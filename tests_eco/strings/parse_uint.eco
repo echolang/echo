@@ -1,0 +1,35 @@
+// `uint` answers a nullable, so the absence case is `== null` rather than a sentinel
+// that would collide with a successful 0
+
+uint64 $a = guard str::uint('42') else { die('42'); }
+echo $a;
+
+uint64 $zero = guard str::uint('0') else { die('0'); }
+echo $zero;
+
+uint64 $hex = guard str::uint('0x10') else { die('0x10'); }
+echo $hex;
+
+uint64 $HEX = guard str::uint('0X10') else { die('0X10'); }
+echo $HEX;
+
+// the uint64 boundary, which is what accumulating unsigned buys
+uint64 $hex_max = guard str::uint('0xFFFFFFFFFFFFFFFF') else { die('hex max'); }
+echo $hex_max;
+
+uint64 $dec_max = guard str::uint('18446744073709551615') else { die('dec max'); }
+echo $dec_max;
+
+// overflow answers null, never a wrapped value
+echo str::uint('0x10000000000000000') == null;
+echo str::uint('18446744073709551616') == null;
+
+// nothing else is accepted - no sign, no whitespace, no trailing text, no lone prefix
+echo str::uint('') == null;
+echo str::uint('0x') == null;
+echo str::uint('0X') == null;
+echo str::uint('0xG') == null;
+echo str::uint(' 4') == null;
+echo str::uint('4kg') == null;
+echo str::uint('+7') == null;
+echo str::uint('-1') == null;

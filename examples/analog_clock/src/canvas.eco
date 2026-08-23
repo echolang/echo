@@ -128,13 +128,13 @@ struct Canvas
     // the whole picture as one string. `print` takes one `string`, so a frame has to arrive in a
     // single statement - printing cell by cell would flicker and cost a write syscall per glyph.
     //
-    // nothing terminal-specific in here, deliberately: homing the cursor is what the *animation* does
-    // between frames, and a canvas that knew about it could not hand back a picture anybody could
-    // compare. `main.eco` puts the escape in front of this on the live path
+    // the row terminator is `std::io::NEWLINE`, not a hardcoded LF: a Windows console treats a lone
+    // `\n` as "down one row, same column". homing the cursor stays in `main.eco` so a frame is still
+    // a picture anybody can compare
     function to_frame() : string
     {
         string $out = '';
-        $out->reserve($this->width * $this->height * 3 + $this->height);
+        $out->reserve($this->width * $this->height * 3 + $this->height * std::io::NEWLINE->size());
 
         // `const &$row` borrows the row without copying it and says out loud that nothing here writes
         // one. a plain `$row` would be a copy of an owning array, per row, per frame
@@ -143,7 +143,7 @@ struct Canvas
                 append_glyph(&$out, $cell);
             }
 
-            $out->append("\n");
+            $out->append(std::io::NEWLINE);
         }
 
         return $out;

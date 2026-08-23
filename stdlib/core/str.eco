@@ -209,6 +209,37 @@ internal function digit(uint8 $b) : int32
 }
 
 /**
+ * The value of an ASCII hexadecimal digit byte, or `-1` when it is not one.
+ *
+ * `0`-`9`, `a`-`f`, `A`-`F`. Same `-1` sentinel as `digit`, and the same widen-to-`int32`
+ * subtraction so a byte below `'0'` does not wrap into a large digit. `private`: `uint` is
+ * the one reader.
+ */
+private function hex_digit(uint8 $b) : int32
+{
+    int32 $decimal = digit($b);
+
+    if ($decimal >= 0) {
+        return $decimal;
+    }
+
+    int32 $wide = $b;
+    int32 $upper = $wide - CH_UPPER_A;
+
+    if ($upper >= 0 && $upper <= 5) {
+        return $upper + 10;
+    }
+
+    int32 $lower = $wide - CH_LOWER_A;
+
+    if ($lower >= 0 && $lower <= 5) {
+        return $lower + 10;
+    }
+
+    return -1;
+}
+
+/**
  * A window over a NUL-terminated C string, without copying it.
  *
  * The counterpart to `string::view::cstr()`, which goes the other way. Everything C hands back is
@@ -775,6 +806,7 @@ public function rpad(const string& $text, usize $width, uint8 $fill) : string
 private const int64 PARSE_INT_FLOOR = -922337203685477580;
 private const int64 PARSE_INT_FLOOR_DIGIT = 8;
 private const int64 INT64_MIN = -9223372036854775808;
+private const uint64 PARSE_UINT_MAX = 18446744073709551615;
 
 /**
  * The integer `$text` spells, or `null` when it does not spell one.
@@ -843,6 +875,69 @@ public function int(const string& $text) : int64?
     }
 
     return -$value;
+}
+
+/**
+ * The unsigned integer `$text` spells, or `null` when it does not spell one.
+ *
+ * Base ten, or hexadecimal with a leading `0x` / `0X`. Nothing else - no sign, no whitespace, no
+ * separators, no trailing characters. `str::trim` first if the text came from a line of input.
+ *
+ * Overflow answers `null` rather than wrapping, so `0xFFFFFFFFFFFFFFFF` parses and one more digit
+ * does not. Accumulates `uint64`, which is the whole of why this is not `str::int` with a base.
+ */
+public function uint(const string& $text) : uint64?
+{
+    usize $n = $text->size();
+
+    if ($n == 0) {
+        return null;
+    }
+
+    usize $i = 0;
+    uint64 $base = 10;
+
+    if ($n >= 2 && $text->byte(0) == CH_ZERO) {
+        uint8 $second = $text->byte(1);
+
+        if ($second == CH_X || $second == CH_UPPER_X) {
+            $base = 16;
+            $i = 2;
+        }
+    }
+
+    // a lone prefix is not a number
+    if ($i >= $n) {
+        return null;
+    }
+
+    uint64 $value = 0;
+
+    while ($i < $n) {
+        int32 $raw = 0;
+
+        if ($base == 16) {
+            $raw = hex_digit($text->byte($i));
+        }
+        else {
+            $raw = digit($text->byte($i));
+        }
+
+        if ($raw < 0) {
+            return null;
+        }
+
+        uint64 $d = $raw;
+
+        if ($value > (PARSE_UINT_MAX - $d) / $base) {
+            return null;
+        }
+
+        $value = $value * $base + $d;
+        $i = $i + 1;
+    }
+
+    return $value;
 }
 
 /**

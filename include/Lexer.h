@@ -3,14 +3,14 @@
 
 #pragma once
 
+#include "Token.h"
+#include "AST/ASTOps.h"
+
 #include <iostream>
 #include <vector>
 #include <string>
 #include <cstring>
 #include <exception>
-
-#include "Token.h"
-#include "AST/ASTOps.h"
 
 #define MHP_VOCAB_LB '\n'
 #define MHP_VOCAB_SPACE ' '

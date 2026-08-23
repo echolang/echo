@@ -3,13 +3,13 @@
 
 #pragma once
 
+#include "AST/ASTDeclarationSite.h"
+#include "AST/ASTSymbol.h"
+
 #include <string>
 #include <unordered_map>
 #include <memory>
 #include <vector>
-
-#include "AST/ASTDeclarationSite.h"
-#include "AST/ASTSymbol.h"
 
 #define ECO_NAMESPACE_SEPARATOR "::"
 

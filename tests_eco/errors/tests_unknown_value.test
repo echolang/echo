@@ -1,0 +1,13 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  tests_unknown_value.eco:1:10
+
+  'life' is not a tests expectation, expected one of: death.
+
+  1 | #[tests: expects life]
+    :          ^^^^^^^^^^^^
+  2 | test gives_up {
+
+1 error, nothing was compiled.

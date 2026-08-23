@@ -1,0 +1,13 @@
+// the filter looks ahead from the `#` and drops attributes with a dropped test. a `#[tests:]`
+// left behind would attach to `later` in silence, the same leak `#[group:]` had
+#[tests: expects death]
+test dropped {
+    assert(true);
+}
+
+function later() : int32
+{
+    return 7;
+}
+
+echo later();

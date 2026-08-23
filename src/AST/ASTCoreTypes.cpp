@@ -151,7 +151,9 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
 }
 
 std::optional<AST::CoreCrashInfoLayout> AST::resolve_core_crash_info_layout(
-    const AST::CoreTypes &types, std::string &out_error)
+    const AST::CoreTypes &types,
+    std::string &out_error
+)
 {
     AST::TypeDeclNode *info_decl = types.declaration(AST::CoreTypeKind::t_crash_info);
 

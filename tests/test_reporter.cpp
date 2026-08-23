@@ -73,6 +73,27 @@ TEST_CASE("the default rendering off a terminal is one line per test", "[testrep
         "\n✗ mylib/math.eco::subtracts  exited 1\n");
 }
 
+TEST_CASE("an expected-death test that returned has its own sentence", "[testreporter]")
+{
+    std::ostringstream out;
+    ProgressReporter progress;
+    TestReporter reporter(out, progress, a_terminal());
+
+    TestResult result = a_result("src/math.eco", "should_die", 1, TestOutcome::t_failed);
+    result.status = 0;
+    result.test.expects_death = true;
+
+    reporter.begin(1);
+    reporter.result(result);
+
+    REQUIRE(!reporter.finish());
+
+    REQUIRE(out.str() ==
+        "FAIL 1/1  mylib/math.eco::should_die  (expected death, but it returned)\n"
+        "1 test, 1 failed\n"
+        "\n✗ mylib/math.eco::should_die  expected death, but it returned\n");
+}
+
 TEST_CASE("a listing groups its tests under one header per file", "[testreporter]")
 {
     std::ostringstream out;

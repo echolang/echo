@@ -1,0 +1,13 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  tests_unknown_tag.eco:1:10
+
+  'wants' is not a tests tag, expected one of: expects.
+
+  1 | #[tests: wants death]
+    :          ^^^^^
+  2 | test gives_up {
+
+1 error, nothing was compiled.

@@ -48,8 +48,10 @@ test a_frame_covers_the_whole_canvas
 
     // the canvas is two rows taller than the dial - a blank one, then the readout - and every row ends in
     // a newline. no layer has been added, so this is the empty picture at its full size
-    assert($frame->size() == $dial->columns() * ($dial->rows() + 2) + $dial->rows() + 2,
-           'one byte a cell and one a row');
+    usize $rows = $dial->rows() + 2;
+
+    assert($frame->size() == $dial->columns() * $rows + $rows * std::io::NEWLINE->size(),
+           'one byte a cell and a newline a row');
 }
 
 test a_layer_draws

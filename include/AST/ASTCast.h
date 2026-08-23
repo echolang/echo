@@ -41,6 +41,11 @@ namespace AST
         // pointer to pointer: a reinterpret, a borrow widening, or the T&($p:$) promotion.
         // AST::narrowing_promotes_raw_storage stays the unsafe question
         t_pointer,
+
+        // ptr<T> <-> extern function<R(P...)>: a one-word reinterpret. not t_pointer, because
+        // the unsafe question is AST::function_pointer_promotes_raw_storage - a raw word
+        // becoming a trusted typed callable, and the reverse extracting that word
+        t_function_pointer,
     };
 
     struct CastPlan

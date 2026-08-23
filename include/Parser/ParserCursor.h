@@ -3,12 +3,13 @@
 
 #pragma once
 
+#include "Token.h"
+
 #include <string>
 #include <algorithm>
 #include <initializer_list>
 #include <vector>
 #include <assert.h>
-#include "Token.h"
 
 namespace Parser
 {

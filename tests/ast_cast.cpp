@@ -93,6 +93,32 @@ TEST_CASE("a borrow promotion is a pointer cast", "[cast]")
     REQUIRE(lookup.plan.kind == CastKind::t_pointer);
 }
 
+TEST_CASE("a pointer to a C function pointer is a function-pointer reinterpret", "[cast]")
+{
+    auto tm = EchoTests::tests_make_tokenized_module("0");
+    auto &lit = tm.nodes.emplace_back<LiteralIntExprNode>(tm.tokens[0]);
+    const ValueType i32 = prim(ValueTypePrimitive::t_int32);
+    const ValueType cfn = ValueType::make_c_function(i32, { i32 });
+
+    const CastLookup lookup = cast_plan_for(
+        typed(tm, ptr_to(prim(ValueTypePrimitive::t_uint8)), &lit), cfn);
+    REQUIRE(lookup.result == CastLookup::Result::t_ok);
+    REQUIRE(lookup.plan.kind == CastKind::t_function_pointer);
+}
+
+TEST_CASE("a C function pointer to a pointer is a function-pointer reinterpret", "[cast]")
+{
+    auto tm = EchoTests::tests_make_tokenized_module("0");
+    auto &lit = tm.nodes.emplace_back<LiteralIntExprNode>(tm.tokens[0]);
+    const ValueType i32 = prim(ValueTypePrimitive::t_int32);
+    const ValueType cfn = ValueType::make_c_function(i32, { i32 });
+
+    const CastLookup lookup = cast_plan_for(
+        typed(tm, cfn, &lit), ptr_to(prim(ValueTypePrimitive::t_uint8)));
+    REQUIRE(lookup.result == CastLookup::Result::t_ok);
+    REQUIRE(lookup.plan.kind == CastKind::t_function_pointer);
+}
+
 TEST_CASE("an undetermined operand waits rather than refusing", "[cast]")
 {
     auto tm = EchoTests::tests_make_tokenized_module("0");

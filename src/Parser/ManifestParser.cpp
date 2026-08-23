@@ -1403,5 +1403,3 @@ bool Parser::resolve_module_graph(
 
     return true;
 }
-
-

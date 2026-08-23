@@ -1,0 +1,19 @@
+// stdout is a pipe in this corpus, so isatty is false and columns is 0.
+// a closed-looking answer rather than an error: that is the whole contract
+
+if (std::io::stdout->isatty()) {
+    std::io::println('stdout is a terminal');
+}
+else {
+    std::io::println('stdout is not a terminal');
+}
+
+int32 $width = std::io::stdout->columns();
+std::io::println("columns {$width}");
+
+if (std::io::stdin->isatty()) {
+    std::io::println('stdin is a terminal');
+}
+else {
+    std::io::println('stdin is not a terminal');
+}

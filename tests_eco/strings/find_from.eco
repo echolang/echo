@@ -1,0 +1,27 @@
+// find from an offset, same sentinel as the one-argument form: the haystack's own size
+// when there is no match, or when $from is already at or past the end
+
+$a = 'hello world';
+
+echo $a->find('o', 0);
+echo $a->find('o', 5);
+echo $a->find('world', 0);
+echo $a->find('world', 7);
+echo $a->find('zzz', 0);
+echo $a->find('hello', 1);
+
+// empty needle is found at $from when $from is inside; at size it is the sentinel
+echo $a->find('', 6);
+echo $a->find('', 11);
+
+// past the end, and at the end with a real needle, are both the sentinel - and `sub` is
+// not reached, because a start past the end would assert rather than answer size
+echo $a->find('x', 11);
+echo $a->find('x', 99);
+
+// the found offset feeds straight back into `sub`, the way the one-argument form does
+echo $a->sub($a->find('o', 5), 1);
+
+// the view overload is the same composition
+string::view $v = $a->view();
+echo $v->find('o', 5);

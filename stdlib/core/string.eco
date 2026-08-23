@@ -153,18 +153,13 @@ public struct string
         }
 
         /**
-         * The byte offset of the first occurrence of `$needle`, or **`$this->size` when there is
-         * none**.
+         * The byte offset of `$needle`, or **`$this->size` when there is none**. Never a valid
+         * index: the test is `$i < $v->size`, and a found offset feeds into `sub`. An empty
+         * needle is found at 0; in an empty window that is the sentinel, and `contains` says
+         * false.
          *
-         * There is no `Option` to hand back, so the sentinel is the one value always to hand and
-         * never a valid index: the size itself. The test reads `if ($i < $v->size)` rather than a
-         * comparison against an imported constant, and a found offset feeds straight into `sub`.
-         *
-         * An empty needle is found at 0. In an *empty* window that answer is also the sentinel, and
-         * `contains` inherits the corner and says false.
-         *
-         * Scan for the first byte, then compare the rest. A candidate view
-         * per offset was the same comparison with a temporary on every step.
+         * Scan for the first byte, then compare the rest. A candidate view per offset was the
+         * same comparison with a temporary on every step.
          */
         const function find(string::view $needle) : usize
         {
@@ -206,6 +201,19 @@ public struct string
             }
 
             return $m;
+        }
+
+        /**
+         * `find` from byte `$from`. Same sentinel. `$from` is clamped because `sub` asserts a
+         * start past the end. A miss in the tail is `$from + rest.size`, which is `$this->size`.
+         */
+        const function find(string::view $needle, usize $from) : usize
+        {
+            if ($from >= $this->size) {
+                return $this->size;
+            }
+
+            return $from + $this->sub($from, $this->size - $from)->find($needle);
         }
 
         /**
@@ -563,6 +571,15 @@ public struct string
     const function find(const string& $needle) : usize
     {
         return $this->as_view()->find($needle->as_view());
+    }
+
+    /**
+     * `find` from byte `$from`. Same sentinel as the one-argument form.
+     */
+    #[inline]
+    const function find(const string& $needle, usize $from) : usize
+    {
+        return $this->as_view()->find($needle->as_view(), $from);
     }
 
     #[inline]

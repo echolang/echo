@@ -39,6 +39,10 @@ namespace
             return fmt::format("killed by {}", signal_description(result.signal));
 
         case Compiler::TestOutcome::t_failed:
+            if (result.test.expects_death && result.status == 0) {
+                return "expected death, but it returned";
+            }
+
             return fmt::format("exited {}", result.status);
 
         case Compiler::TestOutcome::t_timed_out:

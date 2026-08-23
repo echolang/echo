@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-
 #include "AST/ASTNode.h"
 #include "AST/ASTNodeReference.h"
 #include "AST/ASTValueType.h"
+
+#include <unordered_map>
+#include <vector>
 
 namespace AST
 {

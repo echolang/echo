@@ -22,6 +22,36 @@
 
 namespace
 {
+    // one pass/fail rule for both overloads, so the JIT fork and the linked runner cannot disagree.
+    // a fired `--timeout` stays t_timed_out. a signal stays t_signalled: a segfault is not
+    // `__eco_abort`, and v1 does not count it as an expected death. a non-zero *exit* is the
+    // inverted pass when the test asked for death - die and a failed assert are both that exit
+    Compiler::TestOutcome isolated_outcome(
+        const Compiler::TestCase &test,
+        bool timed_out,
+        int signal,
+        int status
+    )
+    {
+        if (timed_out) {
+            return Compiler::TestOutcome::t_timed_out;
+        }
+
+        if (signal != 0) {
+            return Compiler::TestOutcome::t_signalled;
+        }
+
+        if (test.expects_death) {
+            return status != 0
+                ? Compiler::TestOutcome::t_passed
+                : Compiler::TestOutcome::t_failed;
+        }
+
+        return status == 0
+            ? Compiler::TestOutcome::t_passed
+            : Compiler::TestOutcome::t_failed;
+    }
+
 #if ECO_TEST_ISOLATION_POSIX
     // everything the child wrote, read to end of file or until the deadline.
     //
@@ -124,17 +154,7 @@ Compiler::TestResult Compiler::run_test_isolated(
     result.status = captured.exit_code;
     result.signal = captured.signal;
 
-    if (captured.timed_out) {
-        result.outcome = TestOutcome::t_timed_out;
-        return result;
-    }
-
-    if (captured.signal != 0) {
-        result.outcome = TestOutcome::t_signalled;
-        return result;
-    }
-
-    result.outcome = result.status == 0 ? TestOutcome::t_passed : TestOutcome::t_failed;
+    result.outcome = isolated_outcome(test, captured.timed_out, captured.signal, result.status);
     return result;
 }
 
@@ -231,23 +251,14 @@ Compiler::TestResult Compiler::run_test_isolated(
     result.milliseconds = elapsed();
 
     if (timed_out) {
-        result.outcome = TestOutcome::t_timed_out;
         result.signal = SIGKILL;
-        return result;
-    }
-
-    if (WIFSIGNALED(status)) {
+    } else if (WIFSIGNALED(status)) {
         result.signal = WTERMSIG(status);
-        result.outcome = TestOutcome::t_signalled;
-        return result;
+    } else {
+        result.status = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     }
 
-    result.status = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-
-    // **any non-zero exit is a failure and echoc does not care which.** A failed `assert` and a `die` both
-    // reach the abort thunk's `exit(1)` having already written their message, and a test calling
-    // `std::env::exit(3)` has ended itself without saying it passed
-    result.outcome = result.status == 0 ? TestOutcome::t_passed : TestOutcome::t_failed;
+    result.outcome = isolated_outcome(test, timed_out, result.signal, result.status);
 
     return result;
 }

@@ -21,8 +21,12 @@ namespace
     //   unique      TypeDeclParser  -> bind_unique_attribute, read by AST::classify_copy
     //   atomic      TypeDeclParser  -> bind_atomic_attribute, read by AST::counts_are_atomic
     //   group       TestDeclParser  -> AST::TestDeclaration::group, read by Compiler::select_tests
+    //   tests       TestDeclParser  -> AST::TestDeclaration::expects_death, read by
+    //               Compiler::run_test_isolated. not the `tests` *condition flag*
+    //               (TargetFacts::tests / `#[if: tests]`): that is a directive value, this is an
+    //               attribute name. directives never reach is_known_attribute
     constexpr std::string_view k_declaration_attributes[] = {
-        "inline", "implicit", "intrinsic", "builtin", "core", "unique", "atomic", "group" };
+        "inline", "implicit", "intrinsic", "builtin", "core", "unique", "atomic", "group", "tests" };
 
     // and the manifest's nine, which reach this parser too: a `module.eco` is **Echo**, read by the real
     // lexer and the real attribute parser into a scratch bundle. Leaving them out of the union made every

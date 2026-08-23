@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <string>
 #include "AST/ASTNodeReference.h"
+
+#include <string>
 
 namespace AST
 {

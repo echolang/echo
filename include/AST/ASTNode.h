@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include "AST/ASTNodeTypes.h"
+#include "AST/ASTNodeReference.h"
+#include "AST/ASTVisitor.h"
+
 #include <string>
 #include <vector>
 #include <memory>
@@ -10,10 +14,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
-
-#include "AST/ASTNodeTypes.h"
-#include "AST/ASTNodeReference.h"
-#include "AST/ASTVisitor.h"
 
 namespace AST
 {

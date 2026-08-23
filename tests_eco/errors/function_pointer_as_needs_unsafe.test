@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+[error] UnsafeFunctionPointerCast  function_pointer_as_needs_unsafe.eco:6:17
+
+  cannot read a 'extern function<int32()>' as a 'ptr<uint8>' outside an 'unsafe' block. A C function pointer is a trusted typed callable: calling through it is the signature you wrote, so establishing one over a raw word - or extracting the word - is a promise only you can make.
+
+  5 | 
+  6 | ptr<uint8> $p = &stub as ptr<uint8>;
+    :                 ^
+  7 | extern function<int32()> $back = $p:$ as extern function<int32()>;
+
+  help: inside 'unsafe { }' you assert the word is the address of a function with that signature, or that you are extracting that address to store it. The compiler does not check either. '&name' is the safe producer
+
+[error] UnsafeFunctionPointerCast  function_pointer_as_needs_unsafe.eco:7:34
+
+  cannot read a 'ptr<uint8>' as a 'extern function<int32()>' outside an 'unsafe' block. A C function pointer is a trusted typed callable: calling through it is the signature you wrote, so establishing one over a raw word - or extracting the word - is a promise only you can make.
+
+  6 | ptr<uint8> $p = &stub as ptr<uint8>;
+  7 | extern function<int32()> $back = $p:$ as extern function<int32()>;
+    :                                  ^^
+  8 | echo $back();
+
+  help: inside 'unsafe { }' you assert the word is the address of a function with that signature, or that you are extracting that address to store it. The compiler does not check either. '&name' is the safe producer
+
+2 errors, nothing was compiled.

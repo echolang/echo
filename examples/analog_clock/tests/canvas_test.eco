@@ -12,11 +12,21 @@
 namespace clock;
 
 // what an untouched canvas of this size looks like: `GLYPH_EMPTY` is a space, and `to_frame` ends every
-// row with a newline
+// row with `NEWLINE`
 #[if: tests]
+function rows_of(string $a, string $b) : string
+{
+    string $s = $a;
+    $s->append(std::io::NEWLINE);
+    $s->append($b);
+    $s->append(std::io::NEWLINE);
+
+    return $s;
+}
+
 function blank_3x2() : string
 {
-    return "   \n   \n";
+    return rows_of('   ', '   ');
 }
 #[end]
 
@@ -35,7 +45,7 @@ test a_set_cell_shows_up_in_the_frame
     // arithmetic rather than a table
     $c->set(1, 0, 65);
 
-    assert($c->to_frame() == " A \n   \n", 'the second cell of the first row');
+    assert($c->to_frame() == rows_of(' A ', '   '), 'the second cell of the first row');
 }
 
 test filling_replaces_every_cell
@@ -44,7 +54,7 @@ test filling_replaces_every_cell
 
     $c->fill(GLYPH_PIN);
 
-    assert($c->to_frame() == "┼┼┼\n┼┼┼\n", 'six pins and two newlines');
+    assert($c->to_frame() == rows_of('┼┼┼', '┼┼┼'), 'six pins and two newlines');
 }
 
 test a_glyph_is_not_a_byte
@@ -57,7 +67,7 @@ test a_glyph_is_not_a_byte
 
     // eight bytes of picture would be one per cell plus the newlines. `┼` is three, which is the reason a
     // cell holds a glyph id and ids become bytes only here
-    assert($frame->size() == 20, 'three bytes a pin, one a newline');
+    assert($frame->size() == 18 + 2 * std::io::NEWLINE->size(), 'three bytes a pin, then a newline');
 }
 
 test out_of_range_is_a_no_op
@@ -94,7 +104,7 @@ test text_lands_byte_by_byte
 
     $c->write_text(0, 1, &$text);
 
-    assert($c->to_frame() == "   \nAB \n", 'both bytes, on the second row');
+    assert($c->to_frame() == rows_of('   ', 'AB '), 'both bytes, on the second row');
 }
 
 test text_running_off_the_edge_is_clipped
@@ -106,5 +116,5 @@ test text_running_off_the_edge_is_clipped
     // whole string
     $c->write_text(2, 0, &$text);
 
-    assert($c->to_frame() == "  A\n   \n", 'the A fits and the B does not');
+    assert($c->to_frame() == rows_of('  A', '   '), 'the A fits and the B does not');
 }

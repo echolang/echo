@@ -1,0 +1,13 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  tests_untagged.eco:1:10
+
+  'death' does not name a tests tag - write '<tests tag> <value>', where it is one of: expects.
+
+  1 | #[tests: death]
+    :          ^^^^^
+  2 | test gives_up {
+
+1 error, nothing was compiled.

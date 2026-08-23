@@ -1,0 +1,8 @@
+// a hang is still a timeout, even when the test expected to die
+
+#[tests: expects death]
+test hangs
+{
+    while (true) {
+    }
+}

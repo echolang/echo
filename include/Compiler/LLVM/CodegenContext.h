@@ -124,7 +124,8 @@ namespace Compiler::LLVM
         llvm::Value *string_as_view(
             llvm::Value *value,
             const AST::ValueType &type,
-            const char *prefix);
+            const char *prefix
+        );
 
         // **the caller's half of the return ABI, and the only place a call to an Echo function is
         // emitted.** echo, die and dprint convert a `string` through this, and every ordinary

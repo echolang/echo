@@ -67,6 +67,10 @@ namespace Compiler
     // between itself and the runner, or a process boundary. A boundary survives `assert`, `die`,
     // `env::exit` and a segfault alike, and changes nothing about how any of them lower.
     //
+    // `#[tests: expects death]` inverts the pass condition: a non-zero *exit* is a pass. a fired
+    // `--timeout` stays `t_timed_out`. a signal stays `t_signalled`. v1 does not distinguish `die`
+    // from a failed `assert` - both are `__eco_abort` - and does not match the abort message.
+    //
     // two ways to start the child, one result shape. the JIT path forks and calls `call` in the
     // child. a linked runner is spawned as `argv` with `ECO_INTERNAL_RUN_TEST` naming this test.
     // `timeout_ms` is `--timeout`. zero waits forever. a fired deadline is `t_timed_out`

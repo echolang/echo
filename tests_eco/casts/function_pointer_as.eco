@@ -1,0 +1,21 @@
+// `&name` is the safe producer. the marked unsafe one is the one-word reinterpret a
+// loader needs: store a resolved address as ptr<uint8>, read it back typed, call it
+
+function stub() : int32
+{
+    return 42;
+}
+
+struct Slot
+{
+    extern function<int32()> $fn;
+}
+
+unsafe {
+    ptr<uint8> $p = &stub as ptr<uint8>;
+    extern function<int32()> $back = $p:$ as extern function<int32()>;
+    echo $back();
+
+    Slot $s = Slot($back);
+    echo $s->fn();
+}

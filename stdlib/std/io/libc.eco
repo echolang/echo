@@ -36,6 +36,9 @@ internal extern {
     function rename as c_rename(ptr<const uint8> $from, ptr<const uint8> $to) : int32;
     function access as c_access(ptr<const uint8> $path, int32 $amode) : int32;
     function strerror as c_strerror(int32 $code) : ptr<uint8>;
+
+    function isatty as c_isatty(int32 $fd) : int32;
+    function ioctl as c_ioctl(int32 $fd, usize $request, variadic_args $args) : int32;
 }
 #[end]
 
@@ -61,6 +64,32 @@ internal extern {
     // through `console_write` first. pinned in the JIT next to `_write` for
     // the same msvcrt-vs-UCRT reason
     function _get_osfhandle as c_get_osfhandle(int32 $fd) : ptr<uint8>;
+    function _isatty as c_isatty(int32 $fd) : int32;
+}
+
+// layout matches Win32 CONSOLE_SCREEN_BUFFER_INFO: SHORT is int16, WORD is
+// uint16, no padding on this compiler. columns() reads srWindow, not dwSize
+internal struct console_coord
+{
+    int16 $x;
+    int16 $y;
+}
+
+internal struct console_rect
+{
+    int16 $left;
+    int16 $top;
+    int16 $right;
+    int16 $bottom;
+}
+
+internal struct console_screen_buffer_info
+{
+    console_coord $size;
+    console_coord $cursor;
+    uint16 $attributes;
+    console_rect $window;
+    console_coord $max_window;
 }
 
 internal extern {
@@ -80,6 +109,10 @@ internal extern {
         int32 $utf8_n,
         ptr<uint16> $wide,
         int32 $wide_n
+    ) : int32;
+    function GetConsoleScreenBufferInfo as c_GetConsoleScreenBufferInfo(
+        ptr<uint8> $h,
+        ptr<console_screen_buffer_info> $info
     ) : int32;
 }
 
@@ -172,6 +205,25 @@ internal const int32 F_OK = 0;
 internal const uint32 OPEN_MODE = 438;
 
 internal const usize IO_BUF = 8192;
+
+internal const uint8 LINE_FEED = 10;
+internal const uint8 CARRIAGE_RETURN = 13;
+
+#[if: os != windows]
+internal struct winsize
+{
+    uint16 $row;
+    uint16 $col;
+    uint16 $xpixel;
+    uint16 $ypixel;
+}
+#[end]
+
+#[if: os == darwin]
+internal const usize TIOCGWINSZ = 1074295912;
+#[elif: os == linux]
+internal const usize TIOCGWINSZ = 21523;
+#[end]
 
 /**
  * The `errno` the last failing libc call left, as an `ioerror`.

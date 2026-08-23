@@ -74,6 +74,7 @@ TEST_CASE("a test is a void function of no arguments", "[testdecl]")
 
     REQUIRE(declared.name == "adds_up");
     REQUIRE(declared.group.empty());
+    REQUIRE_FALSE(declared.expects_death);
     REQUIRE(declared.decl != nullptr);
     REQUIRE(declared.decl->declared_in.file != nullptr);
 
@@ -123,6 +124,18 @@ TEST_CASE("a group is read off the declaration's attributes", "[testdecl]")
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
     REQUIRE(tests_of(*bundle).front().group == "arithmetic");
+}
+
+TEST_CASE("expects death is read off the tests attribute", "[testdecl]")
+{
+    auto bundle = tests_make_parsed_bundle_with_tests(
+        "#[tests: expects death]\n"
+        "test gives_up {\n"
+        "    $a = 1;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    REQUIRE(tests_of(*bundle).front().expects_death);
 }
 
 // **the same name in two files is legal and is the design.** A test's name is unique within its own file and

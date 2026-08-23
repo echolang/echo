@@ -93,10 +93,14 @@ llvm::Function *AbortCodegen::get_or_create_abort_thunk()
 }
 
 void AbortCodegen::write_pieces(
-    llvm::Value *headline, llvm::Value *headline_len,
-    llvm::Value *message, llvm::Value *message_len,
-    llvm::Value *file, llvm::Value *file_len,
-    llvm::Value *line, llvm::Value *line_len
+    llvm::Value *headline,
+    llvm::Value *headline_len,
+    llvm::Value *message,
+    llvm::Value *message_len,
+    llvm::Value *file,
+    llvm::Value *file_len,
+    llvm::Value *line,
+    llvm::Value *line_len
 )
 {
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);

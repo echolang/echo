@@ -1,0 +1,6 @@
+# the suite captures both streams, so neither fd is a console
+
+--- OUT --->
+stdout is not a terminal
+columns 0
+stdin is not a terminal

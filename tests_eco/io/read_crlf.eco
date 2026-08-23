@@ -1,0 +1,72 @@
+// a Windows console Enter is CRLF; a file written that way has to come back as
+// the same lines a Unix `\n` file would. both the buffered `file` reader and
+// the unbuffered `stream` one.
+
+string $path = '';
+$path->append(str::from(std::env::tmp()));
+$path->append('/echo-io-crlf-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+usize $w = guard std::io::writefile($path, "one\r\ntwo\r\nthree") else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $w;
+
+file $f = guard std::io::open($path, .read) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string? $a = guard $f->readline() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $a ?? 'null';
+
+string? $b = guard $f->readline() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $b ?? 'null';
+
+string? $c = guard $f->readline() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $c ?? 'null';
+
+$f->close();
+
+file $g = guard std::io::open($path, .read) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+std::io::stream $s = std::io::stream($g->fd());
+
+string $u = guard $s->readline() else {
+    echo 'stream empty';
+    return 1;
+}
+
+echo $u;
+
+string $v = guard $s->readline() else {
+    echo 'stream empty';
+    return 1;
+}
+
+echo $v;
+
+$g->close();
+
+bool $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}

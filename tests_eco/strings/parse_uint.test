@@ -1,0 +1,19 @@
+# unsigned parse: hex prefix, the uint64 boundary, overflow is null, and nothing else is a number
+
+--- OUT --->
+42
+0
+16
+16
+18446744073709551615
+18446744073709551615
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1

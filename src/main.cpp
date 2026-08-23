@@ -1,9 +1,3 @@
-#include <iostream>
-#include <fstream>
-#include <sstream>
-
-#include <fmt/core.h>
-
 #include "eco.h"
 #include "Lexer.h"
 #include "AST/ASTBundle.h"
@@ -42,6 +36,10 @@
 #include "Compiler/TestSelection.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
 
+#include <fmt/core.h>
+#include <iostream>
+#include <fstream>
+#include <sstream>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/TargetParser/Host.h>
 
@@ -2270,7 +2268,8 @@ static std::vector<Compiler::TestCase> collect_tests(const AST::Bundle &bundle)
                 file != nullptr ? file->get_path() : std::filesystem::path{},
                 declared.group,
                 declared.name,
-                AST::mangle_function_name(declared.decl)
+                AST::mangle_function_name(declared.decl),
+                declared.expects_death
             });
         }
     }

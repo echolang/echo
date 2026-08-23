@@ -77,11 +77,54 @@ public struct stream
      *
      * Two writes rather than one, deliberately: appending the newline to the bytes would mean
      * copying them, and they may be a shared substring with nowhere to put a longer copy.
+     *
+     * The terminator is `NEWLINE`, not a hardcoded LF: a Windows console treats a lone `\n` as
+     * "down one row, same column".
      */
     const function writeline(const string& $text) : void
     {
         $this->write($text);
-        $this->write(NEWLINE->cstr(), 1);
+        $this->write(NEWLINE);
+    }
+
+    /**
+     * True when this descriptor is a terminal. A pipe, a file, and a closed fd are false.
+     * There is no error to recover from: "not a terminal" and "not open" are the same answer.
+     */
+    const function isatty() : bool
+    {
+        return c_isatty($this->fd) != 0;
+    }
+
+    /**
+     * The window width in columns, or 0 when this is not a terminal.
+     *
+     * On Windows this is the visible window, not the screen-buffer width. `COLUMNS` is a
+     * caller policy on top of this, not something the stream reads.
+     */
+    const function columns() : int32
+    {
+        if (c_isatty($this->fd) == 0) {
+            return 0;
+        }
+
+        #[if: os == windows]
+        return console_columns($this->fd);
+        #[else]
+        winsize $ws = winsize(0, 0, 0, 0);
+
+        if (c_ioctl($this->fd, TIOCGWINSZ, [&$ws]) != 0) {
+            return 0;
+        }
+
+        int32 $col = $ws->col;
+
+        if ($col <= 0) {
+            return 0;
+        }
+
+        return $col;
+        #[end]
     }
 
     /**
@@ -123,7 +166,23 @@ public struct stream
 
             $any = true;
 
-            if ($byte == NEWLINE_BYTE) {
+            if ($byte == LINE_FEED) {
+                break;
+            }
+
+            if ($byte == CARRIAGE_RETURN) {
+                // CRLF is one ending. a leftover byte has nowhere to live on this
+                // type, so a CR that is not followed by LF still ends the line;
+                // a stray byte after it is kept on this line rather than dropped
+                uint8 $next = 0;
+                isize $more = c_read($this->fd, &$next, 1);
+
+                if ($more == 1) {
+                    if ($next != LINE_FEED) {
+                        $owner->push($next);
+                    }
+                }
+
                 break;
             }
 
@@ -138,11 +197,14 @@ public struct stream
     }
 }
 
-// the byte and the one-byte string, so `writeline` needs no allocation and `readline` no magic
-// number. a constant is its expression copied into each use site, so neither costs anything.
-// `private`: `writeline` and `readline` just below are the only things that read them
-private const NEWLINE = '\n';
-private const uint8 NEWLINE_BYTE = 10;
+// `writeline` writes this, so a Windows console gets a real newline and a pipe gets the
+// same bytes a Windows text file would. `print("foo\n")` still goes through `console_write`'s
+// CR-insert on a console; that is the compatibility path for a literal LF, not this constant
+#[if: os == windows]
+public const NEWLINE = "\r\n";
+#[else]
+public const NEWLINE = "\n";
+#[end]
 
 /**
  * Standard output, file descriptor 1.

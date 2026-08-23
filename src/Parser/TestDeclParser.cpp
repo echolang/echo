@@ -14,6 +14,10 @@
 
 #include <fmt/core.h>
 
+#include <string>
+#include <utility>
+#include <vector>
+
 namespace
 {
     // the display name of the namespace a test's declaration lives in. never written by anybody, and
@@ -60,6 +64,53 @@ namespace
             });
 
         return group.value_or("");
+    }
+
+    // `#[tests: expects death]` off the declaration's drained attributes.
+    //
+    // tag vocabulary closed at `expects`, value vocabulary closed at `death` - both refused
+    // through AttributeReader, so a misspelled word is a located error rather than a no-op.
+    // v1 is this one flag; a second tag is a new field on TestDeclaration, not something a
+    // bool can grow into. read here for `group`'s reason: this is where the attribute is and
+    // where a refusal has a token
+    bool read_expects_death(Parser::Payload &payload, AST::FunctionDeclNode &decl)
+    {
+        AST::AttributeNode *written = decl.attributes.get_first("tests");
+
+        if (written == nullptr) {
+            return false;
+        }
+
+        std::optional<std::string> kind = Parser::read_attribute_value(
+            payload, written, "tests",
+            [](AST::AttributeReader &reader, const AST::AttributeValue &value)
+                -> std::optional<std::string> {
+                static const std::vector<std::pair<std::string, std::string>> tags = {
+                    { "expects", "expects" },
+                };
+
+                std::string tag;
+
+                if (!reader.tag(value, tags, "tests tag", "expects", tag)) {
+                    return std::nullopt;
+                }
+
+                std::optional<std::string> name = reader.name(value);
+
+                if (!name.has_value()) {
+                    return std::nullopt;
+                }
+
+                if (*name != "death") {
+                    reader.refuse(value.span, fmt::format(
+                        "'{}' is not a tests expectation, expected one of: death.", *name));
+                    return std::nullopt;
+                }
+
+                return name;
+            });
+
+        return kind.has_value();
     }
 };
 
@@ -133,6 +184,7 @@ void Parser::parse_testdecl(Parser::Payload &payload, bool symbol_only)
     Parser::drain_attributes(payload, decl.attributes);
 
     const std::string group = read_group(payload, decl);
+    const bool expects_death = read_expects_death(payload, decl);
 
     // **the declaration goes to the file root**, never into whatever scope it was written in: codegen
     // emits bodies from the file root's children and AST::OwnershipPass resolves drops from the same list,
@@ -161,6 +213,7 @@ void Parser::parse_testdecl(Parser::Payload &payload, bool symbol_only)
     payload.context.module.tests.push_back(AST::TestDeclaration {
         name,
         group,
-        &decl
+        &decl,
+        expects_death
     });
 }

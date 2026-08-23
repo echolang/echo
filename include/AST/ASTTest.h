@@ -22,11 +22,12 @@ namespace AST
 
     // one `test <name> { ... }`, as the driver reads it back.
     //
-    // **the record, and not a second source of truth.** Everything here except `group` is derivable from
-    // `decl` - and `group` is on the declaration's attributes - so this exists to be *enumerable*: codegen
-    // and the semantic passes find a test by walking the node arena like any other function, and a test
-    // runner has to find them by module and by file. Kept on AST::Module rather than in a registry, because
-    // a test is not a symbol and nothing ever looks one up by name.
+    // **the record, and not a second source of truth.** Everything here except `group` and
+    // `expects_death` is derivable from `decl` - and both of those are on the declaration's
+    // attributes - so this exists to be *enumerable*: codegen and the semantic passes find a test by
+    // walking the node arena like any other function, and a test runner has to find them by module
+    // and by file. Kept on AST::Module rather than in a registry, because a test is not a symbol and
+    // nothing ever looks one up by name.
     //
     // **the file is not here**, deliberately: it is `decl->declared_in`, the one record of where a
     // declaration was written, and a copy beside it would be the fourth answer AST::DeclarationOrigin
@@ -42,6 +43,10 @@ namespace AST
         std::string group;
 
         FunctionDeclNode *decl = nullptr;
+
+        // `#[tests: expects death]`. inverts the runner's pass condition: the child must exit
+        // non-zero. trailing so existing aggregate inits keep compiling
+        bool expects_death = false;
     };
 };
 

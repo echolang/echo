@@ -43,7 +43,7 @@ AST::ConstFoldResult AST::ConstFoldResult::refused(std::string why)
 
 namespace
 {
-    using Result = ConstFoldResult::Result;
+    typedef ConstFoldResult::Result Result;
 
     ConstFoldResult fold_bool(bool value)
     {

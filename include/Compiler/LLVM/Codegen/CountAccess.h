@@ -27,7 +27,8 @@ namespace Compiler::LLVM
     llvm::Value *counts_are_atomic_flag(
         CodegenContext &ctx,
         llvm::Value *handle,
-        llvm::Type *box_type);
+        llvm::Type *box_type
+    );
 
     // run `emit(atomic)` once, or twice behind the typeinfo flag with a phi.
     // increment ignores the return; decrement needs the next count
@@ -37,7 +38,8 @@ namespace Compiler::LLVM
         llvm::Value *handle,
         llvm::Type *box_type,
         const char *label,
-        llvm::function_ref<llvm::Value *(bool atomic)> emit);
+        llvm::function_ref<llvm::Value *(bool atomic)> emit
+    );
 };
 
 #endif

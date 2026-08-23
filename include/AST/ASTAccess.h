@@ -240,6 +240,11 @@ namespace AST
     // the explicit narrowing `T&($p:$)` - the one promotion that converts a *value* rather than
     // taking the address of a place, so it has a question and a call site of its own
     bool narrowing_promotes_raw_storage(const ValueType &from, const ValueType &to);
+
+    // ptr<T> <-> extern function<R(P...)>. the same shape of promise as the narrowing above:
+    // a raw word becomes a trusted typed callable, and the reverse extracts that word. both
+    // directions: a loader stores a resolved address as ptr<uint8> and reads it back typed
+    bool function_pointer_promotes_raw_storage(const ValueType &from, const ValueType &to);
 };
 
 #endif

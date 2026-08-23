@@ -3,16 +3,16 @@
 
 #pragma once
 
-#include <algorithm>
-#include <stdexcept>
-#include <vector>
-
 #include "AST/ASTModule.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTDeclarationSite.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTValueType.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <vector>
 
 namespace AST
 {

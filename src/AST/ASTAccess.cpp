@@ -343,6 +343,14 @@ bool AST::narrowing_promotes_raw_storage(const AST::ValueType &from, const AST::
     return from.is_pointer() && from.is_nullable() && to.is_pointer() && !to.is_nullable();
 }
 
+bool AST::function_pointer_promotes_raw_storage(const AST::ValueType &from, const AST::ValueType &to)
+{
+    // a C function pointer is a trusted typed callable, the way a T& is a trusted typed borrow.
+    // reinterpreting a raw word as one - or extracting the word to store it - is the promise
+    return (from.is_pointer() && to.is_c_function())
+        || (from.is_c_function() && to.is_pointer());
+}
+
 bool AST::place_is_raw_derived(AST::ExprNode *expr)
 {
     while (expr != nullptr) {

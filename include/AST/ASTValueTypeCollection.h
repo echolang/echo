@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <vector>
 #include "AST/ASTValueType.h"
+
+#include <vector>
 
 namespace AST
 {

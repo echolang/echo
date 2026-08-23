@@ -1,0 +1,8 @@
+function stub() : int32
+{
+    return 42;
+}
+
+ptr<uint8> $p = &stub as ptr<uint8>;
+extern function<int32()> $back = $p:$ as extern function<int32()>;
+echo $back();

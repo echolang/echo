@@ -1,0 +1,6 @@
+// a die is a pass when the test said it would
+
+#[tests: expects death]
+test gives_up {
+    die('gone');
+}

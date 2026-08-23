@@ -46,9 +46,12 @@ namespace AST
         // cast and by every implicit borrow, which all arrive as an address-of
         void check_unsafe_promotion(const ValueType &to, ExprNode *operand, const TokenReference &at);
 
-        // the `unsafe` gate and the issue itself, for both refusal predicates - the place one above
-        // and the narrowing cast, which is a value conversion and so has no place to ask about
+        // the issue for a raw-to-borrow promotion outside `unsafe`. the gate is in_unsafe()
         void report_unsafe_promotion(const ValueType &to, const TokenReference &at);
+
+        // the issue for ptr<T> <-> extern function<...> outside `unsafe`. the same gate; a
+        // different issue because the promise is a typed callable, not a T&
+        void report_unsafe_function_pointer(const ValueType &from, const ValueType &to, const TokenReference &at);
 
         // refuses a read of a property this site is not allowed to name. takes the property the
         // caller already resolved, so the name is looked up once per member access. `t_owner` is
@@ -161,6 +164,12 @@ namespace AST
         // invited a second, vaguer report of it from one of the readers, which is the double-reporting this
         // exists to prevent
         bool _context_operands_refused = false;
+
+        // **the `unsafe` gate, said once.** UnsafePromotion and UnsafeFunctionPointerCast both
+        // ask this rather than comparing `_unsafe_depth` themselves
+        bool in_unsafe() const {
+            return _unsafe_depth > 0;
+        }
 
         CodeRef code_ref_for(const TokenReference &token);
 

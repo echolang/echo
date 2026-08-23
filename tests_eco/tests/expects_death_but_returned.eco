@@ -1,0 +1,6 @@
+// expected death, but the body returned - that is a failed test, not a silent pass
+
+#[tests: expects death]
+test lives {
+    assert(true);
+}

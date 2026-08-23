@@ -1606,6 +1606,12 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         report_unsafe_promotion(node.cast_to, location_of_expression(node.expr));
     }
 
+    if (!node.is_implcit && node.expr != nullptr
+        && function_pointer_promotes_raw_storage(node.expr->result_type(), node.cast_to)) {
+        report_unsafe_function_pointer(
+            node.expr->result_type(), node.cast_to, location_of_expression(node.expr));
+    }
+
     // CastResolution reports every written-cast refusal and sets plan_decided. a generic
     // body this walk does not enter. !plan_decided here is a missed rewrite, not a second
     // classification
@@ -1649,18 +1655,28 @@ void TypeChecker::check_unsafe_promotion(
     report_unsafe_promotion(to, at);
 }
 
-// **the `unsafe` gate and the issue, said once.** the two refusal predicates are different questions -
-// one is about a place a borrow is taken of, the other about a value conversion - but what happens
-// once either answers yes is the same, and a depth rule that grows a condition in one of two copies
-// is a rule the other silently keeps the old version of
 void TypeChecker::report_unsafe_promotion(const ValueType &to, const TokenReference &at)
 {
-    if (_unsafe_depth > 0) {
+    if (in_unsafe()) {
         return;
     }
 
     _collector.collect_issue<Issue::UnsafePromotion>(
         code_ref_for(at), to.get_type_desciption());
+}
+
+void TypeChecker::report_unsafe_function_pointer(
+    const ValueType &from,
+    const ValueType &to,
+    const TokenReference &at
+)
+{
+    if (in_unsafe()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::UnsafeFunctionPointerCast>(
+        code_ref_for(at), from.get_type_desciption(), to.get_type_desciption());
 }
 
 void TypeChecker::visitBinaryExpr(BinaryExprNode &node)

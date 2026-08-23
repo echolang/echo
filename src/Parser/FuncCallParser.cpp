@@ -18,8 +18,8 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/TypeCastNode.h"
-#include <fmt/core.h>
 
+#include <fmt/core.h>
 #include <cassert>
 #include <map>
 #include <functional>

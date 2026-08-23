@@ -3,9 +3,10 @@
 
 #pragma once
 
+#include "AST/ASTNodeTypes.h"
+
 #include <assert.h>
 #include <vector>
-#include "AST/ASTNodeTypes.h"
 
 namespace AST
 {

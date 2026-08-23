@@ -278,6 +278,12 @@ namespace AST
         MAKE_ISSUE_DEF1(UnsafePromotion, IssueSeverity::Error, const std::string, borrow_type,
             std::vector<IssueNote> notes() const override;);
 
+        // ptr<T> <-> extern function<...> outside `unsafe`. its own kind because the promise is
+        // a typed callable, not a T& whose later accesses carry a type family. rewording
+        // UnsafePromotion would move every promotion golden for a sentence that is a lie here
+        MAKE_ISSUE_DEF2(UnsafeFunctionPointerCast, IssueSeverity::Error, const std::string, from_type, const std::string, to_type,
+            std::vector<IssueNote> notes() const override;);
+
         // `assume<T>` outside `unsafe`. its own kind because the recovery is a promise the type
         // system cannot check, which is a different question from UnsafePromotion's raw-storage
         // borrow. the sentence is the diagnostic; the remedy lives in notes() so the collector's

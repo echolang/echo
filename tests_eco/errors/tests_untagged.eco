@@ -1,0 +1,4 @@
+#[tests: death]
+test gives_up {
+    die('gone');
+}

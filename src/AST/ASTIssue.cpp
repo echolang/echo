@@ -303,6 +303,23 @@ std::vector<AST::IssueNote> AST::Issue::UnsafePromotion::notes() const
         "assert that the borrow is the only one" } };
 }
 
+ISSUE_MESSAGE_FNC(UnsafeFunctionPointerCast)
+{
+    return fmt::format(
+        "cannot read a '{}' as a '{}' outside an 'unsafe' block. A C function pointer is a trusted "
+        "typed callable: calling through it is the signature you wrote, so establishing one over a "
+        "raw word - or extracting the word - is a promise only you can make.",
+        from_type, to_type);
+}
+
+std::vector<AST::IssueNote> AST::Issue::UnsafeFunctionPointerCast::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "inside 'unsafe { }' you assert the word is the address of a function with that signature, "
+        "or that you are extracting that address to store it. The compiler does not check either. "
+        "'&name' is the safe producer" } };
+}
+
 ISSUE_MESSAGE_FNC(AssumeRequiresUnsafe)
 {
     return _message;

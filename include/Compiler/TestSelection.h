@@ -49,6 +49,9 @@ namespace Compiler
 
         // the mangled name to look the compiled body up under
         std::string symbol;
+
+        // `#[tests: expects death]`. trailing so existing aggregate inits keep compiling
+        bool expects_death = false;
     };
 
     // `<module>/<file>::<name>`, which is a test's identity said in full - the three things it is tagged by

@@ -11,6 +11,10 @@
  * `GetConsoleMode` and `c_write` falls through to `_write` of the same UTF-8
  * - which is what a redirect and every `tests_eco/io` golden see. No public
  * API: `stdout->write` is still the surface.
+ *
+ * The CR-insert below is compatibility for a bare `\n` already in the bytes
+ * (`print("foo\n")`, a clock frame joined on LF). New code writes `NEWLINE`.
+ * An LF that already has a CR is left alone, so `writeline` is not doubled.
  */
 
 namespace std::io;
@@ -153,5 +157,32 @@ internal function console_write(int32 $fd, ptr<const uint8> $buf, usize $count) 
     mem::free($wide);
 
     return $count as isize;
+}
+
+internal function console_columns(int32 $fd) : int32
+{
+    ptr<uint8> $handle = c_get_osfhandle($fd);
+    console_screen_buffer_info $info = console_screen_buffer_info(
+        console_coord(0, 0),
+        console_coord(0, 0),
+        0,
+        console_rect(0, 0, 0, 0),
+        console_coord(0, 0)
+    );
+
+    if (c_GetConsoleScreenBufferInfo($handle, &$info) == 0) {
+        return 0;
+    }
+
+    console_rect $window = $info->window;
+    int32 $left = $window->left;
+    int32 $right = $window->right;
+    int32 $width = $right - $left + 1;
+
+    if ($width <= 0) {
+        return 0;
+    }
+
+    return $width;
 }
 #[end]

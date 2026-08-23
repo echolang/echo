@@ -1,5 +1,6 @@
 #include "AST/ASTCast.h"
 
+#include "AST/ASTAccess.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTNode.h"
@@ -36,6 +37,13 @@ namespace AST
         // the existing Type(...) form already accepts these; unsafe is narrowing_promotes_raw_storage
         if (from.is_pointer() && to.is_pointer()) {
             return CastLookup::ok(CastKind::t_pointer);
+        }
+
+        // any written pointer <-> C function pointer. any pointee, any signature: the
+        // signature is the programmer's promise, the same way a ptr reinterpret is.
+        // AST::function_pointer_promotes_raw_storage is the question; this is the kind
+        if (function_pointer_promotes_raw_storage(from, to)) {
+            return CastLookup::ok(CastKind::t_function_pointer);
         }
 
         if (from.is_primitive() && to.is_primitive()) {

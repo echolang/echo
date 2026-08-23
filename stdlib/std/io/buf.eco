@@ -194,6 +194,23 @@ internal function read_from(int32 $fd, readwin& $w, ptr<uint8> $dst, usize $coun
     return .ok($done);
 }
 
+// the one CR rule: a line ending is LF, and a CR immediately before it is not part of
+// the line. a CR that ended the previous fill is still trailing on `$line` here
+internal function without_trailing_cr(const string& $s) : string
+{
+    usize $n = $s->size();
+
+    if ($n == 0) {
+        return $s;
+    }
+
+    if ($s->byte($n - 1) != CARRIAGE_RETURN) {
+        return $s;
+    }
+
+    return $s->sub(0, $n - 1);
+}
+
 internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerror>
 {
     string $line = '';
@@ -204,7 +221,7 @@ internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerro
         usize $end = $w->buf->size();
 
         while ($i < $end) {
-            if ($w->buf->byte($i) == 10) {
+            if ($w->buf->byte($i) == LINE_FEED) {
                 usize $n = $i - $w->pos;
 
                 if ($n > 0) {
@@ -214,7 +231,7 @@ internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerro
 
                 $w->pos = $i + 1;
 
-                return .ok($line);
+                return .ok(without_trailing_cr($line));
             }
 
             $i = $i + 1;
@@ -236,7 +253,7 @@ internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerro
 
         if ($got == 0) {
             if ($any) {
-                return .ok($line);
+                return .ok(without_trailing_cr($line));
             }
 
             return .ok(null);

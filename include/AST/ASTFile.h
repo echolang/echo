@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include <filesystem>
-#include <string>
-#include <optional>
-
 #include "Token.h"
 #include "AST/ASTImport.h"
 #include "AST/ScopeNode.h"
+
+#include <filesystem>
+#include <string>
+#include <optional>
 
 namespace AST
 {
