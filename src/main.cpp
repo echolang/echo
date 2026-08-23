@@ -2791,6 +2791,10 @@ static int main_print_manifest(
 
 int main(int argc, char *argv[], char *envp[])
 {
+    // before any write: on Windows this sets the console to UTF-8 and turns on virtual-terminal
+    // processing. A pipe is left alone; see Compiler::prepare_terminal
+    Compiler::prepare_terminal();
+
 #if defined(_WIN32)
     // echo of a string uses `_write` while integers go through `printf`. when stdout is a
     // pipe it is fully buffered, and `fflush(NULL)` from JIT'd code does not drain this

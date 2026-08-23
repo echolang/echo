@@ -88,7 +88,9 @@ namespace Compiler
         //
         // `NO_COLOR` (any value) and `TERM=dumb` suppress; `CLICOLOR_FORCE` (non-empty, not "0") forces.
         // unicode is decided by the locale saying UTF-8, or by `WT_SESSION` - Windows Terminal, as opposed
-        // to the legacy console the same binary may be run from.
+        // to the legacy console the same binary may be run from. Answering yes is not enough on its own:
+        // Windows still decodes `_write` with the OEM page until prepare_terminal() sets the console to
+        // UTF-8.
         //
         // the three environment escape hatches are properties of the *invocation* and so are asked the
         // same way whichever stream this is about; what moves with the stream is the isatty underneath
@@ -103,6 +105,14 @@ namespace Compiler
         // unit tests assert against so a suite's output does not depend on where it was run from
         static TerminalCapabilities plain();
     };
+
+    // one-time host setup, before any write. Unix has nothing to prepare - the bytes are the picture.
+    // Windows `_write` to a console is decoded with the OEM code page even inside Windows Terminal, so a
+    // UTF-8 box-drawing glyph lands as three CP850 characters (`▌` becomes `Ôûî`). Setting the console
+    // to UTF-8 fixes every writer (`_write`, iostreams, llvm::errs, printf); the virtual-terminal bit
+    // is what colour needs in the legacy console. A pipe is not a console, so a golden still
+    // byte-compares.
+    void prepare_terminal();
 
     // `auto` / `always` / `never` and `auto` / `pretty` / `ascii` / `json`, refused rather than defaulted
     // on anything else - a mistyped `--color=alwyas` that silently means `auto` is a flag the user

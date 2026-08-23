@@ -14,6 +14,12 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include "subprocess.h"
 #include "terminal_fixture.h"
 
@@ -708,6 +714,41 @@ TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
     for (const unsigned char byte : ascii) {
         REQUIRE(byte < 0x80);
     }
+}
+
+TEST_CASE("prepare_terminal is safe to call twice", "[cli]")
+{
+    Compiler::prepare_terminal();
+    Compiler::prepare_terminal();
+}
+
+#if defined(_WIN32)
+TEST_CASE("prepare_terminal sets an attached console to UTF-8", "[cli]")
+{
+    const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD mode = 0;
+    if (err == INVALID_HANDLE_VALUE || err == nullptr || GetConsoleMode(err, &mode) == 0) {
+        SKIP("stderr is not a console");
+    }
+
+    Compiler::prepare_terminal();
+    REQUIRE(GetConsoleOutputCP() == CP_UTF8);
+}
+#endif
+
+TEST_CASE("a heading is drawn, not shouted", "[cli]")
+{
+    const std::string unicode = page(Subcommand::t_none, a_terminal(true, 80, false));
+    const std::string ascii = page(Subcommand::t_none, TerminalCapabilities::plain());
+
+    // U+258C LEFT HALF BLOCK, then the word, then the rule of U+2500. The ascii theme draws neither
+    // glyph, so the heading is the word alone rather than a row of hyphens pretending to be a rule
+    REQUIRE(contains(unicode, "\u258c Usage "));
+    REQUIRE(contains(unicode, "\u2500"));
+
+    REQUIRE(contains(ascii, "Usage\n"));
+    REQUIRE_FALSE(contains(ascii, "\u258c"));
+    REQUIRE_FALSE(contains(ascii, "\u2500"));
 }
 
 // **summaries form a column that can be read down.** One width per page, so a row that escaped it would

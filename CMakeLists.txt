@@ -16,6 +16,12 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -fsanitize=address")
     set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
 endif()
+# MSVC otherwise reads this tree as the system ANSI code page, so a UTF-8 box-drawing literal in
+# CommandLineHelp.cpp is three CP1252 characters rather than one glyph. clang defaults to UTF-8;
+# this is the flag that makes cl.exe match. directory-wide so a target added later cannot forget it
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 # set(CMAKE_BUILD_TYPE Debug)
 
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
