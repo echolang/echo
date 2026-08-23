@@ -1,0 +1,10 @@
+// the wall clock is "now-ish" and arithmetic around it is exact. 1700000000 is
+// 2023, 4102444800 is 2100: a machine whose clock is outside that is not running
+// this suite
+use std::time;
+
+time::timestamp $t = time::timestamp::now();
+echo $t->unix_secs() > 1700000000;
+echo $t->unix_secs() < 4102444800;
+echo $t->unix_millis() / 1000 == $t->unix_secs();
+echo ($t + time::duration::secs(1)) - $t == time::duration::secs(1);

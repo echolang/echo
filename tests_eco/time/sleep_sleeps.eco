@@ -1,0 +1,9 @@
+// lower bound only: CI jitter makes an upper bound a flake. negative sleep is a no-op
+use std::time;
+
+time::instant $t = time::instant::now();
+std::time::sleep(.millis(50));
+echo $t->elapsed() >= time::duration::millis(40);
+
+std::time::sleep(time::duration::millis(-10));
+echo 1;

@@ -4,10 +4,11 @@
 #
 #   tools/build_static_curl.sh /tmp/static-curl
 #
-# HTTP/1.1 + HTTPS only. Both platforms sit on a static OpenSSL we build
-# here; Darwin also enables Apple SecTrust so CAs come from the keychain.
-# curl 8.21 dropped --with-secure-transport. Homebrew must not win:
-# PATH is /usr/bin:/bin plus the prefix, PKG_CONFIG_LIBDIR is the prefix.
+# HTTP/1.1 + HTTPS only. Unix sits on a static OpenSSL we build here;
+# Darwin also enables Apple SecTrust so CAs come from the keychain.
+# Windows uses CMake + Schannel and writes libcurl.lib. curl 8.21 dropped
+# --with-secure-transport. Homebrew must not win: PATH is /usr/bin:/bin
+# plus the prefix, PKG_CONFIG_LIBDIR is the prefix.
 
 set -euo pipefail
 
@@ -20,8 +21,8 @@ prefix="$1"
 mkdir -p "${prefix}"
 prefix="$(cd "${prefix}" && pwd)"
 
-if [ -f "${prefix}/lib/libcurl.a" ]; then
-    echo "build_static_curl: already have ${prefix}/lib/libcurl.a"
+if [ -f "${prefix}/lib/libcurl.a" ] || [ -f "${prefix}/lib/libcurl.lib" ]; then
+    echo "build_static_curl: already have a static libcurl under ${prefix}/lib"
     exit 0
 fi
 
@@ -62,12 +63,18 @@ fetch() {
     fi
 }
 
-# replace the search path, do not prepend to Homebrew's
-export PKG_CONFIG_LIBDIR="${prefix}/lib/pkgconfig"
-unset PKG_CONFIG_PATH
-export PATH="${prefix}/bin:/usr/bin:/bin"
-
 os="$(uname -s)"
+case "${os}" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+        ;;
+    *)
+        # replace the search path, do not prepend to Homebrew's
+        export PKG_CONFIG_LIBDIR="${prefix}/lib/pkgconfig"
+        unset PKG_CONFIG_PATH
+        export PATH="${prefix}/bin:/usr/bin:/bin"
+        ;;
+esac
+
 openssl_target=""
 curl_tls=(--with-openssl="${prefix}")
 
@@ -88,6 +95,44 @@ case "${os}" in
     Darwin)
         openssl_target=darwin64-arm64-cc
         curl_tls+=(--with-apple-sectrust)
+        ;;
+
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+        # Schannel is the OS TLS stack, so there is no OpenSSL to build and no
+        # Autotools. CMake writes libcurl.lib into <prefix>/lib.
+        fetch "${CURL_URL}" "${src}/curl.tar.xz" "${CURL_SHA}"
+        mkdir -p "${src}/curl"
+        tar -xJf "${src}/curl.tar.xz" -C "${src}/curl" --strip-components=1
+        # MultiThreaded is libcmt, the CRT echoc's Windows link line always
+        # names. CMake defaults to /MD; that archive then pulls ucrt.lib in
+        # next to libucrt and lld-link duplicate-symbols malloc
+        cmake -S "${src}/curl" -B "${src}/curl-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${prefix}" \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_CURL_EXE=OFF \
+            -DCURL_USE_SCHANNEL=ON \
+            -DCURL_USE_OPENSSL=OFF \
+            -DCURL_USE_LIBPSL=OFF \
+            -DCURL_BROTLI=OFF \
+            -DCURL_ZSTD=OFF \
+            -DCURL_USE_LIBSSH2=OFF \
+            -DUSE_NGHTTP2=OFF \
+            -DCURL_DISABLE_LDAP=ON \
+            -DCURL_DISABLE_RTSP=ON \
+            -DENABLE_UNICODE=ON
+        cmake --build "${src}/curl-build" --config Release
+        cmake --install "${src}/curl-build" --config Release
+
+        if [ ! -f "${prefix}/lib/libcurl.lib" ] && [ ! -f "${prefix}/lib/libcurl.a" ]; then
+            echo "build_static_curl: CMake did not write libcurl.lib / libcurl.a into ${prefix}/lib" >&2
+            ls -la "${prefix}/lib" 2>/dev/null || true
+            exit 1
+        fi
+
+        exit 0
         ;;
 
     *)

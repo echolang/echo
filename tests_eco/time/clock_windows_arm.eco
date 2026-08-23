@@ -1,0 +1,11 @@
+// the Windows arm of `std::time`, lowered on whatever machine runs the suite. There is
+// no clock_gettime; the shims call QPC, GetSystemTimePreciseAsFileTime, and Sleep.
+// pin_clocks is not reached: a Unix host never has to resolve those symbols.
+use std::time;
+
+function pin_clocks() : void
+{
+    time::instant $i = time::instant::now();
+    time::timestamp $t = time::timestamp::now();
+    time::sleep(time::duration::zero());
+}

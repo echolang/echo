@@ -49,8 +49,9 @@ Or as a native binary:
 ./clock
 ```
 
-Ctrl-C quits. Nothing about the terminal is switched on that would need switching back off, so the
-shell you return to is the one you left.
+Ctrl-C quits. Nothing about the terminal is switched on here that would need switching back off, so
+the shell you return to is the one you left. The pictures go through `std::io::print` — `stdout`,
+not `echo` — so a Windows console gets Unicode the same way a Unix terminal does.
 
 Give it an `HH:MM:SS` and it draws that one frame and exits instead — which is how the picture above was
 made, and the quickest way to see whether a change to the drawing did what you meant:
@@ -93,7 +94,7 @@ with the bytes is `two_digits_at`, and that is tested.
 | | |
 |---|---|
 | [module.eco](module.eco) | the manifest: a name, a version, `src/*.eco`, `tests/*.eco`, and the one program |
-| [src/clock.eco](src/clock.eco) | `extern` bindings for `time`, `localtime` and `usleep`; `Time`; reading one off the command line; where each hand points |
+| [src/clock.eco](src/clock.eco) | `extern` bindings for `time`, `localtime` and `usleep` (`Sleep` on Windows); `Time`; reading one off the command line; where each hand points |
 | [src/canvas.eco](src/canvas.eco) | the character grid, and turning it into one printable frame |
 | [src/face.eco](src/face.eco) | `Dial`, the `Renderable` interface, and the three layers that conform to it — the dial, the hands, the `HH:MM:SS` readout |
 | [src/renderer.eco](src/renderer.eco) | `Renderer` — a canvas, a list of layers, and `frame` — one whole picture |

@@ -1,0 +1,6 @@
+// `std::thread::sleep` is the same call, in milliseconds
+use std::time;
+
+time::instant $t = time::instant::now();
+std::thread::sleep(30);
+echo $t->elapsed() >= time::duration::millis(20);

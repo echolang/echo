@@ -1,0 +1,111 @@
+/**
+ * `str::from` for `duration`, so `"{$d}"` is Go-style (`1h2m3.5s`).
+ *
+ * A file of its own because a namespace is a property of the file: duration.eco is `std::time`
+ * and cannot also be `str`. Spec-less only: `"{$d:>8}"` fails by name, which is intended.
+ *
+ * Negating int64-min seconds wraps. Unreachable at that magnitude; not a branch.
+ */
+
+namespace str;
+
+private const int32 MILLI_FRAC_DIGITS = 6;
+private const int32 MICRO_FRAC_DIGITS = 3;
+private const int32 NANO_FRAC_DIGITS = 9;
+
+public function from(const std::time::duration& $d) : string
+{
+    if ($d->is_zero()) {
+        return '0s';
+    }
+
+    if ($d->is_negative()) {
+        return concat('-', render_duration($d->abs()));
+    }
+
+    return render_duration($d);
+}
+
+private function render_duration(const std::time::duration& $d) : string
+{
+    int64 $secs = $d->as_secs();
+    int32 $nanos = $d->subsec_nanos();
+
+    if ($secs == 0) {
+        if ($nanos >= std::time::NANOS_PER_MILLI) {
+            return format_unit(
+                ($nanos / std::time::NANOS_PER_MILLI) as uint64,
+                ($nanos % std::time::NANOS_PER_MILLI) as uint64,
+                MILLI_FRAC_DIGITS,
+                'ms'
+            );
+        }
+
+        if ($nanos >= std::time::NANOS_PER_MICRO) {
+            return format_unit(
+                ($nanos / std::time::NANOS_PER_MICRO) as uint64,
+                ($nanos % std::time::NANOS_PER_MICRO) as uint64,
+                MICRO_FRAC_DIGITS,
+                'us'
+            );
+        }
+
+        return concat(from($nanos as uint64), 'ns');
+    }
+
+    int64 $hours = $secs / std::time::SECS_PER_HOUR;
+    int64 $mins = ($secs % std::time::SECS_PER_HOUR) / std::time::SECS_PER_MINUTE;
+    int64 $s = $secs % std::time::SECS_PER_MINUTE;
+
+    string $out = '';
+
+    if ($hours != 0) {
+        $out = concat(from($hours), 'h');
+    }
+
+    if ($hours != 0 || $mins != 0) {
+        $out = concat($out, from($mins));
+        $out = concat($out, 'm');
+    }
+
+    $out = concat($out, from($s));
+
+    if ($nanos != 0) {
+        $out = concat($out, '.');
+        $out = concat($out, frac_digits($nanos as uint64, NANO_FRAC_DIGITS));
+    }
+
+    return concat($out, 's');
+}
+
+private function format_unit(uint64 $whole, uint64 $frac, int32 $width, const string& $unit) : string
+{
+    if ($frac == 0) {
+        return "{$whole}{$unit}";
+    }
+
+    string $digits = frac_digits($frac, $width);
+    return "{$whole}.{$digits}{$unit}";
+}
+
+private function frac_digits(uint64 $frac, int32 $width) : string
+{
+    string $s = from($frac);
+    usize $need = $width as usize;
+
+    while ($s->size() < $need) {
+        $s = concat('0', $s);
+    }
+
+    usize $end = $s->size();
+
+    while ($end > 0) {
+        if ($s->byte($end - 1) != CH_ZERO) {
+            break;
+        }
+
+        $end = $end - 1;
+    }
+
+    return $s->sub(0, $end);
+}

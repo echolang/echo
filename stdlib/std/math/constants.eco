@@ -66,3 +66,29 @@ public const float LN_10_F32 = 2.3025851f;
  */
 public const float64 SQRT_2 = 1.4142135623730951;
 public const float SQRT_2_F32 = 1.4142135f;
+
+// ----------------------------------------------------------------------------
+// integer extrema
+// ----------------------------------------------------------------------------
+
+/**
+ * The largest value of each integer width. `MIN_*` is written as `-MAX - 1` so the
+ * magnitude never has to be a literal the width cannot hold.
+ */
+public const int8 MAX_INT8 = 127;
+public const int8 MIN_INT8 = -MAX_INT8 - 1;
+public const int16 MAX_INT16 = 32767;
+public const int16 MIN_INT16 = -MAX_INT16 - 1;
+public const int32 MAX_INT32 = 2147483647;
+public const int32 MIN_INT32 = -MAX_INT32 - 1;
+public const int64 MAX_INT64 = 9223372036854775807;
+public const int64 MIN_INT64 = -MAX_INT64 - 1;
+
+public const uint8 MAX_UINT8 = 255;
+public const uint16 MAX_UINT16 = 65535;
+public const uint32 MAX_UINT32 = 4294967295;
+public const uint64 MAX_UINT64 = 18446744073709551615;
+
+public const isize MAX_ISIZE = MAX_INT64 as isize;
+public const isize MIN_ISIZE = -MAX_ISIZE - 1;
+public const usize MAX_USIZE = MAX_UINT64 as usize;

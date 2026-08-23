@@ -1,0 +1,87 @@
+/**
+ * A moment on the monotonic clock.
+ *
+ * `$raw` is time since an arbitrary fixed origin. Subtract two of them, or add a duration;
+ * do not print one. `instant::now()` is `clock_gettime(CLOCK_MONOTONIC)` (QPC on Windows).
+ */
+
+namespace std::time;
+
+public struct instant
+{
+    internal const duration $raw;
+
+    public static function now() : instant
+    {
+        timespec $ts = timespec(0, 0);
+        c_clock_gettime(CLOCK_MONOTONIC, &$ts);
+        return instant(duration($ts->sec, $ts->nsec));
+    }
+
+    const function elapsed() : duration
+    {
+        return instant::now() - $this;
+    }
+
+    const function since(instant $earlier) : duration
+    {
+        return $this - $earlier;
+    }
+}
+
+operator (instant $a) - (instant $b) : duration
+{
+    return $a->raw - $b->raw;
+}
+
+operator (instant $a) + (duration $d) : instant
+{
+    return instant($a->raw + $d);
+}
+
+operator (instant $a) - (duration $d) : instant
+{
+    return instant($a->raw - $d);
+}
+
+operator (instant $a) == (instant $b) : bool
+{
+    return $a->raw == $b->raw;
+}
+
+operator (instant $a) != (instant $b) : bool
+{
+    if ($a == $b) {
+        return false;
+    }
+
+    return true;
+}
+
+operator (instant $a) < (instant $b) : bool
+{
+    return $a->raw < $b->raw;
+}
+
+operator (instant $a) > (instant $b) : bool
+{
+    return $b < $a;
+}
+
+operator (instant $a) <= (instant $b) : bool
+{
+    if ($a < $b) {
+        return true;
+    }
+
+    return $a == $b;
+}
+
+operator (instant $a) >= (instant $b) : bool
+{
+    if ($b < $a) {
+        return true;
+    }
+
+    return $a == $b;
+}

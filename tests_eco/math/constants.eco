@@ -38,3 +38,19 @@ echo std::math::cos(std::math::PI_F32);
 
 // no `const if` over these on purpose: floating-point arithmetic belongs to the target rather than to the
 // tree, so AST::const_fold refuses a float operand and `const if (PI > 3.0)` is an error rather than a fold
+
+echo std::math::MAX_INT8;
+echo std::math::MIN_INT8;
+echo std::math::MAX_INT16;
+echo std::math::MIN_INT16;
+echo std::math::MAX_INT32;
+echo std::math::MIN_INT32;
+echo std::math::MAX_INT64;
+echo std::math::MIN_INT64;
+echo std::math::MAX_UINT8;
+echo std::math::MAX_UINT16;
+echo std::math::MAX_UINT32;
+echo std::math::MAX_UINT64;
+echo std::math::MAX_ISIZE;
+echo std::math::MIN_ISIZE;
+echo std::math::MAX_USIZE;

@@ -169,9 +169,10 @@ namespace Compiler::LLVM
             CmpUnit &cmp_unit
         );
 
-        // the composite shapes, each interned through a replaceable temporary *before* its members are
-        // built - a struct holding a pointer to itself is otherwise an infinite recursion rather than a
-        // wrong answer
+        // the composite shapes. a struct interns a replaceable temporary before its members, because a
+        // field that is `ptr` back to the same type would otherwise recurse forever. a class value is a
+        // handle (pointer to the box), so it interns an opaque pointer for that same cycle instead -
+        // a pointer to a replaceable composite does not survive `replaceTemporary`
         llvm::DIType *struct_type_of(const AST::ValueType &type, CmpUnit &cmp_unit);
         llvm::DIType *class_type_of(const AST::ValueType &type, CmpUnit &cmp_unit);
         // a type's own properties as DIMemberTypes, appended at their offsets from the

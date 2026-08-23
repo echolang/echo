@@ -29,11 +29,13 @@
 #include "Compiler/CommandLineOption.h"
 #include "Compiler/DriverOptions.h"
 #include "Compiler/CompilerException.h"
+#include "Compiler/HostTool.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
+#include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
 #include "Compiler/TestReporter.h"
 #include "Compiler/TestRunner.h"
@@ -47,12 +49,19 @@
 #include "stdlib_embedded.h"
 #endif
 
+#if defined(_WIN32)
+#include <process.h>
+#include <stdio.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
-#include <map>
-#include <set>
 #include <chrono>
+#include <cstdlib>
+#include <map>
+#include <optional>
+#include <set>
 
 // the files an argument names, expanding wildcards. `missing` counts the paths that were named
 // literally and are not there - a caller has to refuse those rather than compile what is left, since
@@ -1093,7 +1102,19 @@ static std::vector<const Parser::ModuleManifest *> compiled_manifests(
 // two builds running at once do not share a directory one of them is going to remove
 static std::filesystem::path fallback_scratch_dir()
 {
-    return std::filesystem::temp_directory_path() / "echoc" / std::to_string(getpid());
+#if defined(_WIN32)
+    const int pid = _getpid();
+
+    // not `%TEMP%`: Defender treats a newly-linked unsigned exe there as a dropper
+    // and blocks the thread. stdlib objects already live under `%LOCALAPPDATA%\echo`
+    if (const char *local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0') {
+        return std::filesystem::path(local) / "echo" / "scratch" / std::to_string(pid);
+    }
+#else
+    const int pid = getpid();
+#endif
+
+    return std::filesystem::temp_directory_path() / "echoc" / std::to_string(pid);
 }
 
 // keying a module reads every one of its sources, so it is not free. Only two things ever look at a key: the
@@ -1381,7 +1402,8 @@ static bool resolve_programs(
             /*name=*/{},
             entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
             /*entry_file=*/{},
-            driver.output
+            driver.output,
+            /*active_targets=*/{}
         });
 
         return true;
@@ -1416,7 +1438,8 @@ static bool resolve_programs(
             target.name,
             entry->name,
             target.entry,
-            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output
+            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output,
+            /*active_targets=*/{}
         };
 
         // **only the target being built, and only in the module that declared it.** Two targets of one
@@ -1912,9 +1935,103 @@ static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompile
     step.finish(true);
 }
 
+// C objects, codegen, optional whole-program merge, emit, link. **one path**, so `build`, a
+// Windows `run`, and a linked test runner cannot drift on `--print ir` or `-O`.
+//
+// nullopt is success; anything else is the exit status the subcommand owes its caller
+static std::optional<int> compile_and_link_executable(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    FrontEnd &front,
+    AST::Bundle &bundle,
+    LLVMCompiler &compiler,
+    const std::string &output,
+    const ModulePlan &plan,
+    bool whole_program
+)
+{
+    std::vector<Compiler::LinkRequirement> link;
+
+    if (!collect_link_requirements(driver, diagnostics, front, link)) {
+        return 1;
+    }
+
+    {
+        Compiler::ScopedPhase phase("cc");
+        CModuleBuilds c_builds;
+
+        if (!build_c_modules(driver, diagnostics, front, /*for_jit=*/false, c_builds)) {
+            return 1;
+        }
+
+        std::string link_error;
+
+        if (!Compiler::merge_link_requirements(c_builds.objects, link, link_error)) {
+            diagnostics.render_untyped("Invalid Link Requirement", link_error);
+            return 1;
+        }
+    }
+
+    try {
+        Compiler::ScopedPhase phase("codegen");
+        Compiler::ProgressStep step(
+            Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_codegen);
+
+        compiler.compile_bundle(bundle, plan.cached);
+
+        if (whole_program) {
+            compiler.link_into_main();
+        }
+
+        step.finish(true);
+    } catch (Compiler::ASTCompilerException &e) {
+        return report_compiler_exception(diagnostics, e);
+    }
+
+    if (!merge_emitted_runtime_link(diagnostics, compiler, link)) {
+        return 1;
+    }
+
+    optimize_if_asked(driver, compiler);
+
+    if (driver.prints(Compiler::PrintKind::t_ir)) {
+        compiler.printIR(false);
+    }
+
+    if (driver.prints(Compiler::PrintKind::t_ir_units)) {
+        compiler.print_unit_ir();
+    }
+
+    if (front.layout().prepare_scratch_dir() != Compiler::BuildDirState::t_ready) {
+        diagnostics.render_untyped("Cannot Build Here", fmt::format(
+            "'{}' could not be created, and the objects on the way to '{}' have nowhere to go.",
+            front.layout().scratch_dir().string(), output));
+        return 1;
+    }
+
+    {
+        Compiler::ScopedPhase phase("emit + link");
+        Compiler::ProgressStep step(
+            Compiler::ProgressReporter::instance(),
+            Compiler::ProgressPhase::t_emit,
+            std::filesystem::path(output).filename().string());
+
+        const bool linked = emit_and_link_modules(compiler, front.layout(), output, plan, link);
+        step.finish(linked);
+
+        if (!linked) {
+            report_link_failure(diagnostics, link);
+            return 1;
+        }
+    }
+
+    return std::nullopt;
+}
+
 // **everything between a parsed bundle and a JIT that can be asked for an address**, shared by the two
-// subcommands that run one: the cache plan, the link requirements, the C modules, the native libraries the
-// JIT must have open before it resolves a symbol, then codegen and the whole-program optimizer.
+// Unix subcommands that run one: the cache plan, the link requirements, the C modules, the native
+// libraries the JIT must have open before it resolves a symbol, then codegen and the whole-program
+// optimizer.
 //
 // `run` and `test` do the same work here and differ only in what they do with the compiler afterwards - one
 // runs the program, the other calls one definition at a time - so this is one function rather than the two
@@ -2043,7 +2160,47 @@ int main_run(
     const std::string &entry_module = front.entry_module();
 
     LLVMCompiler compiler(front.options);
+    int status = 0;
 
+#if defined(_WIN32)
+    const Compiler::TargetFacts &facts = front.target_facts();
+    const Compiler::TargetFacts host = Compiler::TargetFacts::host();
+    // a host Windows binary. `--target-os darwin` still has to JIT: native-linking
+    // Darwin IR asks for pthread.lib that this machine does not have
+    const bool native_run =
+        facts.operating_system == host.operating_system
+        && facts.architecture == host.architecture
+        && !driver.explains(Compiler::ExplainKind::t_prune)
+        && !front.layout().scratch_is_temporary();
+#else
+    const bool native_run = false;
+#endif
+
+    if (native_run) {
+        compiler.set_entry(entry_module, front.entry_file());
+
+        report_cache_plan(
+            driver, front.manifests(), front.cache_keys, ModulePlan{}, entry_module,
+            /*bypassed=*/true);
+
+        const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run.exe";
+
+        if (const std::optional<int> failed = compile_and_link_executable(
+                driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
+                driver.whole_program)) {
+            return failed.value();
+        }
+
+        std::vector<std::string> argv = { program_name(driver, program) };
+        argv.insert(argv.end(), driver.program_arguments.begin(), driver.program_arguments.end());
+
+        Compiler::ProgressReporter::instance().close(
+            fmt::format("compiled '{}'", entry_module), Compiler::progress_elapsed_ms(started));
+
+        status = Compiler::run_wait(runner.string(), argv);
+        (void)environment;
+    }
+    else {
     if (const std::optional<int> failed = prepare_jit(
             driver, diagnostics, front, bundle, /*test_mode=*/false, compiler)) {
         return failed.value();
@@ -2065,10 +2222,10 @@ int main_run(
     Compiler::ProgressReporter::instance().close(
         fmt::format("compiled '{}'", entry_module), Compiler::progress_elapsed_ms(started));
 
-    int status = 0;
     {
         Compiler::ScopedPhase phase("jit");
         status = compiler.prepare_execution() ? compiler.run_main(argv, environment) : 1;
+    }
     }
 
     // after the program, because the prune happened inside the run - the same position `[timings]` takes,
@@ -2082,9 +2239,9 @@ int main_run(
     // after the program, because a C module's loadable library lives there and was open for the whole of it
     front.layout().discard_temporary_scratch();
 
-    // the program's own status, so `echoc run` exits the way it did. Today that is always 0 on this
-    // path - the entry point's epilogue returns 0 and every other ending goes through libc's `exit`
-    // from inside the JIT, which never comes back here at all
+    // the program's own status, so `echoc run` exits the way it did. a module-scope `die` on the
+    // JIT path never comes back here (libc `exit` from inside the engine); a spawned runner
+    // reports the child's code
     return status;
 }
 
@@ -2154,26 +2311,15 @@ static bool resolve_test_selection(
 
 // **compiles the module and runs its tests, each in a process of its own.**
 //
-// down to the codegen step this is main_run, and it has to be: a test run is the JIT, so it needs the same
-// link requirements resolved, the same C modules built and the same native libraries open - which is why
-// both go through prepare_jit rather than each spelling it. What differs begins after the compile: there is
-// no program to run, only a list of definitions to call one at a time
+// Unix shares prepare_jit with `run` so the two cannot drift. Windows (no fork into a JIT) compiles
+// a linked runner through compile_and_link_executable - the same function `build` uses - and spawns
+// it once per test. Isolation is "one process per test"; fork vs. spawn is TestRunner's question.
 int main_test(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     const Compiler::TerminalCapabilities &capabilities,
     const char *const *environment)
 {
-    // **refused here rather than at the first test**, which is the call `#[link: framework]` makes about
-    // Darwin: a platform that cannot do the thing is told so where the thing was asked for, and every test
-    // "failing" for the same reason is not a report anybody can act on
-    if (!Compiler::test_isolation_available()) {
-        diagnostics.render_untyped("Tests Cannot Be Isolated",
-            "'echoc test' runs each test in a process of its own, and this platform has no fork. Every "
-            "other subcommand is unaffected.");
-        return 1;
-    }
-
     const auto started = std::chrono::steady_clock::now();
 
     auto bundle = AST::Bundle();
@@ -2224,6 +2370,36 @@ int main_test(
 
     LLVMCompiler compiler(front.options);
 
+    std::vector<std::string> roots;
+    for (const Compiler::TestCase &test : selected) {
+        roots.push_back(test.symbol);
+    }
+
+    compiler.set_test_symbols(roots);
+
+    std::filesystem::path runner;
+
+#if defined(_WIN32)
+    (void)environment;
+
+    // no fork into this process's JIT: compile a runner through the same emit+link
+    // `build` uses, whose `main` dispatches on ECO_INTERNAL_RUN_TEST
+    compiler.set_entry(front.entry_module(), front.entry_file());
+    compiler.set_test_mode(true);
+    compiler.set_native_test_runner(true);
+
+    report_cache_plan(
+        driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
+        /*bypassed=*/true);
+
+    runner = front.layout().scratch_dir() / "eco_tests.exe";
+
+    if (const std::optional<int> failed = compile_and_link_executable(
+            driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
+            driver.whole_program)) {
+        return failed.value();
+    }
+#else
     if (const std::optional<int> failed = prepare_jit(
             driver, diagnostics, front, bundle, /*test_mode=*/true, compiler)) {
         return failed.value();
@@ -2233,11 +2409,6 @@ int main_test(
     // them - nothing reaches a test from the entry point, that being the whole of what a test is - and
     // function_address answers 0 for each. It also means `--filter` narrows the machine code and not only
     // the run
-    std::vector<std::string> roots;
-    for (const Compiler::TestCase &test : selected) {
-        roots.push_back(test.symbol);
-    }
-
     compiler.set_jit_roots(std::move(roots));
 
     if (!compiler.prepare_execution()) {
@@ -2257,6 +2428,7 @@ int main_test(
             return 1;
         }
     }
+#endif
 
     // **the facts main() settled, never a second resolve.** Two places deciding independently whether to
     // emit an escape sequence is how a redirected stream ends up with half of them in it - and these are
@@ -2270,6 +2442,10 @@ int main_test(
     reporter.begin(selected.size());
 
     for (const Compiler::TestCase &test : selected) {
+#if defined(_WIN32)
+        reporter.result(Compiler::run_test_isolated(
+            test, { runner.string() }, driver.timeout_ms));
+#else
         const uint64_t address = compiler.function_address(test.symbol);
 
         // **loud rather than a call through null.** A test the prune dropped is a mistake in the root set
@@ -2284,6 +2460,7 @@ int main_test(
         reporter.result(Compiler::run_test_isolated(test, [address]() {
             reinterpret_cast<void (*)()>(address)();
         }, driver.timeout_ms));
+#endif
     }
 
     const bool passed = reporter.finish();
@@ -2346,106 +2523,12 @@ static int build_one_program(
 
     const std::string output = program.output.string();
 
-    // before codegen, for the reason `run` states: a C source that does not compile fails this build
-    // whatever the Echo half does, and the wait is the same either way
-    std::vector<Compiler::LinkRequirement> link;
-
-    if (!collect_link_requirements(driver, diagnostics, front, link)) {
-        return 1;
-    }
-
-    {
-        Compiler::ScopedPhase phase("cc");
-
-        CModuleBuilds c_builds;
-
-        if (!build_c_modules(
-                driver, diagnostics, front, /*for_jit=*/false, c_builds)) {
-            return 1;
-        }
-
-        // ahead of every library, which partition_link_requirements is what guarantees
-        std::string link_error;
-
-        if (!Compiler::merge_link_requirements(c_builds.objects, link, link_error)) {
-            diagnostics.render_untyped("Invalid Link Requirement", link_error);
-            return 1;
-        }
-    }
-
     LLVMCompiler compiler(options);
     compiler.set_entry(entry_module, front.entry_file());
 
-    try {
-        Compiler::ScopedPhase phase("codegen");
-
-        // inside the try for the reason main_run's is
-        Compiler::ProgressStep step(
-            Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_codegen);
-
-        compiler.compile_bundle(bundle, plan.cached);
-
-        if (whole_program) {
-            compiler.link_into_main();
-        }
-
-        step.finish(true);
-    } catch (Compiler::ASTCompilerException &e) {
-        return report_compiler_exception(diagnostics, e);
-    }
-
-    if (!merge_emitted_runtime_link(diagnostics, compiler, link)) {
-        return 1;
-    }
-
-    optimize_if_asked(driver, compiler);
-
-    if (driver.prints(Compiler::PrintKind::t_ir)) {
-        compiler.printIR(false);
-    }
-
-    // after the merge decision above and before the emit below, so what it prints is what gets written.
-    // it optimizes the units it prints unless told not to - the same call emit_objects makes, so the dump
-    // and the object cannot disagree
-    if (driver.prints(Compiler::PrintKind::t_ir_units)) {
-        compiler.print_unit_ir();
-    }
-
-    // **unlike a store, this one is not optional.** A cache that cannot be written costs a rebuild; a
-    // scratch directory that cannot be written is an object with nowhere to go, so it is worth a sentence
-    // here rather than an ofstream failure from inside the backend
-    if (front.layout().prepare_scratch_dir() != Compiler::BuildDirState::t_ready) {
-        diagnostics.render_untyped("Cannot Build Here", fmt::format(
-            "'{}' could not be created, and the objects on the way to '{}' have nowhere to go.",
-            front.layout().scratch_dir().string(), output));
-        return 1;
-    }
-
-    {
-        Compiler::ScopedPhase phase("emit + link");
-        Compiler::ProgressStep step(
-            Compiler::ProgressReporter::instance(),
-            Compiler::ProgressPhase::t_emit,
-            std::filesystem::path(output).filename().string());
-
-        // **one emit-and-link path, whichever build this is.** a second spelling - an emit_object
-        // plus a link_executable over the one unit `emit_objects` skips its way down to anyway,
-        // `link_into_main()` having consumed all the others - would drift from this one. what
-        // `--optimize whole` depends on is that merge, which happened above and is not in question;
-        // with an empty plan `object_for` answers the scratch path, which is the object that arm
-        // was handed.
-        // The tool that failed has already said what it could, and what it could not say is which
-        // manifest asked for each requirement
-        const bool linked = emit_and_link_modules(compiler, front.layout(), output, plan, link);
-
-        // closed before the failure is reported rather than by the destructor after it, so the row sits
-        // above the sentence that explains it - the order every other step reaches deliberately
-        step.finish(linked);
-
-        if (!linked) {
-            report_link_failure(diagnostics, link);
-            return 1;
-        }
+    if (const std::optional<int> failed = compile_and_link_executable(
+            driver, diagnostics, front, bundle, compiler, output, plan, whole_program)) {
+        return failed.value();
     }
 
     // only now, and only for what was actually emitted: a record written before the object exists would
@@ -2708,6 +2791,18 @@ static int main_print_manifest(
 
 int main(int argc, char *argv[], char *envp[])
 {
+    // before any write: on Windows this sets the console to UTF-8 and turns on virtual-terminal
+    // processing. A pipe is left alone; see Compiler::prepare_terminal
+    Compiler::prepare_terminal();
+
+#if defined(_WIN32)
+    // echo of a string uses `_write` while integers go through `printf`. when stdout is a
+    // pipe it is fully buffered, and `fflush(NULL)` from JIT'd code does not drain this
+    // process's FILE*. unbuffer so the two writes stay in program order for `echoc run`
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
+#endif
+
     // **parse, then answer, then resolve.** Compiler::parse_command_line owns every rule about what the
     // words mean, including the bare `--` split, so nothing here reaches into argv - and --help and
     // --version come back as answers rather than as an exit taken inside a library, which is what lets

@@ -1,0 +1,34 @@
+// Go-style `str::from(duration)`: zero, sub-second units, h/m/s, negatives, unbounded hours
+use std::time;
+
+time::duration $z = time::duration::zero();
+echo "{$z}";
+
+time::duration $ns = time::duration::nanos(100);
+echo "{$ns}";
+
+time::duration $us = time::duration::nanos(1500);
+echo "{$us}";
+
+time::duration $ms = time::duration::millis(250);
+echo "{$ms}";
+
+time::duration $s = time::duration::secs(1) + time::duration::millis(500);
+echo "{$s}";
+
+time::duration $m = time::duration::mins(1) + time::duration::secs(30);
+echo "{$m}";
+
+time::duration $h = time::duration::hours(1) + time::duration::mins(2) + time::duration::secs(3) + time::duration::millis(500);
+echo "{$h}";
+
+time::duration $h0 = time::duration::hours(1) + time::duration::secs(3);
+echo "{$h0}";
+
+time::duration $neg = time::duration::millis(-1500);
+echo "{$neg}";
+
+time::duration $long = time::duration::hours(26);
+echo "{$long}";
+
+echo mem::live_allocations();

@@ -1,0 +1,14 @@
+// full operator set, cross-normalisation, negative ordering, and the field-wise
+// instant constructor (unmarked `$raw` does not suppress it)
+use std::time;
+
+echo time::duration::millis(1500) == time::duration(1, 500000000);
+echo time::duration::millis(1500) != time::duration::secs(1);
+echo time::duration::millis(-1500) < time::duration::zero();
+echo time::duration::zero() > time::duration::millis(-1500);
+echo time::duration::secs(1) <= time::duration::secs(1);
+echo time::duration::secs(2) >= time::duration::secs(1);
+echo time::duration::millis(-1500) < time::duration::millis(-500);
+
+time::instant $made = time::instant(time::duration::secs(1));
+echo ($made - time::instant(time::duration::zero())) == time::duration::secs(1);

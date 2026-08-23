@@ -25,7 +25,10 @@ internal extern {
     // returns null when the name is not set, and a pointer into the environment block when it is.
     // the bytes belong to the process, not to the caller
     function getenv as c_getenv(ptr<const uint8> $name) : ptr<uint8>;
+}
 
+#[if: os != windows]
+internal extern {
     // writes the path into `$buf` and hands it back, or null when it does not fit - which is the
     // only failure `cwd` has to distinguish, and why it grows its buffer rather than
     // reading errno
@@ -33,6 +36,30 @@ internal extern {
 
     function getpid as c_getpid() : int32;
 }
+#[end]
+
+#[if: os == windows]
+internal extern {
+    function _getcwd as c_getcwd(ptr<uint8> $buf, usize $size) : ptr<uint8>;
+    function _getpid as c_getpid() : int32;
+
+    function GetModuleFileNameW as c_GetModuleFileNameW(
+        ptr<uint8> $module, ptr<uint16> $buf, uint32 $size) : uint32;
+
+    function WideCharToMultiByte as c_WideCharToMultiByte(
+        uint32 $codepage,
+        uint32 $flags,
+        ptr<const uint16> $wide,
+        int32 $wide_n,
+        ptr<uint8> $utf8,
+        int32 $utf8_n,
+        ptr<uint8> $default_char,
+        ptr<int32> $used_default
+    ) : int32;
+}
+
+internal const uint32 CP_UTF8 = 65001;
+#[end]
 
 // **the one platform-specific binding in the module**, and the reason conditional compilation exists.
 //

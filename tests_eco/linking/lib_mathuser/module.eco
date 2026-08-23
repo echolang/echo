@@ -9,6 +9,8 @@
 #[module: "linkmath"]
 #[version: "0.1.0"]
 
-#[link: lib "m"]
+// `runtime: process` so this merges with stdlib's own libm. `lib "m"` is a
+// *load*, and the same library cannot be linked two ways.
+#[link: lib { name: "m", runtime: process }]
 
 #[sources: "src/*.eco"]

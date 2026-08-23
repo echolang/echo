@@ -1,0 +1,37 @@
+/**
+ * Sleep for a duration.
+ *
+ * A non-positive duration returns immediately. Negative sleep is a no-op, matching Rust and Go.
+ * The duration is already a timespec, so the body is a loop over `nanosleep` that retries on
+ * EINTR from the remainder. `$rem` is zeroed before every call: a non-EINTR failure leaves it
+ * zero and that is the exit, a proof of progress with no errno binding.
+ *
+ * Windows rounds the wait up to the next millisecond and chunks at four billion ms, the
+ * `uint32` Sleep boundary. There is no 500 ms chopping on Unix; that was `usleep`'s limit.
+ */
+
+namespace std::time;
+
+public function sleep(duration $d) : void
+{
+    if ($d <= duration::zero()) {
+        return;
+    }
+
+    timespec $req = timespec($d->secs, $d->nanos);
+
+    while (true) {
+        timespec $rem = timespec(0, 0);
+        int32 $rc = c_nanosleep(&$req, &$rem);
+
+        if ($rc == 0) {
+            return;
+        }
+
+        if ($rem->sec == 0 && $rem->nsec == 0) {
+            return;
+        }
+
+        $req = $rem;
+    }
+}

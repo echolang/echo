@@ -237,6 +237,49 @@ public function exe() : string
     }
 
     die('the executable path does not fit in 64 KiB');
+#[elif: os == windows]
+    // GetModuleFileNameW writes UTF-16. grow until it fits, then WideCharToMultiByte to
+    // UTF-8, which is what every Echo `string` is
+    uint32 $wide_cap = 256;
+
+    while ($wide_cap <= 32768) {
+        ptr<uint16> $wide = mem::alloc<uint16>($wide_cap);
+        uint32 $written = c_GetModuleFileNameW(ptr<uint8>(null), $wide, $wide_cap);
+
+        if ($written == 0) {
+            mem::free($wide);
+            die('GetModuleFileNameW failed');
+        }
+
+        if ($written >= $wide_cap) {
+            mem::free($wide);
+            $wide_cap = $wide_cap * 2;
+            continue;
+        }
+
+        int32 $utf8_n = c_WideCharToMultiByte(
+            CP_UTF8, 0, $wide, $written as int32,
+            ptr<uint8>(null), 0, ptr<uint8>(null), ptr<int32>(null));
+
+        if ($utf8_n <= 0) {
+            mem::free($wide);
+            die('WideCharToMultiByte failed');
+        }
+
+        ptr<uint8> $utf8 = mem::alloc<uint8>(($utf8_n + 1) as usize);
+        $utf8:$[$utf8_n] = 0;
+        c_WideCharToMultiByte(
+            CP_UTF8, 0, $wide, $written as int32,
+            $utf8, $utf8_n, ptr<uint8>(null), ptr<int32>(null));
+        mem::free($wide);
+
+        string $path = str::from($utf8);
+        mem::free($utf8);
+
+        return $path;
+    }
+
+    die('the executable path does not fit in 32 KiB of UTF-16');
 #[else]
     return str::from(arg(0)->cstr());
 #[end]

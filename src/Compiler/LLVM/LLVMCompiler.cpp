@@ -2,6 +2,7 @@
 
 #include "Compiler/LLVM/OdrComparison.h"
 #include "Compiler/PhaseTimings.h"
+#include "Compiler/TestRunner.h"
 
 #include "AST/ASTFunctionEmission.h"
 #include "AST/FunctionDeclNode.h"
@@ -10,7 +11,9 @@
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
 
+#include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Verifier.h>
@@ -59,6 +62,84 @@ void LLVMCompiler::set_entry(const std::string &module_name, const std::filesyst
 void LLVMCompiler::set_test_mode(bool test_mode)
 {
     _ctx.test_mode = test_mode;
+}
+
+void LLVMCompiler::set_native_test_runner(bool enabled)
+{
+    _ctx.emit_native_test_runner = enabled;
+}
+
+void LLVMCompiler::set_test_symbols(std::vector<std::string> symbols)
+{
+    _ctx.test_symbols = std::move(symbols);
+}
+
+void LLVMCompiler::emit_test_dispatch()
+{
+    if (!_ctx.test_mode || !_ctx.emit_native_test_runner || _ctx.test_symbols.empty()) {
+        return;
+    }
+
+    llvm::Module *module = _ctx.current_module();
+    llvm::Function *main_fn = _ctx.builder->GetInsertBlock()->getParent();
+    llvm::Type *i32 = _ctx.builder->getInt32Ty();
+    llvm::Type *void_ty = _ctx.builder->getVoidTy();
+    llvm::PointerType *ptr = llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type());
+
+    llvm::FunctionCallee getenv_fn = _ctx.libc_callee("getenv", ptr, { ptr });
+    llvm::FunctionCallee strcmp_fn = _ctx.libc_callee("strcmp", i32, { ptr, ptr });
+    llvm::FunctionCallee exit_fn = _ctx.libc_callee(
+        "exit", void_ty, { i32 });
+
+    if (auto *exit_decl = llvm::dyn_cast<llvm::Function>(exit_fn.getCallee())) {
+        exit_decl->addFnAttr(llvm::Attribute::NoReturn);
+    }
+
+    llvm::BasicBlock *after = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.after", main_fn);
+    llvm::BasicBlock *search = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.search", main_fn);
+    llvm::BasicBlock *unmatched = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.unmatched", main_fn);
+
+    llvm::Value *name = _ctx.builder->CreateCall(
+        getenv_fn,
+        { _ctx.builder->CreateGlobalStringPtr(Compiler::k_isolated_test_env, "eco.test.env") },
+        "test.name");
+    llvm::Value *missing = _ctx.builder->CreateICmpEQ(
+        name, llvm::ConstantPointerNull::get(ptr), "test.missing");
+    _ctx.builder->CreateCondBr(missing, after, search);
+
+    _ctx.builder->SetInsertPoint(search);
+
+    llvm::FunctionType *test_ty = llvm::FunctionType::get(void_ty, false);
+
+    for (const std::string &symbol : _ctx.test_symbols) {
+        llvm::BasicBlock *run = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.run", main_fn);
+        llvm::BasicBlock *cont = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.next", main_fn);
+
+        llvm::Value *want = _ctx.builder->CreateGlobalStringPtr(symbol, "eco.test.sym");
+        llvm::Value *cmp = _ctx.builder->CreateCall(strcmp_fn, { name, want }, "test.cmp");
+        llvm::Value *eq = _ctx.builder->CreateICmpEQ(cmp, llvm::ConstantInt::get(i32, 0), "test.eq");
+        _ctx.builder->CreateCondBr(eq, run, cont);
+
+        _ctx.builder->SetInsertPoint(run);
+
+        llvm::Function *fn = module->getFunction(symbol);
+
+        if (fn == nullptr) {
+            fn = llvm::Function::Create(test_ty, llvm::Function::ExternalLinkage, symbol, module);
+        }
+
+        _ctx.builder->CreateCall(fn);
+        _ctx.builder->CreateBr(after);
+        _ctx.builder->SetInsertPoint(cont);
+    }
+
+    _ctx.builder->CreateBr(unmatched);
+
+    _ctx.builder->SetInsertPoint(unmatched);
+    _ctx.builder->CreateCall(exit_fn, { llvm::ConstantInt::get(i32, 127) });
+    _ctx.builder->CreateUnreachable();
+
+    _ctx.builder->SetInsertPoint(after);
 }
 
 void LLVMCompiler::emit_entry_file_roots(Compiler::LLVM::CmpUnit &main_cmp_unit)
@@ -280,6 +361,11 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         // the epilogue is the function's own, not the last file-root statement's - and gen_report emits
         // `printf` calls, which must carry a location like every other call here
         _debug_info.set_function_scope_location();
+
+        // a linked test runner cannot share the parent's JIT, so `main` itself looks the
+        // test up and calls it. the JIT path does not emit this, so a leftover
+        // `ECO_INTERNAL_RUN_TEST` cannot hijack the prologue
+        emit_test_dispatch();
 
         // **before the report, and that ordering is the whole reason teardown is not `atexit`.**
         // `--track-allocations` is on for every corpus case, so a static torn down after gen_report

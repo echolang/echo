@@ -1,0 +1,25 @@
+// factories, arithmetic, unary minus, and the floor accessors over a negative
+use std::time;
+
+time::duration $ms = time::duration::millis(-1500);
+echo $ms->as_secs();
+echo $ms->subsec_nanos();
+echo $ms->as_millis();
+
+time::duration $sum = time::duration::secs(1) + time::duration::millis(500);
+echo $sum->as_nanos();
+
+time::duration $a = time::duration::secs(2);
+time::duration $b = time::duration::millis(500);
+echo ($a + $b)->as_millis();
+echo ($a - $b)->as_millis();
+echo (-$b)->as_millis();
+echo ($b * 4)->as_millis();
+echo (4 * $b)->as_millis();
+echo ($a / 2)->as_millis();
+echo $ms->abs()->as_millis();
+echo $ms->is_negative();
+echo time::duration::zero()->is_zero();
+echo time::duration::micros(1500)->as_nanos();
+echo time::duration::mins(2)->as_secs();
+echo time::duration::hours(1)->as_secs();

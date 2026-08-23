@@ -12,6 +12,7 @@
 
 namespace std::thread;
 
+#[if: os != windows]
 internal extern {
     function pthread_create as c_pthread_create(
         ptr<usize> $thread,
@@ -38,9 +39,170 @@ internal extern {
     function pthread_cond_broadcast as c_pthread_cond_broadcast(ptr<uint8> $cond) : int32;
 
     function sched_yield as c_sched_yield() : int32;
-    function usleep as c_usleep(uint32 $usec) : int32;
     function sysconf as c_sysconf(int32 $name) : int64;
 }
+#[end]
+
+#[if: os == windows]
+internal extern {
+    function CreateThread as c_CreateThread(
+        ptr<uint8> $attr,
+        usize $stack,
+        extern function<ptr<uint8>(ptr<uint8>)> $start,
+        ptr<uint8> $arg,
+        uint32 $flags,
+        ptr<uint32> $tid
+    ) : ptr<uint8>;
+
+    function WaitForSingleObject as c_WaitForSingleObject(ptr<uint8> $handle, uint32 $ms) : uint32;
+    function CloseHandle as c_CloseHandle(ptr<uint8> $handle) : int32;
+    function GetCurrentThreadId as c_GetCurrentThreadId() : uint32;
+    function SwitchToThread as c_SwitchToThread() : int32;
+    function GetActiveProcessorCount as c_GetActiveProcessorCount(uint16 $group) : uint32;
+
+    function InitializeSRWLock as c_InitializeSRWLock(ptr<uint8> $lock) : void;
+    function AcquireSRWLockExclusive as c_AcquireSRWLockExclusive(ptr<uint8> $lock) : void;
+    function ReleaseSRWLockExclusive as c_ReleaseSRWLockExclusive(ptr<uint8> $lock) : void;
+    function TryAcquireSRWLockExclusive as c_TryAcquireSRWLockExclusive(ptr<uint8> $lock) : uint8;
+
+    function InitializeConditionVariable as c_InitializeConditionVariable(ptr<uint8> $cond) : void;
+    function SleepConditionVariableSRW as c_SleepConditionVariableSRW(
+        ptr<uint8> $cond, ptr<uint8> $lock, uint32 $ms, uint32 $flags) : int32;
+    function WakeConditionVariable as c_WakeConditionVariable(ptr<uint8> $cond) : void;
+    function WakeAllConditionVariable as c_WakeAllConditionVariable(ptr<uint8> $cond) : void;
+}
+
+internal const uint32 WIN_INFINITE = 4294967295;
+internal const uint16 WIN_ALL_PROCESSOR_GROUPS = 65535;
+
+internal function c_pthread_create(
+    ptr<usize> $thread,
+    ptr<uint8> $attr,
+    extern function<ptr<uint8>(ptr<uint8>)> $start,
+    ptr<uint8> $arg
+) : int32
+{
+    uint32 $tid = 0;
+    ptr<uint8> $handle = c_CreateThread(ptr<uint8>(null), 0, $start, $arg, 0, &$tid);
+
+    if ($handle:$ == null) {
+        return ENOMEM;
+    }
+
+    usize $bits = 0;
+    mem::copy<uint8>(ptr<uint8>(&$bits), ptr<uint8>(&$handle), mem::size<ptr<uint8>>());
+    $thread:$[0] = $bits;
+    return 0;
+}
+
+internal function c_pthread_join(usize $thread, ptr<ptr<uint8>> $retval) : int32
+{
+    usize $bits = $thread;
+    ptr<uint8> $handle = ptr<uint8>(null);
+    mem::copy<uint8>(ptr<uint8>(&$handle), ptr<uint8>(&$bits), mem::size<ptr<uint8>>());
+    c_WaitForSingleObject($handle, WIN_INFINITE);
+    c_CloseHandle($handle);
+    return 0;
+}
+
+internal function c_pthread_detach(usize $thread) : int32
+{
+    usize $bits = $thread;
+    ptr<uint8> $handle = ptr<uint8>(null);
+    mem::copy<uint8>(ptr<uint8>(&$handle), ptr<uint8>(&$bits), mem::size<ptr<uint8>>());
+    c_CloseHandle($handle);
+    return 0;
+}
+
+internal function c_pthread_self() : usize
+{
+    return c_GetCurrentThreadId() as usize;
+}
+
+internal function c_pthread_equal(usize $a, usize $b) : int32
+{
+    if ($a == $b) {
+        return 1;
+    }
+
+    return 0;
+}
+
+internal function c_pthread_mutex_init(ptr<uint8> $mutex, ptr<uint8> $attr) : int32
+{
+    c_InitializeSRWLock($mutex);
+    return 0;
+}
+
+internal function c_pthread_mutex_destroy(ptr<uint8> $mutex) : int32
+{
+    return 0;
+}
+
+internal function c_pthread_mutex_lock(ptr<uint8> $mutex) : int32
+{
+    c_AcquireSRWLockExclusive($mutex);
+    return 0;
+}
+
+internal function c_pthread_mutex_trylock(ptr<uint8> $mutex) : int32
+{
+    if (c_TryAcquireSRWLockExclusive($mutex) != 0) {
+        return 0;
+    }
+
+    return EBUSY;
+}
+
+internal function c_pthread_mutex_unlock(ptr<uint8> $mutex) : int32
+{
+    c_ReleaseSRWLockExclusive($mutex);
+    return 0;
+}
+
+internal function c_pthread_cond_init(ptr<uint8> $cond, ptr<uint8> $attr) : int32
+{
+    c_InitializeConditionVariable($cond);
+    return 0;
+}
+
+internal function c_pthread_cond_destroy(ptr<uint8> $cond) : int32
+{
+    return 0;
+}
+
+internal function c_pthread_cond_wait(ptr<uint8> $cond, ptr<uint8> $mutex) : int32
+{
+    if (c_SleepConditionVariableSRW($cond, $mutex, WIN_INFINITE, 0) == 0) {
+        return EDEADLK;
+    }
+
+    return 0;
+}
+
+internal function c_pthread_cond_signal(ptr<uint8> $cond) : int32
+{
+    c_WakeConditionVariable($cond);
+    return 0;
+}
+
+internal function c_pthread_cond_broadcast(ptr<uint8> $cond) : int32
+{
+    c_WakeAllConditionVariable($cond);
+    return 0;
+}
+
+internal function c_sched_yield() : int32
+{
+    c_SwitchToThread();
+    return 0;
+}
+
+internal function c_sysconf(int32 $name) : int64
+{
+    return c_GetActiveProcessorCount(WIN_ALL_PROCESSOR_GROUPS) as int64;
+}
+#[end]
 
 internal const int32 ENOMEM = 12;
 internal const int32 EBUSY = 16;

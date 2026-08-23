@@ -1,0 +1,9 @@
+// the monotonic clock only ever moves forward. no value to pin, so the case
+// pins the three things that are always true of it
+use std::time;
+
+time::instant $t1 = time::instant::now();
+time::instant $t2 = time::instant::now();
+echo $t2 >= $t1;
+echo ($t2 - $t1) >= time::duration::zero();
+echo $t1->elapsed() >= time::duration::zero();

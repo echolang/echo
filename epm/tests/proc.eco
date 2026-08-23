@@ -1,5 +1,6 @@
 use epm::sys;
 
+#[if: os != windows]
 test run_captures_stdout
 {
     array<string> $a = array<string>();
@@ -40,3 +41,39 @@ test run_passes_an_argument_that_would_break_a_shell
     assert($ran->ok());
     assert($ran->out == "it's");
 }
+#[end]
+
+#[if: os == windows]
+test run_captures_stdout
+{
+    array<string> $a = array<string>();
+    $a[] = 'cmd';
+    $a[] = '/c';
+    $a[] = 'echo hello';
+    sys::Run $ran = sys::run($a);
+    assert($ran->ok());
+    assert($ran->out->contains('hello'));
+}
+
+test run_captures_a_nonzero_exit
+{
+    array<string> $a = array<string>();
+    $a[] = 'cmd';
+    $a[] = '/c';
+    $a[] = 'exit 7';
+    sys::Run $ran = sys::run($a);
+    assert(!$ran->ok());
+    assert($ran->code == 7);
+}
+
+test run_passes_an_argument_that_would_break_a_shell
+{
+    array<string> $a = array<string>();
+    $a[] = 'cmd';
+    $a[] = '/c';
+    $a[] = "echo it's";
+    sys::Run $ran = sys::run($a);
+    assert($ran->ok());
+    assert($ran->out->contains("it's"));
+}
+#[end]

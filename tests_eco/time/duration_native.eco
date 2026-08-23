@@ -1,0 +1,7 @@
+// arithmetic plus a render slice under `mode: build`, so emit+link see the module
+use std::time;
+
+time::duration $sum = time::duration::secs(1) + time::duration::millis(500);
+echo $sum->as_nanos();
+echo "{$sum}";
+echo mem::live_allocations();

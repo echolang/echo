@@ -10,7 +10,8 @@ use epm::util;
 
 public function dir(const string& $name) : string
 {
-    string $path = sys::join('/tmp', "epm-t-{$name}");
+    string $tmp = string::from(std::env::tmp());
+    string $path = sys::join($tmp, "epm-t-{$name}");
     sys::remove_all($path);
     assert(sys::mkdir_p($path));
     return $path;

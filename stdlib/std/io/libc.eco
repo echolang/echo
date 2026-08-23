@@ -14,6 +14,7 @@
 
 namespace std::io;
 
+#[if: os != windows]
 internal extern {
     // the raw, unbuffered writes and reads. deliberately **not** `fwrite`/`fread`: a `string` need
     // not be NUL-terminated, its length is always known, and a second layer of buffering under one
@@ -36,6 +37,70 @@ internal extern {
     function access as c_access(ptr<const uint8> $path, int32 $amode) : int32;
     function strerror as c_strerror(int32 $code) : ptr<uint8>;
 }
+#[end]
+
+#[if: os == windows]
+// UCRT: `_write`/`_read` return `int` and take `unsigned int` counts. wrapping
+// them keeps the rest of the module on `isize`/`usize` the way POSIX does.
+// `O_BINARY` is or'd in `flags_of` - text mode would eat `\n`
+internal extern {
+    function _write as c_write_raw(int32 $fd, ptr<const uint8> $buf, uint32 $count) : int32;
+    function _read as c_read_raw(int32 $fd, ptr<uint8> $buf, uint32 $count) : int32;
+    function fflush as c_fflush(ptr<uint8> $stream) : int32;
+    function _open as c_open(ptr<const uint8> $path, int32 $flags, variadic_args $args) : int32;
+    function _close as c_close(int32 $fd) : int32;
+    function _lseeki64 as c_lseek(int32 $fd, int64 $offset, int32 $whence) : int64;
+    function _unlink as c_unlink(ptr<const uint8> $path) : int32;
+    function rename as c_rename(ptr<const uint8> $from, ptr<const uint8> $to) : int32;
+    function _access as c_access(ptr<const uint8> $path, int32 $amode) : int32;
+    function strerror as c_strerror(int32 $code) : ptr<uint8>;
+    function _errno as c_errno_location() : ptr<int32>;
+
+    // fd → HANDLE. the console APIs below take a handle, and `_write` of UTF-8
+    // to that handle is decoded as OEM (850, 437), which is why `c_write` goes
+    // through `console_write` first. pinned in the JIT next to `_write` for
+    // the same msvcrt-vs-UCRT reason
+    function _get_osfhandle as c_get_osfhandle(int32 $fd) : ptr<uint8>;
+}
+
+internal extern {
+    function GetConsoleMode as c_GetConsoleMode(ptr<uint8> $h, ptr<uint32> $mode) : int32;
+    function SetConsoleMode as c_SetConsoleMode(ptr<uint8> $h, uint32 $mode) : int32;
+    function WriteConsoleW as c_WriteConsoleW(
+        ptr<uint8> $h,
+        ptr<uint16> $text,
+        uint32 $n,
+        ptr<uint32> $written,
+        ptr<uint8> $reserved
+    ) : int32;
+    function MultiByteToWideChar as c_MultiByteToWideChar(
+        uint32 $cp,
+        uint32 $flags,
+        ptr<const uint8> $utf8,
+        int32 $utf8_n,
+        ptr<uint16> $wide,
+        int32 $wide_n
+    ) : int32;
+}
+
+// a console is not `_write`. `console_write` answers the byte count it
+// displayed, or -1 when `$fd` is a pipe or a file and `_write` should run
+internal function c_write(int32 $fd, ptr<const uint8> $buf, usize $count) : isize
+{
+    isize $n = console_write($fd, $buf, $count);
+
+    if ($n >= 0) {
+        return $n;
+    }
+
+    return c_write_raw($fd, $buf, $count as uint32) as isize;
+}
+
+internal function c_read(int32 $fd, ptr<uint8> $buf, usize $count) : isize
+{
+    return c_read_raw($fd, $buf, $count as uint32) as isize;
+}
+#[end]
 
 // errno is a thread-local behind a function, and the function's name is the platform. read the
 // int it points at immediately - nothing else in the caller may touch libc first
@@ -47,17 +112,11 @@ internal extern {
 internal extern {
     function __errno_location as c_errno_location() : ptr<int32>;
 }
-#[else]
-// so `--target-os windows` still typechecks the stdlib. the values are Linux's; nothing here
-// claims to run
-internal extern {
-    function __errno_location as c_errno_location() : ptr<int32>;
-}
 #[end]
 
-// `O_*` values are not the same number on Darwin and Linux. the rest of this module names these
-// constants and never the literals, so a flag used on the wrong host is a missing-symbol problem
-// at compile time rather than a silent wrong open
+// `O_*` values are not the same number on Darwin, Linux and Windows. the rest of this module names
+// these constants and never the literals, so a flag used on the wrong host is a missing-symbol
+// problem at compile time rather than a silent wrong open
 #[if: os == darwin]
 internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
@@ -66,6 +125,7 @@ internal const int32 O_APPEND = 8;
 internal const int32 O_CREAT = 512;
 internal const int32 O_TRUNC = 1024;
 internal const int32 O_CLOEXEC = 16777216;
+internal const int32 O_BINARY = 0;
 #[elif: os == linux]
 internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
@@ -74,6 +134,16 @@ internal const int32 O_CREAT = 64;
 internal const int32 O_TRUNC = 512;
 internal const int32 O_APPEND = 1024;
 internal const int32 O_CLOEXEC = 524288;
+internal const int32 O_BINARY = 0;
+#[elif: os == windows]
+internal const int32 O_RDONLY = 0;
+internal const int32 O_WRONLY = 1;
+internal const int32 O_RDWR = 2;
+internal const int32 O_APPEND = 8;
+internal const int32 O_CREAT = 256;
+internal const int32 O_TRUNC = 512;
+internal const int32 O_CLOEXEC = 0;
+internal const int32 O_BINARY = 32768;
 #[else]
 internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
@@ -82,6 +152,7 @@ internal const int32 O_CREAT = 64;
 internal const int32 O_TRUNC = 512;
 internal const int32 O_APPEND = 1024;
 internal const int32 O_CLOEXEC = 524288;
+internal const int32 O_BINARY = 0;
 #[end]
 
 // these four, and EBADF, agree on every platform this compiler targets

@@ -14,6 +14,12 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include "subprocess.h"
 #include "terminal_fixture.h"
 
@@ -710,6 +716,41 @@ TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
     }
 }
 
+TEST_CASE("prepare_terminal is safe to call twice", "[cli]")
+{
+    Compiler::prepare_terminal();
+    Compiler::prepare_terminal();
+}
+
+#if defined(_WIN32)
+TEST_CASE("prepare_terminal sets an attached console to UTF-8", "[cli]")
+{
+    const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD mode = 0;
+    if (err == INVALID_HANDLE_VALUE || err == nullptr || GetConsoleMode(err, &mode) == 0) {
+        SKIP("stderr is not a console");
+    }
+
+    Compiler::prepare_terminal();
+    REQUIRE(GetConsoleOutputCP() == CP_UTF8);
+}
+#endif
+
+TEST_CASE("a heading is drawn, not shouted", "[cli]")
+{
+    const std::string unicode = page(Subcommand::t_none, a_terminal(true, 80, false));
+    const std::string ascii = page(Subcommand::t_none, TerminalCapabilities::plain());
+
+    // U+258C LEFT HALF BLOCK, then the word, then the rule of U+2500. The ascii theme draws neither
+    // glyph, so the heading is the word alone rather than a row of hyphens pretending to be a rule
+    REQUIRE(contains(unicode, "\u258c Usage "));
+    REQUIRE(contains(unicode, "\u2500"));
+
+    REQUIRE(contains(ascii, "Usage\n"));
+    REQUIRE_FALSE(contains(ascii, "\u258c"));
+    REQUIRE_FALSE(contains(ascii, "\u2500"));
+}
+
 // **summaries form a column that can be read down.** One width per page, so a row that escaped it would
 // be the row that breaks the whole page
 TEST_CASE("every summary on a page starts at the same column", "[cli]")
@@ -824,7 +865,7 @@ TEST_CASE("a refusal is the sentence, the usage and where to read more", "[cli]"
 
 // **the prose is one command away, and the page says so.** The full description was written once, into
 // the table, and a description nobody can reach is a description nobody wrote
-TEST_CASE("--help names one option and prints it in full", "[cli]")
+TEST_CASE("`--help` names one option and prints it in full", "[cli]")
 {
     CommandLine cli;
     std::string error;
@@ -888,25 +929,33 @@ TEST_CASE("help answers on stdout and a refusal on stderr", "[cli]")
 {
     const std::string echoc = EchoTests::quoted(ECHOC_BINARY);
 
-    const EchoTests::ProcessResult version = EchoTests::run_capturing(echoc + " --version 2>/dev/null");
+#if defined(_WIN32)
+    const char *quiet_stdout = " 2>nul";
+    const char *stderr_only = " 2>&1 1>nul";
+#else
+    const char *quiet_stdout = " 2>/dev/null";
+    const char *stderr_only = " 2>&1 1>/dev/null";
+#endif
+
+    const EchoTests::ProcessResult version = EchoTests::run_capturing(echoc + " --version" + quiet_stdout);
     REQUIRE(version.exit_code == 0);
     REQUIRE(version.output == std::string(ECO_VERSION_STRING) + "\n");
 
     // the page goes to stdout and writes nothing to the diagnostic stream
-    const EchoTests::ProcessResult help = EchoTests::run_capturing(echoc + " --help 2>/dev/null");
+    const EchoTests::ProcessResult help = EchoTests::run_capturing(echoc + " --help" + quiet_stdout);
     REQUIRE(help.exit_code == 0);
     REQUIRE(help.output.find("Usage") != std::string::npos);
 
     const EchoTests::ProcessResult help_stderr
-        = EchoTests::run_capturing(echoc + " --help 2>&1 1>/dev/null");
+        = EchoTests::run_capturing(echoc + " --help" + stderr_only);
     REQUIRE(help_stderr.output.empty());
 
     // and a refusal is the mirror of it: stderr, exit 1, nothing on stdout
-    const EchoTests::ProcessResult bare = EchoTests::run_capturing(echoc + " 2>/dev/null");
+    const EchoTests::ProcessResult bare = EchoTests::run_capturing(echoc + quiet_stdout);
     REQUIRE(bare.exit_code == 1);
     REQUIRE(bare.output.empty());
 
     const EchoTests::ProcessResult bare_stderr
-        = EchoTests::run_capturing(echoc + " 2>&1 1>/dev/null");
+        = EchoTests::run_capturing(echoc + stderr_only);
     REQUIRE(bare_stderr.output.find("No command given.") != std::string::npos);
 }

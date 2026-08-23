@@ -8,6 +8,8 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 // the suites' process primitive. Two of them - the e2e corpus and the module cache - drive real `echoc`
 // subprocesses, and they had a `popen` block each: same buffer, same wait-status decoding, same quoting.
@@ -37,13 +39,52 @@ namespace EchoTests
     // shell reports it, which keeps a JIT segfault distinguishable from a clean rejection in the failure
     // message.
     //
-    // **fork + poll + SIGKILL of the process group**, never `popen` and never shell
-    // `timeout(1)`. the child calls setpgid so a `sh -c` that did not exec (a
-    // pipeline, `2>&1`) still dies with its grandchildren. defined in
-    // subprocess.cpp so every suite TU does not compile the poll loop
+    // Compiler::run_shell, which kills the process group (POSIX) or the job
+    // object (Windows) so a pipeline's grandchildren die with the shell
+    inline std::vector<std::string> split_command_words(const std::string &text)
+    {
+        std::vector<std::string> words;
+        std::string current;
+        bool quoted = false;
+
+        for (char c : text) {
+            if (c == '"') {
+                quoted = !quoted;
+                continue;
+            }
+
+            if (!quoted && (c == ' ' || c == '\t')) {
+                if (!current.empty()) {
+                    words.push_back(current);
+                    current.clear();
+                }
+
+                continue;
+            }
+
+            current += c;
+        }
+
+        if (!current.empty()) {
+            words.push_back(current);
+        }
+
+        return words;
+    }
+
     ProcessResult run_capturing(
         const std::string &command,
         unsigned timeout_ms = k_default_timeout_ms
+    );
+
+    // argv spawn with no shell. `working_directory` empty means the caller's.
+    // `stdin_content` is written to the child and then closed; empty inherits
+    ProcessResult run_process(
+        const std::vector<std::string> &argv,
+        unsigned timeout_ms = k_default_timeout_ms,
+        const std::filesystem::path &working_directory = {},
+        const std::vector<std::pair<std::string, std::string>> &extra_env = {},
+        const std::string &stdin_content = {}
     );
 
     // a path as one shell word. The corpus lives under a configured absolute directory, so a space in it is
@@ -85,10 +126,28 @@ namespace EchoTests
     // did a build actually produce this. **Beside write_file and not per suite**, because "the binary is
     // there" is the assertion every target case ends on and two spellings of it is two suites that can
     // disagree about whether a directory counts
+    inline std::filesystem::path with_exe(const std::filesystem::path &path)
+    {
+#if defined(_WIN32)
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec)
+            && path.extension().empty()
+            && std::filesystem::is_regular_file(std::filesystem::path(path.string() + ".exe"), ec)) {
+            return std::filesystem::path(path.string() + ".exe");
+        }
+#endif
+        return path;
+    }
+
     inline bool file_exists(const std::filesystem::path &path)
     {
         std::error_code ec;
-        return std::filesystem::is_regular_file(path, ec);
+        return std::filesystem::is_regular_file(with_exe(path), ec);
+    }
+
+    inline ProcessResult run_binary(const std::filesystem::path &exe, unsigned timeout_ms = k_default_timeout_ms)
+    {
+        return run_process({ with_exe(exe).string() }, timeout_ms);
     }
 
     // a scratch project directory, removed when the test leaves. Named after the *suite* and then the
@@ -122,8 +181,10 @@ namespace EchoTests
         // ones testing discovery itself wants
         ProcessResult echoc(const std::string &args, const std::filesystem::path &working_directory) const
         {
-            return run_capturing(
-                "cd " + quoted(working_directory) + " && " + quoted(ECHOC_BINARY) + " " + args + " 2>&1");
+            std::vector<std::string> argv = { ECHOC_BINARY };
+            const std::vector<std::string> words = split_command_words(args);
+            argv.insert(argv.end(), words.begin(), words.end());
+            return run_process(argv, k_default_timeout_ms, working_directory);
         }
 
         ProcessResult echoc(const std::string &args) const { return echoc(args, _root); }

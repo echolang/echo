@@ -83,12 +83,14 @@ public enum whence
 
 internal function flags_of(filemode $mode) : int32
 {
-    return match ($mode) {
+    int32 $flags = match ($mode) {
         filemode::read      => O_RDONLY | O_CLOEXEC,
         filemode::write     => O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
         filemode::append    => O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
         filemode::readwrite => O_RDWR | O_CLOEXEC,
     };
+
+    return $flags | O_BINARY;
 }
 
 internal function whence_of(whence $from) : int32

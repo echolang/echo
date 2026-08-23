@@ -6,7 +6,15 @@
 #include <cstring>
 
 #if defined(_WIN32)
+#include <mutex>
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #include <io.h>
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
 #define ECO_ISATTY(fd) _isatty(fd)
 #define ECO_STDOUT_FD 1
 #define ECO_STDERR_FD 2
@@ -107,7 +115,18 @@ namespace
             }
         }
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+        const HANDLE handle = GetStdHandle(fd == ECO_STDERR_FD ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+        CONSOLE_SCREEN_BUFFER_INFO info;
+
+        if (handle != INVALID_HANDLE_VALUE && handle != nullptr
+            && GetConsoleScreenBufferInfo(handle, &info)) {
+            const int cols = info.srWindow.Right - info.srWindow.Left + 1;
+            if (cols > 0) {
+                return static_cast<unsigned int>(cols);
+            }
+        }
+#else
         struct winsize size;
         if (ioctl(fd, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
             return size.ws_col;
@@ -169,6 +188,38 @@ Compiler::TerminalCapabilities Compiler::TerminalCapabilities::resolve(
 Compiler::TerminalCapabilities Compiler::TerminalCapabilities::plain()
 {
     return TerminalCapabilities();
+}
+
+void Compiler::prepare_terminal()
+{
+#if defined(_WIN32)
+    static std::once_flag once;
+    std::call_once(once, [] {
+        bool attached = false;
+
+        for (const HANDLE handle : {
+            GetStdHandle(STD_OUTPUT_HANDLE),
+            GetStdHandle(STD_ERROR_HANDLE),
+        }) {
+            DWORD mode = 0;
+            if (handle == nullptr || handle == INVALID_HANDLE_VALUE
+                || !GetConsoleMode(handle, &mode)) {
+                continue;
+            }
+
+            attached = true;
+            SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        }
+
+        // the OEM page is a property of the console, not of a handle: `_write`, iostreams,
+        // llvm::errs and printf all decode through it. a pipe is not a console, so this does not
+        // run for a redirect and a golden still byte-compares
+        if (attached) {
+            SetConsoleOutputCP(CP_UTF8);
+            SetConsoleCP(CP_UTF8);
+        }
+    });
+#endif
 }
 
 namespace

@@ -247,8 +247,9 @@ std::vector<std::filesystem::path> loadables_in_directory(
     return found;
 }
 
-// a `lib<name>.a` sitting in a declared search directory, or nullopt. The one lookup the static
-// arm of the renderer is allowed - it does not walk the host and it does not invent flags
+// a `lib<name>.a` / `lib<name>.lib` sitting in a declared search directory, or nullopt. The one
+// lookup the static arm of the renderer is allowed - it does not walk the host and it does not
+// invent flags
 std::optional<std::filesystem::path> archive_in_search(
     const std::string &name,
     const std::vector<Compiler::LinkRequirement> &requirements
@@ -259,12 +260,20 @@ std::optional<std::filesystem::path> archive_in_search(
             continue;
         }
 
-        const std::filesystem::path archive =
-            std::filesystem::path(other.value) / ("lib" + name + ".a");
+        const std::filesystem::path directory(other.value);
+        const std::string candidates[] = {
+            "lib" + name + ".a",
+            "lib" + name + ".lib",
+            name + ".lib",
+            "lib" + name + "_a.lib",
+        };
 
         std::error_code ec;
-        if (std::filesystem::is_regular_file(archive, ec)) {
-            return archive;
+        for (const std::string &filename : candidates) {
+            const std::filesystem::path archive = directory / filename;
+            if (std::filesystem::is_regular_file(archive, ec)) {
+                return archive;
+            }
         }
     }
 

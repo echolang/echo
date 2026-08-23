@@ -95,7 +95,7 @@ echo $c->count + $boxed;
     REQUIRE(result.output.find("verification failed") == std::string::npos);
     REQUIRE(result.output.find("definitions differ") == std::string::npos);
 
-    const ProcessResult run = run_capturing(quoted(project.root() / "app") + " 2>&1");
+    const ProcessResult run = EchoTests::run_binary(project.root() / "app");
 
     INFO(run.output);
     REQUIRE(run.output.find("47") != std::string::npos);
@@ -152,7 +152,7 @@ echo $total;
     REQUIRE(result.exit_code == 0);
 }
 
-TEST_CASE("-g is part of the module cache key", "[debuginfo]")
+TEST_CASE("`-g` is part of the module cache key", "[debuginfo]")
 {
     // an object carrying DWARF is not the object beside it that does not, so serving one for the other is
     // the unsound-cache case rather than a missed optimization - and it fails silently, because a

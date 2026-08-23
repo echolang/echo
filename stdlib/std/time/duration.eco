@@ -1,0 +1,246 @@
+/**
+ * A signed length of time, not a moment.
+ *
+ * Two words, matching C's `timespec`: `$secs` and `$nanos`. Not a single nanosecond count, so a
+ * clock read and a `nanosleep` take the value as-is, comparison is lexicographic with no sign
+ * arm, and `as_millis()` is one floor-correct expression even for negatives.
+ *
+ * The invariant: `$nanos` is in `[0, 999999999]` and `$secs` carries the sign. `-1.5s` is
+ * `{secs: -2, nanos: 500000000}`, timespec/floor form, never `{secs: -1, nanos: -500000000}`.
+ * Runtime arithmetic wraps, so normalisation is an explicit div/mod plus one borrow branch.
+ *
+ * Fields are `internal const`. `private` would refuse the free operators in this file; unmarked
+ * would publish a mutable `$nanos` and the constructor's fold would be optional. The handwritten
+ * constructor has the field-wise signature, so it suppresses the free one: nothing outside this
+ * type can skip normalisation by writing `duration($secs, $nanos)` with a wild `$nanos`.
+ */
+
+namespace std::time;
+
+internal const int64 NANOS_PER_SEC = 1000000000;
+internal const int64 NANOS_PER_MILLI = 1000000;
+internal const int64 NANOS_PER_MICRO = 1000;
+internal const int64 MILLIS_PER_SEC = 1000;
+internal const int64 MICROS_PER_SEC = 1000000;
+internal const int64 SECS_PER_MINUTE = 60;
+internal const int64 SECS_PER_HOUR = 3600;
+
+public struct duration
+{
+    internal const int64 $secs;
+    internal const int64 $nanos;
+
+    // `const int64` matches the field-wise signature of `internal const` properties.
+    // `int64` alone would leave both constructors live and every call ambiguous.
+    constructor(const int64 $secs, const int64 $nanos)
+    {
+        int64 $extra = $nanos / NANOS_PER_SEC;
+        int64 $rem = $nanos % NANOS_PER_SEC;
+
+        if ($rem < 0) {
+            $rem = $rem + NANOS_PER_SEC;
+            $extra = $extra - 1;
+        }
+
+        $this->secs = $secs + $extra;
+        $this->nanos = $rem;
+    }
+
+    #[inline]
+    public static function zero() : duration
+    {
+        return duration(0, 0);
+    }
+
+    #[inline]
+    public static function secs(int64 $n) : duration
+    {
+        return duration($n, 0);
+    }
+
+    #[inline]
+    public static function millis(int64 $n) : duration
+    {
+        return duration($n / MILLIS_PER_SEC, ($n % MILLIS_PER_SEC) * NANOS_PER_MILLI);
+    }
+
+    #[inline]
+    public static function micros(int64 $n) : duration
+    {
+        return duration($n / MICROS_PER_SEC, ($n % MICROS_PER_SEC) * NANOS_PER_MICRO);
+    }
+
+    #[inline]
+    public static function nanos(int64 $n) : duration
+    {
+        return duration(0, $n);
+    }
+
+    #[inline]
+    public static function mins(int64 $n) : duration
+    {
+        return duration::secs($n * SECS_PER_MINUTE);
+    }
+
+    #[inline]
+    public static function hours(int64 $n) : duration
+    {
+        return duration::secs($n * SECS_PER_HOUR);
+    }
+
+    /**
+     * Whole seconds, rounding toward negative infinity. `-1.5s` answers `-2`.
+     */
+    #[inline]
+    const function as_secs() : int64
+    {
+        return $this->secs;
+    }
+
+    #[inline]
+    const function subsec_nanos() : int32
+    {
+        return $this->nanos as int32;
+    }
+
+    /**
+     * Floor-correct for negatives: `secs * MILLIS_PER_SEC + nanos / NANOS_PER_MILLI`.
+     */
+    #[inline]
+    const function as_millis() : int64
+    {
+        return $this->secs * MILLIS_PER_SEC + $this->nanos / NANOS_PER_MILLI;
+    }
+
+    #[inline]
+    const function as_micros() : int64
+    {
+        return $this->secs * MICROS_PER_SEC + $this->nanos / NANOS_PER_MICRO;
+    }
+
+    /**
+     * Whole nanoseconds. Wraps past about plus or minus 292 years.
+     */
+    #[inline]
+    const function as_nanos() : int64
+    {
+        return $this->secs * NANOS_PER_SEC + $this->nanos;
+    }
+
+    #[inline]
+    const function as_float_secs() : float64
+    {
+        return ($this->secs as float64) + ($this->nanos as float64) / (NANOS_PER_SEC as float64);
+    }
+
+    #[inline]
+    const function is_zero() : bool
+    {
+        return $this->secs == 0 && $this->nanos == 0;
+    }
+
+    /**
+     * `secs < 0`. Sound under the invariant: a negative length always has a negative `$secs`.
+     */
+    #[inline]
+    const function is_negative() : bool
+    {
+        return $this->secs < 0;
+    }
+
+    const function abs() : duration
+    {
+        if ($this->secs < 0) {
+            return duration(-$this->secs, -$this->nanos);
+        }
+
+        return duration($this->secs, $this->nanos);
+    }
+}
+
+operator (duration $a) + (duration $b) : duration
+{
+    return duration($a->secs + $b->secs, $a->nanos + $b->nanos);
+}
+
+operator (duration $a) - (duration $b) : duration
+{
+    return duration($a->secs - $b->secs, $a->nanos - $b->nanos);
+}
+
+operator -(duration $a) : duration
+{
+    return duration(-$a->secs, -$a->nanos);
+}
+
+operator (duration $a) == (duration $b) : bool
+{
+    return $a->secs == $b->secs && $a->nanos == $b->nanos;
+}
+
+operator (duration $a) != (duration $b) : bool
+{
+    if ($a == $b) {
+        return false;
+    }
+
+    return true;
+}
+
+operator (duration $a) < (duration $b) : bool
+{
+    if ($a->secs != $b->secs) {
+        return $a->secs < $b->secs;
+    }
+
+    return $a->nanos < $b->nanos;
+}
+
+operator (duration $a) > (duration $b) : bool
+{
+    return $b < $a;
+}
+
+operator (duration $a) <= (duration $b) : bool
+{
+    if ($a < $b) {
+        return true;
+    }
+
+    return $a == $b;
+}
+
+operator (duration $a) >= (duration $b) : bool
+{
+    if ($b < $a) {
+        return true;
+    }
+
+    return $a == $b;
+}
+
+/**
+ * Whole-nanosecond product. Only meaningful within about plus or minus 292 years, the
+ * same bound as `as_nanos()`.
+ */
+operator (duration $a) * (int64 $n) : duration
+{
+    return duration::nanos($a->as_nanos() * $n);
+}
+
+operator (int64 $n) * (duration $a) : duration
+{
+    return $a * $n;
+}
+
+/**
+ * Truncating whole-nanosecond division. Same 292-year bound as `as_nanos()`.
+ */
+operator (duration $a) / (int64 $n) : duration
+{
+    if ($n == 0) {
+        die('duration divided by zero');
+    }
+
+    return duration::nanos($a->as_nanos() / $n);
+}

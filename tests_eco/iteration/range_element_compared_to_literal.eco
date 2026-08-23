@@ -1,0 +1,14 @@
+// a range's `current()` is `V&`, so `foreach (0 .. $n as $i)` binds `$i` as `const usize&` when
+// `$n` is a usize. `$i == 0` is then a borrow against an int32 literal - the array-key case in
+// `key_compared_to_literal` is a `usize` *value* from `key()`, which is why that golden could not
+// see this. Windows `console_write` is written this way, and codegen asserted i64 vs i32
+usize $n = 3;
+
+foreach (0 .. $n as $i) {
+    if ($i == 0) {
+        echo 1;
+    }
+    else {
+        echo 0;
+    }
+}

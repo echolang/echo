@@ -199,15 +199,13 @@ TEST_CASE("two exe targets with scopes compile different sources", "[manifest_sc
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const ProcessResult one = EchoTests::run_capturing(
-        EchoTests::quoted(project.root() / "ecobuild/one") + " 2>&1");
+    const ProcessResult one = EchoTests::run_binary(project.root() / "ecobuild/one");
     INFO(one.output);
 
     REQUIRE(one.output.find("ONLY ONE") != std::string::npos);
     REQUIRE(one.output.find("ONLY TWO") == std::string::npos);
 
-    const ProcessResult two = EchoTests::run_capturing(
-        EchoTests::quoted(project.root() / "ecobuild/two") + " 2>&1");
+    const ProcessResult two = EchoTests::run_binary(project.root() / "ecobuild/two");
     INFO(two.output);
 
     REQUIRE(two.output.find("ONLY TWO") != std::string::npos);

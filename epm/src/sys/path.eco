@@ -1,8 +1,57 @@
 /**
- * Path joining and splitting. `/` only - epm is POSIX.
+ * Path joining and splitting. `/` on POSIX; `/` and `\` on Windows, plus
+ * drive prefixes (`C:`). Forward slashes still work on Windows.
  */
 
 namespace epm::sys;
+
+function is_sep(uint8 $b) : bool
+{
+#[if: os == windows]
+    return $b == 47 || $b == 92;
+#[else]
+    return $b == 47;
+#[end]
+}
+
+function last_sep(const string& $path) : usize
+{
+    usize $last = $path->size();
+    usize $i = 0;
+
+    while ($i < $path->size()) {
+        if (is_sep($path->byte($i))) {
+            $last = $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $last;
+}
+
+public function is_absolute(const string& $path) : bool
+{
+    if ($path->empty()) {
+        return false;
+    }
+
+    if (is_sep($path->byte(0))) {
+        return true;
+    }
+
+#[if: os == windows]
+    if ($path->size() >= 3) {
+        uint8 $drive = $path->byte(0);
+        bool $letter = ($drive >= 65 && $drive <= 90) || ($drive >= 97 && $drive <= 122);
+        if ($letter && $path->byte(1) == 58 && is_sep($path->byte(2))) {
+            return true;
+        }
+    }
+#[end]
+
+    return false;
+}
 
 public function join(const string& $a, const string& $b) : string
 {
@@ -14,31 +63,45 @@ public function join(const string& $a, const string& $b) : string
         return $a;
     }
 
-    if ($b->starts('/')) {
+    if (is_absolute($b)) {
         return $b;
     }
 
-    if ($a->ends('/')) {
+    if (is_sep($a->byte($a->size() - 1))) {
         string $glued = "{$a}{$b}";
         return $glued->clone();
     }
+
+#[if: os == windows]
+    // keep the separator the left side already uses, so `/tmp` + `a` stays
+    // `/tmp/a` in tests and `C:\echo` + `bin` becomes `C:\echo\bin`
+    usize $i = 0;
+    while ($i < $a->size()) {
+        if ($a->byte($i) == 92) {
+            string $joined = "{$a}\\{$b}";
+            return $joined->clone();
+        }
+        $i = $i + 1;
+    }
+#[end]
 
     string $joined = "{$a}/{$b}";
     return $joined->clone();
 }
 
+public function host_exe(const string& $name) : string
+{
+#[if: os == windows]
+    string $exe = "{$name}.exe";
+    return $exe->clone();
+#[else]
+    return $name;
+#[end]
+}
+
 public function basename(const string& $path) : string
 {
-    usize $last = $path->size();
-    usize $i = 0;
-
-    while ($i < $path->size()) {
-        if ($path->byte($i) == 47) {
-            $last = $i;
-        }
-
-        $i = $i + 1;
-    }
+    usize $last = last_sep($path);
 
     if ($last == $path->size()) {
         return $path;
@@ -50,34 +113,25 @@ public function basename(const string& $path) : string
 
 public function dirname(const string& $path) : string
 {
-    usize $last = $path->size();
-    usize $i = 0;
-
-    while ($i < $path->size()) {
-        if ($path->byte($i) == 47) {
-            $last = $i;
-        }
-
-        $i = $i + 1;
-    }
+    usize $last = last_sep($path);
 
     if ($last == $path->size()) {
         return '.';
     }
 
     if ($last == 0) {
-        return '/';
+        string $root = $path->sub(0, 1);
+        return $root->clone();
     }
+
+#[if: os == windows]
+    // C:\foo -> C:\, not C:
+    if ($last >= 2 && $path->byte($last - 1) == 58 && is_sep($path->byte($last))) {
+        string $drive = $path->sub(0, $last + 1);
+        return $drive->clone();
+    }
+#[end]
 
     string $dir = $path->sub(0, $last);
     return $dir->clone();
-}
-
-public function is_absolute(const string& $path) : bool
-{
-    if ($path->empty()) {
-        return false;
-    }
-
-    return $path->starts('/');
 }

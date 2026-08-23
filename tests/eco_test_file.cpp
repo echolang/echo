@@ -55,7 +55,8 @@ namespace
     }
 
     // strips a single trailing `\r`, so a file written with CRLF still has recognizable delimiters
-    // and settings. never applied to section content - an OUT golden is bytes
+    // and settings. OUT content is sliced as bytes and then canonicalized by
+    // strip_trailing_newline, which also drops `\r` so a CRLF checkout still matches
     std::string strip_carriage_return(const std::string &line)
     {
         if (!line.empty() && line.back() == '\r') {
@@ -155,7 +156,11 @@ std::string EcoTestFile::environment_prefix() const
     std::string result;
 
     for (const std::string &pair : environment) {
+#if defined(_WIN32)
+        result += "set " + pair + "&&";
+#else
         result += pair + " ";
+#endif
     }
 
     return result;
@@ -223,6 +228,10 @@ std::string EcoTestFile::compiler_flags(const std::filesystem::path &corpus_root
 
 std::string strip_trailing_newline(std::string s)
 {
+    // git on Windows may check the goldens out as CRLF; captured output is already
+    // stripped of `\r`. both sides of the comparison go through here
+    s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
+
     if (!s.empty() && s.back() == '\n') {
         s.pop_back();
     }
@@ -564,7 +573,8 @@ bool parse_eco_test_file(
             // canonicalized here rather than at the comparison, so `expected_output` *is* the golden
             // for every reader. a section body ends just before the next delimiter, so it carries
             // the newline that delimiter sits behind - one trailing `\n` that belongs to the format
-            // rather than to the program's output
+            // rather than to the program's output. `\r` is stripped too, so a CRLF checkout of the
+            // corpus still matches captured output that HostTool already unfolded to `\n`
             out_file.expected_output = strip_trailing_newline(body);
             has_output = true;
             continue;

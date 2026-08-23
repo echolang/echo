@@ -1,0 +1,12 @@
+expect: fail
+
+# the IR section is the one that states the rule, and it deliberately stops at the colon:
+# duration.eco is edited, and a check that fails whenever a line moves says nothing about
+# where the location came from. the OUT section carries the line because the harness wants
+# one; if a change to duration.eco moves the die, update the number here
+
+--- OUT --->
+fatal error: duration divided by zero
+  at duration.eco:242
+--- IR --->
+CHECK: at duration.eco:

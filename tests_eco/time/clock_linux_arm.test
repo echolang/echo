@@ -1,0 +1,7 @@
+flags: --target-os linux
+
+--- OUT --->
+--- IR --->
+CHECK: declare i32 @nanosleep(
+CHECK: call i32 @clock_gettime(i32 1,
+CHECK: declare i32 @clock_gettime(

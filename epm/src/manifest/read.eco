@@ -100,7 +100,7 @@ public function find_module(const string& $start) : string?
  * Which echoc this process should shell out to.
  *
  * A non-empty $from_env is ECHOC and wins. Otherwise the echoc sitting
- * next to this binary, which is where install.sh puts it. A bare
+ * next to this binary, which is where the installer puts it. A bare
  * `echoc` is PATH.
  */
 public function echoc_from(const string& $exe_dir, const string& $from_env) : string
@@ -109,13 +109,13 @@ public function echoc_from(const string& $exe_dir, const string& $from_env) : st
         return $from_env;
     }
 
-    string $sibling = sys::join($exe_dir, 'echoc');
+    string $sibling = sys::join($exe_dir, sys::host_exe('echoc'));
 
     if (sys::is_file($sibling)) {
         return $sibling;
     }
 
-    return 'echoc';
+    return sys::host_exe('echoc');
 }
 
 public function echoc_bin() : string
