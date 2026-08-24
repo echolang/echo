@@ -1,57 +1,64 @@
 namespace epm::cmd;
 
-use epm::cli::{CommandLine, report, start_from_cli};
+use command;
+use command::element;
+use epm::cli::{App, start_from_cli, work_context};
 use epm::fetch;
 use epm::lock;
 use epm::manifest;
 use epm::resolve;
 use epm::sys;
 use epm::util;
-use std::io;
 
-public function install(const CommandLine& $cli) : int32
+public function install(const App& $app, const command::Parsed& $cli) : int32
 {
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    command::CLIContext $ctx = work_context($app, $cli);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
         return 1;
     }
 
-    return install_at($start);
+    return install_at($start, $ctx);
 }
 
 public function install_at(const string& $start) : int32
 {
+    return install_at($start, command::CLIContext::plain());
+}
+
+public function install_at(const string& $start, command::CLIContext $ctx) : int32
+{
     manifest::Manifest $man = guard project_at($start) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
     array<manifest::Requirement> $need = manifest::all_requires($man);
 
     if ($need->count() == 0) {
-        io::println('nothing to install');
+        $ctx->line('nothing to install');
         return 0;
     }
 
     string $lock_path = lock::path_beside($man->path);
 
     if (!sys::is_file($lock_path)) {
-        return update_at($start, '');
+        return update_at($start, '', $ctx);
     }
 
     lock::Lock $lock = guard lock::load($lock_path) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
-    if (!lock_covers($need, $lock)) {
+    if (!lock_covers($need, $lock, $ctx)) {
         return 1;
     }
 
-    return apply_lock($man, $lock, $lock_path);
+    return apply_lock($man, $lock, $lock_path, $ctx);
 }
 
-public function update(const CommandLine& $cli) : int32
+public function update(const App& $app, const command::Parsed& $cli) : int32
 {
     string $only = '';
 
@@ -59,24 +66,34 @@ public function update(const CommandLine& $cli) : int32
         $only = $cli->positionals[0];
     }
 
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    command::CLIContext $ctx = work_context($app, $cli);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
         return 1;
     }
 
-    return update_at($start, $only);
+    return update_at($start, $only, $ctx);
 }
 
 public function update_at(const string& $start, const string& $only) : int32
 {
+    return update_at($start, $only, command::CLIContext::plain());
+}
+
+public function update_at(
+    const string& $start,
+    const string& $only,
+    command::CLIContext $ctx
+) : int32
+{
     manifest::Manifest $man = guard project_at($start) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
     string $lock_path = lock::path_beside($man->path);
     lock::Lock $old = guard lock::load($lock_path) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
@@ -84,12 +101,21 @@ public function update_at(const string& $start, const string& $only) : int32
 
     if ($need->count() == 0) {
         lock::Lock $empty = lock::Lock();
-        return finish_lock($man, $old, $empty);
+        int32 $code = finish_lock($man, $old, $empty, $ctx);
+
+        if ($code == 0) {
+            $ctx->line("wrote {$lock_path}");
+        }
+
+        return $code;
     }
+
+    element::Spinner $spin = $ctx->create<element::Spinner>();
+    $spin->start('resolving');
 
     resolve::World $world = resolve::World();
     bool $filled = guard resolve::fill_world($need, $world) else ($e) {
-        report($e);
+        $spin->fail($e);
         return 1;
     }
 
@@ -116,16 +142,19 @@ public function update_at(const string& $start, const string& $only) : int32
     }
 
     array<resolve::Choice> $plan = guard resolve::solve($roots, $world) else ($e) {
-        report($e);
+        $spin->fail($e);
         return 1;
     }
 
-    return apply_plan($man, $old, $plan);
+    int32 $n = $plan->count() as int32;
+    $spin->succeed("resolved {$n} packages");
+    return apply_plan($man, $old, $plan, $ctx);
 }
 
 private function lock_covers(
     const array<manifest::Requirement>& $need,
-    const lock::Lock& $lock
+    const lock::Lock& $lock,
+    command::CLIContext $ctx
 ) : bool
 {
     usize $i = 0;
@@ -133,22 +162,22 @@ private function lock_covers(
     while ($i < $need->count()) {
         manifest::Requirement $req = $need[$i];
         lock::Entry $have = guard $lock->find($req->name) else {
-            report("'{$req->name}' is required but not locked - run `epm update`");
+            $ctx->printError("'{$req->name}' is required but not locked - run `epm update`");
             return false;
         }
 
         util::Range $range = guard util::parse_range($req->version) else {
-            report("'{$req->version}' is not a version range");
+            $ctx->printError("'{$req->version}' is not a version range");
             return false;
         }
 
         util::Version $ver = guard util::parse_version($have->version) else {
-            report("lock has a broken version for {$req->name}");
+            $ctx->printError("lock has a broken version for {$req->name}");
             return false;
         }
 
         if (!util::satisfies($ver, $range)) {
-            report("'{$req->name}' @{$have->version} does not satisfy {$req->version} - run `epm update`");
+            $ctx->printError("'{$req->name}' @{$have->version} does not satisfy {$req->version} - run `epm update`");
             return false;
         }
 
@@ -161,32 +190,40 @@ private function lock_covers(
 private function apply_lock(
     const manifest::Manifest& $man,
     lock::Lock $lock,
-    const string& $lock_path
+    const string& $lock_path,
+    command::CLIContext $ctx
 ) : int32
 {
     string $vendor = sys::join(sys::dirname($man->path), 'vendor');
 
     if (!sys::mkdir_p($vendor)) {
-        report("cannot create {$vendor}");
+        $ctx->printError("cannot create {$vendor}");
         return 1;
     }
 
+    int32 $total = $lock->packages->count() as int32;
+    element::Progress $bar = $ctx->create<element::Progress>();
+    $bar->start('installing', $total);
+
     bool $dirty = false;
+    int32 $kept = 0;
+    int32 $fetched = 0;
     usize $i = 0;
 
     while ($i < $lock->packages->count()) {
         lock::Entry $e = $lock->packages[$i];
         string $dest = sys::join($vendor, $e->name);
         Placed $got = guard materialize($dest, $e->origin, $e->rev, $e->sha256) else ($err) {
-            report($err);
+            $bar->fail();
+            $ctx->printError($err);
             return 1;
         }
 
         if ($got->kept) {
-            io::println("keep {$e->name}@{$e->version}");
+            $kept = $kept + 1;
         }
         else {
-            io::println("vendor {$e->name}@{$e->version}");
+            $fetched = $fetched + 1;
         }
 
         if ($got->sha256 != $e->sha256 || $got->rev != $e->rev) {
@@ -195,33 +232,44 @@ private function apply_lock(
             $dirty = true;
         }
 
+        $bar->advance(1, "{$e->name}@{$e->version}");
         $i = $i + 1;
     }
 
     if ($dirty) {
         bool $saved = guard lock::save($lock_path, $lock) else ($e) {
-            report($e);
+            $bar->fail();
+            $ctx->printError($e);
             return 1;
         }
     }
 
+    $bar->set($total, "{$kept} kept, {$fetched} vendored");
+    $bar->finish();
     return 0;
 }
 
 private function apply_plan(
     const manifest::Manifest& $man,
     const lock::Lock& $old,
-    const array<resolve::Choice>& $plan
+    const array<resolve::Choice>& $plan,
+    command::CLIContext $ctx
 ) : int32
 {
     string $vendor = sys::join(sys::dirname($man->path), 'vendor');
 
     if (!sys::mkdir_p($vendor)) {
-        report("cannot create {$vendor}");
+        $ctx->printError("cannot create {$vendor}");
         return 1;
     }
 
+    int32 $total = $plan->count() as int32;
+    element::Progress $bar = $ctx->create<element::Progress>();
+    $bar->start('vendoring', $total);
+
     lock::Lock $lock = lock::Lock();
+    int32 $kept = 0;
+    int32 $fetched = 0;
     usize $i = 0;
 
     while ($i < $plan->count()) {
@@ -234,22 +282,24 @@ private function apply_plan(
         }
 
         string $expect = expected_sha($old, $c->name, $want);
+        string $ver = $c->version->spelling();
 
         Placed $got = guard materialize($dest, $c->origin, $want, $expect) else ($e) {
-            report($e);
+            $bar->fail();
+            $ctx->printError($e);
             return 1;
         }
 
         if ($got->kept) {
-            io::println("keep {$c->name}@{$c->version->spelling()}");
+            $kept = $kept + 1;
         }
         else {
-            io::println("vendor {$c->name}@{$c->version->spelling()}");
+            $fetched = $fetched + 1;
         }
 
         lock::Entry $entry = lock::Entry(
             $c->name,
-            $c->version->spelling(),
+            $ver,
             $c->origin,
             $got->rev,
             $got->sha256
@@ -263,10 +313,20 @@ private function apply_plan(
         }
 
         $lock->packages[] = $entry;
+        $bar->advance(1, "{$c->name}@{$ver}");
         $i = $i + 1;
     }
 
-    return finish_lock($man, $old, $lock);
+    int32 $code = finish_lock($man, $old, $lock, $ctx);
+
+    if ($code != 0) {
+        $bar->fail();
+        return 1;
+    }
+
+    $bar->set($total, "{$kept} kept, {$fetched} vendored");
+    $bar->finish();
+    return 0;
 }
 
 private function expected_sha(
@@ -328,7 +388,8 @@ function materialize(
 private function finish_lock(
     const manifest::Manifest& $man,
     const lock::Lock& $old,
-    const lock::Lock& $lock
+    const lock::Lock& $lock,
+    command::CLIContext $ctx
 ) : int32
 {
     string $vendor = sys::join(sys::dirname($man->path), 'vendor');
@@ -351,10 +412,9 @@ private function finish_lock(
     }
 
     bool $saved = guard lock::save($lock_path, $lock) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
-    io::println("wrote {$lock_path}");
     return 0;
 }

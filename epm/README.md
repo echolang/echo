@@ -5,8 +5,9 @@ anything. It writes a `module.eco` only as a whole new file (`epm init`) or as
 the one `#[requires:]` line `epm add` was asked for.
 
 A released `epm` arrives next to `echoc` from the installer. This tree
-is the bootstrap: path-depends on `../../echolibs/libjson` and
-`../../echolibs/libcurl`, compiled by this tree's `echoc`.
+is the bootstrap: path-depends on `../../echolibs/libjson`,
+`../../echolibs/libcurl` and `../../echolibs/libcommand`, compiled by this
+tree's `echoc`.
 
 ```bash
 # from this directory, with this tree's echoc (it must understand -p manifest)
@@ -53,7 +54,8 @@ lock file does an `update`.
 
 A library that is already on disk is a path, not a package. `--path` writes
 `#[depends:]` and stops there — same spelling epm uses to bootstrap itself
-on `../../echolibs/libjson` and `../../echolibs/libcurl`. `--git` is for
+on `../../echolibs/libjson`, `../../echolibs/libcurl` and
+`../../echolibs/libcommand`. `--git` is for
 something epm has to fetch into `vendor/`.
 
 After `epm install`, `vendor/` is on disk and `echoc build` needs no flags.

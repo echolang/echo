@@ -1,0 +1,8 @@
+// `file_url` is a string transform: backslash to slash, a third slash for a drive
+// path, percent-encoding for anything that is not unreserved / `/` / `:`.
+
+echo std::env::file_url('/tmp/fixture.txt');
+echo std::env::file_url('/tmp/First Last/x');
+echo std::env::file_url("C:\u{5C}Users\u{5C}First Last\u{5C}x");
+echo std::env::file_url('foo');
+echo std::env::file_url('');

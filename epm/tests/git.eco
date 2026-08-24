@@ -93,6 +93,38 @@ test fill_world_walks_a_local_requires
     scratch::gone($b);
 }
 
+test fetch_manifest_loads_a_module_with_a_cc_include
+{
+    string $dir = scratch::dir('git-cc-inc');
+    scratch::file($dir, 'inc/.keep', '');
+    scratch::git_module($dir, 'lib', '1.0.0', "#[cc: include \"inc\"]\n");
+
+    fetch::Source $src = fetch::source_for(manifest::Origin::git($dir));
+    resolve::Package $cat = guard $src->list_versions();
+    manifest::Manifest $man = guard $src->fetch_manifest(
+        $cat->releases[0]->tag,
+        $cat->releases[0]->rev
+    );
+    assert($man->name == 'lib');
+    scratch::gone($dir);
+}
+
+test hydrate_names_why_module_eco_was_unreadable
+{
+    string $dir = scratch::dir('git-cc-missing');
+    scratch::git_module($dir, 'lib', '1.0.0', "#[cc: include \"nowhere\"]\n");
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '^1.0', manifest::Origin::git($dir), '');
+    resolve::World $world = resolve::World();
+    bool $ok = guard resolve::fill_world($roots, $world);
+    result<array<resolve::Choice>, string> $out = resolve::solve($roots, $world);
+    assert($out->failed());
+    assert($out->failure()->contains('readable module.eco'));
+    assert($out->failure()->contains('is not a directory'));
+    scratch::gone($dir);
+}
+
 test fill_world_refuses_a_requirement_without_git
 {
     array<manifest::Requirement> $roots = array<manifest::Requirement>();

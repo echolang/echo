@@ -300,7 +300,12 @@ private function assign(
         $err = "no version of '{$name}' satisfies {$pending[$head]->who}'s range {$pending[$head]->req->version}";
     }
     else if (!$readable) {
+        string $detail = $err;
         $err = "no version of '{$name}' has a readable module.eco in range {$pending[$head]->req->version}";
+
+        if (!$detail->empty()) {
+            $err = "{$err}:\n{$detail}";
+        }
     }
 
     return false;
@@ -321,7 +326,8 @@ private function hydrate(
     fetch::Source $src = fetch::source_for($origin);
     string $tag = $world->catalog[$pkg]->releases[$rel_i]->tag;
     string $rev = $world->catalog[$pkg]->releases[$rel_i]->rev;
-    epm::manifest::Manifest $man = guard $src->fetch_manifest($tag, $rev) else {
+    epm::manifest::Manifest $man = guard $src->fetch_manifest($tag, $rev) else ($e) {
+        $err = $e;
         return false;
     }
 

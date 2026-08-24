@@ -4,41 +4,43 @@
 
 namespace epm::cmd;
 
-use epm::cli::{CommandLine, report, Subcommand};
+use command;
+use epm::cli;
 use epm::manifest;
 use std::env;
 
-public function dispatch(const CommandLine& $cli) : int32
+public function dispatch(const cli::App& $app, const command::Parsed& $cli) : int32
 {
-    if ($cli->subcommand == Subcommand::init) {
-        return init($cli);
+    if ($cli->command->id == $app->init->id) {
+        return init($app, $cli);
     }
 
-    if ($cli->subcommand == Subcommand::install) {
-        return install($cli);
+    if ($cli->command->id == $app->install->id) {
+        return install($app, $cli);
     }
 
-    if ($cli->subcommand == Subcommand::add) {
-        return add($cli);
+    if ($cli->command->id == $app->add->id) {
+        return add($app, $cli);
     }
 
-    if ($cli->subcommand == Subcommand::remove) {
-        return remove($cli);
+    if ($cli->command->id == $app->remove->id) {
+        return remove($app, $cli);
     }
 
-    if ($cli->subcommand == Subcommand::update) {
-        return update($cli);
+    if ($cli->command->id == $app->update->id) {
+        return update($app, $cli);
     }
 
-    if ($cli->subcommand == Subcommand::verify) {
-        return verify($cli);
+    if ($cli->command->id == $app->verify->id) {
+        return verify($app, $cli);
     }
 
-    if ($cli->subcommand == Subcommand::tree) {
-        return tree($cli);
+    if ($cli->command->id == $app->tree->id) {
+        return tree($app, $cli);
     }
 
-    report('No command given.');
+    command::CLIContext $err = cli::work_context($app, $cli);
+    $err->printError('No command given.');
     return 1;
 }
 

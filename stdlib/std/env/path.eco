@@ -1,0 +1,108 @@
+/**
+ * How a path is spelled on this machine, and how you name one as a `file://` URL.
+ *
+ * A path is still a `string`. There is no path type. These two are the whole of what the
+ * library is willing to say about separators: `DS` is the one this OS uses between
+ * components, and `file_url` turns a native path into a URL curl, a browser, and
+ * `std::io` callers can agree on.
+ */
+
+namespace std::env;
+
+// `NEWLINE` is the other platform separator. same shape: a string constant, one per OS,
+// copied into every use site, no storage in the stdlib object
+#[if: os == windows]
+public const DS = "\u{5C}";
+#[else]
+public const DS = "/";
+#[end]
+
+private const HEX_DIGITS = '0123456789ABCDEF';
+private const uint8 SLASH = 0x2F;
+private const uint8 BACKSLASH = 0x5C;
+private const uint8 COLON = 0x3A;
+private const uint8 PERCENT = 0x25;
+private const uint8 MINUS = 0x2D;
+private const uint8 DOT = 0x2E;
+private const uint8 UNDERSCORE = 0x5F;
+private const uint8 TILDE = 0x7E;
+private const uint8 ZERO = 0x30;
+private const uint8 NINE = 0x39;
+private const uint8 UPPER_A = 0x41;
+private const uint8 UPPER_Z = 0x5A;
+private const uint8 LOWER_A = 0x61;
+private const uint8 LOWER_Z = 0x7A;
+
+/**
+ * RFC 3986 unreserved: `A-Z a-z 0-9 - . _ ~`.
+ */
+private function unreserved(uint8 $b) : bool
+{
+    int32 $wide = $b;
+
+    if ($wide >= UPPER_A && $wide <= UPPER_Z) {
+        return true;
+    }
+
+    if ($wide >= LOWER_A && $wide <= LOWER_Z) {
+        return true;
+    }
+
+    if ($wide >= ZERO && $wide <= NINE) {
+        return true;
+    }
+
+    if ($b == MINUS || $b == DOT) {
+        return true;
+    }
+
+    if ($b == UNDERSCORE || $b == TILDE) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * `$path` as a `file://` URL.
+ *
+ * Backslashes become slashes. A drive path gets the third slash (`C:\x` -> `file:///C:/x`).
+ * Unreserved bytes, `/`, and `:` stay. Everything else is `%XX`, including a space in
+ * `%TEMP%`. The URL always uses `/`; `DS` is the filesystem spelling, not this one.
+ *
+ * A relative path is treated as absolute under the empty authority, the way the third
+ * slash already commits to. There is no percent-decoding on the way in: a `%` in a
+ * filename becomes `%25`.
+ */
+public function file_url(const string& $path) : string
+{
+    string $hex = HEX_DIGITS;
+    string $out = 'file://';
+    usize $i = 0;
+
+    if (!$path->starts('/')) {
+        $out->push(SLASH);
+    }
+
+    while ($i < $path->size()) {
+        uint8 $b = $path->byte($i);
+
+        if ($b == BACKSLASH) {
+            $out->push(SLASH);
+        }
+        else if ($b == SLASH || $b == COLON || unreserved($b)) {
+            $out->push($b);
+        }
+        else {
+            int32 $wide = $b;
+
+            $out->push(PERCENT);
+            $out->push($hex->byte($wide / 16));
+            $out->push($hex->byte($wide % 16));
+        }
+
+        $i = $i + 1;
+    }
+
+    return $out;
+}

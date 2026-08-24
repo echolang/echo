@@ -82,11 +82,14 @@ public class Git : Source
 
         string $cache = cache_dir($this->url, $key);
         string $mod = sys::join($cache, 'module.eco');
+        result<manifest::Manifest, string> $cached = load_if_readable($mod);
 
-        if (!sys::is_file($mod)) {
-            if (!$this->clone_manifest($key, $cache)) {
-                return .error("no module.eco at {$this->url}@{$key}");
-            }
+        if (!$cached->failed()) {
+            return $cached;
+        }
+
+        if (!$this->clone_manifest($key, $cache)) {
+            return .error("no module.eco at {$this->url}@{$key}");
         }
 
         return manifest::load($mod);

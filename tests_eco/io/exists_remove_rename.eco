@@ -1,6 +1,6 @@
 string $dir = '';
 $dir->append(str::from(std::env::tmp()));
-$dir->append('/');
+$dir->append(std::env::DS);
 
 string $a = $dir;
 $a->append('echo-io-ren-a-');

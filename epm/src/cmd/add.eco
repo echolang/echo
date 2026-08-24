@@ -1,73 +1,75 @@
 namespace epm::cmd;
 
-use epm::cli::{CommandLine, report, start_from_cli};
+use command;
+use epm::cli::{App, start_from_cli, work_context};
 use epm::manifest;
 use epm::sys;
 use epm::util;
 use std::env;
 use std::io;
 
-public function add(const CommandLine& $cli) : int32
+public function add(const App& $app, const command::Parsed& $cli) : int32
 {
+    command::CLIContext $ctx = work_context($app, $cli);
     string $name = '';
 
     if ($cli->positionals->count() > 0) {
         $name = $cli->positionals[0];
     }
 
-    if ($cli->stated_path) {
-        return add_path($name, $cli->path, $cli);
+    if ($cli->stated($app->path)) {
+        return add_path($name, $cli->value($app->path), $app, $cli, $ctx);
     }
 
-    if ($name->empty() || !$cli->stated_git) {
-        report("'add' needs a name and '--git', or '--path'");
+    if ($name->empty() || !$cli->stated($app->git)) {
+        $ctx->printError("'add' needs a name and '--git', or '--path'");
         return 1;
     }
 
     if (!manifest::usable_name($name)) {
-        report("'{$name}' is not a usable package name");
+        $ctx->printError("'{$name}' is not a usable package name");
         return 1;
     }
 
-    if (util::parse_range($cli->range) == null) {
-        report("'{$cli->range}' is not a version range");
+    if (util::parse_range($cli->value($app->range)) == null) {
+        $ctx->printError("'{$cli->value($app->range)}' is not a version range");
         return 1;
     }
 
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
         return 1;
     }
 
     string $mod = guard manifest::find_module($start) else {
-        report('no module.eco here or above');
+        $ctx->printError('no module.eco here or above');
         return 1;
     }
 
     string $before = guard io::readfile($mod) else ($e) {
-        report("cannot read {$mod}: {$e}");
+        $ctx->printError("cannot read {$mod}: {$e}");
         return 1;
     }
 
     manifest::Requirement $req = manifest::Requirement(
         $name,
-        $cli->range,
-        manifest::Origin::git($cli->git),
+        $cli->value($app->range),
+        manifest::Origin::git($cli->value($app->git)),
         ''
     );
     bool $added = guard manifest::add_line($mod, $req) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
-    io::println("added {$name} to {$mod}");
-    int32 $code = update_at(sys::dirname($mod), '');
+    $ctx->line("added {$name} to {$mod}");
+    int32 $code = update_at(sys::dirname($mod), '', $ctx);
 
     if ($code != 0) {
         result<usize, io::ioerror> $restored = io::writefile($mod, $before);
 
         if ($restored->failed()) {
-            report("update failed, and the original {$mod} could not be restored");
+            $ctx->printError("update failed, and the original {$mod} could not be restored");
         }
     }
 
@@ -77,16 +79,18 @@ public function add(const CommandLine& $cli) : int32
 private function add_path(
     const string& $name,
     const string& $path,
-    const CommandLine& $cli
+    const App& $app,
+    const command::Parsed& $cli,
+    command::CLIContext $ctx
 ) : int32
 {
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
         return 1;
     }
 
     string $mod = guard manifest::find_module($start) else {
-        report('no module.eco here or above');
+        $ctx->printError('no module.eco here or above');
         return 1;
     }
 
@@ -105,56 +109,57 @@ private function add_path(
     string $lib_mod = sys::join($lib, 'module.eco');
 
     if (!sys::is_file($lib_mod)) {
-        report("no module.eco at {$lib}");
+        $ctx->printError("no module.eco at {$lib}");
         return 1;
     }
 
     manifest::Manifest $lib_man = guard manifest::load($lib_mod) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
     if (!$name->empty() && $name != $lib_man->name) {
-        report("'{$name}' does not match module '{$lib_man->name}' at {$path}");
+        $ctx->printError("'{$name}' does not match module '{$lib_man->name}' at {$path}");
         return 1;
     }
 
     bool $added = guard manifest::add_depend_line($mod, $path) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
-    io::println("depends {$lib_man->name} -> {$path}");
+    $ctx->line("depends {$lib_man->name} -> {$path}");
     return 0;
 }
 
-public function remove(const CommandLine& $cli) : int32
+public function remove(const App& $app, const command::Parsed& $cli) : int32
 {
+    command::CLIContext $ctx = work_context($app, $cli);
     string $name = $cli->positionals[0];
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
         return 1;
     }
 
     string $mod = guard manifest::find_module($start) else {
-        report('no module.eco here or above');
+        $ctx->printError('no module.eco here or above');
         return 1;
     }
 
     string $before = guard io::readfile($mod) else ($e) {
-        report("cannot read {$mod}: {$e}");
+        $ctx->printError("cannot read {$mod}: {$e}");
         return 1;
     }
 
     if (!manifest::remove_line($mod, $name)->failed()) {
-        io::println("removed {$name}");
-        int32 $code = update_at(sys::dirname($mod), '');
+        $ctx->line("removed {$name}");
+        int32 $code = update_at(sys::dirname($mod), '', $ctx);
 
         if ($code != 0) {
             result<usize, io::ioerror> $restored = io::writefile($mod, $before);
 
             if ($restored->failed()) {
-                report("update failed, and the original {$mod} could not be restored");
+                $ctx->printError("update failed, and the original {$mod} could not be restored");
             }
         }
 
@@ -162,12 +167,12 @@ public function remove(const CommandLine& $cli) : int32
     }
 
     if (!manifest::remove_depend_line($mod, $name)->failed()) {
-        io::println("removed path depend {$name}");
+        $ctx->line("removed path depend {$name}");
         return 0;
     }
 
     manifest::Manifest $man = guard manifest::load($mod) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
@@ -191,11 +196,11 @@ public function remove(const CommandLine& $cli) : int32
 
             if ($dep->name == $name) {
                 bool $gone = guard manifest::remove_depend_line($mod, $depend) else ($e) {
-                    report($e);
+                    $ctx->printError($e);
                     return 1;
                 }
 
-                io::println("removed path depend {$name} -> {$depend}");
+                $ctx->line("removed path depend {$name} -> {$depend}");
                 return 0;
             }
         }
@@ -203,6 +208,6 @@ public function remove(const CommandLine& $cli) : int32
         $i = $i + 1;
     }
 
-    report("'{$name}' is not required and is not a path depend");
+    $ctx->printError("'{$name}' is not required and is not a path depend");
     return 1;
 }

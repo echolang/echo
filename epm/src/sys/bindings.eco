@@ -34,7 +34,4 @@ internal extern {
     function epm_sha256_new() : ptr<uint8>;
     function epm_sha256_update(ptr<uint8> $h, ptr<const uint8> $data, usize $n) : void;
     function epm_sha256_final(ptr<uint8> $h, ptr<uint8> $out) : void;
-
-    function epm_isatty(int32 $fd) : int32;
-    function epm_columns(int32 $fd) : int32;
 }

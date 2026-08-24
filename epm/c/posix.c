@@ -13,30 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-int32_t epm_isatty(int32_t fd)
-{
-    return isatty(fd) ? 1 : 0;
-}
-
-int32_t epm_columns(int32_t fd)
-{
-    if (!isatty(fd)) {
-        return 0;
-    }
-
-    struct winsize size;
-
-    if (ioctl(fd, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
-        return (int32_t)size.ws_col;
-    }
-
-    return 0;
-}
 
 DIR *epm_opendir(const char *path)
 {

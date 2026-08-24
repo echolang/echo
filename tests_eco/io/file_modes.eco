@@ -2,7 +2,8 @@
 
 string $path = '';
 $path->append(str::from(std::env::tmp()));
-$path->append('/echo-io-modes-');
+$path->append(std::env::DS);
+$path->append('echo-io-modes-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
 

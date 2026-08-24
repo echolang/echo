@@ -23,6 +23,7 @@
 
 #[depends: "../../echolibs/libjson"]
 #[depends: "../../echolibs/libcurl"]
+#[depends: "../../echolibs/libcommand"]
 
 // release builds pass --define static_curl and --link search:<prefix>/lib.
 // the archive still needs zlib and a TLS stack; those names are not on

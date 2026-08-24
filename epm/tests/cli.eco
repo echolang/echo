@@ -1,7 +1,15 @@
+use command;
 use epm::cli;
 
-function parse_ok(const array<string>& $words) : cli::CommandLine
+struct Got
 {
+    cli::App $app;
+    command::Parsed $parsed;
+}
+
+function parse_outcome(const array<string>& $words) : command::Outcome
+{
+    cli::App $app = cli::App();
     array<string> $argv = array<string>();
     $argv[] = 'epm';
     usize $i = 0;
@@ -11,27 +19,33 @@ function parse_ok(const array<string>& $words) : cli::CommandLine
         $i = $i + 1;
     }
 
-    cli::CommandLine $cli = cli::CommandLine();
-    bool $ok = guard cli::parse_command_line($argv, $cli);
-    return $cli;
+    return $app->cmd->parse($argv);
+}
+
+function parse_ok(const array<string>& $words) : Got
+{
+    cli::App $app = cli::App();
+    array<string> $argv = array<string>();
+    $argv[] = 'epm';
+    usize $i = 0;
+
+    while ($i < $words->count()) {
+        $argv[] = $words[$i];
+        $i = $i + 1;
+    }
+
+    command::Outcome $r = $app->cmd->parse($argv);
+    assert($r->error == null);
+    return Got($app, $r->parsed);
 }
 
 function parse_err(const array<string>& $words) : string
 {
-    array<string> $argv = array<string>();
-    $argv[] = 'epm';
-    usize $i = 0;
+    command::Outcome $r = parse_outcome($words);
 
-    while ($i < $words->count()) {
-        $argv[] = $words[$i];
-        $i = $i + 1;
-    }
-
-    cli::CommandLine $cli = cli::CommandLine();
-    result<bool, string> $got = cli::parse_command_line($argv, $cli);
-
-    if ($got->failed()) {
-        return $got->failure();
+    if ($r->error != null) {
+        command::Error $e = $r->error ?? .noCommand;
+        return $e->message();
     }
 
     return '';
@@ -70,6 +84,32 @@ function words4(const string& $a, const string& $b, const string& $c, const stri
     return $w;
 }
 
+function blockHas(const command::Block& $b, const string& $needle) : bool
+{
+    foreach ($b->rows as $row) {
+        if ($row->contains($needle)) {
+            return true;
+        }
+
+        if (command::stripSgr($row)->contains($needle)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function stripped(const command::Block& $b) : command::Block
+{
+    $out = command::Block();
+
+    foreach ($b->rows as $row) {
+        $out->push(command::stripSgr($row));
+    }
+
+    return $out;
+}
+
 test no_command_is_a_refusal
 {
     string $err = parse_err(words());
@@ -79,7 +119,7 @@ test no_command_is_a_refusal
 test unknown_command_names_the_list
 {
     string $err = parse_err(words1('compile'));
-    assert($err->contains("'compile' is not an epm command."));
+    assert($err->contains("'compile' is not a command."));
     assert($err->contains("'install'"));
     assert($err->contains("'add'"));
 }
@@ -98,37 +138,37 @@ test install_does_not_take_git
 
 test help_short_circuits_a_missing_name
 {
-    cli::CommandLine $cli = parse_ok(words2('remove', '--help'));
-    assert($cli->wants_help);
-    assert($cli->subcommand == cli::Subcommand::remove);
+    Got $got = parse_ok(words2('remove', '--help'));
+    assert($got->parsed->wantsHelp);
+    assert($got->parsed->command->id == $got->app->remove->id);
 }
 
 test version_short_circuits
 {
-    cli::CommandLine $cli = parse_ok(words1('--version'));
-    assert($cli->wants_version);
+    Got $got = parse_ok(words1('--version'));
+    assert($got->parsed->wantsVersion);
 }
 
 test help_then_command_is_that_page
 {
-    cli::CommandLine $cli = parse_ok(words2('--help', 'add'));
-    assert($cli->wants_help);
-    assert($cli->subcommand == cli::Subcommand::add);
+    Got $got = parse_ok(words2('--help', 'add'));
+    assert($got->parsed->wantsHelp);
+    assert($got->parsed->command->id == $got->app->add->id);
 }
 
 test add_help_git_names_the_option
 {
-    cli::CommandLine $cli = parse_ok(words3('add', '--help', 'git'));
-    assert($cli->wants_help);
-    assert($cli->help_topic_is_option);
-    assert($cli->help_topic == 'git');
+    Got $got = parse_ok(words3('add', '--help', 'git'));
+    assert($got->parsed->wantsHelp);
+    assert($got->parsed->helpTopicId >= 0);
+    assert($got->parsed->helpTopic == 'git');
 }
 
 test add_help_unknown_word_is_still_help
 {
-    cli::CommandLine $cli = parse_ok(words3('add', '--help', 'libjson'));
-    assert($cli->wants_help);
-    assert(!$cli->help_topic_is_option);
+    Got $got = parse_ok(words3('add', '--help', 'libjson'));
+    assert($got->parsed->wantsHelp);
+    assert($got->parsed->helpTopicId < 0);
 }
 
 test install_help_git_is_refused
@@ -139,16 +179,16 @@ test install_help_git_is_refused
 
 test range_equals_form
 {
-    cli::CommandLine $cli = parse_ok(words4('add', 'lib', '--git', 'https://example.com/lib.git'));
-    assert($cli->git == 'https://example.com/lib.git');
-    assert($cli->range == '*');
+    Got $got = parse_ok(words4('add', 'lib', '--git', 'https://example.com/lib.git'));
+    assert($got->parsed->value($got->app->git) == 'https://example.com/lib.git');
+    assert($got->parsed->value($got->app->range) == '*');
 
     array<string> $w = words3('add', 'lib', '--git');
     $w[] = 'https://example.com/lib.git';
     $w[] = '--range=^0.2';
-    $cli = parse_ok($w);
-    assert($cli->range == '^0.2');
-    assert($cli->positionals[0] == 'lib');
+    $got = parse_ok($w);
+    assert($got->parsed->value($got->app->range) == '^0.2');
+    assert($got->parsed->positionals[0] == 'lib');
 }
 
 test flag_after_the_name
@@ -156,9 +196,9 @@ test flag_after_the_name
     array<string> $w = words2('add', 'lib');
     $w[] = '--git';
     $w[] = 'https://example.com/lib.git';
-    cli::CommandLine $cli = parse_ok($w);
-    assert($cli->git == 'https://example.com/lib.git');
-    assert($cli->positionals[0] == 'lib');
+    Got $got = parse_ok($w);
+    assert($got->parsed->value($got->app->git) == 'https://example.com/lib.git');
+    assert($got->parsed->positionals[0] == 'lib');
 }
 
 test git_and_path_are_one_question
@@ -169,7 +209,7 @@ test git_and_path_are_one_question
     string $err = parse_err($w);
     assert($err->contains('--git'));
     assert($err->contains('--path'));
-    assert($err->contains('origin'));
+    assert($err->contains('two answers to one question'));
 }
 
 test git_needs_a_value_not_another_flag
@@ -181,7 +221,7 @@ test git_needs_a_value_not_another_flag
 test install_refuses_a_leftover_word
 {
     string $err = parse_err(words2('install', 'libjson'));
-    assert($err == "'install' takes no package name.");
+    assert($err == "'install' takes no positional arguments.");
 }
 
 test separator_is_refused
@@ -201,8 +241,8 @@ test clustered_short_is_refused
 
 test colour_alias
 {
-    cli::CommandLine $cli = parse_ok(words3('install', '--colour', 'never'));
-    assert($cli->color == 'never');
+    Got $got = parse_ok(words3('install', '--colour', 'never'));
+    assert($got->parsed->value($got->app->cmd->color) == 'never');
 }
 
 test unknown_color_value
@@ -214,63 +254,62 @@ test unknown_color_value
 
 test overview_page_lists_commands
 {
-    cli::CommandLine $cli = parse_ok(words1('--help'));
-    string $page = cli::render_help($cli, cli::plain_terminal());
-    assert($page->contains('Usage'));
-    assert($page->contains('init'));
-    assert($page->contains('install'));
-    assert($page->contains('add'));
-    assert($page->contains('remove'));
-    assert($page->contains('update'));
-    assert($page->contains('verify'));
-    assert($page->contains('tree'));
-    assert($page->contains('--help'));
-    assert($page->contains('--version'));
+    Got $got = parse_ok(words1('--help'));
+    command::Block $page = command::renderHelp($got->app->cmd, $got->parsed, command::plain());
+    assert(blockHas($page, 'Usage'));
+    assert(blockHas($page, 'init'));
+    assert(blockHas($page, 'install'));
+    assert(blockHas($page, 'add'));
+    assert(blockHas($page, 'remove'));
+    assert(blockHas($page, 'update'));
+    assert(blockHas($page, 'verify'));
+    assert(blockHas($page, 'tree'));
+    assert(blockHas($page, '--help'));
+    assert(blockHas($page, '--version'));
 }
 
 test add_help_git_is_that_option
 {
-    cli::CommandLine $cli = parse_ok(words3('add', '--help', 'git'));
-    string $page = cli::render_help($cli, cli::plain_terminal());
-    assert($page->contains('--git'));
-    assert($page->contains('GitHub'));
-    assert(!$page->contains('--path writes'));
+    Got $got = parse_ok(words3('add', '--help', 'git'));
+    command::Block $page = command::renderHelp($got->app->cmd, $got->parsed, command::plain());
+    assert(blockHas($page, '--git'));
+    assert(blockHas($page, 'GitHub'));
+    assert(!blockHas($page, '--path writes'));
 }
 
 test refusal_shape
 {
-    string $text = cli::render_error(
-        'No command given.',
-        cli::Subcommand::none,
-        cli::plain_terminal()
-    );
-    assert($text->starts('error: No command given.'));
-    assert($text->contains('Usage'));
-    assert($text->contains("Run 'epm --help'"));
+    cli::App $app = cli::App();
+    command::Error $e = .noCommand;
+    command::Parsed $p = command::Parsed();
+    command::Block $page = command::renderError($e, $app->cmd, $p, command::plain());
+    assert(blockHas($page, 'error: No command given.'));
+    assert(blockHas($page, 'Usage'));
+    assert(blockHas($page, "Run 'epm --help'"));
 }
 
 test init_parses
 {
-    cli::CommandLine $cli = parse_ok(words1('init'));
-    assert($cli->subcommand == cli::Subcommand::init);
-    assert(!$cli->stated_yes);
+    Got $got = parse_ok(words1('init'));
+    assert($got->parsed->command->id == $got->app->init->id);
+    assert(!$got->parsed->stated($got->app->yes));
 }
 
 test init_yes_sets_the_flag
 {
-    cli::CommandLine $cli = parse_ok(words3('init', 'greet', '--yes'));
-    assert($cli->stated_yes);
-    assert($cli->positionals[0] == 'greet');
+    Got $got = parse_ok(words3('init', 'greet', '--yes'));
+    assert($got->parsed->stated($got->app->yes));
+    assert($got->parsed->positionals[0] == 'greet');
 
-    $cli = parse_ok(words3('init', '-y', 'greet'));
-    assert($cli->stated_yes);
-    assert($cli->positionals[0] == 'greet');
+    $got = parse_ok(words3('init', '-y', 'greet'));
+    assert($got->parsed->stated($got->app->yes));
+    assert($got->parsed->positionals[0] == 'greet');
 }
 
 test init_takes_at_most_one_name
 {
     string $err = parse_err(words3('init', 'a', 'b'));
-    assert($err == "'init' takes at most one package name.");
+    assert($err == "'init' takes too many positional arguments.");
 }
 
 test init_does_not_take_module
@@ -285,46 +324,43 @@ test install_does_not_take_yes
     assert($err == "'install' does not take '-y, --yes'.");
 }
 
+test module_before_the_command_is_refused
+{
+    string $err = parse_err(words3('-m', 'app', 'install'));
+    assert($err == "'epm' does not take '-m, --module'.");
+}
+
 test init_help_describes_the_wizard
 {
-    cli::CommandLine $cli = parse_ok(words2('init', '--help'));
-    string $page = cli::render_help($cli, cli::plain_terminal());
-    assert($page->contains('init'));
-    assert($page->contains('wizard'));
-    assert($page->contains('--yes'));
-    assert($page->contains('[<name>]'));
+    Got $got = parse_ok(words2('init', '--help'));
+    command::Block $page = command::renderHelp($got->app->cmd, $got->parsed, command::plain());
+    assert(blockHas($page, 'init'));
+    assert(blockHas($page, 'wizard'));
+    assert(blockHas($page, '--yes'));
+    assert(blockHas($page, '[<name>]'));
 }
 
 test init_help_yes_is_that_option
 {
-    cli::CommandLine $cli = parse_ok(words3('init', '--help', 'yes'));
-    string $page = cli::render_help($cli, cli::plain_terminal());
-    assert($page->contains('--yes'));
-    assert($page->contains('epm init greet --yes'));
-    assert($page->contains('Accepted by: init.'));
+    Got $got = parse_ok(words3('init', '--help', 'yes'));
+    command::Block $page = command::renderHelp($got->app->cmd, $got->parsed, command::plain());
+    assert(blockHas($page, '--yes'));
+    assert(blockHas($page, 'epm init greet --yes'));
+    assert(blockHas($page, 'Accepted by: init.'));
 }
 
 test coloured_page_minus_escapes_is_the_plain_page
 {
-    cli::CommandLine $cli = parse_ok(words1('--help'));
-    string $plain = cli::render_help($cli, cli::plain_terminal());
-    cli::TerminalCapabilities $color = cli::TerminalCapabilities(true, false, 80, true);
-    string $drawn = cli::render_help($cli, $color);
-    assert($drawn->contains("\x1b["));
-    assert(cli::strip_sgr($drawn) == $plain);
+    Got $got = parse_ok(words1('--help'));
+    command::Block $plain = command::renderHelp($got->app->cmd, $got->parsed, command::plain());
+    command::TerminalCapabilities $color = command::TerminalCapabilities(true, false, 80, true);
+    command::Block $drawn = command::renderHelp($got->app->cmd, $got->parsed, $color);
+    assert(blockHas($drawn, "\x1b["));
+    assert(stripped($drawn) == $plain);
 }
 
 test version_text
 {
-    assert(cli::render_version() == "0.1.0\n");
-}
-
-test accepts_masks_are_the_bits
-{
-    assert(cli::ACCEPTS_EXISTING == (
-        cli::ACCEPTS_INSTALL | cli::ACCEPTS_ADD | cli::ACCEPTS_REMOVE
-        | cli::ACCEPTS_UPDATE | cli::ACCEPTS_VERIFY | cli::ACCEPTS_TREE
-    ));
-    assert(cli::ACCEPTS_ALL == (cli::ACCEPTS_EXISTING | cli::ACCEPTS_INIT));
-    assert((cli::ACCEPTS_EXISTING & cli::ACCEPTS_INIT) == 0);
+    cli::App $app = cli::App();
+    assert(command::renderVersion($app->cmd) == '0.1.0');
 }

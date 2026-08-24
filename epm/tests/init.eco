@@ -1,3 +1,4 @@
+use command;
 use epm::cli;
 use epm::cmd;
 use epm::manifest;
@@ -5,8 +6,15 @@ use epm::scaffold;
 use epm::scratch;
 use epm::sys;
 
-function parse_init(const array<string>& $words) : cli::CommandLine
+struct InitGot
 {
+    cli::App $app;
+    command::Parsed $parsed;
+}
+
+function parse_init(const array<string>& $words) : InitGot
+{
+    cli::App $app = cli::App();
     array<string> $argv = array<string>();
     $argv[] = 'epm';
     usize $i = 0;
@@ -16,9 +24,9 @@ function parse_init(const array<string>& $words) : cli::CommandLine
         $i = $i + 1;
     }
 
-    cli::CommandLine $cli = cli::CommandLine();
-    bool $ok = guard cli::parse_command_line($argv, $cli);
-    return $cli;
+    command::Outcome $r = $app->cmd->parse($argv);
+    assert($r->error == null);
+    return InitGot($app, $r->parsed);
 }
 
 function assert_wrote(const string& $dir, const scaffold::Recipe& $recipe) : void
@@ -178,8 +186,8 @@ test init_yes_writes_the_defaults
     $words[] = 'init';
     $words[] = 'greet';
     $words[] = '--yes';
-    cli::CommandLine $cli = parse_init($words);
-    assert(cmd::init_at($cli, $root) == 0);
+    InitGot $got = parse_init($words);
+    assert(cmd::init_at($got->app, $got->parsed, $root) == 0);
     assert_wrote(sys::join($root, 'greet'), scaffold::default_recipe('greet'));
 
     scratch::gone($root);
@@ -191,8 +199,8 @@ test init_yes_needs_a_name
     array<string> $words = array<string>();
     $words[] = 'init';
     $words[] = '--yes';
-    cli::CommandLine $cli = parse_init($words);
-    assert(cmd::init_at($cli, $root) == 1);
+    InitGot $got = parse_init($words);
+    assert(cmd::init_at($got->app, $got->parsed, $root) == 1);
     assert(!sys::exists(sys::join($root, 'greet')));
 
     scratch::gone($root);

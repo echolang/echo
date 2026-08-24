@@ -5,7 +5,6 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <io.h>
 
 #include "internal.h"
 
@@ -14,32 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
-
-int32_t epm_isatty(int32_t fd)
-{
-    return _isatty(fd) ? 1 : 0;
-}
-
-int32_t epm_columns(int32_t fd)
-{
-    HANDLE handle;
-    CONSOLE_SCREEN_BUFFER_INFO info;
-
-    if (!_isatty(fd)) {
-        return 0;
-    }
-
-    handle = (HANDLE)_get_osfhandle(fd);
-    if (handle == INVALID_HANDLE_VALUE) {
-        return 0;
-    }
-
-    if (GetConsoleScreenBufferInfo(handle, &info) && info.dwSize.X > 0) {
-        return (int32_t)info.dwSize.X;
-    }
-
-    return 0;
-}
 
 static wchar_t *utf8_to_wide(const char *utf8)
 {

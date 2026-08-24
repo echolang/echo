@@ -105,3 +105,12 @@ function cache_dir(const string& $url, const string& $rev) : string
     string $tmp = str::from(env::tmp());
     return sys::join(sys::join($tmp, "epm-cache/{$hash}"), $rev);
 }
+
+internal function load_if_readable(const string& $mod) : result<manifest::Manifest, string>
+{
+    if (!sys::is_file($mod)) {
+        return .error("no module.eco at {$mod}");
+    }
+
+    return manifest::load($mod);
+}

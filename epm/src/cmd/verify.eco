@@ -1,26 +1,33 @@
 namespace epm::cmd;
 
-use epm::cli::{CommandLine, report, start_from_cli};
+use command;
+use command::element;
+use epm::cli::{App, start_from_cli, work_context};
 use epm::lock;
 use epm::manifest;
 use epm::sys;
 use epm::util;
-use std::io;
 
-public function verify(const CommandLine& $cli) : int32
+public function verify(const App& $app, const command::Parsed& $cli) : int32
 {
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    command::CLIContext $ctx = work_context($app, $cli);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
         return 1;
     }
 
-    return verify_at($start);
+    return verify_at($start, $ctx);
 }
 
 public function verify_at(const string& $start) : int32
 {
+    return verify_at($start, command::CLIContext::plain());
+}
+
+public function verify_at(const string& $start, command::CLIContext $ctx) : int32
+{
     manifest::Manifest $man = guard project_at($start) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
@@ -29,12 +36,12 @@ public function verify_at(const string& $start) : int32
     string $lock_path = lock::path_beside($man->path);
 
     if (!sys::is_file($lock_path)) {
-        report('no epm.lock.json - run `epm update`');
+        $ctx->printError('no epm.lock.json - run `epm update`');
         return 1;
     }
 
     lock::Lock $lock = guard lock::load($lock_path) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
@@ -45,54 +52,29 @@ public function verify_at(const string& $start) : int32
     while ($i < $need->count()) {
         manifest::Requirement $req = $need[$i];
         lock::Entry $have = guard $lock->find($req->name) else {
-            report("'{$req->name}' is required but not locked");
+            $ctx->printError("'{$req->name}' is required but not locked");
             $failed = $failed + 1;
             $i = $i + 1;
             continue;
         }
 
         util::Range $range = guard util::parse_range($req->version) else {
-            report("'{$req->version}' is not a version range");
+            $ctx->printError("'{$req->version}' is not a version range");
             $failed = $failed + 1;
             $i = $i + 1;
             continue;
         }
 
         util::Version $ver = guard util::parse_version($have->version) else {
-            report("lock has a broken version for {$req->name}");
+            $ctx->printError("lock has a broken version for {$req->name}");
             $failed = $failed + 1;
             $i = $i + 1;
             continue;
         }
 
         if (!util::satisfies($ver, $range)) {
-            report("'{$req->name}' @{$have->version} does not satisfy {$req->version}");
+            $ctx->printError("'{$req->name}' @{$have->version} does not satisfy {$req->version}");
             $failed = $failed + 1;
-        }
-
-        $i = $i + 1;
-    }
-
-    $i = 0;
-
-    while ($i < $lock->packages->count()) {
-        lock::Entry $e = $lock->packages[$i];
-        string $dir = sys::join($vendor, $e->name);
-
-        if (!sys::is_dir($dir)) {
-            report("missing vendor/{$e->name}");
-            $failed = $failed + 1;
-        }
-        else if ($e->sha256->empty()) {
-            report("lock entry '{$e->name}' has no sha256 - run `epm update`");
-            $failed = $failed + 1;
-        }
-        else if (sys::tree_sha256($dir) != $e->sha256) {
-            report("sha256 mismatch for {$e->name}");
-            $failed = $failed + 1;
-        }
-        else {
-            io::println("ok {$e->name}@{$e->version}");
         }
 
         $i = $i + 1;
@@ -102,79 +84,126 @@ public function verify_at(const string& $start) : int32
         return 1;
     }
 
-    return 0;
-}
+    int32 $total = $lock->packages->count() as int32;
+    element::Progress $bar = $ctx->create<element::Progress>();
+    $bar->start('verifying', $total);
 
-public function tree(const CommandLine& $cli) : int32
-{
-    string $start = guard start_from_cli($cli) else ($e) {
-        report($e);
+    array<string> $errors = array<string>();
+    $i = 0;
+
+    while ($i < $lock->packages->count()) {
+        lock::Entry $e = $lock->packages[$i];
+        string $dir = sys::join($vendor, $e->name);
+
+        if (!sys::is_dir($dir)) {
+            $errors[] = "missing vendor/{$e->name}";
+            $failed = $failed + 1;
+        }
+        else if ($e->sha256->empty()) {
+            $errors[] = "lock entry '{$e->name}' has no sha256 - run `epm update`";
+            $failed = $failed + 1;
+        }
+        else if (sys::tree_sha256($dir) != $e->sha256) {
+            $errors[] = "sha256 mismatch for {$e->name}";
+            $failed = $failed + 1;
+        }
+
+        $bar->advance(1, "{$e->name}@{$e->version}");
+        $i = $i + 1;
+    }
+
+    if ($failed > 0) {
+        $bar->fail();
+
+        foreach ($errors as $msg) {
+            $ctx->printError($msg);
+        }
+
         return 1;
     }
 
-    return tree_at($start);
+    $bar->set($total, "{$total} packages");
+    $bar->finish();
+    return 0;
+}
+
+public function tree(const App& $app, const command::Parsed& $cli) : int32
+{
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        command::CLIContext $err = work_context($app, $cli);
+        $err->printError($e);
+        return 1;
+    }
+
+    command::CLIContext $out = .from($cli, $app->cmd, .stdout);
+    return tree_at($start, $out);
 }
 
 public function tree_at(const string& $start) : int32
 {
+    return tree_at($start, command::CLIContext::plain());
+}
+
+public function tree_at(const string& $start, command::CLIContext $ctx) : int32
+{
     manifest::Manifest $man = guard project_at($start) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
     string $lock_path = lock::path_beside($man->path);
     lock::Lock $lock = guard lock::load($lock_path) else ($e) {
-        report($e);
+        $ctx->printError($e);
         return 1;
     }
 
     if ($lock->packages->count() == 0) {
-        io::println('(empty - run `epm update`)');
+        $ctx->line('(empty - run `epm update`)');
         return 0;
     }
 
+    element::Tree $t = $ctx->create<element::Tree>($man->name);
     usize $i = 0;
 
     while ($i < $man->requires->count()) {
-        print_node($man->requires[$i]->name, $lock, 0);
+        $t->root->children[] = tree_node($man->requires[$i]->name, $lock, 0);
         $i = $i + 1;
     }
 
     $i = 0;
 
     while ($i < $man->scoped->count()) {
-        print_node($man->scoped[$i]->req->name, $lock, 0);
+        $t->root->children[] = tree_node($man->scoped[$i]->req->name, $lock, 0);
         $i = $i + 1;
     }
 
+    $t->display();
     return 0;
 }
 
-private function print_node(const string& $name, const lock::Lock& $lock, int32 $depth) : void
+private function tree_node(const string& $name, const lock::Lock& $lock, int32 $depth) : element::Node
 {
     if ($depth > 32) {
-        return;
+        return element::Node($name);
     }
 
-    usize $n = $depth;
-    string $pad = str::repeat('  ', $n);
     lock::Entry? $e = $lock->find($name);
 
     if ($e == null) {
-        io::println("{$pad}{$name}  (missing)");
-        return;
+        return element::Node("{$name}  (missing)");
     }
 
     lock::Entry $have = guard $e else {
-        return;
+        return element::Node($name);
     }
 
-    io::println("{$pad}{$have->name}@{$have->version}  {$have->rev}");
-
+    element::Node $n = element::Node("{$have->name}@{$have->version}  {$have->rev}");
     usize $i = 0;
 
     while ($i < $have->requires->count()) {
-        print_node($have->requires[$i], $lock, $depth + 1);
+        $n->children[] = tree_node($have->requires[$i], $lock, $depth + 1);
         $i = $i + 1;
     }
+
+    return $n;
 }

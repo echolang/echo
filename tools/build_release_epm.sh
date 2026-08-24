@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# compile epm with a just-built echoc, after cloning the two path-depends it
+# compile epm with a just-built echoc, after cloning the path-depends it
 # bootstraps on.
 #
 #   tools/build_release_epm.sh build-release/echoc /tmp/epm /tmp/static-curl 0.2.2
 #
-# epm/module.eco writes ../../echolibs/{libjson,libcurl} from epm/, so the
+# epm/module.eco writes ../../echolibs/{libjson,libcurl,libcommand} from epm/, so the
 # clones land next to the echo checkout, not inside it. The depends stay
 # paths: epm must not need itself to build itself.
 #
@@ -103,6 +103,7 @@ clone() {
 
 clone libjson
 clone libcurl
+clone libcommand
 
 # --define static_curl is a no-op unless libcurl's manifest names it.
 # write the gate if this clone predates that line, so the echo release

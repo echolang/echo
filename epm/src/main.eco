@@ -6,35 +6,32 @@
  * the invocation asked for.
  */
 
+use command;
 use epm::cli;
 use epm::cmd::dispatch;
 use std::env;
 use std::io;
 
-array<string> $argv = env::argv();
-cli::CommandLine $parsed = cli::CommandLine();
-bool $ok = guard cli::parse_command_line($argv, $parsed) else ($e) {
-    cli::TerminalCapabilities $err_caps = cli::capabilities_for(
-        $parsed,
-        cli::TerminalStream::stderr
-    );
-    io::eprint(cli::render_error($e, $parsed->subcommand, $err_caps));
+cli::App $app = cli::App();
+command::Outcome $r = $app->cmd->parse(env::argv());
+
+if ($r->error != null) {
+    command::Error $e = $r->error ?? .noCommand;
+    command::CLIContext $err = .from($r->parsed, $app->cmd, .stderr);
+    $err->print(command::renderError($e, $app->cmd, $r->parsed, $err));
     env::exit(1);
 }
 
-if ($parsed->wants_version) {
-    io::print(cli::render_version());
+if ($r->parsed->wantsVersion) {
+    io::println(command::renderVersion($app->cmd));
     env::exit(0);
 }
 
-if ($parsed->wants_help) {
-    cli::TerminalCapabilities $out_caps = cli::capabilities_for(
-        $parsed,
-        cli::TerminalStream::stdout
-    );
-    io::print(cli::render_help($parsed, $out_caps));
+if ($r->parsed->wantsHelp) {
+    command::CLIContext $out = .from($r->parsed, $app->cmd, .stdout);
+    $out->print(command::renderHelp($app->cmd, $r->parsed, $out));
     env::exit(0);
 }
 
-int32 $code = dispatch($parsed);
+int32 $code = dispatch($app, $r->parsed);
 env::exit($code);

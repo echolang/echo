@@ -1,0 +1,5 @@
+// `DS` is the filesystem separator. pinned with --target-os so the golden is the
+// unix arm on every machine that runs the suite.
+
+echo std::env::DS->size();
+echo std::env::DS->byte(0);

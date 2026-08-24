@@ -1,0 +1,5 @@
+// the windows arm of `DS` is a single backslash. --target-os picks the constant
+// without native-linking, so this runs on darwin/linux too.
+
+echo std::env::DS->size();
+echo std::env::DS->byte(0);

@@ -4,122 +4,163 @@
 
 namespace epm::cmd;
 
+use command;
+use command::element;
 use epm::cli;
 use epm::scaffold;
 use epm::sys;
 use std::env;
-use std::io;
 
-public function init(const cli::CommandLine& $cli) : int32
+public function init(const cli::App& $app, const command::Parsed& $cli) : int32
 {
-    return init_at($cli, env::cwd());
+    return init_at($app, $cli, env::cwd());
 }
 
-public function init_at(const cli::CommandLine& $cli, const string& $parent) : int32
+public function init_at(
+    const cli::App& $app,
+    const command::Parsed& $cli,
+    const string& $parent
+) : int32
 {
-    if ($cli->stated_yes) {
-        return init_yes($cli, $parent);
+    command::CLIContext $ctx = .from($cli, $app->cmd, .stderr);
+
+    if ($cli->stated($app->yes)) {
+        return init_yes($cli, $parent, $ctx);
     }
 
-    if (!cli::capabilities_for($cli, cli::TerminalStream::stdin)->interactive) {
-        cli::report(
+    command::TerminalCapabilities $in = command::capabilitiesFor(
+        $cli,
+        $app->cmd,
+        .stdin
+    );
+
+    if (!$in->interactive) {
+        $ctx->printError(
             "init is a wizard and this is not a terminal. Write 'epm init <name> --yes' to take the defaults."
         );
         return 1;
     }
 
-    return init_wizard($cli, $parent);
+    return init_wizard($cli, $parent, $ctx);
 }
 
-function init_yes(const cli::CommandLine& $cli, const string& $parent) : int32
+function init_yes(
+    const command::Parsed& $cli,
+    const string& $parent,
+    command::CLIContext $ctx
+) : int32
 {
     if ($cli->positionals->count() == 0) {
-        cli::report("'init --yes' needs a module name.");
+        $ctx->printError("'init --yes' needs a module name.");
         return 1;
     }
 
-    return write_recipe($cli, scaffold::default_recipe($cli->positionals[0]), $parent);
+    return write_recipe($ctx, scaffold::default_recipe($cli->positionals[0]), $parent);
 }
 
-function init_wizard(const cli::CommandLine& $cli, const string& $parent) : int32
+function init_wizard(
+    const command::Parsed& $cli,
+    const string& $parent,
+    command::CLIContext $ctx
+) : int32
 {
-    cli::TerminalCapabilities $caps = cli::capabilities_for($cli, cli::TerminalStream::stdout);
-    scaffold::Recipe $recipe = guard collect_recipe($cli, $caps->color) else ($e) {
-        cli::report($e);
-        return 1;
-    }
+    $ctx->beginStepper('init');
+
+    scaffold::Recipe $recipe = collect_recipe($cli, $ctx);
 
     string $shown = sys::join(sys::join($parent, $recipe->name), 'module.eco');
-    io::println('');
-    io::println("About to write to {$shown}:");
-    io::println('');
-    io::print(scaffold::manifest_text($recipe));
-    io::println('');
+    $ctx->print(element::noteFrame(
+        $ctx->channel(),
+        "About to write to {$shown}",
+        scaffold::manifest_text($recipe)
+    ));
 
-    bool $ok = guard ask_bool('Is this OK?', $caps->color) else ($e) {
-        cli::report($e);
-        return 1;
-    }
+    bool $ok = element::confirm($ctx, 'Write this module?');
 
     if (!$ok) {
-        cli::report('init cancelled.');
+        $ctx->printError('init cancelled.');
+        $ctx->endStepper('Nothing was written.');
         return 1;
     }
 
-    return write_recipe($cli, $recipe, $parent);
+    if (!write_files($ctx, $recipe, $parent)) {
+        $ctx->endStepper('Nothing was written.');
+        return 1;
+    }
+
+    $ctx->endStepper("created {$recipe->name}/");
+    print_created($ctx, $recipe);
+    return 0;
 }
 
 function write_recipe(
-    const cli::CommandLine& $cli,
+    command::CLIContext $ctx,
     const scaffold::Recipe& $recipe,
     const string& $parent
 ) : int32
 {
-    result<string, string> $got = scaffold::apply($recipe, $parent);
-
-    if ($got->failed()) {
-        cli::report($got->failure());
+    if (!write_files($ctx, $recipe, $parent)) {
         return 1;
     }
 
-    print_created($cli, $recipe);
+    print_created($ctx, $recipe);
     return 0;
 }
 
-function print_created(const cli::CommandLine& $cli, const scaffold::Recipe& $recipe) : void
+function write_files(
+    command::CLIContext $ctx,
+    const scaffold::Recipe& $recipe,
+    const string& $parent
+) : bool
 {
-    cli::TerminalCapabilities $caps = cli::capabilities_for($cli, cli::TerminalStream::stdout);
-    string $mark = cli::styled('created', cli::SGR_SUCCESS, $caps->color);
-    io::println("{$mark} {$recipe->name}/");
+    element::Spinner $spin = $ctx->create<element::Spinner>();
+    $spin->start('writing files');
 
-    array<scaffold::File> $tree = scaffold::files($recipe);
+    result<string, string> $got = scaffold::apply($recipe, $parent);
+
+    if ($got->failed()) {
+        $spin->fail($got->failure());
+        return false;
+    }
+
+    int32 $n = scaffold::files($recipe)->count() as int32;
+    $spin->succeed("wrote {$n} files");
+    return true;
+}
+
+function print_created(command::CLIContext $ctx, const scaffold::Recipe& $recipe) : void
+{
+    element::Tree $t = $ctx->create<element::Tree>("{$recipe->name}/");
+    array<scaffold::File> $files = scaffold::files($recipe);
     usize $i = 0;
 
-    while ($i < $tree->count()) {
-        io::println("  {$tree[$i]->rel}");
+    while ($i < $files->count()) {
+        $t->root->children[] = element::Node($files[$i]->rel);
         $i = $i + 1;
     }
 
-    io::println('');
+    $t->display();
 
     if ($recipe->kind == scaffold::Kind::exe) {
-        print_hint('echoc run', $caps);
+        print_hint($ctx, 'echoc run');
     }
 
-    print_hint('echoc build', $caps);
+    print_hint($ctx, 'echoc build');
 
     if ($recipe->tests) {
-        print_hint('echoc test', $caps);
+        print_hint($ctx, 'echoc test');
     }
 }
 
-function print_hint(const string& $line, const cli::TerminalCapabilities& $caps) : void
+function print_hint(command::CLIContext $ctx, const string& $line) : void
 {
-    string $hint = cli::styled($line, cli::SGR_DIM, $caps->color);
-    io::println("  {$hint}");
+    $ctx->line(command::styled("  {$line}", command::SGR_DIM, $ctx->caps->color));
 }
 
-function collect_recipe(const cli::CommandLine& $cli, bool $color) : result<scaffold::Recipe, string>
+function collect_recipe(
+    const command::Parsed& $cli,
+    command::CLIContext $ctx
+) : scaffold::Recipe
 {
     string $seed = '';
 
@@ -127,164 +168,95 @@ function collect_recipe(const cli::CommandLine& $cli, bool $color) : result<scaf
         $seed = $cli->positionals[0];
     }
 
-    string $name = guard ask_name($seed, $color) else ($e) {
-        return .error($e);
-    }
+    string $name = ask_name($ctx, $seed);
+    string $description = ask_text($ctx, 'description', '');
+    string $license = ask_license($ctx);
+    scaffold::Kind $kind = ask_kind($ctx);
+    bool $tests = element::confirm($ctx, 'tests');
+    bool $readme = element::confirm($ctx, 'readme');
 
-    string $description = guard ask_text('description', '', $color) else ($e) {
-        return .error($e);
-    }
-
-    string $license = guard ask_license($color) else ($e) {
-        return .error($e);
-    }
-
-    scaffold::Kind $kind = guard ask_kind($color) else ($e) {
-        return .error($e);
-    }
-
-    bool $tests = guard ask_bool('tests', $color) else ($e) {
-        return .error($e);
-    }
-
-    bool $readme = guard ask_bool('readme', $color) else ($e) {
-        return .error($e);
-    }
-
-    return .ok(scaffold::Recipe($name, $description, $license, $kind, $tests, $readme));
+    return scaffold::Recipe($name, $description, $license, $kind, $tests, $readme);
 }
 
-function ask_name(const string& $seed, bool $color) : result<string, string>
+function ask_name(command::CLIContext $ctx, const string& $seed) : string
 {
     while (true) {
-        string $got = guard ask('module name', $seed, $color) else ($e) {
-            return .error($e);
+        element::Text $p = $ctx->create<element::Text>('module name');
+
+        if (!$seed->empty()) {
+            $p->hint($seed);
+            $p->otherwise($seed);
         }
 
+        string $got = $p->ask();
+
         if (scaffold::usable_project_name($got)) {
-            return .ok($got);
+            return $got;
         }
 
         if ($got->empty()) {
-            cli::report('a module name is required.');
+            $ctx->printError('a module name is required.');
         }
         else {
-            cli::report("'{$got}' is not a usable module name.");
+            $ctx->printError("'{$got}' is not a usable module name.");
         }
     }
 }
 
 function ask_text(
+    command::CLIContext $ctx,
     const string& $label,
-    const string& $default,
-    bool $color
-) : result<string, string>
+    const string& $default
+) : string
 {
     while (true) {
-        string $got = guard ask($label, $default, $color) else ($e) {
-            return .error($e);
+        element::Text $p = $ctx->create<element::Text>($label);
+        $p->require(false);
+
+        if (!$default->empty()) {
+            $p->hint($default);
+            $p->otherwise($default);
         }
+
+        string $got = $p->ask();
 
         if (scaffold::attribute_text_ok($got)) {
-            return .ok($got);
+            return $got;
         }
 
-        cli::report('a description cannot contain a quote or a newline');
+        $ctx->printError('a description cannot contain a quote or a newline');
     }
 }
 
-function ask_license(bool $color) : result<string, string>
+function ask_license(command::CLIContext $ctx) : string
 {
     while (true) {
-        string $got = guard ask('license', 'MIT', $color) else ($e) {
-            return .error($e);
-        }
+        element::Text $p = $ctx->create<element::Text>('license');
+        $p->hint('MIT');
+        $p->otherwise('MIT');
+        string $got = $p->ask();
 
         if ($got == '-') {
-            return .ok('');
+            return '';
         }
 
         if (scaffold::attribute_text_ok($got) && !$got->empty()) {
-            return .ok($got);
+            return $got;
         }
 
-        cli::report('a license cannot contain a quote or a newline');
+        $ctx->printError('a license cannot contain a quote or a newline');
     }
 }
 
-function ask_kind(bool $color) : result<scaffold::Kind, string>
+function ask_kind(command::CLIContext $ctx) : scaffold::Kind
 {
-    while (true) {
-        string $got = guard ask('kind', 'exe', $color) else ($e) {
-            return .error($e);
-        }
-
-        scaffold::Kind $kind = guard scaffold::kind_named($got) else {
-            cli::report("kind is 'exe' or 'lib'.");
-            continue;
-        }
-
-        return .ok($kind);
-    }
-}
-
-function ask_bool(const string& $label, bool $color) : result<bool, string>
-{
-    while (true) {
-        string $got = guard ask($label, 'yes', $color) else ($e) {
-            return .error($e);
-        }
-
-        bool $v = guard yes_named($got) else {
-            cli::report("write 'yes' or 'no'.");
-            continue;
-        }
-
-        return .ok($v);
-    }
-}
-
-function yes_named(const string& $word) : bool?
-{
-    string $low = str::lower($word);
-
-    if ($low == 'yes' || $low == 'y') {
-        return true;
+    array<string> $choices = array<string>();
+    $choices[] = 'exe';
+    $choices[] = 'lib';
+    array<string> $got = element::select($ctx, 'kind', $choices);
+    scaffold::Kind $kind = guard scaffold::kind_named($got[0]) else {
+        die("unexpected kind '{$got[0]}'");
     }
 
-    if ($low == 'no' || $low == 'n') {
-        return false;
-    }
-
-    return null;
-}
-
-function ask(
-    const string& $label,
-    const string& $default,
-    bool $color
-) : result<string, string>
-{
-    io::print($label);
-    io::print(':');
-
-    if (!$default->empty()) {
-        io::print(' ');
-        io::print(cli::styled("({$default})", cli::SGR_DIM, $color));
-    }
-
-    io::print(' ');
-    io::stdout->flush();
-
-    string $line = guard io::readline() else {
-        return .error('init cancelled.');
-    }
-
-    string $got = str::trim($line);
-
-    if ($got->empty()) {
-        return .ok($default);
-    }
-
-    return .ok($got);
+    return $kind;
 }

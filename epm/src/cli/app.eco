@@ -1,0 +1,228 @@
+/**
+ * epm's command table. Parse, usage, the page and every argv refusal read
+ * this. Adding a flag is adding a row. The walk itself is libcommand.
+ */
+
+namespace epm::cli;
+
+use command;
+use epm::sys;
+use std::env;
+
+public struct App
+{
+    command::Command $cmd;
+    command::Subcommand $init;
+    command::Subcommand $install;
+    command::Subcommand $add;
+    command::Subcommand $remove;
+    command::Subcommand $update;
+    command::Subcommand $verify;
+    command::Subcommand $tree;
+    command::Arg $module;
+    command::Arg $git;
+    command::Arg $path;
+    command::Arg $range;
+    command::Flag $yes;
+
+    constructor()
+    {
+        command::Command $cmd = command::Command(
+            'epm',
+            VERSION,
+            'a package manager for Echo'
+        );
+        $cmd->tail(false);
+
+        command::Subcommand $init = $cmd->command(
+            'init',
+            'create a new Echo module',
+            'Walk a short wizard and write a new module into a new directory.\nEnter takes a default. --yes skips the questions and writes those defaults.\nThe directory is named after the module and is created next to the working directory. A module.eco already there is a refusal: init creates, it does not occupy.'
+        );
+        $cmd->positional(
+            $init,
+            '[<name>]',
+            'the module name, and the directory',
+            'Omitted, the wizard asks. Stated, it is the default. --yes needs it: a script has to say the name.',
+            0,
+            1,
+            'What it works on'
+        );
+
+        command::Subcommand $install = $cmd->command(
+            'install',
+            'apply epm.lock.json to vendor/',
+            'Apply the lock file to vendor/. A first install with no lock file does an update.\nAfter this, echoc build needs no flags: vendor/ is on disk and the compiler finds it.'
+        );
+
+        command::Subcommand $add = $cmd->command(
+            'add',
+            'require a package, or depend on a path',
+            'Add a package to this module. --git writes a #[requires:] line and resolves it.\n--path writes #[depends:] and stops there: a library that is already on disk is a path, not a package.\nThey are alternatives, not a pair.'
+        );
+        $cmd->positional(
+            $add,
+            '[<name>]',
+            'the package name, or omitted when --path names a module',
+            'With --git the name is required and becomes the vendor/ directory.\nWith --path it is optional: the module.eco at that path already has a name, and a written one must match.',
+            0,
+            1,
+            'What it works on'
+        );
+
+        command::Subcommand $remove = $cmd->command(
+            'remove',
+            'drop a required package',
+            'Delete the #[requires:] line for this name and re-resolve. Path dependencies are #[depends:] and are edited by hand.'
+        );
+        $cmd->positional(
+            $remove,
+            '<name>',
+            'the package to drop',
+            'The name as it appears in #[requires:], which is also the directory under vendor/.',
+            1,
+            1,
+            'What it works on'
+        );
+
+        command::Subcommand $update = $cmd->command(
+            'update',
+            're-resolve within the declared ranges',
+            'Re-resolve the graph within the ranges the manifest declares, rewrite the lock, and vendor what changed.\nA name narrows the work: that package is re-resolved and everything else is held at the locked version.'
+        );
+        $cmd->positional(
+            $update,
+            '[<name>]',
+            're-resolve only this package',
+            'Omit it and every requirement is re-resolved. Write one and the others stay pinned.',
+            0,
+            1,
+            'What it works on'
+        );
+
+        command::Subcommand $verify = $cmd->command(
+            'verify',
+            'lock satisfies the manifest; vendor/ matches the lock',
+            'Check that every requirement is locked inside its range, and that vendor/ holds the locked rev.'
+        );
+
+        command::Subcommand $tree = $cmd->command(
+            'tree',
+            'the resolved graph',
+            'Print the locked graph, roots first, each package with the rev that was vendored.'
+        );
+
+        command::Arg $module = $cmd->arg(
+            'module',
+            'm',
+            '<manifest>',
+            'the project, a file or a directory holding one'
+        );
+        $cmd->category($module, 'What it works on');
+        $cmd->accept($module, $install);
+        $cmd->accept($module, $add);
+        $cmd->accept($module, $remove);
+        $cmd->accept($module, $update);
+        $cmd->accept($module, $verify);
+        $cmd->accept($module, $tree);
+        $cmd->describe(
+            $module,
+            'The module.eco this command is about, or the directory that holds one:\n  epm install -m ../app\n  epm add lib --git https://example.com/lib.git -m app/module.eco\nOmitted, epm walks up from the working directory until it finds a module.eco. Stated, that walk does not happen: the path must name the file or a directory that already holds one.'
+        );
+
+        command::Arg $git = $cmd->arg(
+            'git',
+            '',
+            '<url>',
+            'fetch this remote into vendor/'
+        );
+        $cmd->category($git, 'What it works on');
+        $cmd->accept($git, $add);
+        $cmd->describe(
+            $git,
+            'The git remote to fetch. Writes source: git "..." on the #[requires:] line.\nepm lists tags, picks a version in range, and vendors the tree:\n  epm add lib --git https://github.com/echolang/libcurl --range ^0.1\nA GitHub remote lists tags and reads module.eco over HTTP; every other host uses git. Checkout is always git.'
+        );
+
+        command::Arg $path = $cmd->arg(
+            'path',
+            '',
+            '<dir>',
+            'already on disk, writes #[depends:]'
+        );
+        $cmd->category($path, 'What it works on');
+        $cmd->accept($path, $add);
+        $cmd->describe(
+            $path,
+            'A library that is already on disk. Writes #[depends:] and stops: nothing is fetched, nothing is locked.\n  epm add --path ../../echolibs/libjson\nThe name is optional. The module.eco at that path already has one, and a written name must match.'
+        );
+
+        $cmd->exclude($git, $path);
+
+        command::Arg $range = $cmd->arg(
+            'range',
+            '',
+            '<range>',
+            'the versions this project will accept'
+        );
+        $cmd->category($range, 'What it works on');
+        $cmd->accept($range, $add);
+        $cmd->fallback($range, '*');
+        $cmd->describe(
+            $range,
+            'A semver range. Defaults to *, every release:\n  epm add lib --git https://example.com/lib.git --range ^0.2\nv1 understands 1.2.3, ^1.2.3, ~1.2.3, >=1.2.3 and *.\n--version is epm\'s own version, the way echoc --version is. This is the package range.'
+        );
+
+        command::Flag $yes = $cmd->flag(
+            'yes',
+            'y',
+            'take the defaults, write, do not ask'
+        );
+        $cmd->accept($yes, $init);
+        $cmd->describe(
+            $yes,
+            'Skip the wizard. Needs a module name:\n  epm init greet --yes\nWithout --yes, init asks. Without a terminal, --yes is the only way through.'
+        );
+
+        $this->cmd = $cmd;
+        $this->init = $init;
+        $this->install = $install;
+        $this->add = $add;
+        $this->remove = $remove;
+        $this->update = $update;
+        $this->verify = $verify;
+        $this->tree = $tree;
+        $this->module = $module;
+        $this->git = $git;
+        $this->path = $path;
+        $this->range = $range;
+        $this->yes = $yes;
+    }
+}
+
+public function start_from_cli(const App& $app, const command::Parsed& $cli) : result<string, string>
+{
+    if (!$cli->stated($app->module)) {
+        return .ok(env::cwd());
+    }
+
+    string $probe = $cli->value($app->module);
+
+    if (!sys::is_absolute($probe)) {
+        $probe = sys::join(env::cwd(), $cli->value($app->module));
+    }
+
+    if (sys::is_file($probe) && sys::basename($probe) == 'module.eco') {
+        return .ok(sys::dirname($probe));
+    }
+
+    if (sys::is_dir($probe) && sys::is_file(sys::join($probe, 'module.eco'))) {
+        return .ok($probe);
+    }
+
+    return .error("no module.eco at {$cli->value($app->module)}");
+}
+
+public function work_context(const App& $app, const command::Parsed& $cli) : command::CLIContext
+{
+    return command::CLIContext::from($cli, $app->cmd, .stderr);
+}
