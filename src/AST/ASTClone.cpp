@@ -118,9 +118,16 @@ Node *NamespaceNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 
 Node *TypeNode::clone(CloneContext &cc) const
 {
-    return type_token.has_value()
+    TypeNode *c = type_token.has_value()
         ? cc.make<TypeNode>(this, cc.substitute(type), type_token.value())
         : cc.make<TypeNode>(this, cc.substitute(type));
+
+    c->written_names.reserve(written_names.size());
+    for (TypeNode *name : written_names) {
+        c->written_names.push_back(cc.child(name));
+    }
+
+    return c;
 }
 
 Node *TypeCastNode::clone(CloneContext &cc) const

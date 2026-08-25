@@ -14,11 +14,29 @@
 
 #include <algorithm>
 #include <optional>
+#include <utility>
+#include <vector>
 #include <fmt/core.h>
+
+namespace
+{
+    struct TypeNameSite
+    {
+        TokenReference token;
+        AST::ValueType type;
+
+        TypeNameSite(const TokenReference &token, AST::ValueType type)
+            : token(token), type(std::move(type))
+        {}
+    };
+};
 
 // the type grammar is mutually recursive: a generic argument is a type, and a type may be a
 // generic application. both work on bare ValueTypes, only the public entry point makes a node
-static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload);
+static std::optional<AST::ValueType> parse_value_type(
+    Parser::Payload &payload,
+    std::vector<TypeNameSite> *names
+);
 
 AST::Symbol *Parser::find_unqualified_type(Parser::Payload &payload, const std::string &name, const AST::Namespace &from)
 {
@@ -443,7 +461,11 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
 // first, and Parser::parse_namespace consumes `identifier ::` runs greedily. that is a real hole and
 // not one this needs - a nested type is reached through its owner, and an owner is a plain type name
 // wherever it is in scope
-static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, std::optional<TokenReference> &out_name)
+static AST::TypeDeclNode *try_parse_member_type_chain(
+    Parser::Payload &payload,
+    std::optional<TokenReference> &out_name,
+    std::vector<TypeNameSite> *names
+)
 {
     auto &cursor = payload.cursor;
 
@@ -470,10 +492,14 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
     // ambiguity: a name can be both a type and a namespace, and every failure below leaves the caller
     // to try the namespace-qualified path. consuming irreversibly here left the cursor mid-name and
     // turned one mis-resolved `A::B` into a cascade of unrelated diagnostics
+    const TokenReference owner_token = cursor.current();
     const auto start = cursor.snapshot();
 
     cursor.skip(); // the owner name
     cursor.skip(); // the `::`
+
+    std::vector<TypeNameSite> pending;
+    pending.emplace_back(owner_token, owner->value_type());
 
     while (true) {
         if (!cursor.is_type(Token::Type::t_identifier)) {
@@ -499,11 +525,18 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
         }
 
         owner = nested;
+        pending.emplace_back(name_token, nested->value_type());
         out_name.emplace(name_token); // TokenReference has no copy assignment
         cursor.skip();
 
         // another `::` continues the chain
         if (!cursor.is_type_sequence(0, { Token::Type::t_namespace_sep, Token::Type::t_identifier })) {
+            if (names != nullptr) {
+                for (const TypeNameSite &site : pending) {
+                    names->emplace_back(site.token, site.type);
+                }
+            }
+
             return owner;
         }
 
@@ -514,7 +547,12 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
 // parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
 // applied to `template_decl`, and returns the interned application ValueType. Arguments are
 // themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type
-static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::TypeDeclNode *template_decl, const TokenReference &name_token)
+static AST::ValueType parse_generic_application(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *template_decl,
+    const TokenReference &name_token,
+    std::vector<TypeNameSite> *names
+)
 {
     auto &cursor = payload.cursor;
     AST::ComplexType *template_ct = template_decl->value_type().get_complex_type();
@@ -528,7 +566,7 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::T
             return AST::ValueType::make_unknown();
         }
 
-        auto arg_type = parse_value_type(payload);
+        auto arg_type = parse_value_type(payload, names);
         if (!arg_type.has_value()) {
             return AST::ValueType::make_unknown();
         }
@@ -935,8 +973,12 @@ static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType 
 
 // parses one type, without emplacing a node. `parse_type` is the thin wrapper that turns the
 // result into the single TypeNode a caller expects - recursing through parse_type instead would
-// litter an orphan node into the collection for every nested level of a `ptr<ptr<T>>`
-static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
+// litter an orphan node into the collection for every nested level of a `ptr<ptr<T>>`.
+// `names` collects each identifier this spelling resolved, so an editor walk does not re-parse
+static std::optional<AST::ValueType> parse_value_type(
+    Parser::Payload &payload,
+    std::vector<TypeNameSite> *names
+)
 {
     bool is_const = false;
 
@@ -957,7 +999,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
     if (Parser::starts_callable_type(payload.cursor)) {
         payload.cursor.skip(2);
 
-        auto return_type = parse_value_type(payload);
+        auto return_type = parse_value_type(payload, names);
         if (!return_type.has_value()) {
             return std::nullopt;
         }
@@ -976,7 +1018,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
                 return std::nullopt;
             }
 
-            auto param = parse_value_type(payload);
+            auto param = parse_value_type(payload, names);
             if (!param.has_value()) {
                 return std::nullopt;
             }
@@ -1019,7 +1061,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 
         payload.cursor.skip();
 
-        auto pointee = parse_value_type(payload);
+        auto pointee = parse_value_type(payload, names);
         if (!pointee.has_value()) {
             return std::nullopt;
         }
@@ -1053,7 +1095,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 
         payload.cursor.skip();
 
-        auto target = parse_value_type(payload);
+        auto target = parse_value_type(payload, names);
         if (!target.has_value()) {
             return std::nullopt;
         }
@@ -1097,12 +1139,15 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
     // `Owner::Nested` before `a::b::Foo`: the two spellings are indistinguishable until the leading
     // identifier is looked up, and only one of them can be resolved by descending namespaces
     std::optional<TokenReference> member_type_name;
-    if (AST::TypeDeclNode *member_type = try_parse_member_type_chain(payload, member_type_name)) {
+    if (AST::TypeDeclNode *member_type = try_parse_member_type_chain(payload, member_type_name, names)) {
         AST::ValueType nested_type = member_type->value_type();
 
         // a nested type may itself be generic, and the application reads the same as any other
         if (payload.cursor.is_type(Token::Type::t_open_angle)) {
-            nested_type = parse_generic_application(payload, member_type, member_type_name.value());
+            nested_type = parse_generic_application(payload, member_type, member_type_name.value(), names);
+            if (names != nullptr && !names->empty()) {
+                names->back().type = nested_type;
+            }
         }
 
         return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(nested_type) : nested_type);
@@ -1163,7 +1208,11 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 
     // generic application on a user type: `Name<Arg, Arg, ...>` (nested, e.g. Foo<Bar<int>>)
     if (user_type_decl && payload.cursor.is_type(Token::Type::t_open_angle)) {
-        primitive_type = parse_generic_application(payload, user_type_decl, token);
+        primitive_type = parse_generic_application(payload, user_type_decl, token, names);
+    }
+
+    if (names != nullptr) {
+        names->emplace_back(token, primitive_type);
     }
 
     if (is_const) {
@@ -1176,11 +1225,18 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
 {
     auto token = payload.cursor.current();
+    std::vector<TypeNameSite> names;
 
-    auto type = parse_value_type(payload);
+    auto type = parse_value_type(payload, &names);
     if (!type.has_value()) {
         return nullptr;
     }
 
-    return &payload.context.emplace_node<AST::TypeNode>(type.value(), token);
+    AST::TypeNode &node = payload.context.emplace_node<AST::TypeNode>(type.value(), token);
+    for (const TypeNameSite &site : names) {
+        AST::TypeNode &leaf = payload.context.emplace_node<AST::TypeNode>(site.type, site.token);
+        node.written_names.push_back(&leaf);
+    }
+
+    return &node;
 }

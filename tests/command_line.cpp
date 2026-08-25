@@ -458,7 +458,7 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({}) == "No command given.");
 
     REQUIRE(refusal({ "compile", "a.eco" })
-        == "'compile' is not an echoc command. Write 'run', 'build', 'test' or 'clean'.");
+        == "'compile' is not an echoc command. Write 'run', 'build', 'test', 'clean' or 'lsp'.");
 
     REQUIRE(refusal({ "run", "--nonsense", "a.eco" }) == "Unknown option '--nonsense'.");
 
@@ -485,6 +485,15 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
 
     REQUIRE(refusal({ "clean", "app.eco" })
         == "'clean' takes no source files. It parses none and runs no pass.");
+
+    REQUIRE(refusal({ "lsp" }) == "<accepted>");
+    REQUIRE(refusal({ "lsp", "app.eco" })
+        == "'lsp' takes no source files. It parses none and runs no pass.");
+    REQUIRE(refusal({ "lsp", "--no-stdlib" }) == "<accepted>");
+    REQUIRE(refusal({ "lsp", "-m", "lib" }) == "<accepted>");
+    REQUIRE(refusal({ "lsp", "--stdio" }) == "<accepted>");
+    REQUIRE(refusal({ "run", "--stdio", "a.eco" }) == "'run' does not take '--stdio'.");
+    REQUIRE(refusal({ "lsp", "--diagnostics", "json" }) == "'lsp' does not take '--diagnostics'.");
 
     REQUIRE(refusal({ "build", "-o", "out", "a.eco", "--", "x" })
         == "Only 'run' passes arguments to the program, so '--' means nothing to 'build'.");
@@ -845,7 +854,8 @@ TEST_CASE("the usage line is built from the table", "[cli]")
         "  echoc run [options] <sources...> [-- <program arguments>]\n"
         "  echoc build [options] <sources...>\n"
         "  echoc test [options] <sources...>\n"
-        "  echoc clean [options]\n");
+        "  echoc clean [options]\n"
+        "  echoc lsp [options]\n");
 }
 
 TEST_CASE("a refusal is the sentence, the usage and where to read more", "[cli]")

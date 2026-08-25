@@ -1,12 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <AST/ASTConstantExpander.h>
-#include <AST/ASTMonomorphizer.h>
-#include <AST/ASTAccessPass.h>
-#include <AST/ASTPointerAdjuster.h>
-#include <AST/ASTTypeChecker.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
+#include <Compiler/ParsePipeline.h>
 
 #include "helpers.h"
 
@@ -54,11 +50,7 @@ AST::Module EchoTests::tests_make_tokenized_module(std::string content)
 
 void EchoTests::run_test_semantic_passes(AST::Bundle &bundle, Compiler::CompilerOptions options)
 {
-    AST::ConstantExpander(bundle).run();
-    AST::Monomorphizer(bundle).run();
-    AST::PointerAdjuster(bundle).run();
-    AST::AccessPass(bundle).run();
-    AST::TypeChecker(bundle, options).run();
+    Compiler::run_semantic_pipeline(bundle, options);
 }
 
 std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string content)

@@ -498,8 +498,14 @@ void RecursiveVisitor::visitMemberAccess(MemberAccessNode &node)
     place_edge(node.get_base_node());
 }
 
+void RecursiveVisitor::visitType(TypeNode &node)
+{
+    for (TypeNode *name : node.written_names) {
+        statement_edge(name);
+    }
+}
+
 // leaves and cross-reference-only nodes: nothing to descend into
-void RecursiveVisitor::visitType(TypeNode &node) {}
 void RecursiveVisitor::visitVar(VarNode &node) {}
 void RecursiveVisitor::visitLiteralFloatExpr(LiteralFloatExprNode &node) {}
 void RecursiveVisitor::visitLiteralIntExpr(LiteralIntExprNode &node) {}

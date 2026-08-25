@@ -30,6 +30,46 @@ namespace AST
         Location end;
     };
 
+    inline bool location_before(const Location &a, const Location &b)
+    {
+        return a.line < b.line || (a.line == b.line && a.column < b.column);
+    }
+
+    inline bool location_in_span(const Location &location, const Span &span)
+    {
+        if (span.file == nullptr) {
+            return false;
+        }
+
+        if (location_before(location, span.start)) {
+            return false;
+        }
+
+        return location_before(location, span.end);
+    }
+
+    inline Span union_span(const Span &a, const Span &b)
+    {
+        if (a.file == nullptr) {
+            return b;
+        }
+
+        if (b.file == nullptr) {
+            return a;
+        }
+
+        Span out = a;
+        if (location_before(b.start, a.start)) {
+            out.start = b.start;
+        }
+
+        if (location_before(a.end, b.end)) {
+            out.end = b.end;
+        }
+
+        return out;
+    }
+
     struct DiagnosticLabel
     {
         Span span;
@@ -78,6 +118,7 @@ namespace AST
     // - a **string literal stores its value without the quotes**, so its span is two characters short.
     //   Known and accepted.
     Span span_of(const TokenSlice &slice, const File *fallback_file = nullptr);
+    Span span_of(const TokenReference &token);
 
     Diagnostic to_diagnostic(const IssueRecord &issue);
 };

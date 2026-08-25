@@ -113,6 +113,8 @@ unsigned int Compiler::bit_of(Subcommand id)
         return accepts::test;
     case Subcommand::t_clean:
         return accepts::clean;
+    case Subcommand::t_lsp:
+        return accepts::lsp;
     case Subcommand::t_none:
         return 0;
     }
@@ -243,7 +245,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_build_dir, "build-dir", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_inputs,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // compiling | clean: the server builds nothing and writes no artifact
+            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
             "<dir>", "",
             "where build artifacts are written",
             "Keep the build's leftovers somewhere other than beside your sources:\n"
@@ -260,7 +263,7 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_package_dir, "package-dir", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_inputs,
-            accepts::compiling, 0, ExclusionGroup::t_none,
+            accepts::compiling | accepts::lsp, 0, ExclusionGroup::t_none,
             "<dir>", "",
             "directory that holds vendored packages",
             "Override the search for 'vendor/':\n"
@@ -419,7 +422,7 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_no_stdlib, "no-stdlib", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_build,
-            accepts::compiling, 0, ExclusionGroup::t_stdlib_use,
+            accepts::compiling | accepts::lsp, 0, ExclusionGroup::t_stdlib_use,
             nullptr, "",
             "compile without the standard library",
             "Compile without the standard library:\n"
@@ -638,7 +641,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_diagnostics, "diagnostics", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_report,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // compiling | clean: the server publishes LSP diagnostics, it does not render any
+            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
             "<auto|pretty|ascii|json>", "auto",
             "how a diagnostic is drawn",
             "How an error or a warning is drawn:\n"
@@ -655,7 +659,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_color, "color", "colour", '\0',
             OptionArity::t_value, OptionCategory::t_report,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // compiling | clean: the server renders nothing
+            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
             "<auto|always|never>", "auto",
             "colourise diagnostics",
             "Colourise diagnostics:\n"
@@ -670,7 +675,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_silent, "silent", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_report,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // compiling | clean: the server draws no checklist
+            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
             nullptr, "",
             "do not draw the progress checklist",
             "Stop drawing the checklist that rewrites itself as each module and phase finishes:\n"
@@ -741,6 +747,20 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "  echoc clean -n\n"
             "A good habit in general, and worth the extra command whenever you have pointed a build "
             "somewhere of your own with --build-dir or '#[build_dir:]'.",
+            {}, nullptr
+        },
+        {
+            Opt::t_stdio, "stdio", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_general,
+            accepts::lsp, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "speak over stdin and stdout",
+            "Name the stdio transport:\n"
+            "  echoc lsp --stdio\n"
+            "It is the only transport echoc has, so writing this flag and omitting it are the same "
+            "thing. Several language-server clients pass it by convention - vscode-languageclient "
+            "appends it when you ask for stdio - and refusing a name for the default would make those "
+            "clients fail for a word that meant nothing.",
             {}, nullptr
         },
         {
@@ -975,6 +995,27 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "So it takes the flags that locate a build, like --module, --build-dir and --target-os, and "
             "refuses every flag that describes one. A flag a command accepts and silently ignores is "
             "worse than one it rejects.",
+            false,
+            nullptr,
+            nullptr,
+            nullptr,
+            false
+        },
+        {
+            Subcommand::t_lsp, "lsp", accepts::lsp,
+            "speak LSP over stdio",
+            "Speak the Language Server Protocol over stdin and stdout, so an editor can ask echoc about "
+            "the program it is looking at:\n"
+            "  echoc lsp\n"
+            "  echoc lsp -m lib\n"
+            "The workspace root arrives from the client's initialize request, or from --module if you "
+            "point at one. Nothing is compiled to an executable and nothing is written beside your "
+            "sources.\n"
+            "Stdout carries only LSP frames. Logging goes to stderr, or to the client as "
+            "window/logMessage. A test block is dropped before it is parsed, the same as every command "
+            "that is not 'test'.\n"
+            "v1 answers diagnostics, hover, go-to-definition and document symbols. Completion is not "
+            "in this yet.",
             false,
             nullptr,
             nullptr,

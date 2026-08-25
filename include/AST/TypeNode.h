@@ -8,6 +8,7 @@
 #include "Lexer.h"
 
 #include <optional>
+#include <vector>
 
 namespace AST
 {
@@ -17,7 +18,14 @@ namespace AST
 
         const ValueType type;
 
+        // the token at the start of the written type (`const`, `ptr`, `function`, …)
+        // source_token_of and the monomorphizer's "the author wrote a type" bit both read this
         std::optional<TokenReference> type_token;
+
+        // identifiers the author wrote in this spelling, each a TypeNode whose `type` is what
+        // that identifier resolved to. parse_type fills them from parse_value_type; minted
+        // nodes have none. owned so a later walk does not re-parse
+        std::vector<TypeNode *> written_names;
 
         TypeNode(ValueType type, TokenReference type_token)
             : type(type), type_token(type_token)

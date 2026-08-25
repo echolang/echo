@@ -17,7 +17,8 @@ namespace Compiler
         t_run,
         t_build,
         t_test,
-        t_clean
+        t_clean,
+        t_lsp
     };
 
     // the bits an option's `subcommands` mask carries. a mask rather than a vector because the only
@@ -28,6 +29,7 @@ namespace Compiler
         constexpr unsigned int build = 1u << 1;
         constexpr unsigned int test = 1u << 2;
         constexpr unsigned int clean = 1u << 3;
+        constexpr unsigned int lsp = 1u << 4;
 
         // the shapes that recur. `compiling` is the set that turns source into code, and is what replaced
         // the second `for (auto &command : {...})` registration loop this table exists to delete.
@@ -37,7 +39,7 @@ namespace Compiler
         // that runs what it compiled in this process, which is what `--explain prune` is about
         constexpr unsigned int compiling = run | build | test;
         constexpr unsigned int jitting = run | test;
-        constexpr unsigned int all = run | build | test | clean;
+        constexpr unsigned int all = run | build | test | clean | lsp;
     };
 
     unsigned int bit_of(Subcommand id);
@@ -76,6 +78,7 @@ namespace Compiler
         t_timeout,
         t_with_stdlib,
         t_dry_run,
+        t_stdio,
         t_help,
         t_version
     };

@@ -35,6 +35,15 @@ AST::Span AST::span_of(const TokenSlice &slice, const File *fallback_file)
     return span;
 }
 
+AST::Span AST::span_of(const TokenReference &token)
+{
+    if (!token.is_valid()) {
+        return {};
+    }
+
+    return span_of(token.make_slice(), token.file());
+}
+
 AST::Diagnostic AST::to_diagnostic(const IssueRecord &issue)
 {
     const CodeRef &code_ref = issue.code_ref;

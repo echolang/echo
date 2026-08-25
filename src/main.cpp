@@ -7,11 +7,7 @@
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTDiagnosticRenderer.h"
 #include "AST/ASTModuleEmbedder.h"
-#include "AST/ASTConstantExpander.h"
 #include "AST/ASTMonomorphizer.h"
-#include "AST/ASTAccessPass.h"
-#include "AST/ASTPointerAdjuster.h"
-#include "AST/ASTTypeChecker.h"
 #include "AST/ASTMangler.h"
 #include "AST/FunctionDeclNode.h"
 #include "Parser/ManifestParser.h"
@@ -22,6 +18,8 @@
 #include "Compiler/CommandLineHelp.h"
 #include "Compiler/CommandLineOption.h"
 #include "Compiler/DriverOptions.h"
+#include "Compiler/ParsePipeline.h"
+#include "Compiler/Lsp/LspServer.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/LinkRequirement.h"
@@ -103,75 +101,6 @@ std::vector<std::filesystem::path> get_file_list_from_args(
     return files;
 }
 
-int handle_parse(
-    const AST::DiagnosticRenderer &diagnostics,
-    Parser::ModuleParser &parser,
-    Parser::ModuleParser::InputPayload &input)
-{
-    // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says**, unlike the tokenization error inside. That macro
-    // exists to let a *compiler bug* crash with a stack trace, and a malformed `#[if: ...]` is not one - it
-    // is a mistake in the source being compiled, and reporting it as a crash would blame echoc for it.
-    //
-    // the banner names conditional compilation and covers a malformed `test` header too, that being the
-    // other thing Parser::filter_conditional_tokens decides: a test block is a region compiled under one
-    // condition, and the filter has to read its header to know where the region it is dropping ends
-    try {
-        parser.parse_input(input);
-    }
-    catch (AST::Module::TokenFilterException &e) {
-        diagnostics.render_untyped("Conditional Compilation Failed", e.what());
-        return 1;
-    }
-#if !ECO_DONT_CATCH_EXCEPTIONS
-    catch (Parser::ModuleParser::TokenizationException &e) {
-        diagnostics.render_untyped("Tokenization Failed", e.what());
-        return 1;
-    }
-#endif
-
-    return 0;
-}
-
-// the standard library, when it is embedded in the binary rather than read from disk. This is the one
-// module that cannot come from a manifest, because there is no file list to read - the sources *are* the
-// bytes the generated header carries
-//
-// leaving the standard library out is leaving one module out, nothing more - nothing downstream
-// looks a module up by that name, codegen only ever asks for ECO_MAIN_MODULE_NAME, and the core
-// types are bound by whichever source declares `#[core: ...]` rather than by the stdlib. what the
-// program gives up is `die`, `assert` and the `mem::`/`std::math::` namespaces, which is the point: a
-// test reading the emitted IR or an AST dump does not want several hundred lines of library
-// standing between its first assertion and the code it is about
-#if ECO_USE_EMBEDDED_STDLIB
-static void parse_embedded_stdlib_module(AST::Bundle &bundle, Parser::ModuleParser &parser)
-{
-    AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
-    auto &stdlib = bundle.modules.get_module(stdlib_handle);
-
-    EmbeddedModule::load_stdlib_module(bundle, stdlib);
-    parser.parse_module(stdlib, bundle.collector);
-}
-#endif
-
-// the manifest of the project the compiler was invoked *in*, when the command line names nothing at all.
-//
-// this is what makes `echoc run` work the way every other project tool does: a directory holding a
-// module.eco is a project, and pointing at it is redundant. Only consulted when neither `-m` nor a source
-// file was given, so it can never override something the user asked for
-static std::optional<std::filesystem::path> discover_project_manifest()
-{
-    std::error_code ec;
-    const std::filesystem::path here = std::filesystem::current_path(ec);
-
-    if (ec) {
-        return std::nullopt;
-    }
-
-    // through the one owner of "what manifest does this path name", so the manifest's file name is spelled
-    // in exactly one place and a directory is resolved the way every other root is
-    return Parser::manifest_at(here);
-}
-
 // what a `#[if:]` may see, off the command line. **before the parse**, and that is not a preference: the
 // conditional filter runs between lexing and pass 1, so what a condition sees has to be settled before a
 // single file is read. Everything here comes off the command line, so there is nothing to wait for.
@@ -199,15 +128,6 @@ static bool resolve_target_facts(
     return true;
 }
 
-// the manifests this invocation builds, in the order the modules have to be parsed: every `-m` the user
-// gave, plus the standard library's own, which is an ordinary manifest module like any other
-//
-// resolving the whole graph here rather than per flag is what makes a dependency implicit: naming a
-// library that depends on another pulls the other in, once, in the right order
-//
-// **the flags arrive as parameters rather than being read off a parser.** `echoc clean` resolves the same
-// graph and registers none of them, and a function that reaches into a command line for `source` cannot be
-// called by a subcommand that has no such argument
 static bool resolve_manifests(
     const std::vector<std::string> &named_roots,
     bool with_stdlib,
@@ -219,141 +139,25 @@ static bool resolve_manifests(
     std::vector<std::filesystem::path> &out_roots
 )
 {
-    std::vector<std::filesystem::path> roots;
-
-#if !ECO_USE_EMBEDDED_STDLIB
-    if (with_stdlib) {
-        roots.push_back(std::filesystem::path(STDLIB_SOURCE_DIR) / "module.eco");
-    }
-#else
-    (void)with_stdlib;
-#endif
-
-    // the standard library is not one of *the user's* roots - it is added to every build - so it is
-    // deliberately not in out_roots. Whoever asks "what did this invocation point at" must not be told
-    // "the standard library"
-    const size_t implicit_roots = roots.size();
-
-    for (const std::string &named : named_roots) {
-        roots.push_back(std::filesystem::path(named));
-    }
-
-    if (roots.size() == implicit_roots && allow_project_discovery) {
-        if (const std::optional<std::filesystem::path> discovered = discover_project_manifest()) {
-            roots.push_back(discovered.value());
-        }
-    }
-
-    // **resolved here, once.** A root may name the manifest file or the directory holding one, and
-    // Parser::manifest_at is what owns which a directory means - so the answer is taken while both spellings
-    // are still in hand rather than re-derived against every manifest later compared against one. What comes
-    // back is the path a manifest records as its own, which makes that comparison an equality
-    out_roots.clear();
-
-    for (auto named = roots.begin() + implicit_roots; named != roots.end(); ++named) {
-        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(*named);
-
-        // one entry per root whether or not it resolved: a root naming nothing is a failure
-        // resolve_module_graph reports below in its own words, and until then the count is what says
-        // whether this invocation pointed at one module or several
-        out_roots.push_back(
-            resolved.has_value() ? Compiler::canonical_or_absolute(resolved.value()) : *named);
-    }
-
-    if (roots.empty()) {
-        return true;
-    }
+    std::error_code ec;
+    const std::filesystem::path here = std::filesystem::current_path(ec);
 
     Parser::ManifestScratch scratch(facts);
 
-    // one package directory for the whole invocation. a vendored module's own `#[requires:]`
-    // resolve here too, so the tree stays flat
-    if (!out_roots.empty()) {
-        scratch.package_dir = Parser::resolve_package_dir(
-            out_roots.front().parent_path(), package_dir_override);
-    }
-    else if (!package_dir_override.empty()) {
-        scratch.package_dir = Parser::resolve_package_dir({}, package_dir_override);
-    }
-
-    if (!Parser::resolve_module_graph(roots, scratch, out)) {
+    if (!Compiler::resolve_front_end_manifests(
+            named_roots,
+            with_stdlib,
+            allow_project_discovery,
+            ec ? std::filesystem::path{} : here,
+            package_dir_override,
+            scratch,
+            out,
+            out_roots)) {
         scratch.bundle.collector.print_issues(diagnostics);
         return false;
     }
 
     return true;
-}
-
-// is this manifest one of the roots the invocation named, as opposed to one pulled in behind it.
-//
-// a plain membership test, because resolve_manifests already settled each root to the path a manifest
-// records as its own - `-m lib` and `-m lib/module.eco` are one root by the time they get here. Resolving
-// per ask instead cost a Parser::manifest_at and an `equivalent` for every (manifest, root) pair, twice
-// over, to answer a question about a list that cannot change during an invocation
-static bool manifest_is_a_root(
-    const Parser::ModuleManifest &manifest,
-    const std::vector<std::filesystem::path> &roots
-)
-{
-    return std::find(roots.begin(), roots.end(), manifest.path) != roots.end();
-}
-
-// one AST::Module per manifest, parsed completely before the next one starts - which is what the
-// topological order above exists for
-static int parse_manifest_modules(
-    const AST::DiagnosticRenderer &diagnostics,
-    const std::vector<const Parser::ModuleManifest *> &manifests,
-    const std::vector<std::filesystem::path> &roots,
-    const Parser::ActiveTargets &active_targets,
-    AST::Bundle &bundle,
-    Parser::ModuleParser &parser
-)
-{
-    for (const Parser::ModuleManifest *entry : manifests) {
-        const Parser::ModuleManifest &manifest = *entry;
-
-        Compiler::ProgressStep step(
-            Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_parse, manifest.name);
-
-        AST::module_handle_t handle = bundle.modules.add_module(manifest.name);
-        auto &module = bundle.modules.get_module(handle);
-
-        auto input = Parser::ModuleParser::InputPayload {
-            .files = {},
-            .module = module,
-            .collector = bundle.collector
-        };
-
-        // **through the one owner, never off `manifest.sources`.** What this module compiles is a question
-        // about the program being built, and the module cache asks the very same function - two merges
-        // here would be a cache handing one program the object built for another
-        const Parser::ModuleContribution contribution =
-            Parser::module_contribution_for(manifest, active_targets);
-
-        for (const auto &source : contribution.sources) {
-            input.files.push_back(Parser::ModuleParser::InputFile(source));
-        }
-
-        step.summary(fmt::format(
-            "{} file{}",
-            contribution.sources.size(), contribution.sources.size() == 1 ? "" : "s"));
-
-        // **a module the invocation pointed at lists its files; a dependency reports a count.** the same
-        // distinction resolve_manifests already draws, and for the sentence it draws it with: whoever
-        // asks what this invocation pointed at must not be told "the standard library". Twenty-one rows
-        // of stdlib under every build is that answer given anyway
-        if (manifest_is_a_root(manifest, roots)) {
-            step.detail(contribution.sources);
-        }
-
-        if (handle_parse(diagnostics, parser, input)) {
-            return 1;
-        }
-
-        step.finish(true);
-    }
-
-    return 0;
 }
 
 // one program this invocation produces.
@@ -396,8 +200,8 @@ struct Invocation
 
     // **every manifest this project reaches**, in dependency order - which, since a `#[target: ...] { }`
     // scope may declare a `#[depends:]`, is no longer the same set as the modules a given program
-    // compiles. FrontEnd::manifests() is that narrower answer, and carries a different type so the two
-    // cannot be mistaken for one another
+    // compiles. Parser::module_contribution_for, asked of a program's active targets, is that
+    // narrower answer
     std::vector<Parser::ModuleManifest> manifests;
 
     // the user's roots only, never the standard library - this is what "which module is the program" is
@@ -428,90 +232,6 @@ struct Invocation
     std::vector<Program> programs;
 };
 
-// **does this manifest name a file of its own as a program?**
-//
-// The *executable* targets and not every target, which is the whole of the question: a `#[target: test]`
-// produces no artifact and names no entry, so a module declaring only those still is the one program its
-// module has always been - every file root of it, concatenated. Two readers, and they were two copies of
-// this predicate 900 lines apart before it had a name: resolve_programs, deciding whether there is a target
-// to build, and collect_shared_top_level_code, deciding whether "only an entry's top level runs" applies
-static bool module_declares_a_program(const Parser::ModuleManifest &manifest)
-{
-    return std::any_of(
-        manifest.targets.begin(), manifest.targets.end(),
-        [](const Parser::ModuleTarget &target) {
-            return target.kind == Parser::TargetKind::t_executable;
-        });
-}
-
-// **top-level code in a file no target claims**, collected once per file.
-//
-// only asked of a module that declares targets, because that is the only module with anything on record
-// saying which of its files are programs. A file that *is* some other target's entry is left alone: its
-// code belongs to that program and not being part of this one is the point of declaring both.
-//
-// **collects and returns, never renders.** the gate at the end of run_semantic_passes is the one that
-// turns a full collector into output and an exit status - it flushes stdout ahead of stderr first, which
-// a second gate here got wrong, and it reports every issue under one summary rather than this file's
-// under one and the rest under another
-static void collect_shared_top_level_code(const Parser::ModuleManifest &manifest, AST::Bundle &bundle)
-{
-    // **asked of the programs, not of the targets.** The rule this function states is "a target's entry
-    // file becomes the program, so a shared file's top level never runs", and that only holds once
-    // something claims an entry. A test target claims none by construction, so a module declaring only
-    // those still gets the program its module has always been - and until this asked the right question
-    // every file of such a module holding top-level code was refused against a rule nobody wrote
-    if (!module_declares_a_program(manifest)) {
-        return;
-    }
-
-    AST::Module *module = bundle.modules.find_module_ptr(manifest.name);
-
-    if (module == nullptr) {
-        return;
-    }
-
-    for (AST::File &file : module->files()) {
-        const bool is_an_entry = std::any_of(manifest.targets.begin(), manifest.targets.end(),
-            [&file](const Parser::ModuleTarget &target) {
-                return target.entry == file.get_path();
-            });
-
-        // **a file an active scope contributed is that target's own**, not code shared with the rest of
-        // the module, so this rule does not reach it. Answered by subtraction rather than carried: every
-        // file here came from the module's contribution, which is `manifest.sources` plus what the scopes
-        // added, and `manifest.sources` is sorted - so "not one of the module's own" is one lookup
-        const bool is_scoped = !std::binary_search(
-            manifest.sources.begin(), manifest.sources.end(), file.get_path());
-
-        if (is_an_entry || is_scoped || file.root == nullptr) {
-            continue;
-        }
-
-        AST::Node *statement = AST::first_top_level_statement(*file.root);
-
-        if (statement == nullptr) {
-            continue;
-        }
-
-        const TokenReference *token = AST::source_token_of(*statement);
-
-        // **null is a real answer from source_token_of**, and a statement it cannot place is one this
-        // cannot underline. Refusing it with no location at all would be worse than the silent drop it
-        // replaced, so the file keeps its old behaviour in the one case there is nothing to point at
-        if (token == nullptr) {
-            continue;
-        }
-
-        // through the collector rather than through the manifest's own `<file>:<line>:` channel: this is
-        // a mistake in a *source* file, so it gets the underline and the note every other one gets
-        bundle.collector.collect_issue<AST::Issue::TopLevelCodeOutsideEntry>(
-            AST::CodeRef{ module, token->make_slice() },
-            manifest.name,
-            file.get_path().filename().string());
-    }
-}
-
 // builds the bundle both `run` and `build` compile: the stdlib module, the manifest modules, then the
 // main module with the user's sources. one function rather than two copies, because the copies had
 // already drifted - `build` never created a stdlib module at all, so any program calling `mem::` or
@@ -529,67 +249,31 @@ static int build_bundle(
     Parser::ModuleParser &parser
 )
 {
-#if ECO_USE_EMBEDDED_STDLIB
-    if (!driver.no_stdlib) {
-        parse_embedded_stdlib_module(bundle, parser);
-    }
-#endif
-
     // the manifest modules first, in dependency order, and the loose sources after them - so a program on
     // the command line can name anything a manifest declared, and no manifest can name it back. That is
     // the same one-way rule that holds between two manifests, for the same reason
     const std::vector<std::filesystem::path> &source_files = invocation.sources;
 
-    if (parse_manifest_modules(
-            diagnostics, manifests, invocation.roots, program.active_targets, bundle, parser) != 0) {
+    if (!source_files.empty() && Compiler::manifest_claims_main_module(manifests)) {
+        std::cerr << "A manifest already declares the '" << ECO_MAIN_MODULE_NAME
+                  << "' module, so the source files on the command line have nowhere to go."
+                  << std::endl;
         return 1;
     }
 
-    for (const Parser::ModuleManifest *manifest : manifests) {
-        collect_shared_top_level_code(*manifest, bundle);
-    }
+    const Compiler::ParseRequest parse_request{
+        manifests,
+        invocation.roots,
+        program.active_targets,
+        source_files,
+        !driver.no_stdlib,
+        {}
+    };
 
-    if (!source_files.empty()) {
-        const bool manifest_is_the_program = std::any_of(
-            manifests.begin(), manifests.end(),
-            [](const Parser::ModuleManifest *manifest) { return manifest->name == ECO_MAIN_MODULE_NAME; });
-
-        if (manifest_is_the_program) {
-            std::cerr << "A manifest already declares the '" << ECO_MAIN_MODULE_NAME
-                      << "' module, so the source files on the command line have nowhere to go."
-                      << std::endl;
-            return 1;
-        }
-
-        Compiler::ProgressStep step(
-            Compiler::ProgressReporter::instance(),
-            Compiler::ProgressPhase::t_parse,
-            ECO_MAIN_MODULE_NAME);
-
-        AST::module_handle_t module_handle = bundle.modules.add_module(ECO_MAIN_MODULE_NAME);
-        auto &module = bundle.modules.get_module(module_handle);
-
-        auto input = Parser::ModuleParser::InputPayload {
-            .files = {},
-            .module = module,
-            .collector = bundle.collector
-        };
-
-        for (const auto &source_file : source_files) {
-            input.files.push_back(Parser::ModuleParser::InputFile(source_file));
-        }
-
-        // always listed: these are the files the user named on the command line, so there is no version
-        // of this module that is somebody else's dependency
-        step.summary(fmt::format(
-            "{} file{}", source_files.size(), source_files.size() == 1 ? "" : "s"));
-        step.detail(source_files);
-
-        if (handle_parse(diagnostics, parser, input)) {
-            return 1;
-        }
-
-        step.finish(true);
+    if (const std::optional<Compiler::FrontEndFailure> failure =
+            Compiler::parse_front_end_bundle(parse_request, bundle, parser)) {
+        diagnostics.render_untyped(failure->title, failure->message);
+        return 1;
     }
 
     // regenerating the embeddable header is a build step, not a compile step. running it on
@@ -641,8 +325,9 @@ static void print_resolved_ast(const Compiler::DriverOptions &driver, AST::Bundl
 }
 
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
-// a pass added to one entry point and forgotten in the other is a silent behaviour difference
-// tests/helpers.cpp mirrors this list and has to be updated alongside it
+// a pass added to one entry point and forgotten in the other is a silent behaviour difference.
+// Compiler::run_semantic_pipeline is the sequence; this is the driver's ProgressStep, dump, flush
+// and summary around it
 static int run_semantic_passes(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
@@ -653,39 +338,15 @@ static int run_semantic_passes(
     Compiler::ProgressStep step(
         Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_semantic_passes);
 
-    // **before the monomorphizer, not inside its fixpoint.** every reference to a compile-time constant
-    // becomes a clone of that constant's value here, and AST::OwnershipPass - which runs inside that
-    // fixpoint - walks a body exactly once, ever: a reference still in a body when it gets there makes
-    // that walk's answer permanent and wrong. Nothing in an expansion depends on what the fixpoint
-    // produces, so one pass is all it needs
-    AST::ConstantExpander(bundle).run();
-
-    // resolve generics into concrete instances before compilation
-    AST::Monomorphizer monomorphizer(bundle);
-    monomorphizer.run();
-
-    if (driver.prints(Compiler::PrintKind::t_instances)) {
-        // **the one dump written while a progress row is live.** Every other one in this file sits
-        // between steps, which is the measure of whether the steps are placed right - so this is the
-        // whole of the suspend list rather than the first entry in one
-        Compiler::ProgressReporter::instance().suspend();
-        std::cout << monomorphizer.debug_dump_instances() << std::endl;
-    }
-
-    // semantic analysis on the concrete AST: resolves member accesses and call arguments and
-    // records located issues, so type errors surface here instead of deep in codegen
-    // make the pointer transparency the language promises explicit in the tree: every pointer
-    // read in a value position gains a deref node, so from here on result_type() is honest
-    AST::PointerAdjuster(bundle).run();
-
-    // addresses may alias, accesses may not conflict: refuse a call that hands one region to two
-    // parameters when either of them takes it exclusively. after the adjuster because a path walk
-    // wants the tree with every deref in it, and outside the fixpoint because it mints no calls
-    AST::AccessPass(bundle).run();
-
-    // the one pass that reads the options: a builtin can be unavailable, and only the command line
-    // knows whether this one is
-    AST::TypeChecker(bundle, options).run();
+    Compiler::run_semantic_pipeline(bundle, options, [&](AST::Monomorphizer &monomorphizer) {
+        if (driver.prints(Compiler::PrintKind::t_instances)) {
+            // **the one dump written while a progress row is live.** Every other one in this file sits
+            // between steps, which is the measure of whether the steps are placed right - so this is the
+            // whole of the suspend list rather than the first entry in one
+            Compiler::ProgressReporter::instance().suspend();
+            std::cout << monomorphizer.debug_dump_instances() << std::endl;
+        }
+    });
 
     // **closed before anything is printed**, so the row is above the diagnostics that explain it rather
     // than under them. The driver learns the outcome here, from the collector, which is the moment the
@@ -1227,7 +888,7 @@ static std::set<std::string> resolve_test_modules(
     }
 
     for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        if (manifest_is_a_root(manifest, invocation.roots)) {
+        if (Compiler::manifest_is_a_root(manifest, invocation.roots)) {
             result.insert(manifest.name);
         }
     }
@@ -1275,11 +936,11 @@ static bool resolve_programs(
         }
 
         // the root's own name, resolved through the loaded set rather than from the path - the manifest
-        // decides what its module is called. Through manifest_is_a_root and not a comparison of its own,
-        // which is what taught it that `-m lib` and `-m lib/module.eco` are one root
+        // decides what its module is called. Through Compiler::manifest_is_a_root and not a comparison
+        // of its own, which is what taught it that `-m lib` and `-m lib/module.eco` are one root
         auto found = std::find_if(out.manifests.begin(), out.manifests.end(),
             [&out](const Parser::ModuleManifest &manifest) {
-                return manifest_is_a_root(manifest, out.roots);
+                return Compiler::manifest_is_a_root(manifest, out.roots);
             });
 
         if (found == out.manifests.end()) {
@@ -1372,7 +1033,7 @@ static bool resolve_programs(
     //
     // **the *executable* targets and not every target**, or a manifest declaring only `#[target: test]`
     // would fall through to the loop below and build no program at all, silently
-    if (entry == nullptr || !module_declares_a_program(*entry)) {
+    if (entry == nullptr || !Compiler::module_declares_a_program(*entry)) {
         if (!driver.targets.empty()) {
             diagnostics.render_untyped("No Such Target", entry == nullptr
                 ? "'--target' names a program a manifest declares, and this build's program is the source "
@@ -2754,8 +2415,14 @@ static int main_print_manifest(
     }
 
     if (named.empty()) {
-        if (const std::optional<std::filesystem::path> discovered = discover_project_manifest()) {
-            named.push_back(discovered.value());
+        std::error_code ec;
+        const std::filesystem::path here = std::filesystem::current_path(ec);
+
+        if (!ec) {
+            if (const std::optional<std::filesystem::path> discovered =
+                    Compiler::discover_project_manifest(here)) {
+                named.push_back(discovered.value());
+            }
         }
     }
 
@@ -2786,6 +2453,16 @@ static int main_print_manifest(
 
     std::cout << json.value();
     return 0;
+}
+
+static int main_lsp(const Compiler::DriverOptions &driver)
+{
+    // stdout is the LSP stream; nothing else may write it. unitbuf so each frame
+    // leaves before the next read, rather than sitting in a buffer the client is
+    // waiting on
+    std::cout << std::unitbuf;
+    Compiler::Lsp::Server server(std::cin, std::cout, driver);
+    return server.run();
 }
 
 int main(int argc, char *argv[], char *envp[])
@@ -2878,7 +2555,10 @@ int main(int argc, char *argv[], char *envp[])
     // enabled after the capabilities and not beside PhaseTimings above, because it needs them - and after
     // the renderer, because a row must never be the first thing on a stream a diagnostic is about to fail
     // onto
-    if (capabilities.interactive && !driver.silent && !diagnostics.is_machine_readable()) {
+    if (capabilities.interactive
+        && !driver.silent
+        && !diagnostics.is_machine_readable()
+        && driver.subcommand != Compiler::Subcommand::t_lsp) {
         Compiler::ProgressReporter::instance().enable(std::cerr, capabilities);
     }
 
@@ -2898,6 +2578,9 @@ int main(int argc, char *argv[], char *envp[])
 
     case Compiler::Subcommand::t_test:
         return main_test(driver, diagnostics, capabilities, envp);
+
+    case Compiler::Subcommand::t_lsp:
+        return main_lsp(driver);
 
     // unreachable: the parser refuses an invocation with no command, so this is here to make the switch
     // total rather than to be taken

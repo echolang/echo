@@ -48,9 +48,7 @@ namespace EchoTests
 
     AST::Module tests_make_tokenized_module(std::string content);
 
-    // **mirrors run_semantic_passes in src/main.cpp**, and is the only place these tests spell the sequence -
-    // a pass registered in one and not the other makes every test diverge from the real pipeline, and two
-    // copies of the list here made that two chances to forget instead of one
+    // Compiler::run_semantic_pipeline, kept under this name so the ~40 call sites do not change
     void run_test_semantic_passes(AST::Bundle &bundle, Compiler::CompilerOptions options);
 
     std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(std::string content);
