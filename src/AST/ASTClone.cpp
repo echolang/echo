@@ -17,6 +17,7 @@
 
 #include "AST/ASTClone.h"
 
+#include "AST/ASTConstFold.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ScopeNode.h"
@@ -540,12 +541,25 @@ Node *IfStatementNode::clone(CloneContext &cc) const
 // being cloned into an instance. a missing edge here would leave an arm behind in the template
 Node *ConstIfNode::clone(CloneContext &cc) const
 {
+    // clone the condition first so type arguments substitute. if it folds, only the taken arm is
+    // cloned - the discarded one never exists in the instance, so OperatorRewriter cannot mint
+    // into it and TypeLowering cannot emit it. this stays a ConstIfNode: ConstFolding is the splicer
     ConstIfNode *c = cc.shallow(this);
+    c->condition = cc.child(condition);
 
-    c->condition = cc.child(c->condition);
-    c->if_scope = cc.child(c->if_scope);
-    c->else_scope = cc.child(c->else_scope);
+    if (c->condition != nullptr) {
+        const ConstFoldResult folded = const_fold(c->condition);
 
+        if (folded.is_bool()) {
+            ScopeNode *taken = taken_const_if_arm(*this, folded.as_bool());
+            c->if_scope = taken == if_scope ? cc.child(if_scope) : nullptr;
+            c->else_scope = taken == else_scope ? cc.child(else_scope) : nullptr;
+            return c;
+        }
+    }
+
+    c->if_scope = cc.child(if_scope);
+    c->else_scope = cc.child(else_scope);
     return c;
 }
 
@@ -694,6 +708,10 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // under its symbol. the monomorphizer sets these on the instance right after cloning
     c->instantiation_args.clear();
     c->template_ref = nullptr;
+
+    // a clone is a new region. cc.shallow copy-constructs, so an instance of an already-owned
+    // template would otherwise start t_owned and skip the ownership walk
+    c->region_state = RegionState::t_open;
 
     // parameters first, so the map is populated before the body rebinds its VarNodes to them. the same
     // rule ScopeNode::clone follows for a scope's declarations - and this loop is the only thing that can

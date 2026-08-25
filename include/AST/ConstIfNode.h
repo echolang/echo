@@ -13,8 +13,10 @@ namespace AST
     // arm is discarded from the tree.
     //
     // **transient.** AST::ConstFolding replaces it with the arm its condition selected, inside the
-    // monomorphizer's fixpoint - so it is visible with `-a` and gone by `-ar`, and every question after
-    // that point is asked about an ordinary AST::ScopeNode. no codegen arm, no ownership rule.
+    // monomorphizer's fixpoint - so it is visible with `-a` and gone by `-ar`. clone of a generic
+    // body clones only the taken arm when the substituted condition already folds, so the discarded
+    // arm is never in the instance; ConstFolding is still the splicer. every question after that
+    // point is asked about an ordinary AST::ScopeNode. no codegen arm, no ownership rule.
     // AST::ForeachNode's contract, and the same two obligations fail silently without it:
     // OwnershipPass::body_is_concrete must answer *false* while one is present, and
     // PointerAdjuster::visit_const_if must throw.

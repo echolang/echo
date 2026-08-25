@@ -1,12 +1,9 @@
 #include "AST/ASTOwnership.h"
 
-#include "AST/MatchExprNode.h"
-
-
-#include "AST/ConstRefExprNode.h"
-
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTControlFlow.h"
@@ -26,6 +23,7 @@
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/GuardNode.h"
 #include "AST/ReleaseNode.h"
@@ -50,249 +48,6 @@ namespace AST
 
 namespace
 {
-    // **may the ownership pass answer this body yet?** it walks a body exactly once, ever, so every
-    // "no" it records is permanent - and a body it walks too early is one whose drops were decided
-    // against a tree that had not finished arriving.
-    //
-    // four things can still be arriving, and they are four *arms* rather than four conditions in a
-    // hand-written statement switch. that switch would descend into statements only, so an
-    // expression could hold a transient node and answer "concrete" - which is how `make()[0]`
-    // would have its container's `&` written a round after ownership had already walked past it.
-    // AST::RecursiveVisitor makes the walk total: a node kind with no visit_* does not compile,
-    // and none of the four can be reached and missed
-    class BodyAnswerable : public RecursiveVisitor
-    {
-    public:
-        bool answerable = true;
-
-        // **the flag is monotone, so the walk stops the moment it is false.** this runs once per
-        // un-answered body *and* per file root on every fixpoint round, and a body that waits k rounds
-        // would otherwise pay k complete traversals to re-derive the same no.
-        //
-        // both descent seams are pruned - the statement loop here and the expression edge below - so
-        // neither a later statement nor a sibling subtree is walked once the answer is settled. nothing
-        // is rewritten, so unlike the base's loop this one may hold its bound
-        void visitScope(ScopeNode &node) override
-        {
-            for (size_t i = 0; answerable && i < node.children.size(); i++) {
-                statement_edge(node.children[i].node());
-            }
-        }
-
-        ExprNode *rewrite_value_edge(ExprNode *expr) override
-        {
-            return answerable ? RecursiveVisitor::rewrite_value_edge(expr) : expr;
-        }
-
-        // a constant reference stands for an expression nobody has substituted in yet, so nothing about
-        // what a body owns can be answered while one is present.
-        //
-        // belt-and-braces, unlike the two arms below: AST::ConstantExpander runs *before* the fixpoint
-        // rather than inside it, so a reference should never reach this walk at all. the arm is here so
-        // the invariant enforces itself if that order ever moves - this walk answers a body exactly once,
-        // ever, and an early yes cannot be revisited
-        void visit_const_ref(ConstRefExprNode &node) override
-        {
-            answerable = false;
-        }
-
-        // an untyped declaration is one the monomorphizer has not re-derived yet, and a typed one
-        // still mentioning a parameter is waiting on a substitution. either way there is no answer to
-        // "does this own something" yet
-        void visitVarDecl(VarDeclNode &node) override
-        {
-            if (!node.has_type() || contains_type_param(node.type())) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visitVarDecl(node);
-        }
-
-        // **a match whose patterns are not decided yet is never answerable.** the bindings are untyped
-        // and have no initializer until AST::MatchResolution has said which case each arm names, so a
-        // walk now would resolve the arrival of a value that is about to be replaced by a payload read
-        // - permanently, this pass walking a body exactly once ever, and with nothing reporting it.
-        //
-        // the untyped-declaration arm above catches a *bound* arm today, the bindings being scope
-        // children with no type node. this one is what covers an arm that binds nothing, where there is
-        // no declaration to be untyped and the arm's value would otherwise be walked against a match
-        // whose own result type is still unknown
-        void visit_match(MatchExprNode &node) override
-        {
-            if (!node.patterns_decided) {
-                answerable = false;
-                return;
-            }
-
-            RecursiveVisitor::visit_match(node);
-        }
-
-        // **an unexpanded array literal is never answerable**, which the declaration's type alone does
-        // not say: one typed from its elements holds an *unknown* until AST::OperatorRewriter expands
-        // it, and unknown is not contains_type_param. asked of the literal itself rather than of the
-        // declaration holding one, so a literal in any other position counts too
-        void visit_array_literal_expr(ArrayLiteralExprNode &node) override
-        {
-            if (!node.expansion_decided) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visit_array_literal_expr(node);
-        }
-
-        // **an assignment through an undecided bracket may not be a write to a place at all.**
-        // AST::OperatorRewriter::resolve_index_write replaces the whole statement with one call when the
-        // container declares an element-write contract, and this pass walks a body exactly once - so a walk
-        // now would decide the ownership of an assignment about to leave the tree, and push a teardown onto
-        // a node nothing will emit.
-        //
-        // the arm below already covers it through the target, since an undecided bracket is undecided
-        // wherever it sits. this one is here so the invariant is *stated where it is relied on* rather than
-        // inherited: it costs nothing, and it is what keeps the rewrite sound if a future node kind ever
-        // parents an AssignNode somewhere a scope's child list does not reach
-        void visit_assign(AssignNode &node) override
-        {
-            if (node.target != nullptr
-                && node.target->get_node_type() == NodeType::n_expr_index
-                && !static_cast<IndexExprNode *>(node.target)->resolution_decided) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visit_assign(node);
-        }
-
-        // an unresolved bracket has no element call yet, so there is nothing here for the arm below to
-        // find - and resolving it is what *creates* the borrow of the container
-        void visit_index_expr(IndexExprNode &node) override
-        {
-            if (!node.resolution_decided) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visit_index_expr(node);
-        }
-
-        // **a call that has not settled has not been fitted to its parameters**, and fitting is what
-        // writes the `&` around a borrow argument. so a body walked while one is outstanding gives that
-        // argument's temporary no slot, and AST::TypeChecker's guard rail reports it as a compiler bug -
-        // which is exactly what it did. the round order already claims this invariant in the
-        // monomorphizer ("last of the four, so every call in a body it walks has already been fitted");
-        // this is where the claim is checked
-        //
-        // a *failed* call is terminal and counts as answerable: it has its own diagnostic, and waiting
-        // for a program that cannot compile only costs it its drops
-        void visitFunctionCallExpr(FunctionCallExprNode &node) override
-        {
-            if (!call_is_terminal(node.settlement)) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visitFunctionCallExpr(node);
-        }
-
-        // **an unlowered `const if` is never answerable**, and this is the arm whose absence is silent.
-        // which of its two arms exists at all is not decided yet, and this pass walks a body exactly
-        // once - so a walk now would resolve the ownership of statements about to be thrown away, and
-        // give a `T $doomed` in the untaken arm a drop, which is one more generic call site.
-        //
-        // silent because walk_statement's `default:` reads `child.is_expression_node() ? ... : nullptr`,
-        // and a ConstIfNode is not an expression - so without this the whole subtree would simply never
-        // be walked, with no diagnostic anywhere. AST::ConstFolding runs earlier in the same round; once
-        // it has, this node is gone and the arm it left behind is an ordinary scope
-        void visit_const_if(ConstIfNode &node) override
-        {
-            answerable = false;
-
-            RecursiveVisitor::visit_const_if(node);
-        }
-
-        // the same for its expression sibling: an unfolded `const(...)` is a value nothing knows yet, and
-        // a copy or a drop decided around it would be decided against the operand's type rather than the
-        // literal's - which is the same type, but only because the node is transparent *on purpose*
-        void visit_const_expr(ConstExprNode &node) override
-        {
-            answerable = false;
-
-            RecursiveVisitor::visit_const_expr(node);
-        }
-
-        // **an unlowered foreach is never answerable.** it declares `$el` and `$k` with no type, and
-        // the iterator declaration it will mint does not exist yet. AST::ForeachLowering runs earlier
-        // in the same round; once it has, this node is gone and the scope it left behind is ordinary
-        void visit_foreach(ForeachNode &node) override
-        {
-            answerable = false;
-
-            RecursiveVisitor::visit_foreach(node);
-        }
-
-        // **an undecided guard is never answerable**, and this arm's absence is silent in the one way
-        // that matters: the binding is *typed* and its initializer resolves, so nothing here looks
-        // unfinished. what is unfinished is how the binding gets filled - a question about the subject's
-        // conformance that only AST::GuardLowering can answer, in the fixpoint - so a walk now would
-        // resolve the arrival of a value about to be replaced by an `unwrap()` read. permanently: this
-        // pass walks a body exactly once, ever.
-        //
-        // a `T?` guard is decided by the parser and never reaches this, so no existing program's
-        // ownership answer moves by taking this arm
-        void visit_guard(GuardNode &node) override
-        {
-            if (!node.plan_decided) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visit_guard(node);
-        }
-
-        // an undecided `&name` has no type yet. a walk now would decide the ownership of a
-        // value about to be typed by a destination, and this pass walks a body exactly once
-        void visit_function_ref_expr(FunctionRefExprNode &node) override
-        {
-            if (!node.resolved) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visit_function_ref_expr(node);
-        }
-
-        // **an unlowered interpolation is never answerable**, and this is the second arm whose absence
-        // is silent. it stands for a chain of calls none of which exist yet - each one allocating a
-        // `string` that owes a drop - so a walk now would decide the ownership of a statement whose
-        // owning values have not been minted. AST::InterpolationLowering runs earlier in the same
-        // round; once it has, what is left is ordinary calls
-        void visit_string_interpolation(StringInterpolationExprNode &node) override
-        {
-            answerable = false;
-
-            RecursiveVisitor::visit_string_interpolation(node);
-        }
-
-        // **an undecided written cast is never answerable.** a declared conversion is rewritten to a
-        // call that may return an owner, and this pass walks a body exactly once - so a walk now
-        // would decide the arrival of a coerce that is about to become a call. implicit casts never
-        // ask; a built-in kind that CastResolution has already classified is plan_decided
-        void visitTypeCast(TypeCastNode &node) override
-        {
-            if (!node.is_implcit && !node.plan_decided) {
-                answerable = false;
-            }
-
-            RecursiveVisitor::visitTypeCast(node);
-        }
-
-        // a nested declaration is resolved as its own body, from the file root's children. whether
-        // *it* is ready says nothing about whether this one is
-        void visitFunctionDecl(FunctionDeclNode &) override
-        {
-        }
-
-        // **and neither does a type declaration**, which is not flow at all. its properties are
-        // ordinary VarDeclNodes, so descending into `struct Box<T> { T $value; }` finds one typed `T`
-        // and answers "never" for every body the struct is declared beside - a file root included
-        void visit_type_decl(TypeDeclNode &) override
-        {
-        }
-    };
 
     // how a diagnostic names the place a value was arriving at
     const char *describe(ValueDestination destination)
@@ -494,7 +249,9 @@ bool OwnershipPass::run_round()
 
 void OwnershipPass::resolve_root(ScopeNode &root)
 {
-    if (_processed_roots.count(&root) > 0) {
+    // t_ready is the in-progress bit: written before the walk so a re-entry does not walk twice.
+    // t_owned is written after, and is the mutation gate
+    if (_current_file->region_state != RegionState::t_open) {
         return;
     }
 
@@ -507,7 +264,7 @@ void OwnershipPass::resolve_root(ScopeNode &root)
         return;
     }
 
-    _processed_roots.insert(&root);
+    _current_file->region_state = RegionState::t_ready;
 
     _current_function = nullptr;
     _frames.clear();
@@ -522,6 +279,7 @@ void OwnershipPass::resolve_root(ScopeNode &root)
     _handover_reads = handover_reads_in(root, {});
 
     walk_scope(root);
+    _current_file->region_state = RegionState::t_owned;
 }
 
 void OwnershipPass::resolve_function(FunctionDeclNode &decl)
@@ -532,7 +290,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
         return;
     }
 
-    if (_processed_functions.count(&decl) > 0) {
+    if (decl.region_state != RegionState::t_open) {
         return;
     }
 
@@ -546,7 +304,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
         return;
     }
 
-    _processed_functions.insert(&decl);
+    decl.region_state = RegionState::t_ready;
 
     _current_function = &decl;
     _frames.clear();
@@ -591,14 +349,12 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     _frames.push_back(Frame{decl.body, owned_params});
     walk_scope(*decl.body);
     _frames.pop_back();
+    decl.region_state = RegionState::t_owned;
 }
 
 bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
 {
-    BodyAnswerable answerable;
-    scope.accept(answerable);
-
-    return answerable.answerable;
+    return AST::body_is_concrete(scope);
 }
 
 ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
@@ -1278,6 +1034,8 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
 
 VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference &site, const char *prefix)
 {
+    assert_region_accepts_mutation(_current_function, _current_file);
+
     // **numbered, because one bind can hold several.** two temporaries in one statement are two
     // declarations either way - a place refers to the VarDeclNode and never to its spelling - but a
     // dump in which both read `$__temp` cannot be asserted about, and a `RAST` golden is how every
@@ -2679,6 +2437,8 @@ FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
     ExprNode *place
 )
 {
+    assert_region_accepts_mutation(_current_function, _current_file);
+
     // the node, the receiver's addressing and the settlement are all AST::make_resolved_member_call's -
     // this pass is one of its two callers and adds only the round's progress flag. the place that is
     // already an address here is the `$this` of a synthesized class deinit, declared `Foo&` because a
@@ -3041,6 +2801,17 @@ OwnershipPass::TypeHomeScope::~TypeHomeScope()
     _pass._current_file = _previous_file;
 }
 
+OwnershipPass::BodyMutationScope::BodyMutationScope(OwnershipPass &pass, FunctionDeclNode &decl)
+    : _pass(pass), _previous(pass._current_function)
+{
+    _pass._current_function = &decl;
+}
+
+OwnershipPass::BodyMutationScope::~BodyMutationScope()
+{
+    _pass._current_function = _previous;
+}
+
 void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
 {
     ComplexType *ct = node.owner.get_complex_type();
@@ -3085,6 +2856,7 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
         // no parameters at all. `$` is the compiler's own namespace, as it is for `$deinit`
         auto &decl = begin_synthesized_decl(
             fmt::format("$static_init{}", node.index), site);
+        const BodyMutationScope mutating(*this, decl);
 
         // the owner is set so AST::enclosing_type_of answers for this body, which is what lets a
         // `private` static be seated by its own type's initializer - and what keeps
@@ -3151,6 +2923,7 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
     if (needs_destruction(node.decl->type())) {
         auto &decl = begin_synthesized_decl(
             fmt::format("$static_deinit{}", node.index), site);
+        const BodyMutationScope mutating(*this, decl);
 
         decl.owner_type = ct;
         decl.return_type = &_current_module->nodes.emplace_back<TypeNode>(ValueType::make_void());
@@ -3188,6 +2961,7 @@ FunctionDeclNode *OwnershipPass::build_deinit(ComplexType &type, const TokenRefe
     // `destructor` safe there is that it is a keyword token nobody can spell as a name, and `deinit` never
     // was one; `$` is the compiler's own namespace for exactly this - `$this`, `$__it`, `$__env`, `$__temp1`
     auto &decl = begin_synthesized_decl("$deinit", site);
+    const BodyMutationScope mutating(*this, decl);
 
     // **a hint, because a teardown is a call at every scope exit.** the body is one or two calls with no
     // branches, so what an optimized build wants is the sequence a drop site would hold inline - and
@@ -3307,6 +3081,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     // named after the struct, like every constructor - the *template's* name for an instantiation,
     // since `Box<int32>` is what the layout is called and `Box` is what a constructor of it is
     auto &decl = begin_synthesized_decl(ct->template_or_self()->name.value_or(""), site);
+    const BodyMutationScope mutating(*this, decl);
 
     // a constructor, and so deliberately **not** a member: owner_type is what implicit_arg_count()
     // keys on, and args[0] here is the `$other` the caller writes rather than a receiver

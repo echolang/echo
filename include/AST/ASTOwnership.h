@@ -239,7 +239,7 @@ namespace AST
         // the enclosing loop bodies, innermost last. a vector and not a single frame, so a labelled
         // `break N` is _loop_frames[size() - N] the day it is spelled, with the unwind loop unchanged.
         // cleared in resolve_function *and* resolve_root: a stale index from a previous body either reads
-        // out of range or clips an unwind to the wrong depth, and _processed_functions means the wrong
+        // out of range or clips an unwind to the wrong depth, and RegionState::t_owned means the wrong
         // answer is never revisited
         std::vector<LoopFrame> _loop_frames;
 
@@ -265,10 +265,6 @@ namespace AST
         // value, and this is what keeps that claim honest: a second write to the same owning field
         // would leak what the first one built, with nothing further down able to notice
         std::unordered_set<std::string> _initialized_storage;
-
-        // bodies already resolved, so the fixpoint can call this every round
-        std::unordered_set<const FunctionDeclNode *> _processed_functions;
-        std::unordered_set<const ScopeNode *> _processed_roots;
 
         // how many temporaries this body has minted, so their names are distinct. reset per body by
         // both entry points - see make_temporary for why they are numbered at all
@@ -458,9 +454,9 @@ namespace AST
         // the two, which is why it is a parameter and not a second walk.
         //
         // `out` is **rebuilt**, not appended to, so an unwind is derived rather than accumulated.
-        // _processed_functions and _processed_roots mean a body is in fact walked at most once ever, so
-        // nothing today arrives twice - but that is a guarantee two visited-sets make and not one this
-        // can see, and the scope-exit append in walk_scope has no equivalent
+        // RegionState::t_owned means a body is in fact walked at most once ever, so nothing today
+        // arrives twice - but that is a guarantee the region makes and not one this can see, and the
+        // scope-exit append in walk_scope has no equivalent
         void collect_unwind(size_t floor_frame, std::vector<NodeReference> &out);
 
         // destroying a value of `type` at `root`->`path`: one call to whatever ensure_deinit answers for
@@ -798,6 +794,24 @@ namespace AST
             Module *_previous_module;
             File *_previous_file;
             const TypeHome *_home = nullptr;
+        };
+
+        // while a synthesized deinit or copy constructor is being built, minting is into *that*
+        // declaration (t_open), not the function whose walk asked for it (which may already be
+        // t_owned, or t_ready in the middle of its own walk). the assert is ambient, so this
+        // retargets `_current_function` rather than threading a RegionState through every mint
+        class BodyMutationScope
+        {
+        public:
+            BodyMutationScope(OwnershipPass &pass, FunctionDeclNode &decl);
+            ~BodyMutationScope();
+
+            BodyMutationScope(const BodyMutationScope &) = delete;
+            BodyMutationScope &operator=(const BodyMutationScope &) = delete;
+
+        private:
+            OwnershipPass &_pass;
+            FunctionDeclNode *_previous = nullptr;
         };
 
         // --- copies ----------------------------------------------------------------------------

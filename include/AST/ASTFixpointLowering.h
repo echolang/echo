@@ -88,6 +88,7 @@ namespace AST
         // where the walk is, so a subclass can mint nodes into the right arena and locate a diagnostic
         Module *_current_module = nullptr;
         File *_current_file = nullptr;
+        FunctionDeclNode *_current_function = nullptr;
 
         // **set by the subclass**, read by the fixpoint through run_round's answer. cleared at the head
         // of every round

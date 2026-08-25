@@ -50,9 +50,8 @@ bool ConstFolding::run_round()
     // **once for the round, not once per discard.** Bundle::forget_nodes sweeps every bucket of every
     // module, and a round folds one subtree away per `const if` and per `const(...)` - which with the
     // stdlib is several per generic instantiation. nothing between a discard and here reads
-    // NodeCollection::of_type: this walk goes through scope children, and the sweeps that do care -
-    // Monomorphizer::snapshot_calls and TypeLowering::build_function_maps - are the next round and
-    // codegen respectively
+    // NodeCollection::of_type: this walk goes through scope children, and the sweep that still cares -
+    // TypeLowering::build_function_maps - is codegen. Monomorphizer::snapshot_calls walks the live tree
     _detached.flush(_bundle);
 
     return _changed;
@@ -160,7 +159,7 @@ void ConstFolding::detach(ConstExprNode &marker)
     // the marker and everything under it are replaced by whatever this returns to, so the arena stops
     // answering for them - the two ownership builtins a `const(...)` folded are calls nothing should
     // instantiate now. one function, because a refusal owes this exactly as much as a fold does: a
-    // refused operand still names calls Monomorphizer::snapshot_calls would report a second time
+    // refused operand still names calls TypeLowering would emit if they stayed in the arena
     forget(marker);
 
     // and nulled for AST::ForeachLowering's reason: PointerAdjuster rewrites edges in place, so a subtree
@@ -197,7 +196,9 @@ void ConstFolding::lower(ScopeNode &scope, size_t index)
 {
     auto *branch = scope.children[index].get_ptr<ConstIfNode>();
 
-    if (branch == nullptr || branch->condition == nullptr || branch->if_scope == nullptr) {
+    // if_scope may be null: clone of a generic body drops the dead arm, so a false condition
+    // leaves only else_scope. ConstFolding is still the splicer
+    if (branch == nullptr || branch->condition == nullptr) {
         return;
     }
 
@@ -238,7 +239,7 @@ void ConstFolding::lower(ScopeNode &scope, size_t index)
         return;
     }
 
-    ScopeNode *taken = folded.as_bool() ? branch->if_scope : branch->else_scope;
+    ScopeNode *taken = taken_const_if_arm(*branch, folded.as_bool());
 
     if (taken == nullptr) {
         // a false condition with no `else`. an **empty scope** rather than erasing the child, for

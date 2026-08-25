@@ -10,7 +10,9 @@
 
 namespace AST
 {
+    class ConstIfNode;
     class ExprNode;
+    class ScopeNode;
 
     // **the sole answer to "what does this expression fold to before codegen".**
     //
@@ -82,6 +84,14 @@ namespace AST
     // side-effect free and independent of any pass's state, which is what lets codegen and a fixpoint
     // round ask the same question and rely on the same answer
     ConstFoldResult const_fold(const ExprNode *expr);
+
+    // the arm a folded bool condition selects. null for a false condition with no else. ConstFolding
+    // and live_calls both ask; clone uses the same pick so the discarded arm is never in the instance
+    ScopeNode *taken_const_if_arm(const ConstIfNode &node, bool condition);
+
+    // the arm the condition currently selects. null while it has not folded to a bool, and null for
+    // a false condition with no else
+    ScopeNode *taken_const_if_arm(const ConstIfNode &node);
 };
 
 #endif

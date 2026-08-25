@@ -359,3 +359,67 @@ TEST_CASE("One instantiation has one layout, whichever site names it", "[generic
     REQUIRE(written.get_complex_type() == inferred.get_complex_type());
     REQUIRE(written.get_mangled_name() == inferred.get_mangled_name());
 }
+
+static bool has_instance_named(AST::Module &m, const std::string &name)
+{
+    for (auto *decl : EchoTests::decls_named(m, name)) {
+        if (!decl->is_generic()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+TEST_CASE("a generic call in an untaken const if arm is not instantiated", "[generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function poison<T>(T $x): T { return $x; }\n"
+        "function keep<T>(T $x): T { return $x; }\n"
+        "const if (false) {\n"
+        "    poison(1);\n"
+        "}\n"
+        "echo keep(2);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE_FALSE(has_instance_named(m, "poison"));
+    REQUIRE(has_instance_named(m, "keep"));
+}
+
+TEST_CASE("a generic call in a taken const if arm is instantiated", "[generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function keep<T>(T $x): T { return $x; }\n"
+        "const if (true) {\n"
+        "    echo keep(2);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(has_instance_named(m, "keep"));
+}
+
+TEST_CASE("a generic call in a pending const if condition is instantiated", "[generics]")
+{
+    // the condition has to be instantiated so it can fold; the arms must not, until it has.
+    // walking neither is how the condition never folds; walking both is the over-instantiation.
+    // a user function is not foldable - the folder is not an evaluator - so this is a builtin,
+    // declared here because the bundle has no stdlib
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[builtin: needs_destruction]\n"
+        "function nd<T>(): bool;\n"
+        "function poison<T>(T $x): T { return $x; }\n"
+        "const if (nd<int32>()) {\n"
+        "    poison(1);\n"
+        "}\n"
+        "echo 1;\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(has_instance_named(m, "nd"));
+    REQUIRE_FALSE(has_instance_named(m, "poison"));
+}

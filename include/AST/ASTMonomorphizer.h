@@ -143,9 +143,18 @@ namespace AST
 
         FunctionDeclNode *get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args);
 
-        // every call in the bundle, snapshotted before anything is instantiated - cloning appends to
-        // the very collections this walks
+        // AST::live_calls, so a new transient node is one arm in ASTRegion.cpp rather than a second
+        // skip list here
         std::vector<std::pair<FunctionCallExprNode *, Module *>> snapshot_calls();
+
+        // the round's phases. names are the contract; the order is handwritten and load-bearing
+        bool bind(size_t round);
+        bool decide();
+        bool desugar();
+        bool retype();
+        bool settle();
+        bool own();
+        void finalize_each();
 
         // one round's steps, in the order they have to run in - see the comments on each
         bool instantiate_generic_calls(size_t round);

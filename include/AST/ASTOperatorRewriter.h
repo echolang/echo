@@ -18,6 +18,7 @@ namespace AST
     class Collector;
     class Module;
     class File;
+    class FunctionDeclNode;
     class ExprNode;
     class FunctionCallExprNode;
     class IndexExprNode;
@@ -101,6 +102,7 @@ namespace AST
 
         Module *_current_module = nullptr;
         File *_current_file = nullptr;
+        FunctionDeclNode *_current_function = nullptr;
 
         bool _changed = false;
 

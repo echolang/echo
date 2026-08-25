@@ -89,8 +89,8 @@ ExprNode *InterpolationLowering::refuse(StringInterpolationExprNode &node, std::
     ExprNode &replacement = literal_for(node, joined);
 
     // nothing here is kept - the hole expressions go with the node - so the whole subtree is what left
-    // the tree, and the arena has to stop answering for it or Monomorphizer::snapshot_calls keeps
-    // finding calls inside a literal nobody will emit
+    // the tree, and the arena has to stop answering for it or TypeLowering keeps finding calls inside
+    // a literal nobody will emit
     forget_subtree(_bundle, node);
     node.holes.clear();
 

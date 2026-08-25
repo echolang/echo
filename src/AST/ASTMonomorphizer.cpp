@@ -1,6 +1,9 @@
 #include "AST/ASTMonomorphizer.h"
 
 #include "AST/ASTClone.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTModule.h"
+#include "AST/ASTRegion.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeNode.h"
@@ -180,20 +183,11 @@ namespace AST
         return instance;
     }
 
-    // every call in the bundle, snapshotted. cloning a template appends new call nodes to the very
-    // collections this walks, so the list has to be taken before anything is instantiated
+    // every call the program still contains. AST::live_calls is the walk - a tree walk, not of_type,
+    // sharing its descent with body_is_pending so a new transient node is one arm
     std::vector<std::pair<FunctionCallExprNode *, Module *>> Monomorphizer::snapshot_calls()
     {
-        std::vector<std::pair<FunctionCallExprNode *, Module *>> calls;
-
-        for (auto &module_ptr : _bundle.modules) {
-            Module &mod = *module_ptr;
-            for (auto *call : mod.nodes.of_type<FunctionCallExprNode>()) {
-                calls.push_back({call, &mod});
-            }
-        }
-
-        return calls;
+        return live_calls(_bundle);
     }
 
     // step A: a call naming a template becomes a call naming a concrete instance
@@ -568,6 +562,151 @@ namespace AST
         }
     }
 
+    bool Monomorphizer::bind(size_t round)
+    {
+        return instantiate_generic_calls(round);
+    }
+
+    bool Monomorphizer::decide()
+    {
+        // **everything the language asked the compiler to decide, decided before anything else looks
+        // at it.** three constraints pin this position and all three are load-bearing.
+        //
+        // *after bind*, because that is what binds `decl->instantiation_args[0]` on
+        // `mem::is_trivially_copyable<T>()`. AST::classify_copy and AST::needs_destruction both
+        // answer "no" for an unsettled type parameter on purpose - a not-yet rather than a refusal -
+        // so folding either against a `T` the monomorphizer has not bound yet is silently the wrong
+        // answer in the one direction that compiles. the same sentence ExprCodegen has always carried.
+        //
+        // *ahead of desugar*, and this is the point rather than tidiness. The rewriters do not merely
+        // waste work on a subtree about to vanish, they **create call sites in it**.
+        //
+        // An `array<T>`'s untaken copy arm is `$this[] = $other[$i]` - two bare IndexExprNodes at
+        // clone time - and AST::OperatorRewriter is what turns them into `operator []` calls that the
+        // next round instantiates and codegen emits. A `foreach` in an untaken arm is the same story
+        // one level up: AST::ForeachLowering mints its `iterate()`. Discarding first is the only way
+        // not to pay for either.
+        //
+        // *before own*, which walks a body **exactly once, ever**. A `T $doomed` in an untaken arm is
+        // a local that pass gives a drop, and a drop of an owning `T` is one more generic call site.
+        // AST::body_is_concrete answers false while a ConstIfNode or a ConstExprNode is in the body
+        return _const_folding.run_round();
+    }
+
+    bool Monomorphizer::desugar()
+    {
+        bool progressed = false;
+
+        // operand syntax whose meaning the types just settled: a bracket over a container, an
+        // operator over what was a bare type parameter. **ahead of retype**, because a declaration
+        // inferred from `$a[0]` has no type at all until the element call is attached - and behind
+        // bind, because it needs that round's types
+        progressed |= _operators.run_round();
+
+        // **after the rewriter and ahead of the loop lowering.** after, for two reasons that are the
+        // rewriter's own: it performs the weak upgrade that turns a substituted `weak<Node>` into a
+        // `Node?` - so the plan's nullable arm answers it rather than looking for a conformance - and
+        // `$v = guard $slots[$i] else {...}` has no subject type until the bracket has become an
+        // `operator []` call. ahead of the loop lowering, so a `foreach` over a guard's binding sees a
+        // typed binding in this same round.
+        //
+        // and before own for its exact reason: AST::body_is_concrete answers false while
+        // GuardNode::plan_decided is false, so the round a guard's plan lands in is the round its
+        // body becomes eligible
+        progressed |= _guards.run_round();
+
+        // **after the rewriter, before retype.** after, because `foreach ($grid[0] as $row)` has no
+        // source type until the bracket has become an `operator []` call. before, because `$__it` is
+        // declared with no type node and that sweep is what types it, so lowering here saves a whole
+        // round.
+        //
+        // and before own, which walks a body **exactly once, ever**: the round a loop lowers in has
+        // to be the round its body becomes eligible. AST::body_is_concrete answers false while an
+        // unlowered foreach is in the body
+        progressed |= _foreach.run_round();
+
+        // **before interpolation, and that is the whole of why it sits here.** a `"{$s}"` inside a
+        // match arm is lowered in the first round that reaches it - that pass has no pending state
+        // and no finalize - so a payload binding still untyped at that moment is a `str::from`
+        // overload chosen against nothing at all.
+        //
+        // it derives its own subject's type rather than waiting for retype, which is what makes
+        // running here possible - AST::MatchResolution::resolve says why, and a guard's binding
+        // sets the precedent.
+        //
+        // and before own: AST::body_is_concrete answers false while MatchExprNode::patterns_decided
+        // is false
+        progressed |= _matches.run_round();
+
+        // **after the match, before interpolation and own.** after, because a match arm can yield
+        // the value being cast. before interpolation because a hole holding `$x as T` needs the
+        // conversion decided the way a match binding does. before own: a declared conversion is a
+        // call that returns an owner, and body_is_concrete answers false while an explicit
+        // TypeCastNode is still undecided
+        progressed |= _casts.run_round();
+
+        // beside the loop lowering, and for two of its three reasons. **before settle**, because the
+        // `str::from` and `str::concat` calls it mints are exactly what that has to finish. **before
+        // own**, because every one of those calls returns an owning `string` and a body is walked
+        // exactly once; AST::body_is_concrete answers false while an unlowered literal is in it
+        progressed |= _interpolation.run_round();
+
+        return progressed;
+    }
+
+    bool Monomorphizer::retype()
+    {
+        bool progressed = false;
+        progressed |= rederive_stale_variable_types();
+
+        // **after the re-derivation, and that order is the content**: bind/desugar may be what makes
+        // a declaration's type concrete in this very round, and a literal written at a type that is
+        // still undetermined would simply be skipped. AST::type_destination_literals is the
+        // live-tree walk; this is only the moment
+        progressed |= type_destination_literals(_bundle);
+        progressed |= rederive_stale_capture_types();
+        return progressed;
+    }
+
+    bool Monomorphizer::settle()
+    {
+        return settle_calls();
+    }
+
+    bool Monomorphizer::own()
+    {
+        // resolve ownership for every body that is concrete now: erase its `mv` markers, report
+        // the copies it cannot make, and insert its drops. inside the loop for the same reason
+        // retype is - it both *needs* the concrete types this round produced and *produces* new
+        // generic call sites (a drop of a `Box<int32>` local calls Box<T>'s destructor), which
+        // the next round's bind instantiates through the ordinary path
+        //
+        // last of the six, so every call in a body it walks has already been fitted to its
+        // parameters. a copy this pass inserts wraps an argument, and so does a coercion; doing
+        // them in the other order would nest them the other way round
+        return _ownership.run_round();
+    }
+
+    void Monomorphizer::finalize_each()
+    {
+        // **the fixpoint converged, so every transient node it owns has to be gone.** the two
+        // rewriters leave a node in place while its types are still arriving, and nothing else ever
+        // turns a permanent "not yet" into a diagnostic - PointerAdjuster throws for a survivor, and
+        // it runs *before* run_semantic_passes gates on has_critical_issues(), so the abort landed on
+        // top of whatever real error had explained it.
+        //
+        // in the round order, and for the round order's reason: a `const if` refused here leaves an
+        // empty scope behind, and there is nothing left inside it for the ones below to blame
+        _const_folding.finalize();
+        _operators.finalize();
+        _guards.finalize();
+        _matches.finalize();
+        _casts.finalize();
+        _foreach.finalize();
+
+        finalize_calls();
+    }
+
     void Monomorphizer::run()
     {
         // map every function declaration to the module that owns it
@@ -581,7 +720,7 @@ namespace AST
         // fixpoint: each round takes every call as far as the types now known allow, and cloning a
         // template exposes its body's calls - with concrete types - for the next round
         //
-        // the four steps are ordered, and the order is the design. see each one
+        // the six phases are ordered, and the order is the design. see each one
         bool progressed = true;
         size_t rounds = 0;
         while (progressed) {
@@ -602,138 +741,15 @@ namespace AST
                 break;
             }
 
-            progressed |= instantiate_generic_calls(rounds);
-
-            // **everything the language asked the compiler to decide, decided before anything else looks
-            // at it.** three constraints pin this position and all three are load-bearing.
-            //
-            // *after instantiate_generic_calls*, because that is what binds `decl->instantiation_args[0]`
-            // on `mem::is_trivially_copyable<T>()`. AST::classify_copy and AST::needs_destruction both
-            // answer "no" for an unsettled type parameter on purpose - a not-yet rather than a refusal -
-            // so folding either against a `T` the monomorphizer has not bound yet is silently the wrong
-            // answer in the one direction that compiles. the same sentence ExprCodegen has always carried.
-            //
-            // *ahead of both rewriters below*, and this is the point rather than tidiness. They do not
-            // merely waste work on a subtree about to vanish, they **create call sites in it**.
-            //
-            // An `array<T>`'s untaken copy arm is `$this[] = $other[$i]` - two bare IndexExprNodes at
-            // clone time - and AST::OperatorRewriter is what turns them into `operator []` calls that the
-            // next round instantiates and codegen emits. A `foreach` in an untaken arm is the same story
-            // one level up: AST::ForeachLowering mints its `iterate()`. Discarding first is the only way
-            // not to pay for either.
-            //
-            // *before the ownership pass*, which walks a body **exactly once, ever**. A `T $doomed` in an
-            // untaken arm is a local that pass gives a drop, and a drop of an owning `T` is one more
-            // generic call site. OwnershipPass::body_is_concrete answers false while a ConstIfNode or a
-            // ConstExprNode is in the body, which is what makes this safe rather than merely early
-            progressed |= _const_folding.run_round();
-
-            // operand syntax whose meaning the types just settled: a bracket over a container, an
-            // operator over what was a bare type parameter. **ahead of the re-derivation below**,
-            // because a declaration inferred from `$a[0]` has no type at all until the element call
-            // is attached - and behind the instantiation above, because it needs that round's types
-            progressed |= _operators.run_round();
-
-            // **after the rewriter and ahead of the loop lowering.** after, for two reasons that are the
-            // rewriter's own: it performs the weak upgrade that turns a substituted `weak<Node>` into a
-            // `Node?` - so the plan's nullable arm answers it rather than looking for a conformance - and
-            // `$v = guard $slots[$i] else {...}` has no subject type until the bracket has become an
-            // `operator []` call. ahead of the loop lowering, so a `foreach` over a guard's binding sees a
-            // typed binding in this same round.
-            //
-            // and before the ownership pass below for its exact reason: OwnershipPass::body_is_concrete
-            // answers false while GuardNode::plan_decided is false, so the round a guard's plan lands in is
-            // the round its body becomes eligible
-            progressed |= _guards.run_round();
-
-            // **after the rewriter, before the re-derivation.** after, because `foreach ($grid[0] as $row)`
-            // has no source type until the bracket has become an `operator []` call - the very reason the
-            // rewriter is itself ahead of the sweep. before, because `$__it` is declared with no type node
-            // and that sweep is what types it, so lowering here saves a whole round.
-            //
-            // and before the ownership pass below, which walks a body **exactly once, ever**: the round a
-            // loop lowers in has to be the round its body becomes eligible. OwnershipPass::body_is_concrete
-            // answers false while an unlowered foreach is in the body, which is what makes that safe rather
-            // than merely fast
-            progressed |= _foreach.run_round();
-
-            // **before the interpolation lowering, and that is the whole of why it sits here.** a
-            // `"{$s}"` inside a match arm is lowered in the first round that reaches it - that pass has
-            // no pending state and no finalize - so a payload binding still untyped at that moment is a
-            // `str::from` overload chosen against nothing at all. the loop lowering above is ahead of
-            // interpolation for exactly this reason and this is the same reason again.
-            //
-            // it derives its own subject's type rather than waiting for the sweep below, which is what
-            // makes running here possible - AST::MatchResolution::resolve says why, and a guard's
-            // binding sets the precedent.
-            //
-            // and before the ownership pass, which walks a body exactly once ever:
-            // OwnershipPass::body_is_concrete answers false while MatchExprNode::patterns_decided is
-            // false, so the round a match resolves in is the round its body becomes eligible
-            progressed |= _matches.run_round();
-
-            // **after the match, before interpolation and ownership.** after, because a match arm
-            // can yield the value being cast. before interpolation because a hole holding `$x as T`
-            // needs the conversion decided the way a match binding does. before ownership, which
-            // walks a body exactly once: a declared conversion is a call that returns an owner,
-            // and body_is_concrete answers false while an explicit TypeCastNode is still undecided
-            progressed |= _casts.run_round();
-
-            // beside the loop lowering, and for two of its three reasons. **before settle_calls**,
-            // because the `str::from` and `str::concat` calls it mints are exactly what that has to
-            // finish - one of them may name a user's own overload, or a generic the next round still
-            // has to instantiate. **before the ownership pass**, because every one of those calls
-            // returns an owning `string` and a body is walked exactly once, ever;
-            // OwnershipPass::body_is_concrete answers false while an unlowered literal is in it.
-            //
-            // it needs nothing from the rewriter above, unlike the loop lowering: which overload
-            // `str::from` picks is AST::CallResolver's question, asked whenever the hole settles, so
-            // this pass never has to wait for a type and never has a pending state to finalize
-            progressed |= _interpolation.run_round();
-
-            progressed |= rederive_stale_variable_types();
-
-            // **after the re-derivation, and that order is the content**: step B may be what makes a
-            // declaration's type concrete in this very round, and a literal written at a type that is
-            // still undetermined would simply be skipped. AST::type_destination_literals is the
-            // live-tree walk; this is only the moment
-            progressed |= type_destination_literals(_bundle);
-
-            progressed |= rederive_stale_capture_types();
-            progressed |= settle_calls();
-
-            // resolve ownership for every body that is concrete now: erase its `mv` markers, report
-            // the copies it cannot make, and insert its drops. inside the loop for the same reason
-            // the re-typing above is - it both *needs* the concrete types this round produced and
-            // *produces* new generic call sites (a drop of a `Box<int32>` local calls Box<T>'s
-            // destructor), which the next round instantiates through the ordinary path
-            //
-            // last of the four, so every call in a body it walks has already been fitted to its
-            // parameters. a copy this pass inserts wraps an argument, and so does a coercion; doing
-            // them in the other order would nest them the other way round
-            progressed |= _ownership.run_round();
+            progressed |= bind(rounds);
+            progressed |= decide();
+            progressed |= desugar();
+            progressed |= retype();
+            progressed |= settle();
+            progressed |= own();
         }
 
-        // **the fixpoint converged, so every transient node it owns has to be gone.** the two
-        // rewriters leave a node in place while its types are still arriving, and nothing else ever
-        // turns a permanent "not yet" into a diagnostic - PointerAdjuster throws for a survivor, and
-        // it runs *before* run_semantic_passes gates on has_critical_issues(), so the abort landed on
-        // top of whatever real error had explained it.
-        //
-        // in the round order, and for the round order's reason: a literal refused here leaves its
-        // declaration untyped, and a loop over that declaration is what the next line refuses
-        // first of the three, in the round order and for the round order's reason: a `const if` refused
-        // here leaves an empty scope behind, and there is nothing left inside it for the two below to
-        // blame - where the other way round they would report against arms that were never going to be
-        // compiled
-        _const_folding.finalize();
-        _operators.finalize();
-        _guards.finalize();
-        _matches.finalize();
-        _casts.finalize();
-        _foreach.finalize();
-
-        finalize_calls();
+        finalize_each();
     }
 
     namespace

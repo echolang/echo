@@ -1,10 +1,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTBundle.h>
+#include <AST/ASTClone.h>
 #include <AST/ASTConstFold.h>
+#include <AST/ASTRecursiveVisitor.h>
+#include <AST/ASTValueType.h>
+#include <AST/ConstIfNode.h>
 #include <AST/ExprNode.h>
+#include <AST/FunctionDeclNode.h>
 #include <AST/IfStatementNode.h>
+#include <AST/ScopeNode.h>
 #include <AST/VarDeclNode.h>
+#include <Compiler/TargetFacts.h>
+#include <Parser/ModuleParser.h>
 
 #include "helpers.h"
 
@@ -270,6 +278,143 @@ TEST_CASE("the two ownership builtins fold from the taxonomy", "[const_fold]")
 
     REQUIRE(fold_last_condition(*plain).is_bool());
     REQUIRE_FALSE(fold_last_condition(*plain).as_bool());
+}
+
+TEST_CASE("a builtin with a concrete explicit type argument folds while still generic", "[const_fold]")
+{
+    // **the clone-time const if path.** ConstIfNode::clone folds the substituted condition before
+    // instantiate_generic_calls rewires the builtin, so the folder must accept a still-generic
+    // decl whose explicit type argument is already concrete. ConstFolding is still the splicer
+    auto bundle = std::make_unique<Bundle>();
+    auto handle = bundle->modules.add_module("test");
+    Parser::ModuleParser::InputPayload input {
+        .files = {
+            Parser::ModuleParser::InputFile(
+                "/tmp/testfile.eco",
+                "#[builtin: needs_destruction]\n"
+                "function nd<T>() : bool;\n"
+                "if (nd<int32>()) { echo 1; }\n")
+        },
+        .module = bundle->modules.get_module(handle),
+        .collector = bundle->collector
+    };
+    Parser::ModuleParser(Compiler::TargetFacts::host()).parse_input(input);
+
+    REQUIRE(fold_last_condition(*bundle).is_bool());
+    REQUIRE_FALSE(fold_last_condition(*bundle).as_bool());
+
+    auto calls = EchoTests::calls_to(bundle->modules.find_module("test"), "nd");
+    REQUIRE_FALSE(calls.empty());
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->decl->is_generic());
+}
+
+TEST_CASE("clone of a folded const if stays a ConstIfNode and drops the dead arm", "[const_fold][clone]")
+{
+    // ConstFolding is the splicer. clone is type-preserving: it folds the substituted condition
+    // and leaves the other arm null, so the discarded subtree is never in the instance
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[builtin: needs_destruction]\n"
+        "function nd<T>() : bool;\n"
+        "function choose<T>() : int32 {\n"
+        "    const if (nd<T>()) {\n"
+        "        return 1;\n"
+        "    } else {\n"
+        "        return 0;\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *tmpl = nullptr;
+
+    for (auto *decl : EchoTests::decls_named(m, "choose")) {
+        if (decl->is_generic()) {
+            tmpl = decl;
+        }
+    }
+
+    REQUIRE(tmpl != nullptr);
+    REQUIRE_FALSE(tmpl->type_parameters.empty());
+
+    TypeSubstitution subst = TypeSubstitution::positional(
+        tmpl->type_parameters, {ValueType(ValueTypePrimitive::t_int32)});
+    CloneContext cc(m.nodes, subst, bundle->collector.type_registry);
+
+    auto *cloned = static_cast<FunctionDeclNode *>(tmpl->clone(cc));
+    REQUIRE(cloned != nullptr);
+    REQUIRE(cloned->body != nullptr);
+
+    ConstIfNode *branch = nullptr;
+
+    for (auto &child : cloned->body->children) {
+        if (child.has_type<ConstIfNode>()) {
+            branch = child.get_ptr<ConstIfNode>();
+        }
+    }
+
+    REQUIRE(branch != nullptr);
+    REQUIRE(branch->if_scope == nullptr);
+    REQUIRE(branch->else_scope != nullptr);
+}
+
+TEST_CASE("clone of a generic body keeps only the taken const if arm", "[const_fold][clone]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[builtin: needs_destruction]\n"
+        "function nd<T>() : bool;\n"
+        "function poison<T>() : void {}\n"
+        "function choose<T>() : int32 {\n"
+        "    const if (nd<T>()) {\n"
+        "        poison<T>();\n"
+        "        return 1;\n"
+        "    } else {\n"
+        "        return 0;\n"
+        "    }\n"
+        "}\n"
+        "echo choose<int32>();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    FunctionDeclNode *instance = nullptr;
+
+    for (auto *decl : EchoTests::decls_named(m, "choose")) {
+        if (!decl->is_generic()) {
+            instance = decl;
+        }
+    }
+
+    REQUIRE(instance != nullptr);
+    REQUIRE(instance->body != nullptr);
+
+    class FindsConstIf : public RecursiveVisitor
+    {
+    public:
+        bool found = false;
+
+        void visit_const_if(ConstIfNode &) override {
+            found = true;
+        }
+
+        void visitFunctionDecl(FunctionDeclNode &) override {}
+    };
+
+    FindsConstIf find;
+    instance->body->accept(find);
+    REQUIRE_FALSE(find.found);
+
+    bool poison_instantiated = false;
+
+    for (auto *decl : EchoTests::decls_named(m, "poison")) {
+        if (!decl->is_generic()) {
+            poison_instantiated = true;
+        }
+    }
+
+    REQUIRE_FALSE(poison_instantiated);
 }
 
 TEST_CASE("a builtin asked about an unbound T is pending, never a refusal", "[const_fold]")

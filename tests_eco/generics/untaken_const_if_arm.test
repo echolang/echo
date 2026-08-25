@@ -1,0 +1,12 @@
+# the live call is instantiated; the one behind `const if (false)` is not. RAST shows instances
+# as `function name -> type<concrete>` beside the template's `type<T>`. CHECK-NOT is scoped
+# between neighbours, so one before the keep instance and one after covers the whole dump
+
+--- OUT --->
+2
+--- RAST --->
+CHECK: function poison -> type<T>
+CHECK: function keep -> type<T>
+CHECK-NOT: function poison -> type<int32>
+CHECK: function keep -> type<int32>
+CHECK-NOT: function poison -> type<int32>

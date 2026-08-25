@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTNode.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTVisibility.h"
 
@@ -307,6 +308,11 @@ namespace AST
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;
+
+        // how far this body has got. a template stays t_open - nothing runs there. an instance
+        // starts t_open; ownership writes t_ready before the walk (so a re-entry does not walk
+        // twice) then t_owned after. a lowering that mints into t_owned is an assert. AST::RegionState
+        RegionState region_state = RegionState::t_open;
 
         // the list of attributes that are attached to this function
         AttributeList attributes;

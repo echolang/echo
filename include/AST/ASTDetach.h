@@ -14,11 +14,10 @@ namespace AST
     //
     // `NodeCollection::of_type` is not a tree walk - it hands back every node ever allocated of that type -
     // so a pass that replaces a statement leaves everything under the old one visible forever. that is not
-    // merely untidy, it is expensive and occasionally wrong: `Monomorphizer::snapshot_calls` mints a generic
-    // instance per call it finds, `TypeLowering::build_function_maps`' second loop declares a symbol *and
-    // queues a linkonce_odr body* per callee it finds, and `Monomorphizer::finalize_calls` will report an
-    // unknown name against one. so a discarded `const if` arm still had its `operator []` emitted, and a
-    // name it got wrong could still have failed the compile.
+    // merely untidy, it is expensive and occasionally wrong: `TypeLowering::build_function_maps`' second
+    // loop declares a symbol *and queues a linkonce_odr body* per callee it finds in the arena. so a
+    // discarded `const if` arm still had its `operator []` emitted if the forget was late.
+    // `Monomorphizer::snapshot_calls` walks the live tree and does not need this for itself.
     //
     // one owner because three passes discard subtrees and the walk has to be **total** - it is handed
     // straight to `NodeCollection::forget`, and forgetting less than the whole of what went away leaves the

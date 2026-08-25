@@ -5,11 +5,14 @@
 #include "AST/ASTDestruction.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ConstExprNode.h"
+#include "AST/ConstIfNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/OperatorNode.h"
+#include "AST/ScopeNode.h"
 #include "AST/TypeCastNode.h"
+#include "AST/TypeNode.h"
 
 #include <fmt/core.h>
 
@@ -362,14 +365,18 @@ namespace
 
     ConstFoldResult fold_builtin_call(const AST::FunctionCallExprNode &call)
     {
-        // no declaration yet, or one the monomorphizer has not replaced with an instance. both are
-        // not-yets: the fixpoint has more rounds, and settle_calls or instantiate_generic_calls is what
-        // answers them
-        if (call.decl == nullptr || call.decl->is_generic()) {
+        // no declaration yet. a not-yet: the fixpoint has more rounds, and settle_calls is what
+        // answers it
+        if (call.decl == nullptr) {
             return ConstFoldResult::pending();
         }
 
         if (!call.decl->is_builtin()) {
+            // an ordinary generic still waiting on instantiate_generic_calls
+            if (call.decl->is_generic()) {
+                return ConstFoldResult::pending();
+            }
+
             return ConstFoldResult::refused(fmt::format(
                 "'{}' is an ordinary function, so its result is only known when it runs.",
                 call.decl->func_name()));
@@ -393,19 +400,23 @@ namespace
                     call.decl->builtin.value()));
         }
 
-        // **the guard ExprCodegen::gen_type_query_builtin has always carried, and the reason it is
-        // load-bearing here too**: AST::classify_copy and AST::needs_destruction both answer "no" for an
-        // unsettled type parameter, on purpose - a not-yet rather than a refusal - so folding either
-        // against a `T` the monomorphizer has not bound yet is silently the wrong answer in the one
-        // direction that compiles. the two callers differ only in what they do about it: codegen throws,
-        // because an un-instantiated template reaching it is a compiler bug, and a fixpoint round waits
-        if (call.decl->instantiation_args.size() != 1) {
+        // **the subject is the type the query is about.** an instantiated decl carries it on
+        // instantiation_args. a still-generic builtin - `needs_destruction<T>()` inside a template,
+        // or `needs_destruction<int32>()` before the monomorphizer rewires the call - carries it on
+        // the explicit type argument. clone substitutes that TypeNode, so ConstIfNode::clone can
+        // fold against the substitution without waiting for a rewired instance. a type parameter
+        // left in either place is the not-yet classify_copy / needs_destruction answer "no" for
+        AST::ValueType subject = AST::ValueType::make_unknown();
+
+        if (call.decl->instantiation_args.size() == 1) {
+            subject = call.decl->instantiation_args[0];
+        } else if (call.explicit_type_args.size() == 1 && call.explicit_type_args[0] != nullptr) {
+            subject = call.explicit_type_args[0]->type;
+        } else {
             return ConstFoldResult::pending();
         }
 
-        const AST::ValueType &subject = call.decl->instantiation_args[0];
-
-        if (subject.is_type_param()) {
+        if (AST::contains_type_param(subject)) {
             return ConstFoldResult::pending();
         }
 
@@ -664,11 +675,26 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
         //
         // an AST::ConstRefExprNode lands here and cannot: AST::ConstantExpander runs ahead of the
         // fixpoint, so one has already become a clone of its declaration's expression. unlike
-        // BodyAnswerable's belt-and-braces silence about the same node, this one has a location to
+        // body_is_pending's belt-and-braces silence about the same node, this one has a location to
         // report from
         default:
             return ConstFoldResult::refused(
                 "this is not something the compiler can work out for itself - it needs storage, a call, "
                 "or something that only exists while the program runs.");
     }
+}
+
+AST::ScopeNode *AST::taken_const_if_arm(const AST::ConstIfNode &node, bool condition)
+{
+    return condition ? node.if_scope : node.else_scope;
+}
+
+AST::ScopeNode *AST::taken_const_if_arm(const AST::ConstIfNode &node)
+{
+    if (node.condition == nullptr) {
+        return nullptr;
+    }
+
+    const ConstFoldResult folded = const_fold(node.condition);
+    return folded.is_bool() ? taken_const_if_arm(node, folded.as_bool()) : nullptr;
 }

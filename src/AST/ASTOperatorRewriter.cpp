@@ -1,5 +1,7 @@
 #include "AST/ASTOperatorRewriter.h"
 
+#include "AST/ASTFile.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTArrayLiteralExpansion.h"
 #include "AST/ASTBundle.h"
@@ -63,6 +65,7 @@ bool OperatorRewriter::run_round()
             // nothing new leaves the numbering exactly where the round that did put it, because a
             // decided literal is never hoisted twice
             _hoist_count = 0;
+            _current_function = nullptr;
 
             if (file.root != nullptr) {
                 file.root->accept(*this);
@@ -71,9 +74,9 @@ bool OperatorRewriter::run_round()
     }
 
     // **once for the round, not once per discard** - see _detached. nothing between a rewrite and here
-    // reads NodeCollection::of_type: this walk goes through scope children, and the sweeps that do care -
-    // Monomorphizer::snapshot_calls and TypeLowering::build_function_maps - are the next round and
-    // codegen respectively. finalize() calls this, so the flush covers that pass too
+    // reads NodeCollection::of_type: this walk goes through scope children, and the sweep that still cares -
+    // TypeLowering::build_function_maps - is codegen. Monomorphizer::snapshot_calls walks the live tree.
+    // finalize() calls this, so the flush covers that pass too
     _detached.flush(_bundle);
 
     return _changed;
@@ -547,6 +550,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
         }
 
         if (!_hoisted.empty()) {
+            assert_region_accepts_mutation(_current_function, _current_file);
             place_array_literal_hoists(node, i, *_current_module, _hoisted);
         }
 
@@ -558,6 +562,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
         statement_edge(node.children[i].node());
 
         if (!_hoisted.empty()) {
+            assert_region_accepts_mutation(_current_function, _current_file);
             place_array_literal_hoists(node, i, *_current_module, _hoisted);
         }
 
@@ -573,7 +578,10 @@ void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
         return;
     }
 
+    FunctionDeclNode *enclosing = _current_function;
+    _current_function = &node;
     RecursiveVisitor::visitFunctionDecl(node);
+    _current_function = enclosing;
 }
 
 void OperatorRewriter::visitVarDecl(VarDeclNode &node)

@@ -65,7 +65,7 @@ void ForeachLowering::discard(ScopeNode &scope, size_t index, ForeachNode &loop)
 
     // and the arena stops answering for it. nothing here is kept - every path that reaches this one has
     // decided the loop cannot be lowered at all - so the whole loop is what left the tree. without this its
-    // `iterate()` receiver and everything in its body stayed visible to Monomorphizer::snapshot_calls,
+    // `iterate()` receiver and everything in its body stayed visible to TypeLowering's arena sweep,
     // which is what turned one refused loop into a second diagnostic underneath the real one
     forget_subtree(_bundle, loop);
 

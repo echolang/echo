@@ -4,6 +4,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
+#include "AST/ASTRegion.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ScopeNode.h"
 
@@ -22,6 +23,7 @@ CodeRef FixpointLowering::code_ref_for(const TokenReference &token)
 
 size_t FixpointLowering::next_hoist_index()
 {
+    assert_region_accepts_mutation(_current_function, _current_file);
     return _hoist_count++;
 }
 
@@ -60,9 +62,14 @@ void FixpointLowering::finalize()
 
 void FixpointLowering::visitFunctionDecl(FunctionDeclNode &node)
 {
-    if (!node.is_generic()) {
-        RecursiveVisitor::visitFunctionDecl(node);
+    if (node.is_generic()) {
+        return;
     }
+
+    FunctionDeclNode *enclosing = _current_function;
+    _current_function = &node;
+    RecursiveVisitor::visitFunctionDecl(node);
+    _current_function = enclosing;
 }
 
 };  // namespace AST

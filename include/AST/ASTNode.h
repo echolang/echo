@@ -97,11 +97,10 @@ namespace AST
         //
         // it exists because that answer was wrong for a subtree no scope holds any more, and because the
         // sweeps reading it are the expensive ones. `of_type` is not a tree walk, so a pass that replaces
-        // a statement leaves everything under the old one visible forever: Monomorphizer::snapshot_calls
-        // mints a generic instance per call it finds, TypeLowering::build_function_maps' second loop
-        // declares a symbol and **queues a linkonce_odr body** per callee it finds, and
-        // Monomorphizer::finalize_calls will happily report an unknown name against one. so an arm
-        // AST::ConstFolding discarded still had its callees emitted, and could still fail the compile.
+        // a statement leaves everything under the old one visible forever. Monomorphizer::snapshot_calls
+        // walks the live tree for that reason - TypeLowering::build_function_maps' second loop still
+        // declares a symbol and **queues a linkonce_odr body** per callee it finds in the arena, so an
+        // arm AST::ConstFolding discarded can still be emitted if the forget is late.
         //
         // **order-preserving, and that is load-bearing**: `of_type` order is insertion order, and it decides
         // the order codegen declares functions in - IR goldens name symbols by position - so this is an

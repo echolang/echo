@@ -1,0 +1,17 @@
+// a non-builtin generic in an untaken const if arm must not be instantiated. of_type cannot
+// tell the arm from the live program, and one clone is unrecoverable
+function poison<T>(T $x) : T
+{
+    return $x;
+}
+
+function keep<T>(T $x) : T
+{
+    return $x;
+}
+
+const if (false) {
+    poison(1);
+}
+
+echo keep(2);

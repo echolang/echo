@@ -5,6 +5,7 @@
 
 #include "Token.h"
 #include "AST/ASTImport.h"
+#include "AST/ASTRegion.h"
 #include "AST/ScopeNode.h"
 
 #include <filesystem>
@@ -55,6 +56,10 @@ namespace AST
         Module *module = nullptr;
 
         ScopeNode *root = nullptr;
+
+        // the file root is a region, the same unit ownership walks as a function body - codegen
+        // synthesizes `main` out of it. t_ready is in-progress, t_owned is done. AST::RegionState
+        RegionState region_state = RegionState::t_open;
 
         // file-local `use` aliases, in written order. AST::file_import_for is the reader.
         // **mutable** because TokenizedFile holds a const File* - the identity is settled at lex
