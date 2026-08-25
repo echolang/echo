@@ -5,6 +5,7 @@
 #include <Compiler/DriverOptions.h>
 #include <Compiler/Lsp/LspQuery.h>
 #include <Compiler/Lsp/LspSession.h>
+#include <Compiler/SettledPath.h>
 
 #include <filesystem>
 #include <string>
@@ -413,5 +414,6 @@ TEST_CASE("go-to-definition works for a file that exists only in the overlay", "
 
     const auto hit = Compiler::Lsp::definition(require_snapshot(session), *file, location);
     REQUIRE(hit.has_value());
-    REQUIRE(hit->path == path);
+    // definition answers the settled path: `/tmp/...` is `D:\tmp\...` on Windows
+    REQUIRE(hit->path == Compiler::canonical_or_absolute(path));
 }
