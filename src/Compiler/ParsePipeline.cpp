@@ -14,6 +14,7 @@
 #include "Compiler/SettledPath.h"
 
 #if ECO_USE_EMBEDDED_STDLIB
+// this header *defines* EmbeddedModule::load_stdlib_module. one TU only
 #include "stdlib_embedded.h"
 #endif
 

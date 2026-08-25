@@ -41,10 +41,6 @@
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/TargetParser/Host.h>
 
-#if ECO_USE_EMBEDDED_STDLIB
-#include "stdlib_embedded.h"
-#endif
-
 #if defined(_WIN32)
 #include <process.h>
 #include <stdio.h>

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 // AST::embedded_source_path is the sole owner of the path written into
 // stdlib_embedded.h. the Windows release regenerates that header on the runner,
@@ -67,4 +68,26 @@ TEST_CASE("write_embedded_module emits a generic add_file path as a C string", "
     const std::string contents = read_file(tmp);
     REQUIRE(contents.find("module.add_file(\"stdlib:/core/ordered_map.eco\")") != std::string::npos);
     REQUIRE(contents.find('\\') == std::string::npos);
+}
+
+TEST_CASE("stdlib_embedded.h is included from exactly one translation unit", "[embedder]")
+{
+    // the header *defines* load_stdlib_module. a second include is a duplicate
+    // symbol on the ECO_EMBED_STDLIB link, which is the release binary, and
+    // invisible to every other job
+    const fs::path src = fs::path(STDLIB_SOURCE_DIR).parent_path() / "src";
+    std::vector<std::string> holders;
+
+    for (const auto &entry : fs::recursive_directory_iterator(src)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".cpp") {
+            continue;
+        }
+
+        const std::string contents = read_file(entry.path());
+        if (contents.find("#include \"stdlib_embedded.h\"") != std::string::npos) {
+            holders.push_back(entry.path().lexically_relative(src).generic_string());
+        }
+    }
+
+    REQUIRE(holders == std::vector<std::string>{ "Compiler/ParsePipeline.cpp" });
 }
