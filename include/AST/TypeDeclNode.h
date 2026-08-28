@@ -126,7 +126,7 @@ namespace AST
 
         // the constructors the user wrote, in declaration order. a constructor is a free function
         // named after the struct rather than a member, so it is not in _complex_type - but the
-        // struct still has to know its own, because that is what the field-wise constructor's
+        // struct still has to know its own, because that is what the synthesized constructor's
         // suppression rule compares against. never cleared between parse passes: the passes
         // reconcile on the declaration site, so a second pass finds the same node
         void add_constructor(FunctionDeclNode *constructor) {
@@ -137,14 +137,26 @@ namespace AST
             return _constructors;
         }
 
-        // the synthesized field-wise constructor, or null until it is built. kept apart from the
-        // user's own so the suppression rule cannot compare it against itself
-        void set_field_wise_constructor(FunctionDeclNode *constructor) {
-            _field_wise_constructor = constructor;
+        // the synthesized constructor, or null until it is built. kept apart from the user's own so
+        // the suppression rule cannot compare it against itself. field-wise, zero-arg, or absent -
+        // see AST::synthesized_constructor_kind
+        void set_synthesized_constructor(FunctionDeclNode *constructor) {
+            _synthesized_constructor = constructor;
         }
 
-        FunctionDeclNode *field_wise_constructor() const {
-            return _field_wise_constructor;
+        FunctionDeclNode *synthesized_constructor() const {
+            return _synthesized_constructor;
+        }
+
+        // prepend_property_defaults sets this when it actually seats a clone. consume_property_defaults
+        // reads it and nothing else - a synthesized constructor existing, or a user constructor existing,
+        // is not the same question (a field-wise synth never cloned, a bodyless user ctor never cloned)
+        bool defaults_cloned() const {
+            return _defaults_cloned;
+        }
+
+        void note_defaults_cloned() {
+            _defaults_cloned = true;
         }
 
         // whether some pass has already taken this struct's properties. the body is walked in both
@@ -167,7 +179,8 @@ namespace AST
         ComplexType _complex_type;
         std::vector<VarDeclNode *> _properties;
         std::vector<FunctionDeclNode *> _constructors;
-        FunctionDeclNode *_field_wise_constructor = nullptr;
+        FunctionDeclNode *_synthesized_constructor = nullptr;
+        bool _defaults_cloned = false;
         bool _members_collected = false;
     };
 };

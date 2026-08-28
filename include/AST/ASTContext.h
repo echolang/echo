@@ -119,6 +119,13 @@ namespace AST
         // when an unrelated file grows one
         size_t incdec_bind_count = 0;
 
+        // whether a nested declaration parsed here is kept on the file root. a property is walked
+        // in both passes so they agree on where it ends, and only the first walk keeps the node -
+        // a closure in an instance default would otherwise be add_funcdecl'd from the discarded
+        // parse *and* from the clone prepend_property_defaults publishes, two FunctionDeclNodes
+        // mangling to one symbol. static initializers are not recipes; they stay true
+        bool publish_declarations = true;
+
         inline ScopeNode &scope() const {
             assert(scope_ptr);
             return *scope_ptr;
@@ -514,6 +521,28 @@ namespace AST
 
         ~LoopScope() {
             context.loop_depth = previous;
+        }
+    };
+
+    // scopes whether nested declarations parsed here land on the file root. saves and restores,
+    // like ReturnTypeScope: a property default's discarded re-parse must not leak "do not publish"
+    // into a constructor body parsed later in the same walk
+    struct DeclarationPublishScope
+    {
+        Context &context;
+        bool previous;
+
+        DeclarationPublishScope(Context &context, bool publish) :
+            context(context), previous(context.publish_declarations)
+        {
+            context.publish_declarations = publish;
+        }
+
+        DeclarationPublishScope(const DeclarationPublishScope &) = delete;
+        DeclarationPublishScope &operator=(const DeclarationPublishScope &) = delete;
+
+        ~DeclarationPublishScope() {
+            context.publish_declarations = previous;
         }
     };
 

@@ -55,7 +55,7 @@ TEST_CASE("an enum is a declared type of its own kind", "[enum]")
 
     // and no field-wise constructor: `CurlError(2, 30, 404, "...")` would be a door straight past the
     // case table, and it is refused at the declaration rather than left to the private-property rule
-    REQUIRE(decl->field_wise_constructor() == nullptr);
+    REQUIRE(decl->synthesized_constructor() == nullptr);
 }
 
 // the AST layout is **flat** - one property per payload field, all present at once - and that is

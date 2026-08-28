@@ -266,8 +266,8 @@ TEST_CASE("an internal property does not suppress the field-wise constructor", "
 
     auto *open = type_named(internal_fields->modules.find_module("test"), "Open");
     REQUIRE(open != nullptr);
-    REQUIRE(open->field_wise_constructor() != nullptr);
-    REQUIRE(open->field_wise_constructor()->args.size() == 2);
+    REQUIRE(open->synthesized_constructor() != nullptr);
+    REQUIRE(open->synthesized_constructor()->args.size() == 2);
 
     auto private_field = EchoTests::tests_make_parsed_bundle(
         "struct Shut\n"
@@ -280,7 +280,7 @@ TEST_CASE("an internal property does not suppress the field-wise constructor", "
 
     auto *shut = type_named(private_field->modules.find_module("test"), "Shut");
     REQUIRE(shut != nullptr);
-    REQUIRE(shut->field_wise_constructor() == nullptr);
+    REQUIRE(shut->synthesized_constructor() == nullptr);
 }
 
 TEST_CASE("an instantiation copies a property's module visibility", "[visibility]")

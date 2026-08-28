@@ -1,0 +1,9 @@
+// a class uses the same constructor machinery. all defaults, so Handle() exists
+
+class Handle
+{
+    int32 $id = 3;
+}
+
+Handle $h = Handle();
+echo $h->id;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownFunction  property_defaults_partial_no_ctor.eco:9:12
+
+  The function 'Mixed' could not be found
+
+   8 | 
+   9 | Mixed $m = Mixed();
+     :            ^^^^^
+  10 | echo $m->a;
+
+1 error, nothing was compiled.

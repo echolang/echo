@@ -1,0 +1,13 @@
+// a property default is cloned into the constructor body, so an array literal there is an ordinary
+// assignment the expansion can reach - unlike a field-wise argument, which is the limitation
+// docs/reference/limitations.md still names
+
+struct Doc
+{
+    array<int32> $body = [1, 2];
+}
+
+Doc $d = Doc();
+echo $d->body->len;
+echo $d->body[0];
+echo $d->body[1];

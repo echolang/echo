@@ -177,7 +177,7 @@ TEST_CASE("a constructor is one declaration across both parse passes", "[structd
     // the field-wise one is a third declaration of the same name, suppressed here because
     // `constructor(int32)` already occupies the one-int32 signature this struct's single property
     // would produce
-    REQUIRE(point->field_wise_constructor() == nullptr);
+    REQUIRE(point->synthesized_constructor() == nullptr);
     REQUIRE(decls_named(m, "Point").size() == 2);
 }
 
@@ -327,7 +327,7 @@ TEST_CASE("a duplicated struct's members do not leak into the first", "[structde
     REQUIRE(foo->properties().size() == 1);
     REQUIRE(foo->methods().empty());
     REQUIRE(foo->constructors().empty());
-    REQUIRE(foo->field_wise_constructor() != nullptr);
+    REQUIRE(foo->synthesized_constructor() != nullptr);
 
     // parsing resumed on the token after the duplicate's closing brace
     auto *bar = type_named(m, "Bar");

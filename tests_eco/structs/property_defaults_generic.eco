@@ -1,0 +1,15 @@
+// a default mentioning T is cloned into the template constructor and substituted per instance.
+// Inner() is itself an all-defaults zero-arg constructor, so T() is a real call after binding
+
+struct Inner
+{
+    int32 $x = 7;
+}
+
+struct Box<T>
+{
+    T $v = T();
+}
+
+Box<Inner> $b = Box<Inner>();
+echo $b->v->x;

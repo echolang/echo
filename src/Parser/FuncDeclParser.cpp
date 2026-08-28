@@ -377,8 +377,12 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     Parser::report_unused_captures(payload, closure_expr, *environment);
 
     // to the file root, like every other declaration: codegen emits bodies from there and
-    // AST::OwnershipPass resolves drops from the same list
-    payload.context.declaration_scope().add_funcdecl(*closure_decl);
+    // AST::OwnershipPass resolves drops from the same list. skipped when the enclosing parse
+    // will not keep this tree - an instance property default is cloned into constructors, and
+    // that clone is what AST::prepend_property_defaults publishes
+    if (payload.context.publish_declarations) {
+        payload.context.declaration_scope().add_funcdecl(*closure_decl);
+    }
 
     // only now is it known whether anything was captured. an environment with no properties is left off
     // the node entirely, so the closure's env slot stays null and nothing is allocated for it

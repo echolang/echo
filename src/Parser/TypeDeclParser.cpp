@@ -6,8 +6,10 @@
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTDetach.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -21,6 +23,7 @@
 #include "Parser/VisibilityParser.h"
 
 #include <fmt/core.h>
+#include <unordered_set>
 
 // the node a previous pass already registered for this declaration site, with its arguments dropped,
 // or null when the running pass is the first to reach it
@@ -38,6 +41,31 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
     }
 
     return decl;
+}
+
+// a property is walked in both passes so they agree on where it ends. only the first walk keeps
+// the node; the discarded parse still allocated a ClosureExprNode and its FunctionDeclNode, and
+// TypeLowering::build_function_maps declares every FunctionDeclNode in the arena - two decls of
+// one mangled name
+static void forget_discarded_closure_decls(AST::Module &module, AST::ExprNode &expr)
+{
+    struct Forget : AST::RecursiveVisitor
+    {
+        std::unordered_set<const AST::Node *> gone;
+
+        void visit_closure_expr(AST::ClosureExprNode &node) override {
+            AST::RecursiveVisitor::visit_closure_expr(node);
+
+            if (node.decl != nullptr) {
+                AST::collect_subtree(*node.decl, gone);
+                node.decl = nullptr;
+            }
+        }
+    };
+
+    Forget forget;
+    expr.accept(forget);
+    module.nodes.forget(forget.gone);
 }
 
 bool Parser::publish_type_symbol(Parser::Payload &payload, AST::Namespace &ns, AST::TypeDeclNode &node)
@@ -611,7 +639,7 @@ static void parse_constructor(
         // which clears it: this body has one, the declarations nested in it do not
         AST::ConstructorScope ctor_this_scope(payload.context, &this_vardecl);
 
-        // the body opens with an implicit `Foo $this;`, exactly as the synthesized field-wise constructor
+        // the body opens with an implicit `Foo $this;`, exactly as the synthesized constructor
         // below does. handed to parse_scope rather than appended once the body is parsed for one reason
         // this site owns and one it does not: a statement in the body reads `$this` by name and a name is
         // resolved as it is parsed - and it also has to precede the statements that write through it,
@@ -622,7 +650,8 @@ static void parse_constructor(
     leave_member_body(payload);
 
     // and the implicit `return $this` that ends it, on the same terms as the two synthesized
-    // constructors - see AST::close_constructor_body, which owns when one is owed
+    // constructors - see AST::close_constructor_body, which owns when one is owed. property defaults
+    // are prepended later, once every constructor of this type has a body - AST::prepend_property_defaults
     AST::close_constructor_body(payload.context.module, *ctor_decl, this_vardecl);
 
     payload.context.declaration_scope().add_funcdecl(*ctor_decl);
@@ -768,31 +797,28 @@ static void parse_destructor(
     payload.context.declaration_scope().add_funcdecl(*dtor_decl);
 }
 
-// the field-wise constructor, synthesized for every struct: it takes one parameter per property and
-// initializes them in order. built whole, so it is the same in either pass and belongs to whichever
-// one reaches the struct first
-static void synthesize_field_wise_constructor(
+// the synthesized constructor. which of the three shapes it is - field-wise, zero-arg, or none -
+// is AST::synthesized_constructor_kind's. built whole, so it is the same in either pass and belongs
+// to whichever one reaches the struct first
+static void synthesize_constructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
     const AST::ValueType &self_value_type
 )
 {
-    auto name_token = struct_node->name_token.value();
+    const AST::SynthesizedConstructorKind kind = AST::synthesized_constructor_kind(*struct_node);
 
-    std::vector<AST::ValueType> default_ctor_params;
-    default_ctor_params.reserve(struct_node->properties().size());
-    for (const auto &prop : struct_node->properties()) {
-        default_ctor_params.push_back(prop->type_node()->type);
+    if (kind == AST::SynthesizedConstructorKind::t_none) {
+        return;
     }
 
-    // **a private property suppresses it outright, and that is the whole point of the modifier.**
-    // the field-wise constructor writes every property from outside the type, so for a type with a
-    // hidden one it is a public door into the invariant the modifier exists to keep -
-    // `mem::buffer<int32>($stolen, 8)` would be a second owner of one allocation, built with no cast
-    // and no `unsafe` anywhere. such a type builds itself through the constructors it wrote
-    for (const auto &prop : struct_node->properties()) {
-        if (prop->is_private()) {
-            return;
+    auto name_token = struct_node->name_token.value();
+
+    std::vector<AST::ValueType> ctor_params;
+    if (kind == AST::SynthesizedConstructorKind::t_field_wise) {
+        ctor_params.reserve(struct_node->properties().size());
+        for (const auto &prop : struct_node->properties()) {
+            ctor_params.push_back(prop->type_node()->type);
         }
     }
 
@@ -806,7 +832,7 @@ static void synthesize_field_wise_constructor(
     // what it holds depends on how far along we are, and it also holds every free function that
     // happens to share the struct's name, which has nothing to say about how a struct is built
     for (auto *constructor : struct_node->constructors()) {
-        if (AST::signatures_match(constructor, default_ctor_params)) {
+        if (AST::signatures_match(constructor, ctor_params)) {
             return;
         }
     }
@@ -821,7 +847,7 @@ static void synthesize_field_wise_constructor(
     // build that sees this struct produces the same definition - see AST::function_emission_kind
     default_ctor.is_implicitly_generated = true;
 
-    struct_node->set_field_wise_constructor(&default_ctor);
+    struct_node->set_synthesized_constructor(&default_ctor);
 
     default_ctor.ast_namespace = payload.context.current_namespace;
 
@@ -833,17 +859,18 @@ static void synthesize_field_wise_constructor(
     auto &type_node = payload.context.emplace_node<AST::TypeNode>(self_value_type);
     default_ctor.return_type = &type_node;
 
-    // add parameters for each struct property
-    for (const auto &prop : struct_node->properties()) {
-        // create a parameter with the same type as the property
-        auto param_token = payload.context.make_virtual_token(prop->name(), Token::Type::t_varname, name_token);
-        auto param_type = payload.context.emplace_nodep<AST::TypeNode>(prop->type_node()->type);
-        auto param_var = payload.context.emplace_nodep<AST::VarDeclNode>(param_token, param_type);
-        default_ctor.args.push_back(param_var);
+    if (kind == AST::SynthesizedConstructorKind::t_field_wise) {
+        for (const auto &prop : struct_node->properties()) {
+            auto param_token = payload.context.make_virtual_token(prop->name(), Token::Type::t_varname, name_token);
+            auto param_type = payload.context.emplace_nodep<AST::TypeNode>(prop->type_node()->type);
+            auto param_var = payload.context.emplace_nodep<AST::VarDeclNode>(param_token, param_type);
+            default_ctor.args.push_back(param_var);
+        }
     }
 
     // the function body is a scope that initializes the properties of the struct from the
-    // matching parameters
+    // matching parameters. a zero-arg form is `$this` plus the return; its defaults are prepended
+    // in the body pass, when there is a file root to publish a nested closure onto
     auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
     default_ctor.body = &ctor_body;
 
@@ -853,19 +880,21 @@ static void synthesize_field_wise_constructor(
     auto &this_vardecl = AST::declare_constructor_this(payload.context.module, type_node, name_token);
     default_ctor.body->add_vardecl(this_vardecl);
 
-    // one write per property, through the rule AST::seat_property_from_parameter owns - the pointer
-    // binding, the initialization and the hand-over are all its, and an enum's case constructor is
-    // built out of the same call
-    for (size_t i = 0; i < struct_node->properties().size(); i++) {
-        auto *prop = struct_node->properties()[i];
+    if (kind == AST::SynthesizedConstructorKind::t_field_wise) {
+        // one write per property, through the rule AST::seat_property_from_parameter owns - the
+        // pointer binding, the initialization and the hand-over are all its, and an enum's case
+        // constructor is built out of the same call
+        for (size_t i = 0; i < struct_node->properties().size(); i++) {
+            auto *prop = struct_node->properties()[i];
 
-        default_ctor.body->children.push_back(AST::make_ref(
-            AST::seat_property_from_parameter(
-                payload.context.module,
-                this_vardecl,
-                *prop,
-                default_ctor.args[i],
-                prop->token_varname)));
+            default_ctor.body->children.push_back(AST::make_ref(
+                AST::seat_property_from_parameter(
+                    payload.context.module,
+                    this_vardecl,
+                    *prop,
+                    default_ctor.args[i],
+                    prop->token_varname)));
+        }
     }
 
     // return the initialized struct instance, through the same owner the written constructor above ends
@@ -1119,7 +1148,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // a name-matching symbol declared at some *other* token is a second `struct Foo` in one
     // namespace, not this pass reconciling with the declaration the symbol was made from - that case
     // matches the site. everything below here mutates the node the other declaration owns: its type
-    // parameters, add_typedecl, the member walk, and a field-wise constructor that add_funcdecl
+    // parameters, add_typedecl, the member walk, and a synthesized constructor that add_funcdecl
     // would push into the file root a second time (codegen then emits two bodies onto one
     // llvm::Function). so this has to return before any of it. the body is skipped rather than
     // parsed-and-discarded the way a second pass over the same struct discards it, because parsing it
@@ -1522,6 +1551,15 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             //
             // and it is a property of a *property* rather than of a declaration: a local has no outside to
             // be hidden from, and there is no `private` on one
+            //
+            // instance defaults are recipes cloned into constructors; a closure in one is published
+            // by prepend_property_defaults. this walk runs in both passes so they agree on where the
+            // property ends, and the discarded parse would otherwise add_funcdecl a second
+            // FunctionDeclNode of the same mangled name. a `static` is not a recipe - its initializer
+            // is the live one OwnershipPass seats
+            AST::DeclarationPublishScope nested_decls(
+                payload.context, payload.cursor.is_type(Token::Type::t_static));
+
             auto var = parse_varexpr(payload, &structscope);
 
             if (var != nullptr) {
@@ -1555,6 +1593,9 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // append the var as a property of the struct
             else if (var && collect_members) {
                 struct_node->add_property(var);
+            }
+            else if (var != nullptr && !var->is_static() && var->init_expr != nullptr) {
+                forget_discarded_closure_decls(payload.context.module, *var->init_expr);
             }
         }
         else if (starts_operatordecl(cursor)) {
@@ -1634,7 +1675,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     struct_node->mark_members_collected();
 
     // synthesized by whichever pass walked the body, for the same reason the properties belong to it:
-    // there is one field-wise constructor per struct, and its parameter list is the layout this walk
+    // there is one synthesized constructor per struct, and its parameter list is the layout this walk
     // just collected. after the walk, so the suppression rule sees every constructor the user wrote -
     // however far down the body they wrote it
     // never for an interface: it has no fields to take, so what would be synthesized is a zero-argument
@@ -1645,7 +1686,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // catches it by accident, and a field-wise constructor over `(__tag, __c1_after, __c2_code)` is
     // exactly the door out of the case table that must not exist by accident
     if (collect_members && !is_interface_body && !is_enum_body) {
-        synthesize_field_wise_constructor(payload, struct_node, self_value_type);
+        synthesize_constructor(payload, struct_node, self_value_type);
     }
 
     // and the enum's own, in the same position and for the same reason: after the walk, so it is built
@@ -1675,10 +1716,36 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
         report_bodyless(struct_node->complex_type().destructor());
 
+        // recipes into every constructor that wants them, now that bodies exist and this is the
+        // file root - a clone in the declaration pass has no root to publish a nested closure onto.
+        // AST::prepend_property_defaults skips a copy constructor and a bodyless one itself
+        for (auto *ctor : struct_node->constructors()) {
+            if (ctor != nullptr) {
+                AST::prepend_property_defaults(
+                    payload.context.module,
+                    *struct_node,
+                    *ctor,
+                    payload.collector.type_registry,
+                    payload.context.declaration_scope());
+            }
+        }
+
+        if (auto *synth = struct_node->synthesized_constructor()) {
+            AST::prepend_property_defaults(
+                payload.context.module,
+                *struct_node,
+                *synth,
+                payload.collector.type_registry,
+                payload.context.declaration_scope());
+        }
+
+        // drop the leftovers so RecursiveVisitor::visit_type_decl does not type-check a default twice
+        AST::consume_property_defaults(*struct_node);
+
         // codegen emits a body from the file root's children, so the synthesized constructor has to
         // land there - at the tail, where it has always been
-        if (struct_node->field_wise_constructor() != nullptr) {
-            payload.context.declaration_scope().add_funcdecl(*struct_node->field_wise_constructor());
+        if (struct_node->synthesized_constructor() != nullptr) {
+            payload.context.declaration_scope().add_funcdecl(*struct_node->synthesized_constructor());
         }
 
         // **and every member an enum synthesized, for the same reason and one sharper than it.** a case

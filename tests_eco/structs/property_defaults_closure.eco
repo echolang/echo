@@ -1,0 +1,10 @@
+// a property default that holds a closure is cloned into the constructor in the body pass, so
+// the clone's declaration lands on the file root - the declaration pass has no root to publish to
+
+struct Box
+{
+    function<int32()> $f = function() : int32 { return 7; };
+}
+
+Box $b = Box();
+echo $b->f();

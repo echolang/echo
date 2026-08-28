@@ -1,0 +1,31 @@
+// a copy constructor fills from `$other`. the defaults must not run first: bump() would fire
+// once per copy instead of once per construction
+
+struct Counts
+{
+    static int32 $n = 0;
+
+    public static function bump() : int32
+    {
+        Counts::$n = Counts::$n + 1;
+        return Counts::$n;
+    }
+}
+
+struct Tagged
+{
+    int32 $id = Counts::bump();
+
+    constructor(Tagged& $other)
+    {
+        $this->id = $other->id;
+    }
+}
+
+Tagged $a = Tagged();
+echo $a->id;
+echo Counts::$n;
+
+Tagged $b = $a;
+echo $b->id;
+echo Counts::$n;

@@ -27,8 +27,8 @@ TEST_CASE("constructors() is the user-written set, field-wise kept apart", "[con
     REQUIRE(point != nullptr);
 
     REQUIRE(point->constructors().size() == 1);
-    REQUIRE(point->field_wise_constructor() != nullptr);
-    REQUIRE(point->constructors()[0] != point->field_wise_constructor());
+    REQUIRE(point->synthesized_constructor() != nullptr);
+    REQUIRE(point->constructors()[0] != point->synthesized_constructor());
 }
 
 TEST_CASE("T(...) through a type parameter constructs after instantiation", "[constructors][generics]")

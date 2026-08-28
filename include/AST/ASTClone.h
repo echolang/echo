@@ -14,6 +14,7 @@ namespace AST
 {
     class File;
     class FunctionDeclNode;
+    class ScopeNode;
     // toolkit threaded through a deep clone of an AST subtree. It is the single place that
     // knows how to (a) emit new nodes into the right NodeCollection, (b) substitute types,
     // and (c) rebind references so that clones point at clones (not at the originals)
@@ -99,6 +100,16 @@ namespace AST
     // cloned closures hang off the file root, not off the expression. walk `root` for
     // ClosureExprNode, stamp the enclosing instance's identity, and publish each decl
     // so codegen emits the body. one owner so CloneContext is not an out-parameter
+    //
+    // `into` is that root: the monomorphizer and OwnershipPass already have a File whose root is
+    // set, the parser has only the ScopeNode it is still building (file->root is filled after
+    // parse_scope returns)
+    void publish_cloned_closures(
+        Node &root,
+        ScopeNode *into,
+        FunctionDeclNode *enclosing_template,
+        const std::vector<ValueType> &instantiation_args);
+
     void publish_cloned_closures(
         Node &root,
         File *file,

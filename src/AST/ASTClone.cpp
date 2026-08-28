@@ -768,14 +768,14 @@ Node *AttributeNode::clone(CloneContext &cc) const
 
 void publish_cloned_closures(
     Node &root,
-    File *file,
+    ScopeNode *into,
     FunctionDeclNode *enclosing_template,
     const std::vector<ValueType> &instantiation_args
 )
 {
     struct Publisher : RecursiveVisitor
     {
-        File *file = nullptr;
+        ScopeNode *into = nullptr;
         FunctionDeclNode *tmpl = nullptr;
         std::vector<ValueType> args;
 
@@ -784,8 +784,18 @@ void publish_cloned_closures(
                 decl->template_ref = tmpl;
                 decl->instantiation_args = args;
 
-                if (file != nullptr && file->root != nullptr) {
-                    file->root->children.push_back(make_ref(*decl));
+                if (into != nullptr) {
+                    bool already = false;
+                    for (const auto &child : into->children) {
+                        if (child.node() == decl) {
+                            already = true;
+                            break;
+                        }
+                    }
+
+                    if (!already) {
+                        into->add_funcdecl(*decl);
+                    }
                 }
 
                 // the declaration hangs off the file root, so RecursiveVisitor will not
@@ -800,10 +810,21 @@ void publish_cloned_closures(
     };
 
     Publisher publisher;
-    publisher.file = file;
+    publisher.into = into;
     publisher.tmpl = enclosing_template;
     publisher.args = instantiation_args;
     root.accept(publisher);
+}
+
+void publish_cloned_closures(
+    Node &root,
+    File *file,
+    FunctionDeclNode *enclosing_template,
+    const std::vector<ValueType> &instantiation_args
+)
+{
+    publish_cloned_closures(
+        root, file != nullptr ? file->root : nullptr, enclosing_template, instantiation_args);
 }
 
 };  // namespace AST

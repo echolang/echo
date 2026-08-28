@@ -23,7 +23,7 @@ namespace Parser
         t_type_names,
 
         // the declaration surface: function, method and constructor signatures, struct properties
-        // and the synthesized field-wise constructor. member bodies are skipped whole - they call
+        // and the synthesized constructor. member bodies are skipped whole - they call
         // things this pass is still collecting, and a file parsed earlier would not see them
         t_declarations,
 

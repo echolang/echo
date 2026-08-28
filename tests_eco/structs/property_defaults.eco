@@ -1,0 +1,44 @@
+// every property has a default, so Foo() exists and the field-wise constructor does not
+
+struct Color
+{
+    int32 $r = 0;
+    int32 $g = 0;
+    int32 $b = 0;
+}
+
+struct ClearPassOptions
+{
+    int32 $clearColor = 1;
+    int32 $clearDepth = 1;
+    Color $color = Color();
+
+    public static function withColor(int32 $r) : ClearPassOptions
+    {
+        ClearPassOptions $options = ClearPassOptions();
+        $options->color->r = $r;
+        return $options;
+    }
+}
+
+ClearPassOptions $plain = ClearPassOptions();
+echo $plain->clearColor;
+echo $plain->clearDepth;
+echo $plain->color->r;
+
+ClearPassOptions $red = ClearPassOptions::withColor(9);
+echo $red->clearColor;
+echo $red->color->r;
+
+struct Overwrite
+{
+    int32 $n = 1;
+
+    constructor()
+    {
+        $this->n = 9;
+    }
+}
+
+Overwrite $o = Overwrite();
+echo $o->n;

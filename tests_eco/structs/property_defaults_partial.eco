@@ -1,0 +1,17 @@
+// some properties have defaults, some do not: no synthesized constructor. a written one still
+// runs the defaults first, then the body
+
+struct Gate
+{
+    int32 $id = 1;
+    int32 $chevrons;
+
+    constructor(int32 $chevrons)
+    {
+        $this->chevrons = $chevrons;
+    }
+}
+
+Gate $g = Gate(7);
+echo $g->id;
+echo $g->chevrons;

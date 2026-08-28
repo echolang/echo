@@ -1,0 +1,10 @@
+// mixed defaults, no written constructor: Foo() is not generated
+
+struct Mixed
+{
+    int32 $a = 1;
+    int32 $b;
+}
+
+Mixed $m = Mixed();
+echo $m->a;

@@ -357,8 +357,8 @@ TEST_CASE("reaching a struct body in both parse passes does not duplicate constr
     REQUIRE(point->constructors()[0]->body != nullptr);
 
     // and the field-wise one alongside it, taking both properties
-    REQUIRE(point->field_wise_constructor() != nullptr);
-    REQUIRE(point->field_wise_constructor()->args.size() == 2);
+    REQUIRE(point->synthesized_constructor() != nullptr);
+    REQUIRE(point->synthesized_constructor()->args.size() == 2);
 }
 
 TEST_CASE("two methods with the same parameter types are rejected", "[methods]")

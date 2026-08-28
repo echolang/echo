@@ -1,0 +1,16 @@
+// an owning default is an ordinary initialization: the string is seated, copied, and dropped
+
+{
+    struct Named
+    {
+        string $name = 'hi';
+    }
+
+    Named $a = Named();
+    echo $a->name;
+
+    Named $b = $a;
+    echo $b->name;
+}
+
+echo mem::live_allocations();
