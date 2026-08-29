@@ -3,8 +3,10 @@
 #include "Compiler/HostTool.h"
 #include "eco_test_file.h"
 #include "subprocess.h"
+#include "test_lane.h"
 
 #include <algorithm>
+#include <cassert>
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
@@ -17,25 +19,13 @@
 
 // end-to-end suite
 //
-// discovers every `*.eco` under ECO_E2E_TESTS_DIR recursively and reads its sibling `*.test`, which
-// is the whole contract for that case: the settings it runs under, the output it must print, and
-// optionally what the emitted IR or either AST dump must contain. see tests_eco/README.md for the
-// format; EchoTests::parse_eco_test_file owns it.
+// discovers every `*.eco` under EchoTests::e2e_tests_dir() recursively and reads its sibling
+// `*.test`, which is the whole contract for that case: the settings it runs under, the output it
+// must print, and optionally what the emitted IR or either AST dump must contain. see
+// tests_eco/README.md for the format; EchoTests::parse_eco_test_file owns it.
 //
 // the corpus is data driven: adding a `.eco`/`.test` pair (in arbitrarily nested subdirs) needs no
 // CMake reconfigure - discovery happens at runtime
-
-#ifndef ECHOC_BINARY
-#define ECHOC_BINARY "echoc"
-#endif
-
-#ifndef ECO_E2E_TESTS_DIR
-#define ECO_E2E_TESTS_DIR "tests_eco"
-#endif
-
-#ifndef ECO_E2E_TMP_DIR
-#define ECO_E2E_TMP_DIR "e2e_tmp"
-#endif
 
 namespace fs = std::filesystem;
 
@@ -69,7 +59,7 @@ namespace
     // of the two, and a repo-root-relative one drops artifacts among tracked files
     fs::path case_scratch_dir(const fs::path &eco, const fs::path &root)
     {
-        return fs::path(ECO_E2E_TMP_DIR) / fs::relative(eco, root).replace_extension("");
+        return fs::path(EchoTests::e2e_tmp_dir()) / fs::relative(eco, root).replace_extension("");
     }
 
     std::vector<std::string> echoc_argv(
@@ -83,9 +73,12 @@ namespace
     {
         const bool is_build = test.mode == EchoTests::RunMode::t_build;
 
-        REQUIRE((binary != nullptr) == is_build);
+        // not a Catch2 REQUIRE: this runs on the pool as well as the main thread, and Catch2's
+        // macros are not thread-safe. the two sides of this equality are the same fact spelled
+        // twice, so a mismatch is a runner bug rather than a corpus one
+        assert((binary != nullptr) == is_build);
 
-        std::vector<std::string> argv = { ECHOC_BINARY };
+        std::vector<std::string> argv = { EchoTests::echoc_binary() };
 
         if (is_build) {
             argv.push_back("build");
@@ -410,14 +403,11 @@ namespace
         return outcome;
     }
 
-    // the corpus's outcomes, produced by a pool of workers running a window ahead of whichever case
-    // the assertions have reached.
+    // the corpus's outcomes, produced by a pool of workers.
     //
-    // **a window rather than all of them up front.** Eager would be three lines shorter and would make
-    // `tests "[e2e]" -c "eco: arrays/literals.eco"` pay for the whole corpus; that invocation costs one
-    // case today and is the loop a person actually works in. Catch2 enters the sections of a single
-    // test case in declaration order - it shuffles test *cases* - so "the next K" is always work that
-    // will really be asked for, and a filtered run overruns by at most K.
+    // **eager rather than a sliding window.** the TEST_CASE is one Catch2 entry (no DYNAMIC_SECTION
+    // re-run), so filter/shard mark idle slots done without a spawn. an unfiltered CI run wants the
+    // pool saturated from the first wait, not after a window fills. `-c "eco: ..."` is `--e2e-filter`.
     //
     // the slots are sized once and never resized, so a reference handed out by `at` stays valid while
     // later cases are still being filled in around it
@@ -427,16 +417,15 @@ namespace
         ResultCache(const std::vector<DiscoveredCase> &cases, fs::path root)
             : _cases(cases), _root(std::move(root)), _slots(cases.size())
         {
-            const unsigned detected = std::thread::hardware_concurrency();
-            unsigned workers = detected == 0 ? 4 : detected;
+            // construct HostTool's function-local statics on this thread *before* the workers
+            // start. `process_directory` is first reached from `run_captured`; if that first
+            // reach is a worker, the static is constructed after this cache and destroyed
+            // before the destructor joins, which is a heap-use-after-free at `exit` whether
+            // the pool was eager or a sliding window
+            (void)Compiler::process_directory();
+            (void)Compiler::host_clang();
 
-#if defined(_WIN32)
-            // each case is its own echoc, and a native build then starts clang. uncapped
-            // hardware_concurrency on Windows is enough concurrent compilers to AV a child
-            if (workers > 8) {
-                workers = 8;
-            }
-#endif
+            const unsigned workers = EchoTests::e2e_worker_count();
 
             for (unsigned i = 0; i < workers; i++) {
                 _workers.emplace_back([this] { work(); });
@@ -457,40 +446,39 @@ namespace
             }
         }
 
-        const CaseOutcome &at(size_t index)
+        // queue every case this invocation will judge. the TEST_CASE is one Catch2 entry (no
+        // DYNAMIC_SECTION re-run), so eager is cheap for a filtered or sharded run: those cases are
+        // marked done without a spawn. an unfiltered CI run wants the pool saturated from the first
+        // wait, not after a sliding window
+        void enqueue_selected()
         {
-            std::unique_lock<std::mutex> lock(_mutex);
+            std::lock_guard<std::mutex> lock(_mutex);
 
-            // claim this case and the window behind it in one go, so the pool is already busy on what
-            // the next sections will ask for by the time this one is judged.
-            //
-            // the commands are built *here* and not at discovery, for two reasons that point the same
-            // way: echoc_command asserts, and only this thread may - and a filtered run should no more
-            // pay for 400 commands it will never spawn than for the spawns themselves
-            //
-            // the window is twice the pool, so every worker has one case in hand and one behind it
-            for (size_t i = index; i < _slots.size() && i < index + 2 * _workers.size(); i++) {
+            for (size_t i = 0; i < _slots.size(); i++) {
                 if (_slots[i].state != Slot::State::t_idle) {
                     continue;
                 }
 
-                // a case with no `.test`, or one that would not parse, FAILs on that alone - it has
-                // nothing to spawn, so it is done the moment it is looked at rather than being queued
-                // for a worker to discover it has no command
-                if (!_cases[i].runnable()) {
+                if (!EchoTests::e2e_case_selected(_cases[i].rel, i)
+                    || !_cases[i].runnable()
+                    || (EchoTests::is_dev_lane()
+                        && _cases[i].test.mode == EchoTests::RunMode::t_build)) {
                     _slots[i].state = Slot::State::t_done;
                     continue;
                 }
 
                 build_commands(i);
-
                 _slots[i].state = Slot::State::t_claimed;
                 _queue.push_back(i);
             }
 
             _wake_workers.notify_all();
-            _slot_done.wait(lock, [&] { return _slots[index].state == Slot::State::t_done; });
+        }
 
+        const CaseOutcome &at(size_t index)
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+            _slot_done.wait(lock, [&] { return _slots[index].state == Slot::State::t_done; });
             return _slots[index].outcome;
         }
 
@@ -513,6 +501,10 @@ namespace
 
             _slots[index].command
                 = echoc_argv(entry.test, entry.eco, binary, "", _root, entry.scratch);
+
+            if (EchoTests::is_dev_lane()) {
+                return;
+            }
 
             for (const auto &section : entry.test.checks) {
                 _slots[index].dump_commands.push_back(echoc_argv(
@@ -664,15 +656,11 @@ namespace
         return corpus;
     }
 
-    // discovered and parsed **once** per process, not once per section.
-    //
-    // Catch2 re-runs a TEST_CASE body from the top for every leaf section it enters, so anything in
-    // that body happens once per case in the corpus *times* the number of sections. the walk and the
-    // ~200 `.test` parses that produce this list are what the sections are derived *from*, which is
-    // why they cannot move inside one - so they are cached instead, the way require_clang's probe is
+    // discovered and parsed **once** per process: the corpus is large, and every `.test` parse
+    // here is paid before the first case runs. cached the way require_clang's probe is
     const Corpus &corpus()
     {
-        static const Corpus discovered = discover_corpus(ECO_E2E_TESTS_DIR);
+        static const Corpus discovered = discover_corpus(EchoTests::e2e_tests_dir());
 
         return discovered;
     }
@@ -680,7 +668,7 @@ namespace
     // the pool, cached for the same reason and with the same lifetime as the corpus it runs
     ResultCache &results()
     {
-        static ResultCache cache(corpus().cases, ECO_E2E_TESTS_DIR);
+        static ResultCache cache(corpus().cases, EchoTests::e2e_tests_dir());
 
         return cache;
     }
@@ -692,52 +680,58 @@ TEST_CASE("eco end-to-end", "[e2e]")
 
     REQUIRE_FALSE(discovered.cases.empty());
 
-    // one section for all of them rather than one each: an orphan is named by its own CHECK, and 200
-    // sections that do nothing but an fs::exists double how many times Catch2 re-enters this body
-    SECTION("orphan test files")
-    {
-        for (const auto &orphan : discovered.orphans) {
-            FAIL_CHECK("no program next to this test file, expected "
-                << fs::path(orphan).replace_extension(".eco").string());
-        }
+    for (const auto &orphan : discovered.orphans) {
+        FAIL_CHECK("no program next to this test file, expected "
+            << fs::path(orphan).replace_extension(".eco").string());
     }
+
+    // one Catch2 entry, not one DYNAMIC_SECTION per case: Catch2 re-entering the body ~1000 times
+    // was the tax, and `-c "eco: ..."` is replaced by `--e2e-filter`
+    results().enqueue_selected();
 
     for (size_t index = 0; index < discovered.cases.size(); index++) {
         const DiscoveredCase &entry = discovered.cases[index];
 
-        DYNAMIC_SECTION("eco: " << entry.rel)
-        {
-            INFO("file: " << entry.eco.string());
-
-            if (!entry.has_test_file) {
-                FAIL("missing test file: " << fs::path(entry.rel).replace_extension(".test").string()
-                    << ", see tests_eco/README.md for the format");
-            }
-
-            if (!entry.parse_error.empty()) {
-                FAIL(entry.parse_error);
-            }
-
-            const CaseOutcome &outcome = results().at(index);
-
-            if (entry.test.mode == EchoTests::RunMode::t_build) {
-                check_build_output(entry.test, entry.binary, outcome);
-            }
-            else {
-                check_program_output(entry.test, outcome.primary, "echoc");
-            }
+        if (!EchoTests::e2e_case_selected(entry.rel, index)) {
+            continue;
         }
 
-        // the optional other half: what the emitted IR or either AST dump must contain. empty for a
-        // case that did not parse, so a broken `.test` reports its parse error once and not per section
+        if (EchoTests::is_dev_lane()
+            && entry.test.mode == EchoTests::RunMode::t_build) {
+            continue;
+        }
+
+        INFO("eco: " << entry.rel);
+        INFO("file: " << entry.eco.string());
+
+        if (!entry.has_test_file) {
+            FAIL_CHECK("missing test file: " << fs::path(entry.rel).replace_extension(".test").string()
+                << ", see tests_eco/README.md for the format");
+            continue;
+        }
+
+        if (!entry.parse_error.empty()) {
+            FAIL_CHECK(entry.parse_error);
+            continue;
+        }
+
+        const CaseOutcome &outcome = results().at(index);
+
+        if (entry.test.mode == EchoTests::RunMode::t_build) {
+            check_build_output(entry.test, entry.binary, outcome);
+        }
+        else {
+            check_program_output(entry.test, outcome.primary, "echoc");
+        }
+
+        if (EchoTests::is_dev_lane()) {
+            continue;
+        }
+
         for (size_t check = 0; check < entry.test.checks.size(); check++) {
             const EchoTests::CheckSection &section = entry.test.checks[check];
-
-            DYNAMIC_SECTION(EchoTests::dump_section_name(section.kind) << ": " << entry.rel)
-            {
-                INFO("file: " << entry.eco.string());
-                check_dump_section(entry.test, section, results().at(index).dumps.at(check));
-            }
+            INFO(EchoTests::dump_section_name(section.kind) << ": " << entry.rel);
+            check_dump_section(entry.test, section, outcome.dumps.at(check));
         }
     }
 }

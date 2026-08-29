@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConstructionLeavesFieldUnassigned  ctor_helper_never_returns.eco:5:5
+
+  '$x' is not assigned on all paths of this constructor.
+
+  4 | 
+  5 |     constructor()
+    :     ^^^^^^^^^^^
+  6 |     {
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConstructionLeavesFieldUnassigned  ctor_helper_nested_call.eco:16:5
+
+  '$x' is not assigned on all paths of this constructor.
+
+  15 | 
+  16 |     constructor()
+     :     ^^^^^^^^^^^
+  17 |     {
+
+1 error, nothing was compiled.

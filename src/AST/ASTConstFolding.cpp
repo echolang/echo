@@ -7,6 +7,7 @@
 #include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTModule.h"
+#include "AST/ASTRegion.h"
 #include "AST/ConstExprNode.h"
 #include "AST/ConstIfNode.h"
 #include "AST/ExprNode.h"
@@ -38,13 +39,7 @@ bool ConstFolding::run_round()
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
 
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-
-            if (file.root != nullptr) {
-                file.root->accept(*this);
-            }
-        }
+        accept_semantic_roots(*module_ptr, *this, _current_file);
     }
 
     // **once for the round, not once per discard.** Bundle::forget_nodes sweeps every bucket of every

@@ -1,0 +1,20 @@
+class Point
+{
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $x, int32 $y)
+    {
+        $this->seat($x, $y);
+    }
+
+    function seat(int32 $x, int32 $y) : void
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+}
+
+Point $p = Point(3, 4);
+echo $p->x;
+echo $p->y;

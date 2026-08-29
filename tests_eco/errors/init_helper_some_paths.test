@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InitAssignsOnSomePaths  init_helper_some_paths.eco:4:11
+
+  '$hash' is not assigned on all paths of 'init'. Give every path an assignment, or leave it to the constructor.
+
+  3 |     int32 $age;
+  4 |     int32 $hash;
+    :           ^^^^^
+  5 | 
+
+1 error, nothing was compiled.

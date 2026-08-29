@@ -207,27 +207,23 @@ bool OwnershipPass::run_round()
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
 
-        for (auto &file : module_ptr->files()) {
+        for_each_semantic_root(*module_ptr, [&](File &file, ScopeNode &root) {
             _current_file = &file;
-
-            if (file.root == nullptr) {
-                continue;
-            }
 
             // the file root is a body in every sense that matters here: codegen synthesizes `main`
             // out of it, so a local declared at file scope owns its value and is destroyed at the
             // end of the program exactly as one in a function is
-            resolve_root(*file.root);
+            resolve_root(root);
 
             // declarations reached through the root's children, which is also where the
             // monomorphizer appends the instances it creates - so an instance body created this
             // round is resolved on the next one
-            for (auto &child : file.root->children) {
+            for (auto &child : root.children) {
                 if (child.has_type<FunctionDeclNode>()) {
                     resolve_function(child.get<FunctionDeclNode>());
                 }
             }
-        }
+        });
     }
 
     // **everything this round synthesized, in one place, after every walk.** a deinit or a copy

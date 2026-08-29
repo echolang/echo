@@ -57,20 +57,16 @@ bool OperatorRewriter::run_round()
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
 
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-
+        for_each_semantic_root(*module_ptr, [&](File &file, ScopeNode &root) {
             // per file, so a case's hoist names do not move when an unrelated file above it grows a
             // literal - the locality OwnershipPass::_temporary_count has per body. a round that hoists
             // nothing new leaves the numbering exactly where the round that did put it, because a
             // decided literal is never hoisted twice
             _hoist_count = 0;
+            _current_file = &file;
             _current_function = nullptr;
-
-            if (file.root != nullptr) {
-                file.root->accept(*this);
-            }
-        }
+            root.accept(*this);
+        });
     }
 
     // **once for the round, not once per discard** - see _detached. nothing between a rewrite and here

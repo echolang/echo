@@ -59,8 +59,8 @@ namespace AST
     protected:
         explicit FixpointLowering(Bundle &bundle);
 
-        // one walk of every file's root in every module. answers whether anything changed, so the
-        // fixpoint can report progress - see `_changed` below, which is what a subclass sets
+        // one walk of every file root. answers whether anything changed, so the fixpoint can
+        // report progress - see `_changed` below, which is what a subclass sets
         bool run_round();
 
         // **the fixpoint's exit obligation**: one last round in which "not settled yet" is a refusal.
@@ -74,8 +74,8 @@ namespace AST
 
         CodeRef code_ref_for(const TokenReference &token);
 
-        // the next index for a local this pass mints - `$__guard0`, `$__guard1`. **per file**, reset by
-        // run_round, which is the whole of the second invariant above
+        // the next index for a local this pass mints - `$__guard0`, `$__guard1`. **per file**, reset
+        // by run_round, which is the whole of the second invariant above
         size_t next_hoist_index();
 
         // a template's body is only meaningful once cloned into a concrete instance, and the type every

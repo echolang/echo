@@ -1,0 +1,20 @@
+class Inner
+{
+    int32 $x;
+
+    function seat() : void
+    {
+        $this->x = 1;
+    }
+}
+
+struct Outer
+{
+    int32 $x;
+    Inner $child;
+
+    constructor()
+    {
+        $this->child->seat();
+    }
+}

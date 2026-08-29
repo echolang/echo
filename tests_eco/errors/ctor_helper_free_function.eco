@@ -1,0 +1,16 @@
+struct Point
+{
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $x, int32 $y)
+    {
+        seat($this, $x, $y);
+    }
+}
+
+function seat(Point& $p, int32 $x, int32 $y) : void
+{
+    $p->x = $x;
+    $p->y = $y;
+}

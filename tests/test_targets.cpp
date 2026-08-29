@@ -180,7 +180,7 @@ TEST_CASE("a dependency's tests are not this invocation's", "[test_targets]")
         "}\n");
 
     const ProcessResult app = EchoTests::run_process({
-        ECHOC_BINARY, "test", "-m", (project.root() / "app").string() });
+        EchoTests::echoc_binary(), "test", "-m", (project.root() / "app").string() });
 
     INFO(app.output);
     REQUIRE(app.exit_code == 0);
@@ -189,7 +189,7 @@ TEST_CASE("a dependency's tests are not this invocation's", "[test_targets]")
 
     // and pointing at the library is how its own are run
     const ProcessResult lib = EchoTests::run_process({
-        ECHOC_BINARY, "test", "-m", (project.root() / "lib").string() });
+        EchoTests::echoc_binary(), "test", "-m", (project.root() / "lib").string() });
 
     INFO(lib.output);
     REQUIRE(lib.exit_code == 0);

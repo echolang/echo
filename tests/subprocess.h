@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "test_lane.h"
+
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -157,7 +159,7 @@ namespace EchoTests
     {
     public:
         ScopedProject(const std::string &suite, const std::string &name) :
-            _root(std::filesystem::path(ECO_E2E_TMP_DIR) / suite / name)
+            _root(std::filesystem::path(e2e_tmp_dir()) / suite / name)
         {
             std::error_code ec;
             std::filesystem::remove_all(_root, ec);
@@ -181,7 +183,7 @@ namespace EchoTests
         // ones testing discovery itself wants
         ProcessResult echoc(const std::string &args, const std::filesystem::path &working_directory) const
         {
-            std::vector<std::string> argv = { ECHOC_BINARY };
+            std::vector<std::string> argv = { echoc_binary() };
             const std::vector<std::string> words = split_command_words(args);
             argv.insert(argv.end(), words.begin(), words.end());
             return run_process(argv, k_default_timeout_ms, working_directory);

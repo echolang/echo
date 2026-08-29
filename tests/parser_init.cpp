@@ -112,6 +112,81 @@ TEST_CASE("derived-field constructor arity does not depend on file order", "[ini
         ->synthesized_constructor()->args.size() == 1);
 }
 
+TEST_CASE("a constructor that seats through a method on $this is fully assigned", "[init]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    int32 $x;\n"
+        "    int32 $y;\n"
+        "    constructor(int32 $x, int32 $y) { $this->seat($x, $y); }\n"
+        "    function seat(int32 $x, int32 $y) : void {\n"
+        "        $this->x = $x;\n"
+        "        $this->y = $y;\n"
+        "    }\n"
+        "}\n"
+        "Point $p = Point(1, 2);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("init that seats through a method still sees the helper's reads", "[init]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Person {\n"
+        "    int32 $age;\n"
+        "    int32 $hash;\n"
+        "    constructor() {}\n"
+        "    init { $this->seed(); }\n"
+        "    function seed() : void { $this->hash = $this->age; }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "reads 'age' before every constructor has assigned it"));
+}
+
+TEST_CASE("a helper that assigns a derived field on only one branch is some-paths", "[init]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Person {\n"
+        "    int32 $age;\n"
+        "    int32 $hash;\n"
+        "    init { $this->maybe_hash(); }\n"
+        "    function maybe_hash() : void {\n"
+        "        if ($this->age > 0) { $this->hash = 1; }\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "not assigned on all paths of 'init'"));
+}
+
+TEST_CASE("a helper that leaves a field blank is still a constructor hole", "[init]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    int32 $x;\n"
+        "    int32 $y;\n"
+        "    constructor(int32 $x) { $this->seat($x); }\n"
+        "    function seat(int32 $x) : void { $this->x = $x; }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "not assigned on all paths of this constructor"));
+}
+
+TEST_CASE("a free function that takes T& does not assign through $this", "[init]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    int32 $x;\n"
+        "    int32 $y;\n"
+        "    constructor(int32 $x, int32 $y) { seat($this, $x, $y); }\n"
+        "}\n"
+        "function seat(Point& $p, int32 $x, int32 $y) : void {\n"
+        "    $p->x = $x;\n"
+        "    $p->y = $y;\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "not assigned on all paths of this constructor"));
+}
+
 TEST_CASE("a user constructor without init must still assign every field", "[init]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(

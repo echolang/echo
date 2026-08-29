@@ -1,0 +1,17 @@
+struct Person
+{
+    int32 $age;
+    int32 $hash;
+
+    constructor() {}
+
+    init
+    {
+        $this->seed();
+    }
+
+    function seed() : void
+    {
+        $this->hash = $this->age;
+    }
+}

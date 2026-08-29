@@ -21,15 +21,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  build_and_test:
+  build_linux:
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        build_type: [RelWithDebInfo]
-
     env:
-      BUILD_TYPE: ${{ matrix.build_type }}
-      # CXX_FLAGS: "-stdlib=libc++ -std=c++20"
+      BUILD_TYPE: RelWithDebInfo
       USE_CLANG: 1
 
     steps:
@@ -65,11 +60,61 @@ jobs:
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --target tests
 
+    - name: Upload test binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-test-binaries
+        path: |
+          build/tests
+          build/echoc
+        if-no-files-found: error
+
+  test_linux:
+    runs-on: ubuntu-24.04
+    needs: build_linux
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit, e2e-0, e2e-1]
+    env:
+      ECO_SHARD: ${{ matrix.shard }}
+      # the tests binary was compiled on the build job; these override the baked-in absolute paths
+      ECHOC_BINARY: ${{ github.workspace }}/build/echoc
+      ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
+      ECO_E2E_TMP_DIR: ${{ github.workspace }}/build/e2e_tmp
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Setup LLVM
+      uses: ZhongRuoyu/setup-llvm@v0
+      with:
+        llvm-version: 20
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y libc++-dev libc++abi-dev zlib1g-dev
+
+    - name: Download test binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-test-binaries
+        path: build
+
     - name: Test
       working-directory: ${{github.workspace}}/build
-      run: ./tests
+      run: |
+        chmod +x ./tests ./echoc
+        case "${ECO_SHARD}" in
+          unit)  ./tests "~[e2e]" ;;
+          e2e-0) ./tests "[e2e]" --shard 0/2 ;;
+          e2e-1) ./tests "[e2e]" --shard 1/2 ;;
+          *)     echo "unknown shard ${ECO_SHARD}" >&2; exit 1 ;;
+        esac
 
-  build_and_test_windows:
+  build_windows:
     runs-on: windows-2022
     timeout-minutes: 180
     env:
@@ -102,9 +147,58 @@ jobs:
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{ env.BUILD_TYPE }} --target tests
 
+    - name: Upload test binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-test-binaries
+        path: |
+          build/tests.exe
+          build/echoc.exe
+        if-no-files-found: error
+
+  test_windows:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    needs: build_windows
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit, e2e-0, e2e-1]
+    env:
+      ECO_SHARD: ${{ matrix.shard }}
+      # the tests binary was compiled on the build job; these override the baked-in absolute paths
+      ECHOC_BINARY: ${{ github.workspace }}/build/echoc.exe
+      ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
+      ECO_E2E_TMP_DIR: ${{ github.workspace }}/build/e2e_tmp
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: MSVC environment
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Setup LLVM
+      uses: ZhongRuoyu/setup-llvm@v0
+      with:
+        llvm-version: 20
+
+    - name: Download test binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-test-binaries
+        path: build
+
     - name: Test
       working-directory: ${{github.workspace}}/build
-      run: .\tests.exe
+      shell: pwsh
+      run: |
+        switch ($env:ECO_SHARD) {
+          "unit"  { .\tests.exe "~[e2e]"; break }
+          "e2e-0" { .\tests.exe "[e2e]" --shard 0/2; break }
+          "e2e-1" { .\tests.exe "[e2e]" --shard 1/2; break }
+          default { Write-Error "unknown shard $($env:ECO_SHARD)"; exit 1 }
+        }
 
   # the version the release binaries are stamped with and the tag the release gets. Resolved once, so
   # both platforms and the release itself cannot disagree about what was built
@@ -114,7 +208,7 @@ jobs:
   # and no commit pushed back onto master
   resolve_version:
     runs-on: ubuntu-24.04
-    needs: [build_and_test, build_and_test_windows]
+    needs: [test_linux, test_windows]
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       patch: ${{ steps.resolve.outputs.patch }}

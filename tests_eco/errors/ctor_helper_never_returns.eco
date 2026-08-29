@@ -1,0 +1,15 @@
+struct Point
+{
+    int32 $x;
+
+    constructor()
+    {
+        $this->abort();
+        $this->x = 1;
+    }
+
+    function abort() : void
+    {
+        die('no');
+    }
+}

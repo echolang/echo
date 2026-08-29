@@ -34,17 +34,13 @@ bool FixpointLowering::run_round()
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
 
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-
+        for_each_semantic_root(*module_ptr, [&](File &file, ScopeNode &root) {
             // the hoist numbering restarts here, and this line is the whole of the per-file rule: a
             // name minted in one file cannot be renumbered by an unrelated file above it growing one
             _hoist_count = 0;
-
-            if (file.root != nullptr) {
-                file.root->accept(*this);
-            }
-        }
+            _current_file = &file;
+            root.accept(*this);
+        });
     }
 
     return _changed;

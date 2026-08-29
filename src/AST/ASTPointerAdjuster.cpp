@@ -2,6 +2,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTVariadic.h"
@@ -37,12 +38,7 @@ void PointerAdjuster::run()
 {
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-            if (file.root) {
-                file.root->accept(*this);
-            }
-        }
+        accept_semantic_roots(*module_ptr, *this, _current_file);
     }
 }
 

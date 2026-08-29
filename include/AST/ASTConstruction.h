@@ -32,7 +32,10 @@ namespace AST
     // **one construction check, three facts.** implicit ctor assigns every non-derived field;
     // each user ctor assigns every non-derived field `init` does not; `init` assigns every derived
     // field on all paths and reads only fields the preceding ctor assigned (or that `init` itself
-    // has already assigned on this path). reports InitAssignsOnSomePaths,
+    // has already assigned on this path). `$this->method()` is the same walk: the callee is
+    // entered with the caller's fallthrough and the same reads; a `return` in the method is not
+    // a return from the constructor; a helper that never completes does not. a free function that
+    // takes `T&` is not this object, and neither is `$this->child->method()`. reports InitAssignsOnSomePaths,
     // ConstructionLeavesFieldUnassigned, InitReadsUnassignedField. asked of the type after bodies
     // exist - TypeChecker::visit_type_decl, including on a generic template
     void check_construction(TypeDeclNode &type, Collector &collector, Module &module);

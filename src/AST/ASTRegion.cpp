@@ -6,6 +6,7 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTVisitor.h"
 #include "AST/AssignNode.h"
 #include "AST/ConstExprNode.h"
 #include "AST/ConstIfNode.h"
@@ -324,18 +325,42 @@ bool body_is_pending(ScopeNode &scope)
     return walk.pending;
 }
 
+void visit_semantic_roots(
+    Module &module,
+    void *ctx,
+    void (*on_file)(void *ctx, File &file, ScopeNode &root)
+)
+{
+    for (File &file : module.files()) {
+        if (file.root == nullptr) {
+            continue;
+        }
+
+        on_file(ctx, file, *file.root);
+    }
+}
+
+void accept_semantic_roots(Module &module, Visitor &visitor, File *&current_file)
+{
+    for_each_semantic_root(module, [&](File &file, ScopeNode &root) {
+        current_file = &file;
+        root.accept(visitor);
+    });
+}
+
+void accept_semantic_roots(Module &module, Visitor &visitor)
+{
+    File *ignored = nullptr;
+    accept_semantic_roots(module, visitor, ignored);
+}
+
 std::vector<std::pair<FunctionCallExprNode *, Module *>> live_calls(Bundle &bundle)
 {
     LiveCalls walk;
 
     for (auto &module_ptr : bundle.modules) {
         walk.module = module_ptr.get();
-
-        for (auto &file : module_ptr->files()) {
-            if (file.root != nullptr) {
-                file.root->accept(walk);
-            }
-        }
+        accept_semantic_roots(*module_ptr, walk);
     }
 
     return walk.calls;

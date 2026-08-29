@@ -1,0 +1,17 @@
+struct Person
+{
+    int32 $age;
+    int32 $hash;
+
+    init
+    {
+        $this->maybe_hash();
+    }
+
+    function maybe_hash() : void
+    {
+        if ($this->age > 0) {
+            $this->hash = 1;
+        }
+    }
+}

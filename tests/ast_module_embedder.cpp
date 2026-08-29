@@ -3,6 +3,8 @@
 #include <AST/ASTModule.h>
 #include <AST/ASTModuleEmbedder.h>
 
+#include "test_lane.h"
+
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -60,7 +62,7 @@ TEST_CASE("write_embedded_module emits a generic add_file path as a C string", "
     auto &file = module.add_file(fs::path(STDLIB_SOURCE_DIR) / "core" / "ordered_map.eco");
     file.set_content("function f() {}\n");
 
-    const fs::path tmp_dir = fs::path(ECO_E2E_TMP_DIR) / "embedder";
+    const fs::path tmp_dir = fs::path(EchoTests::e2e_tmp_dir()) / "embedder";
     fs::create_directories(tmp_dir);
     const fs::path tmp = tmp_dir / "stdlib_embedded.h";
     AST::write_embedded_module(module, tmp.string());

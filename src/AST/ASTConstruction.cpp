@@ -22,10 +22,12 @@
 #include "AST/ScopeNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
 
 #include <fmt/core.h>
 
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -38,6 +40,7 @@ namespace
         FieldSet fallthrough;
         bool falls_through = true;
         std::vector<FieldSet> completed;
+        FieldSet assigned_any;
     };
 
     struct Read
@@ -46,15 +49,38 @@ namespace
         TokenReference at;
     };
 
+    struct MethodSummary
+    {
+        FieldSet assigned_all;
+        FieldSet assigned_any;
+        bool never_completes = false;
+    };
+
+    struct WalkEnv
+    {
+        std::unordered_set<const AST::FunctionDeclNode *> visiting;
+        std::unordered_map<const AST::FunctionDeclNode *, MethodSummary> summaries;
+    };
+
+    const MethodSummary k_empty_summary;
+
     AST::ExprNode *peel_address(AST::ExprNode *expr)
     {
         while (expr != nullptr) {
+            expr = AST::strip_implicit_casts(expr);
+            if (expr == nullptr) {
+                break;
+            }
+
             const AST::NodeType kind = expr->get_node_type();
             if (kind == AST::NodeType::n_expr_peel) {
                 expr = static_cast<AST::PointerValueNode *>(expr)->operand;
             }
             else if (kind == AST::NodeType::n_expr_deref) {
                 expr = static_cast<AST::DerefExprNode *>(expr)->operand;
+            }
+            else if (kind == AST::NodeType::n_expr_addrof) {
+                expr = static_cast<AST::AddrOfExprNode *>(expr)->operand;
             }
             else {
                 break;
@@ -63,6 +89,9 @@ namespace
 
         return expr;
     }
+
+    bool receiver_is_self(const AST::FunctionCallExprNode &node, const AST::VarDeclNode *self);
+    const AST::VarDeclNode *method_this(const AST::FunctionDeclNode &decl);
 
     // `$this->field`, not `$this->field->next`. the outer access of a nested path is a different
     // object's member; RecursiveVisitor still visits the inner `$this->field` as a read
@@ -104,30 +133,35 @@ namespace
         return out;
     }
 
-    class AssignCollector : public AST::RecursiveVisitor
-    {
-    public:
-        AssignCollector(const AST::VarDeclNode *self, FieldSet *into) : _self(self), _into(into) {}
-
-        void visitFunctionDecl(AST::FunctionDeclNode &) override {}
-
-        void visit_assign(AST::AssignNode &node) override
-        {
-            if (const std::string *name = direct_property_of_self(node.target, _self)) {
-                _into->insert(*name);
-            }
-
-            AST::RecursiveVisitor::visit_assign(node);
-        }
-
-    private:
-        const AST::VarDeclNode *_self;
-        FieldSet *_into;
-    };
-
     void join_completed(PathResult &into, const PathResult &from)
     {
         into.completed.insert(into.completed.end(), from.completed.begin(), from.completed.end());
+    }
+
+    void join_from(PathResult &into, const PathResult &from)
+    {
+        join_completed(into, from);
+        into.assigned_any.insert(from.assigned_any.begin(), from.assigned_any.end());
+    }
+
+    FieldSet all_paths_of(const PathResult &walked)
+    {
+        std::vector<FieldSet> completing = walked.completed;
+
+        if (walked.falls_through) {
+            completing.push_back(walked.fallthrough);
+        }
+
+        if (completing.empty()) {
+            return {};
+        }
+
+        FieldSet all = completing.front();
+        for (size_t i = 1; i < completing.size(); i++) {
+            all = intersect(all, completing[i]);
+        }
+
+        return all;
     }
 
     PathResult join_branches(
@@ -138,7 +172,7 @@ namespace
     {
         PathResult result;
         result.fallthrough = incoming;
-        join_completed(result, then_r);
+        join_from(result, then_r);
 
         if (else_r == nullptr) {
             if (then_r.falls_through) {
@@ -147,7 +181,7 @@ namespace
             return result;
         }
 
-        join_completed(result, *else_r);
+        join_from(result, *else_r);
 
         if (then_r.falls_through && else_r->falls_through) {
             result.fallthrough = intersect(then_r.fallthrough, else_r->fallthrough);
@@ -175,9 +209,18 @@ namespace
         const AST::VarDeclNode *self = nullptr;
         std::vector<Read> *reads = nullptr;
         bool as_statement = false;
+        WalkEnv &env;
 
-        ConstructionWalk(FieldSet incoming, const AST::VarDeclNode *self, std::vector<Read> *reads) :
-            result { std::move(incoming), true, {} }, self(self), reads(reads)
+        ConstructionWalk(
+            FieldSet incoming,
+            const AST::VarDeclNode *self,
+            std::vector<Read> *reads,
+            WalkEnv &env
+        ) :
+            result { std::move(incoming), true, {}, {} },
+            self(self),
+            reads(reads),
+            env(env)
         {}
 
         void statement_edge(AST::Node *node) override
@@ -212,7 +255,7 @@ namespace
 
             for (const AST::NodeReference &child : node.children) {
                 PathResult step = walk_statement(child.node(), current);
-                join_completed(result, step);
+                join_from(result, step);
 
                 if (!step.falls_through) {
                     result.falls_through = false;
@@ -241,6 +284,8 @@ namespace
         {
             AST::RecursiveVisitor::visitFunctionCallExpr(node);
 
+            absorb_this_method(node);
+
             if (as_statement && AST::expression_never_returns(node)) {
                 result.falls_through = false;
             }
@@ -252,6 +297,7 @@ namespace
 
             if (const std::string *name = direct_property_of_self(node.target, self)) {
                 result.fallthrough.insert(*name);
+                result.assigned_any.insert(*name);
             }
         }
 
@@ -272,7 +318,7 @@ namespace
             collect_value(node.bound_value);
 
             PathResult else_r = walk_statement(node.else_scope, result.fallthrough);
-            join_completed(result, else_r);
+            join_from(result, else_r);
         }
 
         void visit_match(AST::MatchExprNode &node) override
@@ -287,7 +333,7 @@ namespace
             for (const AST::MatchExprNode::Arm &arm : node.arms) {
                 PathResult arm_r = walk_statement(arm.scope, incoming);
                 collect_value_with(arm.value, arm_r.fallthrough);
-                join_completed(result, arm_r);
+                join_from(result, arm_r);
 
                 const bool arm_dies = arm.value != nullptr && AST::expression_never_returns(*arm.value);
                 if (arm_dies || !arm_r.falls_through) {
@@ -316,7 +362,7 @@ namespace
         {
             collect_value(node.condition);
             PathResult body_r = walk_statement(node.loop_scope, result.fallthrough);
-            join_completed(result, body_r);
+            join_from(result, body_r);
         }
 
         void visit_for_statement(AST::ForStatementNode &node) override
@@ -324,16 +370,16 @@ namespace
             const FieldSet incoming = result.fallthrough;
             collect_value(node.condition);
             PathResult body_r = walk_statement(node.loop_scope, incoming);
-            join_completed(result, body_r);
+            join_from(result, body_r);
             PathResult step_r = walk_statement(node.step, incoming);
-            join_completed(result, step_r);
+            join_from(result, step_r);
         }
 
         void visit_foreach(AST::ForeachNode &node) override
         {
             collect_value(node.source);
             PathResult body_r = walk_statement(node.body, result.fallthrough);
-            join_completed(result, body_r);
+            join_from(result, body_r);
         }
 
     private:
@@ -382,17 +428,46 @@ namespace
 
         PathResult walk_statement(AST::Node *node, FieldSet incoming)
         {
-            ConstructionWalk inner(std::move(incoming), self, reads);
+            ConstructionWalk inner(std::move(incoming), self, reads, env);
             inner.statement_edge(node);
             return inner.result;
         }
+
+        void absorb_this_method(AST::FunctionCallExprNode &node);
     };
+
+    // `$this->method()`, not `$this->child->method()`. place_root_of walks member and index paths,
+    // so a nested call would credit the outer constructor with the inner type's field names
+    bool receiver_is_self(const AST::FunctionCallExprNode &node, const AST::VarDeclNode *self)
+    {
+        if (self == nullptr || node.arguments.empty()) {
+            return false;
+        }
+
+        AST::ExprNode *expr = peel_address(node.arguments[0]);
+        if (expr == nullptr || expr->get_node_type() != AST::NodeType::n_varref) {
+            return false;
+        }
+
+        auto *ref = static_cast<AST::VarRefNode *>(expr);
+        return ref->is_var() && &ref->get_var().decl() == self;
+    }
+
+    const AST::VarDeclNode *method_this(const AST::FunctionDeclNode &decl)
+    {
+        if (!decl.has_receiver() || decl.args.empty()) {
+            return nullptr;
+        }
+
+        return decl.args[0];
+    }
 
     PathResult walk_scope(
         const AST::ScopeNode *scope,
         FieldSet incoming,
         const AST::VarDeclNode *self,
-        std::vector<Read> *reads
+        std::vector<Read> *reads,
+        WalkEnv &env
     )
     {
         if (scope == nullptr) {
@@ -401,9 +476,100 @@ namespace
             return result;
         }
 
-        ConstructionWalk walk(std::move(incoming), self, reads);
+        ConstructionWalk walk(std::move(incoming), self, reads, env);
         walk.statement_edge(const_cast<AST::ScopeNode *>(scope));
         return walk.result;
+    }
+
+    const MethodSummary &summary_of(
+        AST::FunctionDeclNode &decl,
+        const AST::VarDeclNode *inner_self,
+        WalkEnv &env
+    )
+    {
+        auto cached = env.summaries.find(&decl);
+        if (cached != env.summaries.end()) {
+            return cached->second;
+        }
+
+        if (env.visiting.count(&decl) != 0) {
+            return k_empty_summary;
+        }
+
+        env.visiting.insert(&decl);
+        const PathResult walked = walk_scope(decl.body, {}, inner_self, nullptr, env);
+        env.visiting.erase(&decl);
+
+        MethodSummary summary;
+        summary.assigned_all = all_paths_of(walked);
+        summary.assigned_any = walked.assigned_any;
+        summary.never_completes = !walked.falls_through && walked.completed.empty();
+        return env.summaries.emplace(&decl, std::move(summary)).first->second;
+    }
+
+    void ConstructionWalk::absorb_this_method(AST::FunctionCallExprNode &node)
+    {
+        AST::FunctionDeclNode *decl = node.decl;
+        if (decl == nullptr || decl->member_kind != AST::MemberKind::t_method || decl->body == nullptr) {
+            return;
+        }
+
+        if (!receiver_is_self(node, self)) {
+            return;
+        }
+
+        const AST::VarDeclNode *inner_self = method_this(*decl);
+        if (inner_self == nullptr) {
+            return;
+        }
+
+        // init-reads depend on the caller's already-assigned set, so they still enter the
+        // callee. assignment credit does not: union the method's own all-paths summary
+        if (reads != nullptr) {
+            if (env.visiting.count(decl) != 0) {
+                return;
+            }
+
+            env.visiting.insert(decl);
+            ConstructionWalk inner(result.fallthrough, inner_self, reads, env);
+            inner.statement_edge(decl->body);
+            env.visiting.erase(decl);
+
+            const FieldSet all = all_paths_of(inner.result);
+            result.fallthrough.insert(all.begin(), all.end());
+            result.assigned_any.insert(
+                inner.result.assigned_any.begin(), inner.result.assigned_any.end());
+
+            if (as_statement && !inner.result.falls_through && inner.result.completed.empty()) {
+                result.falls_through = false;
+            }
+
+            return;
+        }
+
+        const MethodSummary &summary = summary_of(*decl, inner_self, env);
+        result.fallthrough.insert(summary.assigned_all.begin(), summary.assigned_all.end());
+        result.assigned_any.insert(summary.assigned_any.begin(), summary.assigned_any.end());
+
+        // a helper that never completes (every path `die`s, no `return`) does not come back.
+        // `expression_never_returns` only answers for builtins (`die`), so a user method that
+        // always dies has to come from this walk or the constructor is treated as continuing
+        if (as_statement && summary.never_completes) {
+            result.falls_through = false;
+        }
+    }
+
+    FieldSet fields_assigned_through(
+        const AST::ScopeNode *body,
+        const AST::VarDeclNode *self,
+        WalkEnv &env
+    )
+    {
+        if (body == nullptr || self == nullptr) {
+            return {};
+        }
+
+        return all_paths_of(walk_scope(body, {}, self, nullptr, env));
     }
 
     const AST::VarDeclNode *init_this(const AST::FunctionDeclNode &init)
@@ -422,27 +588,8 @@ std::unordered_set<std::string> AST::fields_assigned_on_all_paths(
     const AST::VarDeclNode *self
 )
 {
-    if (body == nullptr || self == nullptr) {
-        return {};
-    }
-
-    const PathResult walked = walk_scope(body, {}, self, nullptr);
-    std::vector<FieldSet> completing = walked.completed;
-
-    if (walked.falls_through) {
-        completing.push_back(walked.fallthrough);
-    }
-
-    if (completing.empty()) {
-        return {};
-    }
-
-    FieldSet all = completing.front();
-    for (size_t i = 1; i < completing.size(); i++) {
-        all = intersect(all, completing[i]);
-    }
-
-    return all;
+    WalkEnv env;
+    return fields_assigned_through(body, self, env);
 }
 
 std::unordered_set<std::string> AST::derived_fields_of(const AST::TypeDeclNode &type)
@@ -458,16 +605,17 @@ std::unordered_set<std::string> AST::derived_fields_of(const AST::TypeDeclNode &
 void AST::check_construction(AST::TypeDeclNode &type, AST::Collector &collector, AST::Module &module)
 {
     AST::FunctionDeclNode *init = type.complex_type().type_init();
-    const FieldSet derived = derived_fields_of(type);
+    WalkEnv env;
 
     auto *init_self = init == nullptr ? nullptr : init_this(*init);
+    FieldSet derived;
+    PathResult init_walk;
 
     if (init != nullptr && init->body != nullptr && init_self != nullptr) {
-        FieldSet any_in_init;
-        AssignCollector any_collector(init_self, &any_in_init);
-        init->body->accept(any_collector);
+        init_walk = walk_scope(init->body, {}, init_self, nullptr, env);
+        derived = all_paths_of(init_walk);
 
-        for (const std::string &name : any_in_init) {
+        for (const std::string &name : init_walk.assigned_any) {
             if (derived.count(name) != 0) {
                 continue;
             }
@@ -500,7 +648,7 @@ void AST::check_construction(AST::TypeDeclNode &type, AST::Collector &collector,
             }
 
             const AST::VarDeclNode *self = AST::constructor_this(*ctor);
-            FieldSet assigned = fields_assigned_on_all_paths(ctor->body, self);
+            FieldSet assigned = fields_assigned_through(ctor->body, self, env);
 
             if (ctor_entry.empty() && type.constructors().size() + (type.synthesized_constructor() != nullptr ? 1 : 0) == 1) {
                 ctor_entry = assigned;
@@ -522,7 +670,7 @@ void AST::check_construction(AST::TypeDeclNode &type, AST::Collector &collector,
         note_ctor_assigns(type.synthesized_constructor());
 
         std::vector<Read> reads;
-        walk_scope(init->body, ctor_entry, init_self, &reads);
+        walk_scope(init->body, ctor_entry, init_self, &reads, env);
 
         for (const Read &read : reads) {
             collector.collect_issue<AST::Issue::InitReadsUnassignedField>(
@@ -540,7 +688,7 @@ void AST::check_construction(AST::TypeDeclNode &type, AST::Collector &collector,
         }
 
         const AST::VarDeclNode *self = AST::constructor_this(*ctor);
-        const FieldSet assigned = fields_assigned_on_all_paths(ctor->body, self);
+        const FieldSet assigned = fields_assigned_through(ctor->body, self, env);
 
         for (AST::VarDeclNode *prop : type.properties()) {
             if (prop == nullptr || prop->is_static()) {

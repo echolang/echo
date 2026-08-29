@@ -347,25 +347,39 @@ module" branch:
 1. Write the program, e.g. `tests_eco/math/gcd.eco`.
 2. Run it and look at what it printed:
    ```bash
-   ./build/echoc run tests_eco/math/gcd.eco
+   ./build-test/echoc run tests_eco/math/gcd.eco
    ```
 3. Write `tests_eco/math/gcd.test` with that output under `--- OUT --->`, and **read it** — capturing
    output does not prove it correct, it only records current behavior. Don't commit an expectation that
    encodes a bug.
 4. Add `expect: fail` if the case is a deliberate rejection or a panic.
-5. `./build/tests "[e2e]"` — the new pair is picked up automatically.
+5. `./build-test/tests "[e2e]"` — the new pair is picked up automatically. `./build-test/tests --dev "[e2e]"` while writing; drop `--dev` before you finish.
 
 If the case needs flags, run it with those flags in step 2, or the expectation records a different
 invocation than the one the runner performs.
 
-Write a directive section by hand from a real dump — `./build/echoc run --print ir <file>` — and keep it to the
+Write a directive section by hand from a real dump — `./build-test/echoc run --print ir <file>` — and keep it to the
 claim you mean. A directive that quotes a whole basic block is a byte-for-byte golden wearing a
 disguise.
 
 ## Running
 
 ```bash
-cmake --build build --target tests -j16      # also builds echoc (test target depends on it)
-./build/tests "[e2e]"                         # run just the e2e suite
-ctest --test-dir build --output-on-failure    # run via ctest
+cmake --preset test && cmake --build --preset test
+./build-test/tests --dev "[e2e]"              # local loop: no dump spawns, no mode:build
+./build-test/tests "[e2e]"                    # the full corpus, as CI
+ctest --test-dir build-test --output-on-failure
+```
+
+`--dev` (or `ECO_TEST_LANE=dev`) is a runner policy: it does not spawn `--- IR --->` / `AST` / `RAST` / `UNIT_IR` invocations and it omits `mode: build`. The `.test` files are unchanged. `./tests` with no flags still asserts everything, so CI cannot silently go fast.
+
+`--e2e-filter structs/init` (or `ECO_E2E_FILTER`) replaces Catch2 `-c "eco: ..."` now that the corpus is one TEST_CASE. `--shard i/n` (or `ECO_E2E_SHARD=i/n`) is how CI splits the corpus; a bad `i/n` is a refusal, not a silent full run.
+
+A tests binary moved off the machine that compiled it (CI artifacts) finds the compiler and the corpus through `ECHOC_BINARY`, `ECO_E2E_TESTS_DIR`, and `ECO_E2E_TMP_DIR`. Those override the paths CMake baked in.
+
+A Debug `echoc` is the wrong binary for this corpus. `-O0` + ASan makes a one-line `run` ~1.5 s (the stdlib, every time); RelWithDebInfo is what the "~25 ms" figure in [notes/testing.md](../notes/testing.md) was measured against. `ECO_E2E_JOBS=N` sets the worker pool; Debug/ASan caps itself at 4 so a dozen sanitised compilers do not thrash.
+
+```bash
+cmake --build build --target tests -j16      # Debug tree, also builds echoc
+./build/tests "[e2e]"                         # works, slowly
 ```

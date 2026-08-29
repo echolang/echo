@@ -2,6 +2,8 @@
 
 #include <Compiler/Lsp/LspTransport.h>
 
+#include "test_lane.h"
+
 #include <chrono>
 #include <sstream>
 #include <string>
@@ -12,10 +14,6 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#endif
-
-#ifndef ECHOC_BINARY
-#define ECHOC_BINARY "echoc"
 #endif
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -132,7 +130,7 @@ TEST_CASE("echoc lsp speaks framed JSON-RPC on stdout and nothing else", "[lsp]"
         close(to_child[1]);
         close(from_child[0]);
         close(from_child[1]);
-        execl(ECHOC_BINARY, "echoc", "lsp", "--no-stdlib", static_cast<char *>(nullptr));
+        execl(EchoTests::echoc_binary(), "echoc", "lsp", "--no-stdlib", static_cast<char *>(nullptr));
         _exit(127);
     }
 
@@ -194,7 +192,7 @@ TEST_CASE("didOpen of a broken file publishes diagnostics, a fix clears them", "
         close(to_child[1]);
         close(from_child[0]);
         close(from_child[1]);
-        execl(ECHOC_BINARY, "echoc", "lsp", "--no-stdlib", static_cast<char *>(nullptr));
+        execl(EchoTests::echoc_binary(), "echoc", "lsp", "--no-stdlib", static_cast<char *>(nullptr));
         _exit(127);
     }
 

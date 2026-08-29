@@ -15,6 +15,7 @@ namespace AST
     class FunctionDeclNode;
     class Module;
     class ScopeNode;
+    class Visitor;
 
     // **how far a region has got**, as a fact of the node rather than a set on a pass.
     //
@@ -63,6 +64,39 @@ namespace AST
     // so it can fold, and only the taken arm once it has. a different visitor from body_is_pending:
     // that one stops at the first unfinished node, this one has to see every live call
     std::vector<std::pair<FunctionCallExprNode *, Module *>> live_calls(Bundle &bundle);
+
+    // **what a semantic pipeline round walks.** every live file root. one iterator so TypeChecker,
+    // PointerAdjuster, AccessPass, FixpointLowering, OwnershipPass, OperatorRewriter, ConstFolding,
+    // ConstantExpander and live_calls cannot disagree. the loop lives in the .cpp because
+    // ASTFile.h includes this header
+    void visit_semantic_roots(
+        Module &module,
+        void *ctx,
+        void (*on_file)(void *ctx, File &file, ScopeNode &root)
+    );
+
+    template <typename OnFile>
+    void for_each_semantic_root(Module &module, OnFile on_file)
+    {
+        struct Ctx
+        {
+            OnFile *on_file;
+        };
+
+        Ctx ctx { &on_file };
+
+        visit_semantic_roots(
+            module,
+            &ctx,
+            [](void *raw, File &file, ScopeNode &root) {
+                (*static_cast<Ctx *>(raw)->on_file)(file, root);
+            });
+    }
+
+    // `for_each_semantic_root` then `accept`. the File* overload stamps `_current_file` for
+    // visitors that diagnose; live_calls does not need the seam
+    void accept_semantic_roots(Module &module, Visitor &visitor, File *&current_file);
+    void accept_semantic_roots(Module &module, Visitor &visitor);
 };
 
 #endif

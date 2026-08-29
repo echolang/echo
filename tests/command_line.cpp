@@ -937,7 +937,7 @@ TEST_CASE("one option's page is that option and nothing else", "[cli]")
 // `echoc --version` is also a release-workflow contract: it is string-compared against the resolved tag
 TEST_CASE("help answers on stdout and a refusal on stderr", "[cli]")
 {
-    const std::string echoc = EchoTests::quoted(ECHOC_BINARY);
+    const std::string echoc = EchoTests::quoted(EchoTests::echoc_binary());
 
 #if defined(_WIN32)
     const char *quiet_stdout = " 2>nul";

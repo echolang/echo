@@ -270,7 +270,8 @@ FetchContent_MakeAvailable(Catch2)
 file(GLOB TEST_SOURCES "tests/*.cpp")
 
 add_executable(tests ${TEST_SOURCES})
-target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
+# Catch2, not Catch2WithMain: tests/test_main.cpp owns main so it can add `--dev`
+target_link_libraries(tests PRIVATE Catch2::Catch2)
 target_link_libraries(tests PRIVATE ${LIBNAME})
 
 # the same LLVM components the compiler links, because the tests link the whole compiler library and any
@@ -284,8 +285,9 @@ target_link_libraries(tests PRIVATE ${LIBNAME})
 # file for why the latter must never be added
 target_link_libraries(tests PRIVATE ${LLVM_LIBS})
 
-# the e2e corpus spawns its ~400 echoc subprocesses from a worker pool - the assertions that judge
-# them stay on the main thread, but the spawns do not
+# the e2e corpus spawns its ~1000 echoc subprocesses from a worker pool - the assertions that judge
+# them stay on the main thread, but the spawns do not. ECO_E2E_JOBS overrides the width; --dev on the
+# tests binary skips dump sections and mode:build (CI must not pass it)
 find_package(Threads REQUIRED)
 target_link_libraries(tests PRIVATE Threads::Threads)
 
@@ -293,17 +295,22 @@ target_link_libraries(tests PRIVATE Threads::Threads)
 # where the binary and the corpus live
 add_dependencies(tests ${APPNAME})
 #
-# ECO_E2E_TMP_DIR is the scratch root: one directory per case under it, holding that case's binary, the
-# objects emitted beside it and its module cache. inside the build tree and absolute, because the tests
-# binary's working directory is not fixed (ctest and CI run it from `build/`, a developer runs
-# `./build/tests` from the repo root), so a relative path is wrong in one of the two
+# ECHO_TESTS_* are compile-time defaults. `ECHOC_BINARY` / `ECO_E2E_TESTS_DIR` / `ECO_E2E_TMP_DIR`
+# in the environment win, so a tests binary moved off this machine (CI artifacts) still finds
+# the compiler, the corpus, and scratch. names differ from the env keys on purpose: a `#define
+# ECHOC_BINARY "..."` would turn getenv("ECHOC_BINARY") into getenv("/that/path")
+#
+# scratch is one directory per case under it, holding that case's binary, the objects emitted
+# beside it and its module cache. the default is inside the build tree and absolute, because the
+# tests binary's working directory is not fixed (ctest and CI run it from `build/`, a developer
+# runs `./build/tests` from the repo root)
 #
 # the stdlib definition is PRIVATE on the other two targets, so linking the library does not carry it
 # here. The tests need it to assert that nothing is written into the compiler's own source tree
 target_compile_definitions(tests PRIVATE
-    "ECHOC_BINARY=\"$<TARGET_FILE:${APPNAME}>\""
-    "ECO_E2E_TESTS_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\""
-    "ECO_E2E_TMP_DIR=\"${CMAKE_BINARY_DIR}/e2e_tmp\""
+    "ECHO_TESTS_ECHOC_BINARY=\"$<TARGET_FILE:${APPNAME}>\""
+    "ECHO_TESTS_E2E_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\""
+    "ECHO_TESTS_TMP_DIR=\"${CMAKE_BINARY_DIR}/e2e_tmp\""
     ${ECO_STDLIB_DEFINITION})
 
 # ctest integration
