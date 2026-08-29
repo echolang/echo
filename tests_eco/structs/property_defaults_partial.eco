@@ -1,5 +1,15 @@
-// some properties have defaults, some do not: no synthesized constructor. a written one still
-// runs the defaults first, then the body
+// mixed defaults: the implicit constructor takes every public field, and field defaults
+// become parameter defaults. a user constructor deletes that and still runs field defaults first
+
+struct Mixed
+{
+    int32 $a = 1;
+    int32 $b;
+}
+
+Mixed $m = Mixed($b: 7);
+echo $m->a;
+echo $m->b;
 
 struct Gate
 {

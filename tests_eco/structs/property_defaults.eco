@@ -1,4 +1,5 @@
-// every property has a default, so Foo() exists and the field-wise constructor does not
+// field defaults are parameter defaults on the implicit constructor. Foo() fills them;
+// Foo(1, 2, 3) still works
 
 struct Color
 {
@@ -29,6 +30,9 @@ echo $plain->color->r;
 ClearPassOptions $red = ClearPassOptions::withColor(9);
 echo $red->clearColor;
 echo $red->color->r;
+
+Color $white = Color(1, 1, 1);
+echo $white->r;
 
 struct Overwrite
 {

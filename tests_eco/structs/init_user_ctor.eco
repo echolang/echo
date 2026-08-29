@@ -1,0 +1,22 @@
+// a written constructor deletes memberwise; init still runs after it
+
+struct Gate
+{
+    int32 $id;
+    int32 $stamp;
+
+    constructor(int32 $id)
+    {
+        $this->id = $id;
+        $this->stamp = 0;
+    }
+
+    init
+    {
+        $this->stamp = $this->stamp + 1;
+    }
+}
+
+Gate $g = Gate(7);
+echo $g->id;
+echo $g->stamp;

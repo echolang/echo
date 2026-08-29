@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] PrivatePropertyNeedsInitializer  private_property_needs_initializer.eco:3:19
+
+  '$hidden' is private and has no initializer, so 'Sealed' cannot get an implicit constructor. Give the field a default, write a constructor, or assign it in 'init'.
+
+  2 | {
+  3 |     private int32 $hidden;
+    :                   ^^^^^^^
+  4 |     int32 $open;
+
+1 error, nothing was compiled.

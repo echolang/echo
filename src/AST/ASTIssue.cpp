@@ -270,6 +270,81 @@ ISSUE_MESSAGE_FNC(UnmetInterfaceRequirement)
 {
     return _message;
 }
+ISSUE_MESSAGE_FNC(PositionalAfterNamed)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(UnknownArgumentName)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(DuplicateArgumentName)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(MissingArgumentLabel)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(MissingArgument)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(NamedArgumentNotCallable)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(PrivatePropertyNeedsInitializer)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(DuplicateInit)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(InitHasParameterList)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(InitHasReturnType)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(InitAssignsOnSomePaths)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(ConstructionLeavesFieldUnassigned)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(InitReadsUnassignedField)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(DerivedFieldHasDefault)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(DuplicateParameterLabel)
+{
+    return _message;
+}
+
 ISSUE_MESSAGE_FNC(DuplicateFunctionSignature)
 {
     return _message;

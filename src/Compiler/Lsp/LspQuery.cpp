@@ -159,6 +159,7 @@ namespace
         case AST::MemberKind::t_method:
         case AST::MemberKind::t_static_method:
         case AST::MemberKind::t_destructor:
+        case AST::MemberKind::t_init:
             return Compiler::Lsp::OutlineKind::t_method;
         case AST::MemberKind::t_constructor:
             return Compiler::Lsp::OutlineKind::t_constructor;

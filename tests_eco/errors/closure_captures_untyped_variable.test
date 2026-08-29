@@ -1,10 +1,9 @@
 expect: fail
 
 --- OUT --->
-[error] NoMatchingOverload  closure_captures_untyped_variable.eco:13:6
+[error] MissingArgument  closure_captures_untyped_variable.eco:13:6
 
-  No overload of 'Node' accepts these arguments. Candidates are:
-    Node(int32)
+  The parameter '$v' of 'Node' has no argument, and no default.
 
   12 | 
   13 | $n = Node();

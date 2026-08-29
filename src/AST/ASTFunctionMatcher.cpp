@@ -1,5 +1,6 @@
 #include "AST/ASTFunctionMatcher.h"
 
+#include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 
 #include <fmt/core.h>
@@ -22,6 +23,10 @@ namespace
     {
         bool better_somewhere = false;
 
+        if (a.fits.size() != b.fits.size()) {
+            return false;
+        }
+
         for (size_t i = 0; i < a.fits.size(); i++) {
             if (a.fits[i] == AST::ArgumentFit::t_undetermined || b.fits[i] == AST::ArgumentFit::t_undetermined) {
                 continue;
@@ -41,11 +46,7 @@ namespace
     }
 }
 
-AST::FunctionMatch AST::match_function(
-    const std::vector<AST::FunctionCandidate> &candidates,
-    const std::vector<AST::ValueType> &argument_types,
-    const std::vector<AST::ExprNode *> &arguments
-)
+AST::FunctionMatch AST::match_function(const std::vector<AST::FunctionCandidate> &candidates)
 {
     FunctionMatch result;
 
@@ -64,7 +65,7 @@ AST::FunctionMatch AST::match_function(
     // 1. arity
     std::vector<const FunctionCandidate *> by_arity;
     for (const auto &candidate : candidates) {
-        if (candidate.parameter_types.size() == argument_types.size()) {
+        if (candidate.parameter_types.size() == candidate.argument_types.size()) {
             by_arity.push_back(&candidate);
         }
     }
@@ -90,9 +91,12 @@ AST::FunctionMatch AST::match_function(
         Viable scored { candidate, {} };
         bool fits = true;
 
-        for (size_t i = 0; i < argument_types.size(); i++) {
-            auto *expr = i < arguments.size() ? arguments[i] : nullptr;
-            const auto fit = argument_fit(argument_types[i], expr, candidate->parameter_types[i]);
+        const std::vector<ValueType> &arg_types = candidate->argument_types;
+        const std::vector<ExprNode *> &arg_exprs = candidate->arguments;
+
+        for (size_t i = 0; i < arg_types.size(); i++) {
+            auto *expr = i < arg_exprs.size() ? arg_exprs[i] : nullptr;
+            const auto fit = argument_fit(arg_types[i], expr, candidate->parameter_types[i]);
 
             if (fit == ArgumentFit::t_none) {
                 fits = false;

@@ -1,0 +1,14 @@
+class Handle
+{
+    int32 $n;
+    int32 $twice;
+
+    init
+    {
+        $this->twice = $this->n * 2;
+    }
+}
+
+Handle $h = Handle(5);
+echo $h->n;
+echo $h->twice;

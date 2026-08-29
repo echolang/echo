@@ -1,15 +1,15 @@
 expect: fail
 
 --- OUT --->
-[error] NoMatchingOverload  private_property.eco:34:18
+[error] NoMatchingOverload  private_property.eco:33:18
 
   No overload of 'Sealed' accepts these arguments. Candidates are:
     Sealed(int32)
 
-  33 | // suppressed by the user's own constructor - it is suppressed by the private property
-  34 | Sealed $forged = Sealed(1, 2);
+  32 | // door two: writing a constructor deleted memberwise, so Sealed(1, 2) is not a candidate
+  33 | Sealed $forged = Sealed(1, 2);
      :                  ^^^^^^
-  35 | 
+  34 | 
 
 [error] PrivateMember  private_property.eco:30:10
 

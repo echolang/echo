@@ -19,10 +19,10 @@ namespace std::io;
 
 public struct stream
 {
-    // **`private`, which is what the constructor below is for.** the field-wise constructor a struct gets
-    // for free is suppressed by a private property, so the one that used to seat this field is written out
-    // - identically, so `stream(1)` and a `stream($fd)` over a descriptor of your own both still read as
-    // they did. what is closed is `$s->fd = 7`, which re-aimed a stream something else was holding
+    // **`private`, which is what the constructor below is for.** a private field without a default
+    // refuses the implicit constructor, so the one that seats this field is written out - identically,
+    // so `stream(1)` still reads as it did. what is closed is `$s->fd = 7`, which re-aimed a stream
+    // something else was holding
     private int32 $fd;
 
     /**

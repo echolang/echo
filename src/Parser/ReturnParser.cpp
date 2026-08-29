@@ -2,6 +2,7 @@
 
 #include "Parser/ExprParser.h"
 
+#include "AST/FunctionDeclNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
@@ -35,10 +36,12 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
         // function typed `Foo`, and the ownership pass, seeing a return, unwound the object being
         // built: a destructor call on a half-constructed value, then a garbage result
         //
-        // Context::ctor_this_ptr is exactly the right guard - AST::ConstructorScope clears it for
-        // every declaration nested in the body, so a `function` or closure written inside a
-        // constructor still returns nothing
-        if (payload.context.ctor_this_ptr != nullptr) {
+        // the current function being a constructor is the guard, not ctor_this_ptr alone: `init`
+        // re-opens ConstructorScope so `$this->field =` is an initialization, and that pointer
+        // would rewrite `return;` here into `return $this` in a void function
+        if (payload.context.ctor_this_ptr != nullptr
+            && payload.context.current_function_ptr != nullptr
+            && payload.context.current_function_ptr->is_constructor()) {
             auto *this_var = payload.context.emplace_nodep<AST::VarNode>(payload.context.ctor_this_ptr);
             auto *this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
 

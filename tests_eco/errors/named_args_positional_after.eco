@@ -1,0 +1,6 @@
+function pair(int32 $a, int32 $b) : int32
+{
+    return $a + $b;
+}
+
+echo pair($a: 1, 2);

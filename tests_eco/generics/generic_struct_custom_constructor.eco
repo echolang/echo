@@ -19,8 +19,3 @@ echo $a->backup;
 $b = Box<float64>(2.5);
 echo $b->value;
 echo $b->backup;
-
-// the field-wise constructor of the same generic struct is still reachable
-$c = Box<int32>(1, 2);
-echo $c->value;
-echo $c->backup;

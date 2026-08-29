@@ -11,8 +11,8 @@
  *
  * Fields are `internal const`. `private` would refuse the free operators in this file; unmarked
  * would publish a mutable `$nanos` and the constructor's fold would be optional. The handwritten
- * constructor has the field-wise signature, so it suppresses the free one: nothing outside this
- * type can skip normalisation by writing `duration($secs, $nanos)` with a wild `$nanos`.
+ * constructor deletes the implicit memberwise one: nothing outside this type can skip
+ * normalisation by writing `duration($secs, $nanos)` with a wild `$nanos`.
  */
 
 namespace std::time;
@@ -30,8 +30,6 @@ public struct duration
     internal const int64 $secs;
     internal const int64 $nanos;
 
-    // `const int64` matches the field-wise signature of `internal const` properties.
-    // `int64` alone would leave both constructors live and every call ambiguous.
     constructor(const int64 $secs, const int64 $nanos)
     {
         int64 $extra = $nanos / NANOS_PER_SEC;

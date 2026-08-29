@@ -386,10 +386,17 @@ namespace AST
                 continue;
             }
 
+            const bool had_decl = call->decl != nullptr;
             const auto result = resolver.settle(
                 *call, mod->nodes, code_ref_for(*mod, call->token_function_name), false);
 
-            if (result == CallResolver::Result::t_settled) {
+            // a generic callee returns t_pending after choose_declaration has set `decl`. counting
+            // only t_settled dropped that: the next round instantiates from `decl`, and without
+            // progress the fixpoint stalls with the template never cloned. an implicit constructor
+            // whose type declared `init` also arrives here with `decl` still null (parse left it
+            // pending); after finalize_module_construction it settles, which the first arm counts
+            if (result == CallResolver::Result::t_settled
+                || (call->decl != nullptr && !had_decl)) {
                 progressed = true;
             }
         }

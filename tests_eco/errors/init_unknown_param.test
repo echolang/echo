@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownArgumentName  init_unknown_param.eco:12:20
+
+  The argument '$hash' does not match any parameter of 'Person'.
+
+  11 | 
+  12 | Person $p = Person($hash: 0);
+     :                    ^^^^^
+  13 | 
+
+1 error, nothing was compiled.

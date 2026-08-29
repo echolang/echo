@@ -1,0 +1,16 @@
+// all defaults used to replace the field-wise constructor. now they are parameter defaults,
+// so both Opts() and Opts(1, 2) work
+
+struct Opts
+{
+    int32 $a = 1;
+    int32 $b = 2;
+}
+
+Opts $o = Opts(1, 2);
+echo $o->a;
+echo $o->b;
+
+Opts $plain = Opts();
+echo $plain->a;
+echo $plain->b;

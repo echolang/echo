@@ -331,9 +331,8 @@ TEST_CASE("reaching a struct body in both parse passes does not duplicate constr
     // a constructor's declaration site was a name token minted where
     // the struct's name is written, so a second pass minted a second one and registered the same
     // constructor again as a duplicate signature. it is now the `constructor` keyword - a real token
-    // at a fixed index - and both passes walk the whole body
-    // two properties, so the field-wise constructor takes two arguments and is not suppressed by
-    // the user's one-argument one - both have to be present, exactly once each
+    // at a fixed index - and both passes walk the whole body. a written constructor also deletes
+    // memberwise, so the user's is the only one
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
         "    int32 $x;\n"
@@ -351,14 +350,11 @@ TEST_CASE("reaching a struct body in both parse passes does not duplicate constr
     auto *point = type_named(m, "Point");
     REQUIRE(point != nullptr);
 
-    // the user's, exactly once - not one node per pass
+    // the user's, exactly once - not one node per pass, and not a surviving memberwise beside it
     REQUIRE(point->constructors().size() == 1);
     REQUIRE(point->constructors()[0]->args.size() == 1);
     REQUIRE(point->constructors()[0]->body != nullptr);
-
-    // and the field-wise one alongside it, taking both properties
-    REQUIRE(point->synthesized_constructor() != nullptr);
-    REQUIRE(point->synthesized_constructor()->args.size() == 2);
+    REQUIRE(point->synthesized_constructor() == nullptr);
 }
 
 TEST_CASE("two methods with the same parameter types are rejected", "[methods]")

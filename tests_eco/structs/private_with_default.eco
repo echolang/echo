@@ -1,0 +1,11 @@
+struct Sealed
+{
+    private int32 $used = 0;
+    int32 $capacity = 4096;
+}
+
+Sealed $module = Sealed();
+echo $module->capacity;
+
+Sealed $other = Sealed(8);
+echo $other->capacity;

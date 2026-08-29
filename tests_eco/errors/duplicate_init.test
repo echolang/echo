@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] DuplicateInit  duplicate_init.eco:6:5
+
+  'Person' already has an init.
+
+  5 |     init { $this->n = 1; }
+  6 |     init { $this->n = 2; }
+    :     ^^^^
+  7 | }
+
+1 error, nothing was compiled.

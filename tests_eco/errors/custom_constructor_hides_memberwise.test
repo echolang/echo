@@ -1,0 +1,14 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  custom_constructor_hides_memberwise.eco:11:12
+
+  No overload of 'Point' accepts these arguments. Candidates are:
+    Point(int32)
+
+  10 | 
+  11 | Point $b = Point(7, 9);
+     :            ^^^^^
+  12 | 
+
+1 error, nothing was compiled.

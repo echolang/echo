@@ -11,7 +11,7 @@ using namespace AST;
 using EchoTests::calls_to;
 using EchoTests::type_named;
 
-TEST_CASE("constructors() is the user-written set, field-wise kept apart", "[constructors][generics]")
+TEST_CASE("constructors() is the user-written set, and a user constructor deletes memberwise", "[constructors][generics]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
@@ -27,8 +27,7 @@ TEST_CASE("constructors() is the user-written set, field-wise kept apart", "[con
     REQUIRE(point != nullptr);
 
     REQUIRE(point->constructors().size() == 1);
-    REQUIRE(point->synthesized_constructor() != nullptr);
-    REQUIRE(point->constructors()[0] != point->synthesized_constructor());
+    REQUIRE(point->synthesized_constructor() == nullptr);
 }
 
 TEST_CASE("T(...) through a type parameter constructs after instantiation", "[constructors][generics]")

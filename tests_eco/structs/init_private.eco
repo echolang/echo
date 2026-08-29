@@ -1,0 +1,19 @@
+struct Person
+{
+    int32 $age;
+    private int32 $hash;
+
+    init
+    {
+        $this->hash = $this->age * 2;
+    }
+
+    const function code() : int32
+    {
+        return $this->hash;
+    }
+}
+
+Person $p = Person(9);
+echo $p->age;
+echo $p->code();

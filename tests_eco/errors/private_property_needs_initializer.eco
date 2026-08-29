@@ -1,0 +1,5 @@
+struct Sealed
+{
+    private int32 $hidden;
+    int32 $open;
+}

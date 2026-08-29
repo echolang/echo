@@ -32,6 +32,13 @@ namespace AST
         t_constructor,
         t_destructor,
 
+        // declared `init { }` in a type body. a method with receiver `T&`, no extra parameters, **not**
+        // in any overload set and not in `_methods` - `$p->init()` looks up a method named `init` and
+        // does not find this. reached by planting a call before every constructor `return`, including
+        // the implicit `return $this`. the name token is the unspellable `$init` so a user method
+        // named `init` mangles apart
+        t_init,
+
         // declared `operator (Point $a) + (Point $b) : Point`. a *free* function in every structural
         // sense - null owner_type, registered through FunctionRegistry like a constructor - and this
         // tag is what the two readers that must know it apart read: the mangler, whose name has to
@@ -122,6 +129,10 @@ namespace AST
 
         inline bool is_destructor() const {
             return member_kind == MemberKind::t_destructor;
+        }
+
+        inline bool is_init() const {
+            return member_kind == MemberKind::t_init;
         }
 
         inline bool is_operator() const {
@@ -275,7 +286,7 @@ namespace AST
         }
 
         // nobody wrote this declaration: the compiler built it from a type's shape. Three producers -
-        // the field-wise constructor synthesized by the declaration pass, and the class deinit and copy
+        // the field-wise constructor registered in the declaration pass, and the class deinit and copy
         // constructor synthesized by AST::OwnershipPass.
         //
         // it is the *other* half of what AST::function_emission_kind calls generated, beside

@@ -1,0 +1,21 @@
+struct Box
+{
+    int32 $n;
+    int32 $flag;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+        const if (true) {
+            return;
+        }
+    }
+
+    init
+    {
+        $this->flag = 7;
+    }
+}
+
+Box $b = Box(1);
+echo $b->flag;

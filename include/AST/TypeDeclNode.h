@@ -138,8 +138,8 @@ namespace AST
         }
 
         // the synthesized constructor, or null until it is built. kept apart from the user's own so
-        // the suppression rule cannot compare it against itself. field-wise, zero-arg, or absent -
-        // see AST::synthesized_constructor_kind
+        // the suppression rule cannot compare it against itself. memberwise, or absent when a
+        // constructor was written - see AST::synthesized_constructor_kind
         void set_synthesized_constructor(FunctionDeclNode *constructor) {
             _synthesized_constructor = constructor;
         }
@@ -148,9 +148,14 @@ namespace AST
             return _synthesized_constructor;
         }
 
-        // prepend_property_defaults sets this when it actually seats a clone. consume_property_defaults
-        // reads it and nothing else - a synthesized constructor existing, or a user constructor existing,
-        // is not the same question (a field-wise synth never cloned, a bodyless user ctor never cloned)
+        FunctionDeclNode *type_init() const {
+            return _complex_type.type_init();
+        }
+
+        // prepend_property_defaults sets this when it actually seats a clone, and synthesize_constructor
+        // sets it when a memberwise parameter shared a field default. consume_property_defaults
+        // reads it and nothing else - a constructor existing is not the same question (a bodyless
+        // user ctor never cloned, a copy-only type never cloned)
         bool defaults_cloned() const {
             return _defaults_cloned;
         }

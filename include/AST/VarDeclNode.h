@@ -101,6 +101,21 @@ namespace AST
         // declaration*, not a distinction two types could be told apart by
         bool binds_unwrapped = false;
 
+        // written `forEvent: string $name`: the call site must use `forEvent:`, not `$name:` and not
+        // a positional. empty means the parameter may be positional or `$name:`.
+        //
+        // a label is part of the callee's external shape - it participates in overload identity and
+        // in the mangled name - where the `$name` does not, except as an optional named-arg filter
+        std::optional<TokenReference> label_token;
+
+        bool has_label() const {
+            return label_token.has_value();
+        }
+
+        const std::string label() const {
+            return label_token.has_value() ? label_token->value() : "";
+        }
+
         VarDeclNode(TokenReference token_varname, TypeNode *type) :
             _type_node(type), token_varname(token_varname)
         {

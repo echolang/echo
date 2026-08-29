@@ -5,6 +5,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeNode.h"
+#include "AST/VarDeclNode.h"
 
 AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_decl)
 {
@@ -53,6 +54,13 @@ AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_de
 
     for (auto arg : func_decl->args) {
         mangled_name += "Z" + arg->type_node()->type.get_mangled_name();
+
+        // a label is part of overload identity, so two `(int32, string)` that differ only in
+        // labels must be two symbols. `Y` sits after a complete type and before the next `Z`,
+        // and is unused as a function-level segment
+        if (arg->has_label()) {
+            mangled_name += "Y" + arg->label();
+        }
     }
 
     // the type arguments an instance was created with, in declaration order. the argument types

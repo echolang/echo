@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] InitReadsUnassignedField  init_reads_unassigned.eco:10:30
+
+  'init' reads 'age' before every constructor has assigned it.
+
+   9 |     {
+  10 |         $this->hash = $this->age;
+     :                              ^^^
+  11 |     }
+
+[error] ConstructionLeavesFieldUnassigned  init_reads_unassigned.eco:6:5
+
+  '$age' is not assigned on all paths of this constructor.
+
+  5 | 
+  6 |     constructor() {}
+    :     ^^^^^^^^^^^
+  7 | 
+
+2 errors, nothing was compiled.

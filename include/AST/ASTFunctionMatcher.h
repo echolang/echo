@@ -17,11 +17,17 @@ namespace AST
     // one candidate of an overload set, reduced to what ranking needs. a view rather than the
     // declaration itself, so the matcher can be exercised without a parse tree - and so the
     // generic case can substitute a template's parameter types before they are compared
+    //
+    // `argument_types` is the bound list in *parameter* order: names and defaults have already
+    // been applied by AST::bind_arguments. it is required, not optional - a test without a tree
+    // copies the written types onto every candidate
     struct FunctionCandidate
     {
         FunctionDeclNode *decl = nullptr;
         std::vector<ValueType> parameter_types;
         bool is_generic = false;
+        std::vector<ValueType> argument_types;
+        std::vector<ExprNode *> arguments;
     };
 
     struct FunctionMatch
@@ -56,11 +62,13 @@ namespace AST
 
     // picks the candidate a call resolves to
     //
-    // `argument_types` and `arguments` are parallel; `arguments` may hold nulls (or be shorter)
-    // when only the types are known, which is what keeps the matcher testable without a tree
+    // each candidate carries its own bound argument list in parameter order. CallResolver fills
+    // those from AST::bind_arguments; tests copy the written types onto every candidate
     //
     // the rules, in order:
-    //   1. arity must match exactly - Echo has no default parameters and no varargs
+    //   1. arity must match exactly on the *bound* list - defaults and names are applied by
+    //      AST::bind_arguments before this runs, so a hole that had a default is already filled. C
+    //      variadic tails stay a last-parameter type, not a matcher exception
     //   2. if exactly one candidate survives arity, it wins *without* consulting types. that is
     //      what makes a program with no overloads behave precisely as it did before overload
     //      resolution existed, right down to which pass reports a bad argument: the type checker
@@ -75,10 +83,7 @@ namespace AST
     //      gets a say once the call itself cannot tell them apart
     //   6. undetermined arguments are excluded from the comparison entirely. if what remains
     //      cannot separate the survivors, the answer is t_undecidable, not t_ambiguous
-    FunctionMatch match_function(
-        const std::vector<FunctionCandidate> &candidates,
-        const std::vector<ValueType> &argument_types,
-        const std::vector<ExprNode *> &arguments);
+    FunctionMatch match_function(const std::vector<FunctionCandidate> &candidates);
 
     // renders "foo(int32, float64)" for a diagnostic listing what was tried
     std::string describe_candidates(const std::vector<FunctionDeclNode *> &candidates);

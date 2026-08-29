@@ -45,6 +45,10 @@ namespace AST
         // AST::ensure_unwrap_abort first asks, then one decl for the module
         FunctionDeclNode *unwrap_abort = nullptr;
 
+        // false until AST::finalize_module_construction has run. implicit constructor arity may
+        // still shrink (`init` derives fields), so CallResolver leaves those calls pending
+        bool construction_finalized = false;
+
         Module(const std::string &name, module_handle_t handle) :
             name(name), handle(handle)
         {}

@@ -15,6 +15,13 @@ public struct type_id
 {
     private ptr<uint8> $desc;
 
+    // the implicit constructor would take `$desc` as a public argument. the builtin `type_id<T>()`
+    // is the only producer; a private constructor deletes memberwise without offering a door
+    private constructor(ptr<uint8> $desc)
+    {
+        $this->desc:$ = $desc;
+    }
+
     /**
      * True when `$other` is the same type. The operator below is this, as `==`.
      */

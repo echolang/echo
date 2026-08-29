@@ -2,6 +2,7 @@
 
 #include "AST/ASTVariadic.h"
 
+#include "AST/ASTArgumentBind.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCFunction.h"
@@ -12,6 +13,7 @@
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTModule.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/FunctionDeclNode.h"
@@ -335,6 +337,29 @@ namespace AST
         return find_member_functions(receiver_type.get_complex_type(), call.lookup_name());
     }
 
+    namespace
+    {
+    void apply_binding_to_call(
+        FunctionCallExprNode &call,
+        NodeCollection &nodes,
+        TypeRegistry &registry
+    )
+    {
+        if (call.decl == nullptr) {
+            return;
+        }
+
+        if (call.argument_names.empty() && call.arguments.size() == call.decl->args.size()) {
+            return;
+        }
+
+        const ArgumentBinding binding = bind_arguments(*call.decl, call.arguments, call.argument_names);
+        assert(binding.kind == ArgumentBindKind::t_ok && "choose_declaration already bound this call");
+
+        apply_argument_binding(call, binding, nodes, registry);
+    }
+    }
+
     CallResolver::Result CallResolver::choose_declaration(
         FunctionCallExprNode &call,
         const std::vector<FunctionDeclNode *> &candidates,
@@ -344,20 +369,68 @@ namespace AST
     {
         const std::string &name = call.token_function_name.value();
 
+        // pass 2 registers the memberwise constructor with a signature whose arity may still
+        // shrink once `init` has been parsed. only types that declared `init` (the slot is filled
+        // in pass 2, before any body) need this wait - every other implicit constructor's arity
+        // is already final, and leaving those pending until after parse types `$a = Foo(...)`
+        // as void for a round, which PointerAdjuster and CastResolution then mis-read
+        if (at.module != nullptr && !at.module->construction_finalized) {
+            for (auto *candidate : candidates) {
+                if (candidate == nullptr
+                    || !candidate->is_implicitly_generated
+                    || !candidate->is_constructor()) {
+                    continue;
+                }
+
+                if (find_init(enclosing_type_of(*candidate)) != nullptr) {
+                    return Result::t_pending;
+                }
+            }
+        }
+
+        struct BoundCandidate
+        {
+            FunctionDeclNode *decl = nullptr;
+            ArgumentBinding binding;
+        };
+
+        std::vector<BoundCandidate> bound;
+        bound.reserve(candidates.size());
+
+        for (auto *candidate : candidates) {
+            ArgumentBinding binding = bind_arguments(*candidate, call.arguments, call.argument_names);
+
+            if (binding.kind != ArgumentBindKind::t_ok) {
+                continue;
+            }
+
+            bound.push_back(BoundCandidate { candidate, std::move(binding) });
+        }
+
+        if (bound.empty()) {
+            // bind failures are final, like t_no_viable: a name that matches nothing, a missing
+            // label, an unfilled required parameter. they are not waiting on a later type.
+            // construction calls are not resolved at parse, so this is never asked against a
+            // memberwise parameter list that finalize_module_construction still rewrites
+            report_argument_bind_failure(_collector, call, candidates, at);
+            return Result::t_failed;
+        }
+
         const std::vector<ValueType> argument_types = argument_types_of(call);
 
-        // with a single candidate there is nothing to choose between, so it is taken as written and
-        // every judgement about it is left to the passes that specialise in one: the monomorphizer
-        // reports an unsatisfied constraint by name, the type checker reports which argument is
-        // wrong. pre-filtering here would replace both with "no overload accepts these arguments" -
-        // the same reasoning as the arity short-circuit inside match_function
+        // `choosing` is about the overload *set*, not the bind survivors. a unique name is taken
+        // without types so a bad argument stays the type checker's. an operator's set is the whole
+        // program's, so a lone bind survivor still has to be instantiation-filtered or a generic
+        // `operator []<T>` wins `$s[] = 2` and the failure is UnresolvedTypeParameter
         const bool choosing = candidates.size() > 1;
 
         std::vector<FunctionCandidate> match_candidates;
-        match_candidates.reserve(candidates.size());
+        match_candidates.reserve(bound.size());
 
-        for (auto *candidate : candidates) {
+        for (BoundCandidate &entry : bound) {
+            auto *candidate = entry.decl;
             auto parameter_types = candidate->parameter_types();
+            const BoundSlots slots = bound_slots(entry.binding);
 
             if (choosing && candidate->is_generic()) {
                 // score a template against the parameters it would actually be instantiated with,
@@ -375,7 +448,9 @@ namespace AST
                 // overload set over a generic owner is scored against these substituted parameters,
                 // and without the seed every candidate is still holding a bare `T` - so they all
                 // rank undetermined and tie, and the call never resolves
-                const Instantiation inst = can_instantiate(candidate, call);
+                const ValueType &owner = call.static_owner.is_unknown() ? call.constructed_type : call.static_owner;
+                const Instantiation inst = can_instantiate(
+                    candidate, slots.types, explicit_type_args_of(call), owner, slots.defers);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
                 // candidate. this is also how a type constraint filters an overload set
@@ -397,10 +472,12 @@ namespace AST
                 .decl = candidate,
                 .parameter_types = std::move(parameter_types),
                 .is_generic = candidate->is_generic(),
+                .argument_types = slots.types,
+                .arguments = slots.exprs,
             });
         }
 
-        const auto match = match_function(match_candidates, argument_types, call.arguments);
+        const auto match = match_function(match_candidates);
 
         switch (match.outcome) {
         case FunctionMatch::Outcome::t_resolved:
@@ -702,6 +779,11 @@ namespace AST
         if (call.decl->is_generic()) {
             return Result::t_pending;
         }
+
+        // after the instance exists, so a default still mentioning T is cloned from the substituted
+        // recipe rather than the template's. names stay on the call until here, which is what lets
+        // can_instantiate bind a named list against the template before this runs
+        apply_binding_to_call(call, nodes, _collector.type_registry);
 
         // after the generic gate, so a `T?` parameter is never what a null learns its shape from - the
         // round that rewires `decl` to the instance is the first one with a concrete type to bind. and

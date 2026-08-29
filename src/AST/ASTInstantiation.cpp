@@ -1,5 +1,6 @@
 #include "AST/ASTInstantiation.h"
 
+#include "AST/ASTArgumentBind.h"
 #include "AST/ASTCFunction.h"
 #include "AST/ASTLiteralTyping.h"
 
@@ -427,11 +428,21 @@ namespace AST
         // exclusive on the node, and either is the seed static_owner_bindings reads
         const ValueType &owner = call.static_owner.is_unknown() ? call.constructed_type : call.static_owner;
 
+        // names and defaults still sit on the call: apply_argument_binding runs after this, once
+        // the instance exists. bind here so a named list and a hole that has a default infer T
+        // against the parameter order, not the written order
+        const ArgumentBinding binding = bind_arguments(*tmpl, call.arguments, call.argument_names);
+        if (binding.kind != ArgumentBindKind::t_ok) {
+            return rejected(InstantiationBlame::t_argument_count);
+        }
+
+        const BoundSlots slots = bound_slots(binding);
+
         return can_instantiate(
             tmpl,
-            argument_types_of(call),
+            slots.types,
             explicit_type_args_of(call),
             owner,
-            argument_defers_of(call));
+            slots.defers);
     }
 };

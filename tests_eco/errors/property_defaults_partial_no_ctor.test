@@ -1,9 +1,9 @@
 expect: fail
 
 --- OUT --->
-[error] UnknownFunction  property_defaults_partial_no_ctor.eco:9:12
+[error] MissingArgument  property_defaults_partial_no_ctor.eco:9:12
 
-  The function 'Mixed' could not be found
+  The parameter '$b' of 'Mixed' has no argument, and no default.
 
    8 | 
    9 | Mixed $m = Mixed();

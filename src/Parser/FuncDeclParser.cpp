@@ -168,11 +168,39 @@ bool Parser::parse_parameter_list(
             cursor.skip();
         }
 
+        // `forEvent: string $name` - the call site must use this label. read here rather than in
+        // parse_varexpr because a label is a property of a parameter, and `identifier :` is not
+        // a type. peek past the colon so `Foo $x` stays a type and a name
+        std::optional<TokenReference> label;
+        if (cursor.is_type(Token::Type::t_identifier)
+            && cursor.peek_is_type(1, Token::Type::t_colon)) {
+            label.emplace(cursor.current());
+            cursor.skip();
+            cursor.skip();
+        }
+
         auto *param = parse_varexpr(payload, &into);
 
         if (param != nullptr) {
             param->takes_ownership = takes_ownership;
             param->access_effect = access_effect;
+            if (label.has_value()) {
+                param->label_token.emplace(label.value());
+            }
+
+            if (label.has_value()) {
+                for (const AST::VarDeclNode *earlier : decl.args) {
+                    if (earlier != nullptr && earlier->has_label() && earlier->label() == label->value()) {
+                        payload.collector.collect_issue<AST::Issue::DuplicateParameterLabel>(
+                            payload.context.code_ref(label.value()),
+                            fmt::format(
+                                "The label '{}' is already used on parameter '{}'.",
+                                label->value(),
+                                earlier->name_full()));
+                        break;
+                    }
+                }
+            }
         }
 
         decl.args.push_back(param);

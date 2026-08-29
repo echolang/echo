@@ -7,6 +7,7 @@
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/VarDeclNode.h"
 
 #include <algorithm>
 #include <fmt/core.h>
@@ -350,7 +351,24 @@ namespace
         // declaration, and a caller through the interface has to be able to read which promise it got
         // off the requirement alone. it is also what makes a receiver-split overload set answer *two*
         // interfaces, which is the whole of how a container offers a writable cursor and a read-only one
-        return AST::receiver_is_const(*candidate) == wanted.receiver_is_const;
+        if (AST::receiver_is_const(*candidate) != wanted.receiver_is_const) {
+            return false;
+        }
+
+        // labels are part of the external shape, same as on a free function. an implementor that
+        // dropped one would let a call through the interface use a name the vtable slot does not have
+        for (size_t i = 1; i < candidate->args.size() && i < wanted.requirement->args.size(); i++) {
+            const AST::VarDeclNode *have = candidate->args[i];
+            const AST::VarDeclNode *need = wanted.requirement->args[i];
+            const std::string have_label = have != nullptr ? have->label() : "";
+            const std::string need_label = need != nullptr ? need->label() : "";
+
+            if (have_label != need_label) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // does `candidate` answer the requirement?

@@ -1,0 +1,20 @@
+struct Angle
+{
+    float64 $radians;
+
+    constructor(float64 $radians)
+    {
+        $this->radians = $radians;
+    }
+
+    constructor(degrees: float64 $deg)
+    {
+        $this->radians = $deg * 0.017453292519943295;
+    }
+}
+
+Angle $a = Angle(1.0);
+echo $a->radians;
+
+Angle $b = Angle(degrees: 0.0);
+echo $b->radians;

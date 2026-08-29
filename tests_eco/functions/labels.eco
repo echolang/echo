@@ -1,0 +1,10 @@
+// a declared label is required at the call site; an unlabelled parameter may be positional or $name:
+
+function listen(forEvent: string $name, int32 $code) : int32
+{
+    echo $name;
+    return $code;
+}
+
+echo listen(forEvent: "click", 7);
+echo listen(forEvent: "tap", $code: 8);

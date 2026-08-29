@@ -10,8 +10,14 @@ class Counter
 {
     int32 $value;
 
+    constructor(int32 $value)
+    {
+        $this->value = $value;
+    }
+
     // the copy constructor shape, on a class. +100 so the body announces itself: any value below that
-    // carries it is one this constructor built
+    // carries it is one this constructor built. writing it deletes the implicit memberwise ctor,
+    // so the value constructor above is now required
     constructor(Counter& $other)
     {
         $this->value = $other->value + 100;

@@ -1,6 +1,5 @@
-// a property default is cloned into the constructor body, so an array literal there is an ordinary
-// assignment the expansion can reach - unlike a field-wise argument, which is the limitation
-// docs/reference/limitations.md still names
+// a field default is a parameter default. Doc() clones [1, 2] into the call, and the argument
+// destination types it the same way a written Doc([1, 2]) would
 
 struct Doc
 {

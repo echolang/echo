@@ -174,9 +174,7 @@ TEST_CASE("a constructor is one declaration across both parse passes", "[structd
     REQUIRE(point->constructors()[1]->body != nullptr);
     REQUIRE(point->constructors()[0]->body != point->constructors()[1]->body);
 
-    // the field-wise one is a third declaration of the same name, suppressed here because
-    // `constructor(int32)` already occupies the one-int32 signature this struct's single property
-    // would produce
+    // any written constructor deletes memberwise, so there is no third declaration of the name
     REQUIRE(point->synthesized_constructor() == nullptr);
     REQUIRE(decls_named(m, "Point").size() == 2);
 }

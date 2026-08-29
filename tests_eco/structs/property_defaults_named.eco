@@ -1,0 +1,24 @@
+struct Person
+{
+    string $name;
+    int32 $age;
+    int32 $height = 0;
+}
+
+Person $a = Person("John", 30);
+echo $a->name;
+echo $a->age;
+echo $a->height;
+
+Person $b = Person($name: "Jane", $age: 25);
+echo $b->name;
+echo $b->age;
+
+Person $c = Person($age: 40, $height: 180, $name: "Sam");
+echo $c->name;
+echo $c->age;
+echo $c->height;
+
+Person $d = Person("Kim", $age: 42, $height: 170);
+echo $d->name;
+echo $d->height;

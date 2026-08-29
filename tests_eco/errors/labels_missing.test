@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] MissingArgumentLabel  labels_missing.eco:6:6
+
+  The parameter 'forEvent' of 'listen' must be passed as 'forEvent:'.
+
+  5 | 
+  6 | echo listen("click", 1);
+    :      ^^^^^^
+  7 | 
+
+1 error, nothing was compiled.

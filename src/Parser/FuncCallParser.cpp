@@ -109,15 +109,68 @@ static bool parse_call_arguments(
     Parser::Payload &payload,
     const TokenReference &at_token,
     std::vector<AST::ExprNode *> &args,
+    std::vector<AST::CallArgumentName> *names = nullptr,
     const std::vector<AST::ValueType> *expected_types = nullptr
 )
 {
     auto &cursor = payload.cursor;
 
+    if (names != nullptr) {
+        names->resize(args.size());
+    }
+
+    bool seen_named = false;
+
     while (!cursor.is_type(Token::Type::t_close_paren)) {
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
                 payload.context.code_ref(at_token), Token::Type::t_close_paren, Token::Type::t_unknown);
+            return false;
+        }
+
+        AST::CallArgumentName name;
+
+        const bool named_parameter = cursor.is_type(Token::Type::t_varname)
+            && cursor.peek_is_type(1, Token::Type::t_colon);
+        const bool named_label = cursor.is_type(Token::Type::t_identifier)
+            && cursor.peek_is_type(1, Token::Type::t_colon);
+
+        if (named_parameter || named_label) {
+            if (names == nullptr) {
+                payload.collector.collect_issue<AST::Issue::NamedArgumentNotCallable>(
+                    payload.context.code_ref(cursor.current()),
+                    "Named arguments need a function declaration to bind to.");
+                cursor.try_skip_to_next_statement();
+                return false;
+            }
+
+            name.kind = named_parameter ? AST::ArgumentNameKind::t_parameter : AST::ArgumentNameKind::t_label;
+            name.token.emplace(cursor.current());
+            cursor.skip();
+            cursor.skip();
+
+            const std::string spelling = name.token->value();
+            for (const AST::CallArgumentName &earlier : *names) {
+                if (earlier.kind == name.kind && earlier.token.has_value()
+                    && earlier.token->value() == spelling) {
+                    payload.collector.collect_issue<AST::Issue::DuplicateArgumentName>(
+                        payload.context.code_ref(name.token.value()),
+                        fmt::format("The argument '{}' is specified more than once.", spelling));
+                    cursor.try_skip_to_next_statement();
+                    return false;
+                }
+            }
+
+            // `$param:` starts the named section, after which a positional is illegal.
+            // a declared `label:` is required and may sit among positionals - `listen(forEvent: "click", $fn)`
+            if (named_parameter) {
+                seen_named = true;
+            }
+        } else if (seen_named) {
+            payload.collector.collect_issue<AST::Issue::PositionalAfterNamed>(
+                payload.context.code_ref(cursor.current()),
+                "A positional argument cannot follow a named one.");
+            cursor.try_skip_to_next_statement();
             return false;
         }
 
@@ -134,6 +187,9 @@ static bool parse_call_arguments(
         }
 
         args.push_back(arg);
+        if (names != nullptr) {
+            names->push_back(name);
+        }
 
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
@@ -229,7 +285,7 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
 
     // through the one argument-list walk, handing it the signature's parameter types as the
     // destinations its literals are typed against
-    if (!parse_call_arguments(payload, at, arguments, &signature.parameter_types)) {
+    if (!parse_call_arguments(payload, at, arguments, nullptr, &signature.parameter_types)) {
         return nullptr;
     }
 
@@ -325,12 +381,14 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
 
     // parse the arguments
     std::vector<AST::ExprNode *> args;
-    if (!parse_call_arguments(payload, funcname_token, args)) {
+    std::vector<AST::CallArgumentName> names;
+    if (!parse_call_arguments(payload, funcname_token, args, &names)) {
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
 
     auto &funcall = payload.context.emplace_node<AST::FunctionCallExprNode>(funcname_token, args);
+    funcall.argument_names = std::move(names);
     funcall.explicit_type_args = explicit_type_args;
 
     // a qualified call names the namespace to look in; an unqualified one starts at the one it is
@@ -520,12 +578,14 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     std::vector<AST::ExprNode *> args;
     args.push_back(&payload.context.emplace_node<AST::AddrOfExprNode>(self_arg));
 
-    if (!parse_call_arguments(payload, member_token, args)) {
+    std::vector<AST::CallArgumentName> names;
+    if (!parse_call_arguments(payload, member_token, args, &names)) {
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
 
     auto &funcall = payload.context.emplace_node<AST::FunctionCallExprNode>(member_token, args);
+    funcall.argument_names = std::move(names);
     funcall.explicit_type_args = explicit_type_args;
 
     // **an undetermined receiver is "ask again later", not an error.** the type may be a parameter

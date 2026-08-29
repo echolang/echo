@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] DerivedFieldHasDefault  init_derived_default.eco:4:11
+
+  '$hash' is assigned in 'init'; drop the default.
+
+  3 |     int32 $age;
+  4 |     int32 $hash = 0;
+    :           ^^^^^
+  5 | 
+
+1 error, nothing was compiled.

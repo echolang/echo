@@ -75,6 +75,10 @@ AST::AccessEffect AST::access_effect_of(const AST::FunctionDeclNode &decl, size_
             // the receiver is going away and the body is what ends it
             return AST::AccessEffect::t_take;
 
+        case AST::MemberKind::t_init:
+            // `init` writes derived fields of a value that already exists
+            return AST::AccessEffect::t_inout;
+
         case AST::MemberKind::t_free:
         case AST::MemberKind::t_method:
         case AST::MemberKind::t_operator:

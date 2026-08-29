@@ -142,6 +142,9 @@ namespace AST
     // something is destroyed member-wise. that question is AST::needs_destruction (ASTDestruction.h)
     FunctionDeclNode *find_destructor(const ComplexType *ct);
 
+    // `ct`'s `init { }`, or null. the same template_or_self redirect find_destructor uses
+    FunctionDeclNode *find_init(const ComplexType *ct);
+
     // is this constructor the one that says how to copy `self_value_type`?
     //
     // A user-written constructor whose parameter list is exactly one non-nullable borrow of its own type

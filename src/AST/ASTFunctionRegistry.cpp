@@ -24,6 +24,30 @@ bool AST::signatures_match(const AST::FunctionDeclNode *candidate, const std::ve
     return true;
 }
 
+bool AST::signatures_match(const AST::FunctionDeclNode *a, const AST::FunctionDeclNode *b)
+{
+    if (a == nullptr || b == nullptr || a->args.size() != b->args.size()) {
+        return false;
+    }
+
+    for (size_t i = 0; i < a->args.size(); i++) {
+        if (!(a->parameter_type(i) == b->parameter_type(i))) {
+            return false;
+        }
+
+        const AST::VarDeclNode *pa = a->args[i];
+        const AST::VarDeclNode *pb = b->args[i];
+        const std::string la = pa != nullptr ? pa->label() : "";
+        const std::string lb = pb != nullptr ? pb->label() : "";
+
+        if (la != lb) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 namespace
 {
     // "this symbol is already declared with these parameter types". one wording, so the free and the
@@ -34,7 +58,7 @@ namespace
         collector.collect_issue<AST::Issue::DuplicateFunctionSignature>(
             at,
             fmt::format(
-                "'{}' is already declared with these parameter types. Overloads must differ in their parameters.",
+                "'{}' is already declared with these parameter types. Overloads must differ in their parameters or labels.",
                 previous->signature_description()
             ));
     }
@@ -109,7 +133,7 @@ void AST::FunctionRegistry::register_function(
     // they are the same symbol twice. catching it here rather than at the call site is what turns
     // TypeLowering's "this is a name mangling defect, not a source error" throw into a located
     // source error the user can act on
-    if (auto *previous = find_by_signature(name, *ns, decl->parameter_types(), decl)) {
+    if (auto *previous = first_matching_signature(declared_overloads(name, *ns), decl, decl)) {
         report_duplicate_signature(collector, at, previous);
 
         // deliberately not added to the overload set: leaving it out keeps resolution
@@ -198,6 +222,20 @@ void AST::FunctionRegistry::register_destructor(
     owner.set_destructor(decl);
 }
 
+void AST::FunctionRegistry::register_type_init(
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    AST::FunctionDeclNode *decl,
+    AST::ComplexType &owner
+)
+{
+    if (!claim_declaration_site(collector, at, decl)) {
+        return;
+    }
+
+    owner.set_type_init(decl);
+}
+
 AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
     const AST::ComplexType &owner,
     const AST::FunctionDeclNode *decl,
@@ -222,16 +260,12 @@ AST::FunctionDeclNode *AST::FunctionRegistry::first_matching_signature(
     const AST::FunctionDeclNode *ignore
 ) const
 {
-    // materialized once for the whole search rather than per candidate, which is what keeps
-    // signatures_match's parameter-at-a-time comparison worth having
-    const std::vector<ValueType> parameter_types = decl->parameter_types();
-
     for (auto *candidate : candidates) {
         if (candidate == ignore) {
             continue;
         }
 
-        if (signatures_match(candidate, parameter_types)) {
+        if (signatures_match(candidate, decl)) {
             return candidate;
         }
     }

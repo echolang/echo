@@ -1,0 +1,35 @@
+class Handle
+{
+    int32 $n;
+}
+
+struct Counts
+{
+    static int32 $n = 0;
+
+    public static function bump() : int32
+    {
+        Counts::$n = Counts::$n + 1;
+        return Counts::$n;
+    }
+}
+
+struct Tagged
+{
+    Handle $h;
+    int32 $stamp;
+
+    init
+    {
+        $this->stamp = Counts::bump();
+    }
+}
+
+Tagged $a = Tagged(Handle(1));
+echo $a->stamp;
+echo Counts::$n;
+
+Tagged $b = $a;
+echo $b->stamp;
+echo Counts::$n;
+echo $a->stamp;

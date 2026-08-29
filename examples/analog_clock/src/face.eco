@@ -75,8 +75,9 @@ interface Renderable
 class Face : Renderable
 {
     // a layer's dial is its own business, so it is `private` - and **that is what costs the constructor
-    // below**: a private property suppresses the field-wise one outright, since that one would write
-    // every property from outside. all three layers pay the same three lines for the same reason
+    // below**: a private field without a default cannot be an implicit parameter and cannot be left
+    // blank, so the type has to write a constructor. all three layers pay the same three lines for
+    // the same reason
     private Dial $dial;
 
     constructor(Dial $dial)

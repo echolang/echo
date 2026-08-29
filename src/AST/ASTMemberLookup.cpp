@@ -213,6 +213,13 @@ AST::FunctionDeclNode *AST::find_destructor(const AST::ComplexType *ct)
     return owner == nullptr ? nullptr : owner->destructor();
 }
 
+AST::FunctionDeclNode *AST::find_init(const AST::ComplexType *ct)
+{
+    const AST::ComplexType *owner = member_owner_of(ct);
+
+    return owner == nullptr ? nullptr : owner->type_init();
+}
+
 bool AST::is_copy_constructor(const AST::FunctionDeclNode *decl, const AST::ValueType &self_value_type)
 {
     // exactly one parameter, and args[0] *is* it: a constructor's `$this` is a body-local of value

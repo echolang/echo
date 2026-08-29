@@ -84,7 +84,21 @@ const std::string AST::FunctionDeclNode::signature_description() const
             buffer += " ";
         }
 
+        if (args[i]->has_label()) {
+            buffer += args[i]->label();
+            buffer += ": ";
+        }
+
         buffer += args[i]->type().get_type_desciption();
+
+        // a labelled parameter's `$name` is not how a caller writes it, so it belongs next to the
+        // label in the signature a diagnostic shows. an unlabelled one stays `int32` as it always
+        // was - the `$name:` sugar is optional, and listing it on every candidate would reword
+        // every overload golden for a fact the call site does not have to use
+        if (args[i]->has_label()) {
+            buffer += " ";
+            buffer += args[i]->name_full();
+        }
     }
     buffer += ")";
 

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownArgumentName  named_args_unknown.eco:6:18
+
+  The argument '$nope' does not match any parameter of 'pair'.
+
+  5 | 
+  6 | echo pair($a: 1, $nope: 2);
+    :                  ^^^^^
+  7 | 
+
+1 error, nothing was compiled.

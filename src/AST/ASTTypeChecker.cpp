@@ -1,6 +1,7 @@
 #include "AST/ASTTypeChecker.h"
 
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTConstruction.h"
 #include "AST/ASTAtomics.h"
 #include "AST/ASTCFunction.h"
 #include "AST/ASTVariadic.h"
@@ -489,7 +490,7 @@ void TypeChecker::check_has_implementation(FunctionDeclNode &node)
     // a constructor or a destructor is not this check's to report: the struct parser reports one at
     // the tail of its body pass, where it knows which members that walk actually reached. Two
     // diagnostics for one declaration reads worse than the narrower owner does
-    if (node.is_constructor() || node.is_destructor()) {
+    if (node.is_constructor() || node.is_destructor() || node.is_init()) {
         return;
     }
 
@@ -563,6 +564,13 @@ void TypeChecker::visit_type_decl(TypeDeclNode &node)
     // behind the return would mean a generic implementor was never checked at all, since an
     // instantiation has no TypeDeclNode for this visitor to reach
     check_conformances(node);
+
+    // construction is names, not types: which fields `init` assigns, which a constructor still
+    // owes. a generic template is checked here rather than per instance, the same reason
+    // check_conformances sits ahead of the return
+    if (_current_module != nullptr) {
+        AST::check_construction(node, _collector, *_current_module);
+    }
 
     // a generic struct template's property types legitimately mention its type parameters (the T
     // in `struct Box<T> { T $value; }`); it is only meaningful once instantiated with concrete
@@ -2047,7 +2055,16 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
     // what still gets checked is the payload, in Parser::parse_guard: a declared type that does not match
     // what is inside the nullable is refused there, where the two are both in hand
     if (node.init_expr && node.has_type() && !node.binds_unwrapped) {
-        check_destination_fits(Destination::t_declaration, node.type(), *node.init_expr, node.token_varname);
+        // an array literal has no type of its own - result_type() is unknown by design - so the
+        // ordinary conversion check would refuse `array<int32> $a = [1, 2]` as unknown → array.
+        // a parameter default is cloned into the call and expanded there; bind the destination
+        // so that clone already knows what to build. a declaration / assignment is expanded in
+        // place by AST::OperatorRewriter before this pass, so those never reach here as literals
+        if (array_literal_of(node.init_expr) != nullptr) {
+            bind_array_literal_to(node.init_expr, node.type(), _collector.core_types);
+        } else {
+            check_destination_fits(Destination::t_declaration, node.type(), *node.init_expr, node.token_varname);
+        }
     }
 
     if (node.has_type() && is_written_null(node.init_expr)) {

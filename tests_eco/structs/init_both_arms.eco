@@ -1,0 +1,19 @@
+struct Gauge
+{
+    int32 $n;
+    int32 $sign;
+
+    init
+    {
+        if ($this->n < 0) {
+            $this->sign = -1;
+        } else {
+            $this->sign = 1;
+        }
+    }
+}
+
+Gauge $a = Gauge(-3);
+echo $a->sign;
+Gauge $b = Gauge(4);
+echo $b->sign;

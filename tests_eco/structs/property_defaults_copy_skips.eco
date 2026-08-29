@@ -16,6 +16,8 @@ struct Tagged
 {
     int32 $id = Counts::bump();
 
+    constructor() {}
+
     constructor(Tagged& $other)
     {
         $this->id = $other->id;

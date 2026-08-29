@@ -1,0 +1,12 @@
+struct Person
+{
+    int32 $age;
+    int32 $hash;
+
+    init
+    {
+        $this->hash = $this->age * 2;
+    }
+}
+
+Person $p = Person($hash: 0);

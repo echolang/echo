@@ -94,6 +94,22 @@ namespace AST
         return settlement == CallSettlement::t_settled || settlement == CallSettlement::t_failed;
     }
 
+    // how a written argument names its slot, until AST::CallResolver rewrites the call to
+    // positional. empty `argument_names` (or every kind t_none) is an all-positional list -
+    // operators, synthesized calls, and every call that has already settled
+    enum class ArgumentNameKind
+    {
+        t_none,
+        t_parameter,
+        t_label,
+    };
+
+    struct CallArgumentName
+    {
+        ArgumentNameKind kind = ArgumentNameKind::t_none;
+        std::optional<TokenReference> token;
+    };
+
     class FunctionCallExprNode : public ExprNode
     {
     public:
@@ -101,6 +117,11 @@ namespace AST
 
         TokenReference token_function_name;
         std::vector<ExprNode*> arguments;
+
+        // parallel to `arguments` while the call is unresolved. a member call's receiver is slot 0
+        // and is always t_none. CallResolver clears this once it has rewritten `arguments` into
+        // parameter order, defaults cloned in, so everything downstream stays exact-arity
+        std::vector<CallArgumentName> argument_names;
 
         // the name the registry knows, when a `use` aliased it. empty means the token's own spelling.
         // the token stays what was written, so a diagnostic still points at `sq` after

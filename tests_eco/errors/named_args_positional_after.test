@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] PositionalAfterNamed  named_args_positional_after.eco:6:18
+
+  A positional argument cannot follow a named one.
+
+  5 | 
+  6 | echo pair($a: 1, 2);
+    :                  ^
+  7 | 
+
+1 error, nothing was compiled.

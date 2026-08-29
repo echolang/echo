@@ -483,6 +483,7 @@ public struct parts_iterator : contract::iterator<string::view>, contract::keyed
         $this->source = $source;
         $this->spans = $spans;
         $this->pos = 0;
+        $this->current = string::view(null, 0);
     }
 
     function advance() : bool

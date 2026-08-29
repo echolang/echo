@@ -14,6 +14,7 @@
 using namespace AST;
 
 using EchoTests::decls_named;
+using EchoTests::has_issue_containing;
 using EchoTests::type_named;
 
 // **the default is the module, and one keyword covers two axes.** the e2e corpus holds what a program is
@@ -253,7 +254,7 @@ TEST_CASE("member_visibility maps internal to the module rung", "[visibility]")
     REQUIRE(member_visibility(std::nullopt) == Visibility::t_public);
 }
 
-TEST_CASE("an internal property does not suppress the field-wise constructor", "[visibility]")
+TEST_CASE("an internal property stays an implicit constructor parameter", "[visibility]")
 {
     auto internal_fields = EchoTests::tests_make_parsed_bundle(
         "struct Open\n"
@@ -276,11 +277,14 @@ TEST_CASE("an internal property does not suppress the field-wise constructor", "
         "    int32 $m;\n"
         "}\n");
 
-    REQUIRE_FALSE(private_field->collector.has_critical_issues());
+    // private with no initializer cannot be a public argument and cannot be left blank
+    REQUIRE(private_field->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*private_field, "is private and has no initializer"));
 
     auto *shut = type_named(private_field->modules.find_module("test"), "Shut");
     REQUIRE(shut != nullptr);
-    REQUIRE(shut->synthesized_constructor() == nullptr);
+    REQUIRE(shut->synthesized_constructor() != nullptr);
+    REQUIRE(shut->synthesized_constructor()->body == nullptr);
 }
 
 TEST_CASE("an instantiation copies a property's module visibility", "[visibility]")

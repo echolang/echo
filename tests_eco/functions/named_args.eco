@@ -1,0 +1,11 @@
+// named arguments bind to $param; positionals fill in order first, then names may follow
+
+function pair(int32 $a, int32 $b) : int32
+{
+    return $a * 10 + $b;
+}
+
+echo pair(1, 2);
+echo pair($a: 1, $b: 2);
+echo pair($b: 2, $a: 1);
+echo pair(1, $b: 2);

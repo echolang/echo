@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] DuplicateFunctionSignature  duplicate_copy_constructor.eco:18:5
 
-  'Box(Box&)' is already declared with these parameter types. Overloads must differ in their parameters.
+  'Box(Box&)' is already declared with these parameter types. Overloads must differ in their parameters or labels.
 
   17 | 
   18 |     constructor(Box& $another)

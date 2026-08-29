@@ -1,0 +1,14 @@
+struct Box
+{
+    usize $tag;
+
+    constructor(Box& $other)
+    {
+        $this->tag = $other->tag;
+    }
+
+    constructor(from: Box& $another)
+    {
+        $this->tag = $another->tag;
+    }
+}

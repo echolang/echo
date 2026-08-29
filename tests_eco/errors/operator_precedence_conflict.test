@@ -12,7 +12,7 @@ expect: fail
 
 [error] DuplicateFunctionSignature  operator_precedence_conflict.eco:5:27
 
-  'operator op(S, S)' is already declared with these parameter types. Overloads must differ in their parameters.
+  'operator op(S, S)' is already declared with these parameter types. Overloads must differ in their parameters or labels.
 
   4 | operator(30, left) (S $a) op (S $b): int32 { return 1; }
   5 | operator(50, left) (S $a) op (S $b): int32 { return 2; }

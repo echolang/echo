@@ -1,0 +1,17 @@
+// a default fills a hole after matching; it need not be trailing
+
+function add(int32 $a, int32 $b = 2) : int32
+{
+    return $a + $b;
+}
+
+function wrap(int32 $a = 1, int32 $b) : int32
+{
+    return $a * 10 + $b;
+}
+
+echo add(3);
+echo add(3, 4);
+echo add($a: 5);
+echo add($b: 6, $a: 7);
+echo wrap($b: 8);

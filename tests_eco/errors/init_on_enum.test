@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] init_on_enum.eco:4:5
+
+  'E' is an enum, so it cannot declare an init. An enum holds `case` declarations, and the functions, operators and statics it answers with.
+
+  3 |     case a;
+  4 |     init { }
+    :     ^^^^
+  5 | }
+
+1 error, nothing was compiled.

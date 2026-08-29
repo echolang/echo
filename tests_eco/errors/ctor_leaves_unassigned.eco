@@ -1,0 +1,10 @@
+struct Point
+{
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $x)
+    {
+        $this->x = $x;
+    }
+}

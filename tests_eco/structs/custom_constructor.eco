@@ -1,5 +1,5 @@
-// a user-written `constructor(...)`. it shares its name with the synthesized field-wise one, so
-// the two are an overload set and the arguments decide which is meant
+// a user-written constructor deletes the implicit memberwise one. named args bind to
+// the constructor's parameters, not to fields
 
 struct Point {
     int32 $x;
@@ -11,18 +11,10 @@ struct Point {
     }
 }
 
-// the user's constructor
 Point $a = Point(3);
 echo $a->x;
 echo $a->y;
 
-// the field-wise one is still there - it is only suppressed when the user writes a constructor
-// with the very same parameter types, because Echo has no other way to build a struct
-Point $b = Point(7, 9);
-echo $b->x;
-echo $b->y;
-
-// reading and writing through $this inside the body, including a local
 struct Counter {
     int32 $total;
 

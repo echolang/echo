@@ -32,7 +32,12 @@ namespace
     }
 
     FunctionMatch match(const std::vector<FunctionCandidate> &candidates, const std::vector<ValueType> &args) {
-        return AST::match_function(candidates, args, {});
+        std::vector<FunctionCandidate> with_args = candidates;
+        for (FunctionCandidate &candidate : with_args) {
+            candidate.argument_types = args;
+        }
+
+        return AST::match_function(with_args);
     }
 }
 

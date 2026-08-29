@@ -12,6 +12,7 @@
 
 namespace AST
 {
+    class ExprNode;
     class File;
     class FunctionDeclNode;
     class ScopeNode;
@@ -115,6 +116,12 @@ namespace AST
         File *file,
         FunctionDeclNode *enclosing_template,
         const std::vector<ValueType> &instantiation_args);
+
+    // clone `recipe` but share every ClosureExprNode's FunctionDeclNode with the original.
+    // ClosureExprNode::clone otherwise mints a second decl that mangles to the same symbol.
+    // the substitution is empty at a call site and at prepend, so sharing is the right answer;
+    // an instantiation clones the recipe later with T bound
+    ExprNode *clone_sharing_closures(ExprNode *recipe, CloneContext &cc);
 };
 
 #endif

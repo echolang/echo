@@ -29,6 +29,5 @@ echo $s->open;
 // door one: reaching the field
 echo $s->hidden;
 
-// door two: the field-wise constructor, which would write every property from outside. it is not
-// suppressed by the user's own constructor - it is suppressed by the private property
+// door two: writing a constructor deleted memberwise, so Sealed(1, 2) is not a candidate
 Sealed $forged = Sealed(1, 2);

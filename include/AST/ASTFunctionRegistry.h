@@ -27,6 +27,10 @@ namespace AST
     // whether the field-wise constructor would duplicate one the user wrote
     bool signatures_match(const FunctionDeclNode *candidate, const std::vector<ValueType> &parameter_types);
 
+    // types **and labels**. parameter names are not identity - `f(int32 $a)` and `f(int32 $b)` collide,
+    // `f(from: int32 $a)` and `f(int32 $a)` do not
+    bool signatures_match(const FunctionDeclNode *a, const FunctionDeclNode *b);
+
     // the single store of function declarations, bundle-wide, keyed by namespace and name to a
     // *set* of overloads rather than to one declaration
     //
@@ -73,6 +77,10 @@ namespace AST
         // to overload on, so "already has a destructor" is the caller's report to make, where the
         // struct's name is at hand - and the caller asks it of the slot, before registering
         void register_destructor(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
+
+        // registers the owner's `init { }`. the destructor's shape: neither `_by_name` nor the
+        // method table, so `$p->init()` cannot resolve to it. duplicate is the caller's report
+        void register_type_init(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
 
         // the overload set for a name, searched from `ns` outward. the first namespace holding
         // any candidate for the name answers - an outer namespace does not extend an inner one's
@@ -149,10 +157,9 @@ namespace AST
         // than asserted
         bool claim_declaration_site(Collector &collector, const CodeRef &at, FunctionDeclNode *decl);
 
-        // the first candidate whose parameter types are exactly `decl`'s, skipping `ignore`. the two
-        // signature lookups above differ only in which overload set they hand over, so the comparison
-        // itself lives here once - materializing `decl`'s parameter types for the whole search rather
-        // than per candidate
+        // the first candidate whose types **and labels** are exactly `decl`'s, skipping `ignore`. the
+        // two signature lookups above differ only in which overload set they hand over, so the
+        // comparison itself lives here once
         FunctionDeclNode *first_matching_signature(
             const std::vector<FunctionDeclNode *> &candidates,
             const FunctionDeclNode *decl,

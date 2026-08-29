@@ -3230,6 +3230,8 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
     close_constructor_body(*_current_module, decl, this_decl);
 
+    AST::plant_init_call(*_current_module, decl, AST::find_init(ct));
+
     publish_synthesized_decl(decl);
 
     return &decl;

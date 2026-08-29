@@ -37,7 +37,7 @@ public struct buffer<T>
     // **private, and that is what turns the claim above into a fact.** while these were reachable,
     // `$b->data:$ = $a->data;` built a second owner of one allocation in ordinary safe code - so
     // "two live buffers are two allocations" was a convention this file kept rather than something
-    // the compiler knew. a private property also suppresses the field-wise constructor, which was the
+    // the compiler knew. a private property without a default refuses the implicit constructor, which was the
     // other door: `mem::buffer<int32>($stolen, 8)` no longer exists to be written
     private ptr<T> $data;
     private usize $cap;

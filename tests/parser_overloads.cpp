@@ -146,12 +146,12 @@ TEST_CASE("a user constructor written in another file still suppresses the field
     REQUIRE(calls[0]->decl == decls[0]);
 }
 
-TEST_CASE("a user constructor of a different signature leaves the field-wise one in place", "[overloads]")
+TEST_CASE("a user constructor of a different signature deletes the implicit memberwise one", "[overloads]")
 {
-    // Echo has no other syntax for building a struct, so a convenience constructor must not take the
-    // field-wise one away - both spellings resolve, from a file parsed before the struct's own
-    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
-        "$a = Point(3.0);\n$b = Point(1.0, 2.0);\n",
+    // any written constructor deletes memberwise, including from a file parsed before the struct's
+    // own. Point(3.0) is the user's; Point(1.0, 2.0) used to be the field-wise companion and is gone
+    auto ok = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "$a = Point(3.0);\n",
         "struct Point {\n"
         "    float64 $x;\n"
         "    float64 $y;\n"
@@ -159,22 +159,34 @@ TEST_CASE("a user constructor of a different signature leaves the field-wise one
         "}\n",
     });
 
-    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    REQUIRE_FALSE(ok->collector.has_critical_issues());
 
-    auto &m = bundle->modules.find_module("test");
-    REQUIRE(decls_named(m, "Point").size() == 2);
+    auto &m = ok->modules.find_module("test");
+    REQUIRE(decls_named(m, "Point").size() == 1);
+    REQUIRE(decls_named(m, "Point")[0]->args.size() == 1);
 
     auto calls = calls_to(m, "Point");
-    REQUIRE(calls.size() == 2);
+    REQUIRE(calls.size() == 1);
     REQUIRE(calls[0]->decl->args.size() == 1);
-    REQUIRE(calls[1]->decl->args.size() == 2);
+
+    auto hidden = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "$b = Point(1.0, 2.0);\n",
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    float64 $y;\n"
+        "    constructor(float64 $v) { $this->x = $v; $this->y = $v; }\n"
+        "}\n",
+    });
+
+    REQUIRE(hidden->collector.has_critical_issues());
 }
 
-TEST_CASE("a struct's own constructor is reachable alongside the field-wise one", "[overloads]")
+TEST_CASE("a struct's own constructor is the only constructor of that name", "[overloads]")
 {
-    // the synthesized field-wise constructor is registered under the struct's name, exactly like
-    // the user's - they used to collide, and the synthesized one (registered last) always won
-    auto bundle = EchoTests::tests_make_parsed_bundle(
+    // the synthesized memberwise constructor used to sit in the same overload set as the user's,
+    // under the struct's name. they collided, and the synthesized one (registered last) always won.
+    // a written constructor now deletes it, so Point(1) is the user's and Point(1, 2) is nothing
+    auto ok = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
         "    int32 $x;\n"
         "    int32 $y;\n"
@@ -183,16 +195,28 @@ TEST_CASE("a struct's own constructor is reachable alongside the field-wise one"
         "        $this->y = $v;\n"
         "    }\n"
         "}\n"
-        "$a = Point(1);\n"
+        "$a = Point(1);\n");
+
+    REQUIRE_FALSE(ok->collector.has_critical_issues());
+
+    auto &m = ok->modules.find_module("test");
+    REQUIRE(decls_named(m, "Point").size() == 1);
+    auto calls = calls_to(m, "Point");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->decl->args.size() == 1);
+
+    auto hidden = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    int32 $x;\n"
+        "    int32 $y;\n"
+        "    constructor(int32 $v) {\n"
+        "        $this->x = $v;\n"
+        "        $this->y = $v;\n"
+        "    }\n"
+        "}\n"
         "$b = Point(1, 2);\n");
 
-    REQUIRE_FALSE(bundle->collector.has_critical_issues());
-
-    auto &m = bundle->modules.find_module("test");
-    auto calls = calls_to(m, "Point");
-    REQUIRE(calls.size() == 2);
-    REQUIRE(calls[0]->decl->args.size() == 1);
-    REQUIRE(calls[1]->decl->args.size() == 2);
+    REQUIRE(hidden->collector.has_critical_issues());
 }
 
 TEST_CASE("a constructor body opens with its $this declaration", "[overloads]")

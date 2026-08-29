@@ -27,20 +27,29 @@ namespace
     const char *k_types =
         // the reference kinds
         "class Handle { int32 $tag; }\n"
-        "class Written { int32 $tag; constructor(Written& $other) { $this->tag = $other->tag; } }\n"
+        "class Written {\n"
+        "    int32 $tag;\n"
+        "    constructor(int32 $tag) { $this->tag = $tag; }\n"
+        "    constructor(Written& $other) { $this->tag = $other->tag; }\n"
+        "}\n"
         "interface Shape { function area() : int32; }\n"
 
         // nothing to arrange
         "struct Plain { int32 $x; usize $y; }\n"
         "struct HoldsPointer { ptr<uint8> $data; }\n"
 
-        // the author's answer, with and without a destructor of its own
-        "struct Says { int32 $x; constructor(Says& $other) { $this->x = $other->x; } }\n"
-        // the `$tag` is the harness talking, not the rule: with one pointer property, `SaysAndOwns(null)`
-        // below fits the copy constructor and the field-wise one equally well and the call is ambiguous
+        // the author's answer, with and without a destructor of its own. a written copy constructor
+        // is a constructor, so it deletes memberwise - the value constructors below are what the
+        // copy-site fixture still uses to build `$a`
+        "struct Says {\n"
+        "    int32 $x;\n"
+        "    constructor(int32 $x) { $this->x = $x; }\n"
+        "    constructor(Says& $other) { $this->x = $other->x; }\n"
+        "}\n"
         "struct SaysAndOwns {\n"
         "    usize $tag;\n"
         "    ptr<uint8> $data;\n"
+        "    constructor(usize $tag, ptr<uint8> $data) { $this->tag = $tag; $this->data:$ = $data; }\n"
         "    constructor(SaysAndOwns& $other) { $this->tag = $other->tag; $this->data:$ = $other->data; }\n"
         "    destructor() { $this->data:$ = null; }\n"
         "}\n"

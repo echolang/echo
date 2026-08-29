@@ -6,10 +6,12 @@
 #include "Token.h"
 
 #include <string>
+#include <vector>
 
 namespace AST
 {
     class AssignNode;
+    class Collector;
     class ExprNode;
     class FunctionDeclNode;
     class Module;
@@ -18,10 +20,11 @@ namespace AST
     class TypeNode;
     class TypeRegistry;
     class VarDeclNode;
+    class ValueType;
 
     // **what every constructor body is made of, whoever writes it.** four producers build one -
-    // Parser::parse_constructor for a written `constructor(...)`, the synthesized one the type
-    // declaration parser builds (field-wise or zero-arg from property defaults), an enum's case
+    // Parser::parse_constructor for a written `constructor(...)`, the synthesized memberwise one
+    // AST::finalize_type_construction builds, an enum's case
     // constructor, and AST::OwnershipPass::ensure_copy_constructor - and none of them is the one the
     // reader happens to be looking at. so the rules live here rather than at the first of them: while
     // they did not, the third producer rediscovered them wrongly - it gave a class no allocation at
@@ -143,24 +146,73 @@ namespace AST
         ScopeNode &declaration_scope
     );
 
-    // which free constructor a type is owed, if any. mixed defaults are none - a field-wise
-    // Foo($a, $b) would ignore `$a = 0` at the call site, so the default would be a lie. a private
-    // property suppresses only the field-wise form: that constructor takes the hidden value as a
-    // public argument, and the zero-arg form does not
+    // which free constructor a type is owed. any written `constructor` deletes it; otherwise it is
+    // memberwise over the fields a caller could have assigned. field defaults are parameter defaults.
+    // a private property without an initializer is not a reason to skip registration - `init` may
+    // still derive it - and finalize_type_construction refuses to build the body if it is still blank
     enum class SynthesizedConstructorKind
     {
         t_none,
-        t_field_wise,
-        t_zero_arg,
+        t_memberwise,
     };
 
     SynthesizedConstructorKind synthesized_constructor_kind(const TypeDeclNode &type);
 
+    // instance properties that can be implicit constructor parameters: not static, not private.
+    // derived fields are filtered by implicit_constructor_parameters, not here - derived-ness is
+    // a fact about `init`, not about the property
+    bool is_implicit_constructor_parameter(const VarDeclNode &property);
+
+    std::vector<VarDeclNode *> implicit_constructor_parameters(const TypeDeclNode &type);
+
+    // the constructor body's `$this` local, which is `body->children.front()` by construction. null
+    // when the body has not been built. one owner so planting and definite assignment cannot disagree
+    VarDeclNode *constructor_this(FunctionDeclNode &ctor);
+
+    // insert a resolved call to `init` immediately before every `return` that leaves `ctor`,
+    // including the implicit `return $this`. nested functions are a different frame and are skipped.
+    // a `die` path does not return, so `init` does not run
+    void plant_init_call(Module &module, FunctionDeclNode &ctor, FunctionDeclNode *init);
+
+    // register the memberwise constructor in the function registry. asked from the declaration
+    // pass so a `Foo(...)` in another file's body is not UnknownFunction. the body is not built
+    // here: derived fields are unknown until every `init` in the module exists, so the arity may
+    // still shrink. parse_funccall leaves construction calls unresolved until
+    // finalize_module_construction has run
+    void ensure_synthesized_constructor(
+        Module &module,
+        TypeDeclNode &type,
+        Collector &collector,
+        const ValueType &self_type
+    );
+
+    // **after every file's body pass.** `init` bodies exist, so derived fields are known: revive a
+    // constructor the declaration pass skipped for an uninitialized private, drop parameters
+    // `init` now derives, build the body once, then prepend, consume, plant, and the two
+    // construction diagnostics that are not path-sensitive
+    void finalize_type_construction(
+        Module &module,
+        TypeDeclNode &type,
+        Collector &collector,
+        ScopeNode &declaration_scope,
+        const ValueType &self_type
+    );
+
+    // walk every type in the module from its file root and finalize_type_construction. asked once
+    // from ModuleParser after pass 3 of every file, so constructor arity is stable before the
+    // semantic pipeline settles `Foo(...)`
+    void finalize_module_construction(Module &module, Collector &collector);
+
+    // a private instance property with no initializer. the implicit ctor cannot take it as a
+    // public argument and cannot leave it unassigned. null when every private field is initialized
+    // or there are none
+    const VarDeclNode *uninitialized_private_property(const TypeDeclNode &type);
+
     // **drops each property's `init_expr` once prepend_property_defaults has seated a clone.**
     // the recipe is not a live initializer: RecursiveVisitor::visit_type_decl would type-check it
     // again as a declaration, so a bad default reports twice at the same token. asked of
-    // TypeDeclNode::defaults_cloned, not re-derived from whether a constructor exists - a field-wise
-    // synth never cloned, and a bodyless user constructor never cloned, so those leftovers stay for
+    // TypeDeclNode::defaults_cloned, not re-derived from whether a constructor exists - a bodyless
+    // user constructor never cloned, and a copy-only type never cloned, so those leftovers stay for
     // TypeChecker to see
     void consume_property_defaults(TypeDeclNode &type);
 };

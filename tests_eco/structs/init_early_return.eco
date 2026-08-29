@@ -1,0 +1,25 @@
+struct Box
+{
+    int32 $n;
+    int32 $flag;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    init
+    {
+        if ($this->n < 0) {
+            $this->flag = 0;
+            return;
+        }
+
+        $this->flag = 1;
+    }
+}
+
+Box $a = Box(-3);
+echo $a->flag;
+Box $b = Box(4);
+echo $b->flag;

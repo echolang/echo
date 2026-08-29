@@ -1,0 +1,16 @@
+// labels participate in overload identity; parameter names do not
+
+function print(int32 $level, string $message) : int32
+{
+    echo $message;
+    return $level;
+}
+
+function print(fromDecimal: int32 $cents, currency: string $code) : int32
+{
+    echo $code;
+    return $cents;
+}
+
+echo print(1, "hi");
+echo print(fromDecimal: 100, currency: "EUR");

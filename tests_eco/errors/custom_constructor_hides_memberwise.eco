@@ -1,0 +1,11 @@
+struct Point {
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $v) {
+        $this->x = $v;
+        $this->y = $v;
+    }
+}
+
+Point $b = Point(7, 9);

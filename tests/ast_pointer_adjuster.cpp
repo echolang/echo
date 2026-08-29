@@ -184,7 +184,7 @@ TEST_CASE("A borrow-typed struct member reads through, and its initializer binds
     // but the synthesized constructor *binds* the field. a plain write-through there would store
     // through a field that has never been seated - the initializer is spelled `$this->t:$ = $t`
     // by the struct parser precisely so this deref is absent
-    REQUIRE(contains(d, "ma<int32&>(varref<H>(var($this))->t) = varref<int32&>(var(t))"));
+    REQUIRE(contains(d, "ma<int32&>(varref<H>(var($this))->t) = varref<int32&>(var($t))"));
     REQUIRE_FALSE(contains(d, "deref<int32>(ma<int32&>(varref<H>(var($this))->t))"));
 }
 

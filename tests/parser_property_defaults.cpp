@@ -59,7 +59,7 @@ namespace
     }
 }
 
-TEST_CASE("all property defaults synthesize a zero-arg constructor", "[property_defaults]")
+TEST_CASE("all property defaults become parameter defaults on the memberwise constructor", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Opts {\n"
@@ -73,7 +73,9 @@ TEST_CASE("all property defaults synthesize a zero-arg constructor", "[property_
     auto *synth = opts->synthesized_constructor();
     REQUIRE(synth != nullptr);
     REQUIRE(synth->is_implicitly_generated);
-    REQUIRE(synth->args.empty());
+    REQUIRE(synth->args.size() == 2);
+    REQUIRE(synth->args[0]->init_expr != nullptr);
+    REQUIRE(synth->args[1]->init_expr != nullptr);
     REQUIRE(init_assignments(synth) == 2);
 
     // `$this` is the first child: a class constructor's allocation lives in that declaration,
@@ -82,7 +84,7 @@ TEST_CASE("all property defaults synthesize a zero-arg constructor", "[property_
     REQUIRE(synth->body->children.front().node()->get_node_type() == NodeType::n_vardecl);
 }
 
-TEST_CASE("partial property defaults synthesize no constructor", "[property_defaults]")
+TEST_CASE("partial property defaults still synthesize memberwise", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Mixed {\n"
@@ -93,8 +95,11 @@ TEST_CASE("partial property defaults synthesize no constructor", "[property_defa
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto *mixed = require_type(*bundle, "Mixed");
-    REQUIRE(mixed->synthesized_constructor() == nullptr);
-    REQUIRE(mixed->constructors().empty());
+    auto *synth = mixed->synthesized_constructor();
+    REQUIRE(synth != nullptr);
+    REQUIRE(synth->args.size() == 2);
+    REQUIRE(synth->args[0]->init_expr != nullptr);
+    REQUIRE(synth->args[1]->init_expr == nullptr);
 }
 
 TEST_CASE("no property defaults keep the field-wise constructor", "[property_defaults]")
@@ -125,7 +130,7 @@ TEST_CASE("an empty struct still gets the zero-arg field-wise constructor", "[pr
     REQUIRE(empty->synthesized_constructor()->args.empty());
 }
 
-TEST_CASE("private does not suppress the all-defaults zero-arg constructor", "[property_defaults]")
+TEST_CASE("a private field with a default is omitted from the implicit parameter list", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Shut {\n"
@@ -138,10 +143,12 @@ TEST_CASE("private does not suppress the all-defaults zero-arg constructor", "[p
     auto *shut = require_type(*bundle, "Shut");
     auto *synth = shut->synthesized_constructor();
     REQUIRE(synth != nullptr);
-    REQUIRE(synth->args.empty());
+    REQUIRE(synth->args.size() == 1);
+    REQUIRE(synth->args[0]->name() == "m");
+    REQUIRE(init_assignments(synth) == 2);
 }
 
-TEST_CASE("private still suppresses field-wise when nothing has a default", "[property_defaults]")
+TEST_CASE("a private field without a default refuses the implicit constructor", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Shut {\n"
@@ -149,10 +156,27 @@ TEST_CASE("private still suppresses field-wise when nothing has a default", "[pr
         "    int32 $m;\n"
         "}\n");
 
-    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    REQUIRE(bundle->collector.has_critical_issues());
 
     auto *shut = require_type(*bundle, "Shut");
-    REQUIRE(shut->synthesized_constructor() == nullptr);
+    REQUIRE(shut->synthesized_constructor() != nullptr);
+    REQUIRE(shut->synthesized_constructor()->body == nullptr);
+}
+
+TEST_CASE("any user constructor deletes the implicit memberwise one", "[property_defaults]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    int32 $x;\n"
+        "    int32 $y;\n"
+        "    constructor(int32 $v) { $this->x = $v; $this->y = $v; }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *point = require_type(*bundle, "Point");
+    REQUIRE(point->synthesized_constructor() == nullptr);
+    REQUIRE(point->constructors().size() == 1);
 }
 
 TEST_CASE("a user constructor() occupies the all-defaults zero-arg signature", "[property_defaults]")
@@ -220,7 +244,7 @@ TEST_CASE("defaults are prepended to a user constructor, not a copy constructor"
     REQUIRE(copy_first->value_expr->get_node_type() == NodeType::n_member_access);
 }
 
-TEST_CASE("a generic type with all defaults synthesizes a zero-arg constructor", "[property_defaults]")
+TEST_CASE("a generic type with defaults synthesizes memberwise", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Box<T> {\n"
@@ -231,7 +255,8 @@ TEST_CASE("a generic type with all defaults synthesizes a zero-arg constructor",
 
     auto *box = require_type(*bundle, "Box");
     REQUIRE(box->synthesized_constructor() != nullptr);
-    REQUIRE(box->synthesized_constructor()->args.empty());
+    REQUIRE(box->synthesized_constructor()->args.size() == 1);
+    REQUIRE(box->synthesized_constructor()->args[0]->init_expr != nullptr);
     REQUIRE(box->synthesized_constructor()->is_generic());
 }
 
@@ -251,7 +276,7 @@ TEST_CASE("cloned defaults consume the recipe on the property", "[property_defau
     REQUIRE(opts->properties()[1]->init_expr == nullptr);
 }
 
-TEST_CASE("unused mixed defaults keep the recipe", "[property_defaults]")
+TEST_CASE("memberwise defaults consume the recipe on the property", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Mixed {\n"
@@ -262,8 +287,8 @@ TEST_CASE("unused mixed defaults keep the recipe", "[property_defaults]")
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto *mixed = require_type(*bundle, "Mixed");
-    REQUIRE(mixed->properties()[0]->init_expr != nullptr);
-    REQUIRE(mixed->properties()[1]->init_expr == nullptr);
+    REQUIRE(mixed->properties()[0]->init_expr == nullptr);
+    REQUIRE(mixed->synthesized_constructor()->args[0]->init_expr != nullptr);
 }
 
 TEST_CASE("a user constructor consumes the recipe", "[property_defaults]")
@@ -348,14 +373,13 @@ TEST_CASE("a bad default reports once after it has been cloned", "[property_defa
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Bad {\n"
         "    int32 $n = 'nope';\n"
-        "}\n"
-        "Bad $b = Bad();\n");
+        "}\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
     REQUIRE(bundle->collector.issues.size() == 1);
 }
 
-TEST_CASE("an unused mixed default is still type-checked", "[property_defaults]")
+TEST_CASE("a mixed default on the implicit constructor is still type-checked", "[property_defaults]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Mixed {\n"

@@ -1,5 +1,6 @@
-// a default mentioning T is cloned into the template constructor and substituted per instance.
-// Inner() is itself an all-defaults zero-arg constructor, so T() is a real call after binding
+// a default mentioning T is a parameter default on the template. Box<Inner>() instantiates first,
+// then re-clones Inner() from the instance. Inner() is itself memberwise of nothing required
+// besides $x's default, so T() is a real call after binding
 
 struct Inner
 {

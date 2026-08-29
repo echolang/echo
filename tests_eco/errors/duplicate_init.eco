@@ -1,0 +1,7 @@
+struct Person
+{
+    int32 $n;
+
+    init { $this->n = 1; }
+    init { $this->n = 2; }
+}

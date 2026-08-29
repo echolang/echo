@@ -1195,6 +1195,18 @@ namespace AST
             return _destructor;
         }
 
+        // this type's `init { }`, or null. at most one, so a slot beside the destructor, and on the
+        // *type* for the destructor's reason: an instantiation has a ComplexType and no TypeDeclNode.
+        // AST::find_init redirects through template_or_self. not in `_methods`, so a user method
+        // named `init` is a different declaration
+        void set_type_init(FunctionDeclNode *decl) {
+            _type_init = decl;
+        }
+
+        FunctionDeclNode *type_init() const {
+            return _type_init;
+        }
+
         // this type's copy constructor - the constructor taking one non-nullable borrow of its own
         // type - or null. at most one, so a slot beside the destructor above, and reached by type for
         // the same reason: the copy sites AST::OwnershipPass inserts know the type of the value being
@@ -1332,6 +1344,7 @@ namespace AST
         std::vector<VarDeclNode *> _static_properties;
         std::unordered_map<std::string, TypeDeclNode *> _member_types;
         FunctionDeclNode *_destructor = nullptr;
+        FunctionDeclNode *_type_init = nullptr;
         FunctionDeclNode *_copy_constructor = nullptr;
         FunctionDeclNode *_deinit = nullptr;
         std::vector<FunctionDeclNode *> _implicit_conversions;

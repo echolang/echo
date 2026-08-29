@@ -18,6 +18,7 @@ private class box<T>
 
     constructor()
     {
+        $this->value = null;
     }
 }
 

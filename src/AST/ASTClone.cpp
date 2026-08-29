@@ -827,4 +827,30 @@ void publish_cloned_closures(
         root, file != nullptr ? file->root : nullptr, enclosing_template, instantiation_args);
 }
 
+ExprNode *clone_sharing_closures(ExprNode *recipe, CloneContext &cc)
+{
+    if (recipe == nullptr) {
+        return nullptr;
+    }
+
+    struct RebindClosures : RecursiveVisitor
+    {
+        CloneContext *cc = nullptr;
+
+        void visit_closure_expr(ClosureExprNode &node) override {
+            if (node.decl != nullptr) {
+                cc->map[node.decl] = node.decl;
+            }
+
+            RecursiveVisitor::visit_closure_expr(node);
+        }
+    };
+
+    RebindClosures rebind;
+    rebind.cc = &cc;
+    recipe->accept(rebind);
+
+    return cc.child(recipe);
+}
+
 };  // namespace AST

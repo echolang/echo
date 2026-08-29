@@ -1,0 +1,6 @@
+function listen(forEvent: string $name, int32 $code) : int32
+{
+    return $code;
+}
+
+echo listen($name: "click", $code: 1);

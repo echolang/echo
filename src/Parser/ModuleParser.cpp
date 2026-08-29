@@ -8,6 +8,7 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 
+#include "AST/ASTConstructor.h"
 #include "AST/ASTImport.h"
 
 #include <iostream>
@@ -173,6 +174,10 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
         file->root = &parse_scope(parser_payload);
     }
     }
+
+    // derived fields are known now, so memberwise arity is stable. construction calls were left
+    // unresolved in pass 3 so they cannot settle against a list this sweep still rewrites
+    AST::finalize_module_construction(module, collector);
 }
 
 void Parser::ModuleParser::parse_input(const InputPayload &payload) const

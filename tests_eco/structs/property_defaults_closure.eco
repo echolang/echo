@@ -1,5 +1,5 @@
-// a property default that holds a closure is cloned into the constructor in the body pass, so
-// the clone's declaration lands on the file root - the declaration pass has no root to publish to
+// a property default that holds a closure is published onto the file root in the body pass - the
+// declaration pass has no root to publish to - and bind clones the expression while sharing the decl
 
 struct Box
 {

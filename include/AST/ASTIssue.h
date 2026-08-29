@@ -218,8 +218,9 @@ namespace AST
         MAKE_ISSUE_DEF2(UnknownStaticFunction, IssueSeverity::Error, const std::string, function_name, const std::string, type_name,
             std::vector<IssueNote> notes() const override;);
         // `T(...)` after substitution named a type that has no constructors - a primitive, an
-        // interface, or a type whose field-wise constructor was suppressed and that wrote none of
-        // its own. its own kind because UnknownFunction would name the type-parameter token (`T`)
+        // interface, or a type whose implicit constructor was refused (a private field without a
+        // default) and that wrote none of its own. its own kind because UnknownFunction would name
+        // the type-parameter token (`T`)
         // rather than the type it became, and the remedy is not "declare a function of that name"
         MAKE_ISSUE_DEF1(CannotConstructType, IssueSeverity::Error, const std::string, type_name,
             std::vector<IssueNote> notes() const override;);
@@ -238,6 +239,30 @@ namespace AST
         MAKE_ISSUE_DEF1(DuplicateFunctionSignature, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
+
+        // named / labelled arguments. their own kinds rather than NoMatchingOverload's second
+        // reading: a name the callee does not have, a label the callee required, and a hole the
+        // callee still owes are three different mistakes, and an issue's message is part of the
+        // collector's dedup key
+        MAKE_ISSUE_DEF1(PositionalAfterNamed, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(UnknownArgumentName, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DuplicateArgumentName, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(MissingArgumentLabel, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(MissingArgument, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(NamedArgumentNotCallable, IssueSeverity::Error, const std::string, _message);
+
+        // a private property is omitted from the implicit constructor, so it must already have a
+        // value or the type must declare a constructor that assigns it
+        MAKE_ISSUE_DEF1(PrivatePropertyNeedsInitializer, IssueSeverity::Error, const std::string, _message);
+
+        MAKE_ISSUE_DEF1(DuplicateInit, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InitHasParameterList, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InitHasReturnType, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InitAssignsOnSomePaths, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ConstructionLeavesFieldUnassigned, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InitReadsUnassignedField, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DerivedFieldHasDefault, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DuplicateParameterLabel, IssueSeverity::Error, const std::string, _message);
 
         // two `test` blocks of one name in one file. its own kind rather than DuplicateFunctionSignature's
         // second reading, because a test is in no overload set: that message talks about a signature and a

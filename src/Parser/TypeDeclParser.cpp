@@ -464,17 +464,16 @@ static void publish_copy_constructor(
             return;
         }
 
-        // an identically-shaped second one has already been reported at this very token, as
-        // register_function's DuplicateFunctionSignature. only a *differently* shaped one reaches
-        // here - `Foo&` beside `const Foo&`, which are two signatures and both answer the
-        // recognition rule - and that does need saying, because they are not overloads of anything:
-        // a type has one copy, and nothing would decide which of them an implicit copy meant
+        // a type has one copy. DuplicateFunctionSignature already covers the identically-shaped
+        // second one (types and labels). this arm is the rest: `Foo&` beside `const Foo&`, or two
+        // copies that differ only by a label - they are not overloads of anything, and nothing
+        // would decide which of them an implicit copy meant
         //
         // and deliberately no skip_declaration_body/return, unlike the destructor's duplicate below.
         // report_bodyless at the end of parse_typedecl iterates *every* constructor, so a body-less
         // one would earn a second, confusing diagnostic; the destructor escapes that because
         // report_bodyless asks only its slot
-        if (!AST::signatures_match(existing, ctor_decl->parameter_types())) {
+        if (!AST::signatures_match(existing, ctor_decl)) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(ctor_token),
                 fmt::format("'{}' already has a copy constructor.", struct_node->type_name()));
@@ -797,113 +796,97 @@ static void parse_destructor(
     payload.context.declaration_scope().add_funcdecl(*dtor_decl);
 }
 
-// the synthesized constructor. which of the three shapes it is - field-wise, zero-arg, or none -
-// is AST::synthesized_constructor_kind's. built whole, so it is the same in either pass and belongs
-// to whichever one reaches the struct first
-static void synthesize_constructor(
+// `init { }` in a type body. a method with receiver `T&`, no extra parameters, not in any
+// overload set. the name token is the unspellable `$init` so a user method named `init` is a
+// different symbol. two-pass reconciliation is the destructor's, keyed on the `init` identifier
+static void parse_init(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
-    const AST::ValueType &self_value_type
+    AST::TypeNode *self_type_node
 )
 {
-    const AST::SynthesizedConstructorKind kind = AST::synthesized_constructor_kind(*struct_node);
+    auto &cursor = payload.cursor;
+    const TokenReference init_token = cursor.current();
 
-    if (kind == AST::SynthesizedConstructorKind::t_none) {
+    cursor.skip(); // skip "init"
+
+    if (cursor.is_type(Token::Type::t_open_paren)) {
+        payload.collector.collect_issue<AST::Issue::InitHasParameterList>(
+            payload.context.code_ref(cursor.current()),
+            "init takes no parameter list - write 'init { ... }'.");
+        cursor.skip();
+        cursor.skip_until({ Token::Type::t_close_paren, Token::Type::t_open_brace });
+        if (cursor.is_type(Token::Type::t_close_paren)) {
+            cursor.skip();
+        }
+    }
+
+    if (cursor.is_type(Token::Type::t_colon)) {
+        payload.collector.collect_issue<AST::Issue::InitHasReturnType>(
+            payload.context.code_ref(cursor.current()),
+            "init returns nothing - drop the ': type'.");
+        cursor.skip();
+        if (can_parse_type(payload)) {
+            parse_type(payload);
+        }
+    }
+
+    AST::FunctionDeclNode *init_decl = reconciled_member_decl(payload, init_token);
+
+    if (init_decl == nullptr) {
+        auto name_token = payload.context.make_virtual_token(
+            "$init", Token::Type::t_identifier, init_token);
+        init_decl = &payload.context.emplace_node<AST::FunctionDeclNode>(name_token, init_token);
+        init_decl->member_kind = AST::MemberKind::t_init;
+    }
+
+    publish_member_attributes(payload, init_decl, struct_node, init_token);
+
+    init_decl->ast_namespace = payload.context.current_namespace;
+    init_decl->owner_type = &struct_node->complex_type();
+    init_decl->type_parameters = struct_node->type_parameters();
+    init_decl->inherited_type_param_count = init_decl->type_parameters.size();
+
+    if (init_decl->return_type == nullptr) {
+        init_decl->return_type = &payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_void());
+    }
+
+    auto &init_scope = payload.context.emplace_node<AST::ScopeNode>();
+    Parser::push_receiver_param(payload, *init_decl, init_scope, self_type_node, init_token);
+
+    AST::FunctionDeclNode *existing = struct_node->complex_type().type_init();
+
+    if (existing != nullptr && existing != init_decl) {
+        payload.collector.collect_issue<AST::Issue::DuplicateInit>(
+            payload.context.code_ref(init_token),
+            fmt::format("'{}' already has an init.", struct_node->type_name()));
+        Parser::skip_declaration_body(payload);
         return;
     }
 
-    auto name_token = struct_node->name_token.value();
+    payload.collector.functions.register_type_init(
+        payload.collector, payload.context.code_ref(init_token), init_decl, struct_node->complex_type());
 
-    std::vector<AST::ValueType> ctor_params;
-    if (kind == AST::SynthesizedConstructorKind::t_field_wise) {
-        ctor_params.reserve(struct_node->properties().size());
-        for (const auto &prop : struct_node->properties()) {
-            ctor_params.push_back(prop->type_node()->type);
-        }
+    const auto init_brace = enter_member_body(payload, init_decl);
+    if (!init_brace.has_value()) {
+        return;
     }
 
-    // it is *not* suppressed merely because the user wrote a constructor of their own. Echo has no
-    // other syntax for building a struct, so taking it away the moment a convenience constructor
-    // appears would silently break every `Foo(...)` elsewhere in the program. It is suppressed only
-    // when one of the user's own already occupies this exact signature
-    //
-    // asked of *this struct's* constructors rather than of the namespace's overload set for the
-    // name. the set is the wrong question twice over: it is being filled as the module is parsed, so
-    // what it holds depends on how far along we are, and it also holds every free function that
-    // happens to share the struct's name, which has nothing to say about how a struct is built
-    for (auto *constructor : struct_node->constructors()) {
-        if (AST::signatures_match(constructor, ctor_params)) {
-            return;
-        }
+    init_scope.is_function_boundary = true;
+    payload.context.push_scope(init_scope);
+
+    {
+        AST::ReturnTypeScope return_scope(payload.context, init_decl->return_type);
+        AST::FunctionBodyScope body_scope(payload.context, init_decl);
+        // so `$this->hash =` is that field's initialization, including of a `const` property
+        AST::ConstructorScope ctor_this_scope(payload.context, init_decl->args[0]);
+
+        init_decl->body = &parse_scope(payload, init_brace);
     }
 
-    // the struct's own name token is this declaration's site: nothing else claims it (a struct
-    // declaration is not in the function registry) and it is the same index in every pass, so the
-    // synthesized constructor needs no token minted for it either
-    auto &default_ctor = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
-    default_ctor.member_kind = AST::MemberKind::t_constructor;
+    leave_member_body(payload);
 
-    // built from the struct's properties rather than written, so no module owns its symbol and every
-    // build that sees this struct produces the same definition - see AST::function_emission_kind
-    default_ctor.is_implicitly_generated = true;
-
-    struct_node->set_synthesized_constructor(&default_ctor);
-
-    default_ctor.ast_namespace = payload.context.current_namespace;
-
-    // inherited, not merely held: inherited_type_param_count is what lets Box<int32>(1, 2) name
-    // the type. empty own list - a constructor has no type parameters of its own
-    Parser::declare_type_parameters(payload, default_ctor, {}, struct_node->type_parameters());
-
-    // create a type node for the return type
-    auto &type_node = payload.context.emplace_node<AST::TypeNode>(self_value_type);
-    default_ctor.return_type = &type_node;
-
-    if (kind == AST::SynthesizedConstructorKind::t_field_wise) {
-        for (const auto &prop : struct_node->properties()) {
-            auto param_token = payload.context.make_virtual_token(prop->name(), Token::Type::t_varname, name_token);
-            auto param_type = payload.context.emplace_nodep<AST::TypeNode>(prop->type_node()->type);
-            auto param_var = payload.context.emplace_nodep<AST::VarDeclNode>(param_token, param_type);
-            default_ctor.args.push_back(param_var);
-        }
-    }
-
-    // the function body is a scope that initializes the properties of the struct from the
-    // matching parameters. a zero-arg form is `$this` plus the return; its defaults are prepended
-    // in the body pass, when there is a file root to publish a nested closure onto
-    auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
-    default_ctor.body = &ctor_body;
-
-    // allocate "$this" - ahead of every statement below, which is this body's half of
-    // AST::declare_constructor_this's rule: a class's field writes store *through* the handle its
-    // initializer makes
-    auto &this_vardecl = AST::declare_constructor_this(payload.context.module, type_node, name_token);
-    default_ctor.body->add_vardecl(this_vardecl);
-
-    if (kind == AST::SynthesizedConstructorKind::t_field_wise) {
-        // one write per property, through the rule AST::seat_property_from_parameter owns - the
-        // pointer binding, the initialization and the hand-over are all its, and an enum's case
-        // constructor is built out of the same call
-        for (size_t i = 0; i < struct_node->properties().size(); i++) {
-            auto *prop = struct_node->properties()[i];
-
-            default_ctor.body->children.push_back(AST::make_ref(
-                AST::seat_property_from_parameter(
-                    payload.context.module,
-                    this_vardecl,
-                    *prop,
-                    default_ctor.args[i],
-                    prop->token_varname)));
-        }
-    }
-
-    // return the initialized struct instance, through the same owner the written constructor above ends
-    // by. nothing here can leave early, so the guard inside it always answers "one is owed" - it is
-    // called anyway, because "when does a constructor owe a return" is not a question this site holds
-    AST::close_constructor_body(payload.context.module, default_ctor, this_vardecl);
-
-    payload.collector.functions.register_function(
-        payload.collector, payload.context.code_ref(name_token), &default_ctor);
+    payload.context.declaration_scope().add_funcdecl(*init_decl);
 }
 
 // `#[core: string]` - the stdlib telling the compiler which declared type this is. bound in both the
@@ -1629,6 +1612,24 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             parse_constructor(payload, struct_node, self_value_type, visibility);
         }
+        else if (cursor.is_type(Token::Type::t_identifier)
+            && cursor.current().value() == "init"
+            && (cursor.peek_is_type(1, Token::Type::t_open_brace)
+                || cursor.peek_is_type(1, Token::Type::t_open_paren)
+                || cursor.peek_is_type(1, Token::Type::t_colon))) {
+            if (is_interface_body || is_enum_body) {
+                refuse_braced_member("an init");
+                continue;
+            }
+
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "init is never called by name - the compiler runs it at the end of every constructor - "
+                "so there is no call site for a modifier to narrow.");
+
+            parse_init(payload, struct_node, &self_type_node);
+        }
         else if (cursor.is_type(Token::Type::t_destructor)) {
             // a real token, unlike `constructor` above: it has to be one so no member can be named
             // `destructor` and collide with the mangled name of the real thing
@@ -1674,19 +1675,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     struct_node->mark_members_collected();
 
-    // synthesized by whichever pass walked the body, for the same reason the properties belong to it:
-    // there is one synthesized constructor per struct, and its parameter list is the layout this walk
-    // just collected. after the walk, so the suppression rule sees every constructor the user wrote -
-    // however far down the body they wrote it
-    // never for an interface: it has no fields to take, so what would be synthesized is a zero-argument
-    // constructor of a type that is never constructed - and unlike the refusals in the body walk above
-    // this one nobody wrote, so there would be no token to report it at
-    // never for an enum either, and said here rather than left to the private-property rule that would
-    // already suppress it: every slot of an enum is private, so that rule does catch this today - but it
-    // catches it by accident, and a field-wise constructor over `(__tag, __c1_after, __c2_code)` is
-    // exactly the door out of the case table that must not exist by accident
+    // declaration pass: the name has to be in the overload set before any other file's body is
+    // parsed, because parse_funccall reports UnknownFunction while it is reading the call
     if (collect_members && !is_interface_body && !is_enum_body) {
-        synthesize_constructor(payload, struct_node, self_value_type);
+        AST::ensure_synthesized_constructor(
+            payload.context.module, *struct_node, payload.collector, self_value_type);
     }
 
     // and the enum's own, in the same position and for the same reason: after the walk, so it is built
@@ -1696,6 +1689,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     }
 
     if (!declarations_only) {
+        // construction is finalized after pass 3 of *every* file, not here: derived fields are a
+        // fact about `init`, and a `Foo(...)` in another file must not bind against a parameter
+        // list this walk is still rewriting. ModuleParser::parse_module asks
+        // AST::finalize_module_construction once the last body is attached
+
         // a member the declaration pass registered that this pass never reached - error recovery in
         // the body above skipped past it. it would otherwise be silent and fatal: codegen *declares*
         // every function in the module's arena but emits a body only for the ones in the file root's
@@ -1715,38 +1713,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         }
 
         report_bodyless(struct_node->complex_type().destructor());
-
-        // recipes into every constructor that wants them, now that bodies exist and this is the
-        // file root - a clone in the declaration pass has no root to publish a nested closure onto.
-        // AST::prepend_property_defaults skips a copy constructor and a bodyless one itself
-        for (auto *ctor : struct_node->constructors()) {
-            if (ctor != nullptr) {
-                AST::prepend_property_defaults(
-                    payload.context.module,
-                    *struct_node,
-                    *ctor,
-                    payload.collector.type_registry,
-                    payload.context.declaration_scope());
-            }
-        }
-
-        if (auto *synth = struct_node->synthesized_constructor()) {
-            AST::prepend_property_defaults(
-                payload.context.module,
-                *struct_node,
-                *synth,
-                payload.collector.type_registry,
-                payload.context.declaration_scope());
-        }
-
-        // drop the leftovers so RecursiveVisitor::visit_type_decl does not type-check a default twice
-        AST::consume_property_defaults(*struct_node);
-
-        // codegen emits a body from the file root's children, so the synthesized constructor has to
-        // land there - at the tail, where it has always been
-        if (struct_node->synthesized_constructor() != nullptr) {
-            payload.context.declaration_scope().add_funcdecl(*struct_node->synthesized_constructor());
-        }
+        report_bodyless(struct_node->complex_type().type_init());
 
         // **and every member an enum synthesized, for the same reason and one sharper than it.** a case
         // constructor and the backing accessor are `is_implicitly_generated`, so
