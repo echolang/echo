@@ -1,0 +1,100 @@
+string $leaf = 'echo-io-dir-';
+$leaf->append(str::from(std::env::pid()));
+string $root = std::env::join(std::env::tmp(), $leaf);
+string $a = std::env::join($root, 'a.txt');
+string $b = std::env::join($root, 'b.txt');
+string $sub = std::env::join($root, 'sub');
+
+bool $made = guard std::io::mkdir($root) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $wa = guard std::io::writefile($a, 'A') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $wb = guard std::io::writefile($b, 'B') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+bool $ms = guard std::io::mkdir($sub) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+dir $d = guard std::io::opendir($root) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+int32 $n = 0;
+bool $has_a = false;
+bool $has_b = false;
+bool $has_sub = false;
+bool $saw_dot = false;
+bool $a_is_file = false;
+bool $sub_is_dir = false;
+bool $a_path_ok = false;
+
+foreach ($d as $e) {
+    $n = $n + 1;
+
+    if ($e->name() == '.') {
+        $saw_dot = true;
+    }
+
+    if ($e->name() == '..') {
+        $saw_dot = true;
+    }
+
+    if ($e->name() == 'a.txt') {
+        $has_a = true;
+        $a_is_file = $e->is_file();
+        $a_path_ok = $e->path() == $a;
+    }
+
+    if ($e->name() == 'b.txt') {
+        $has_b = true;
+    }
+
+    if ($e->name() == 'sub') {
+        $has_sub = true;
+        $sub_is_dir = $e->is_directory();
+    }
+}
+
+echo $n;
+echo $has_a;
+echo $has_b;
+echo $has_sub;
+echo $saw_dot;
+echo $a_is_file;
+echo $sub_is_dir;
+echo $a_path_ok;
+
+echo $d->error() == null;
+
+$d->close();
+
+bool $ra = guard std::io::remove($a) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+bool $rb = guard std::io::remove($b) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+bool $rs = guard std::io::rmdir($sub) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+bool $rr = guard std::io::rmdir($root) else ($e) {
+    echo $e->message();
+    return 1;
+}

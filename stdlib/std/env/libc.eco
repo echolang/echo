@@ -56,6 +56,15 @@ internal extern {
         ptr<uint8> $default_char,
         ptr<int32> $used_default
     ) : int32;
+
+    function MultiByteToWideChar as c_MultiByteToWideChar(
+        uint32 $cp,
+        uint32 $flags,
+        ptr<const uint8> $utf8,
+        int32 $utf8_n,
+        ptr<uint16> $wide,
+        int32 $wide_n
+    ) : int32;
 }
 
 internal const uint32 CP_UTF8 = 65001;

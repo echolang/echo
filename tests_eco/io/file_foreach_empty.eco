@@ -1,0 +1,30 @@
+string $name = 'echo-io-foreach-empty-';
+$name->append(str::from(std::env::pid()));
+$name->append('.txt');
+string $path = std::env::join(std::env::tmp(), $name);
+
+usize $w = guard std::io::writefile($path, '') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+file $f = guard std::io::open($path, .read) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+int32 $n = 0;
+
+foreach ($f as $line) {
+    $n = $n + 1;
+    echo $line;
+}
+
+echo $n;
+
+$f->close();
+
+bool $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}

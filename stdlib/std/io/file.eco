@@ -2,22 +2,24 @@
  * An owned file descriptor, with a read window and a write window.
  *
  * `stream` is a borrowed fd that never closes. This is the other half: you opened it, it closes
- * itself, and leftover bytes have somewhere to live.
+ * itself, and leftover bytes have somewhere to live. `foreach` walks the lines.
  */
 
 namespace std::io;
 
-public class file
+public class file : contract::iterable<string>
 {
     private int32 $fd;
     private readwin $rin;
     private writewin $wout;
+    private ioerror? $err;
 
     private constructor(int32 $fd)
     {
         $this->fd = $fd;
         $this->rin = readwin();
         $this->wout = writewin();
+        $this->err = null;
     }
 
     destructor()
@@ -30,10 +32,8 @@ public class file
      */
     static function open(const string& $path, filemode $mode) : result<file, ioerror>
     {
-        int32 $fd = c_open($path->cstr(), flags_of($mode), [OPEN_MODE]);
-
-        if ($fd < 0) {
-            return .error(last_error());
+        int32 $fd = guard open_path($path, flags_of($mode)) else ($e) {
+            return .error($e);
         }
 
         return .ok(file($fd));
@@ -187,6 +187,84 @@ public class file
 
         return .ok($end);
     }
+
+    /**
+     * A cursor over the lines. Newline stripped, same bargain `readline` makes.
+     *
+     * End of file stops the loop. A read that fails stops it too, and leaves
+     * the reason on `error()`.
+     */
+    function iterate() : file_iterator
+    {
+        $this->err = null;
+        return file_iterator($this);
+    }
+
+    /**
+     * Null unless a read during `foreach` failed. End of file is not an error.
+     */
+    const function error() : ioerror?
+    {
+        return $this->err;
+    }
+
+    internal function note_error(ioerror $e) : void
+    {
+        $this->err = $e;
+    }
+}
+
+/**
+ * The cursor a `file` hands `foreach`. The line lives in a field so
+ * `current()` has storage to borrow. The key is the 0-based line number.
+ */
+public struct file_iterator : contract::iterator<string>, contract::keyed<usize>
+{
+    private file $src;
+    private string $line;
+    private usize $produced;
+    private bool $done;
+
+    constructor(file $src)
+    {
+        $this->src = $src;
+        $this->line = '';
+        $this->produced = 0;
+        $this->done = false;
+    }
+
+    function advance() : bool
+    {
+        if ($this->done) {
+            return false;
+        }
+
+        result<string?, ioerror> $r = $this->src->readline();
+        string? $next = guard $r else ($e) {
+            $this->src->note_error($e);
+            $this->done = true;
+            return false;
+        }
+
+        string $line = guard $next else {
+            $this->done = true;
+            return false;
+        }
+
+        $this->line = $line;
+        $this->produced = $this->produced + 1;
+        return true;
+    }
+
+    function current() : string&
+    {
+        return &$this->line;
+    }
+
+    function key() : usize
+    {
+        return $this->produced - 1;
+    }
 }
 
 public function open(const string& $path, filemode $mode) : result<file, ioerror>
@@ -232,34 +310,24 @@ public function writefile(const string& $path, const string& $text) : result<usi
 
 public function exists(const string& $path) : result<bool, ioerror>
 {
-    if (c_access($path->cstr(), F_OK) == 0) {
-        return .ok(true);
+    bool $ok = guard access_path($path, F_OK) else ($e) {
+        // missing is an answer. denied is not "no" - EACCES is a file that is there
+        if ($e->missing()) {
+            return .ok(false);
+        }
+
+        return .error($e);
     }
 
-    ioerror $e = last_error();
-
-    // missing is an answer. denied is not "no" - EACCES is a file that is there
-    if ($e->missing()) {
-        return .ok(false);
-    }
-
-    return .error($e);
+    return .ok($ok);
 }
 
 public function remove(const string& $path) : result<bool, ioerror>
 {
-    if (c_unlink($path->cstr()) < 0) {
-        return .error(last_error());
-    }
-
-    return .ok(true);
+    return unlink_path($path);
 }
 
 public function rename(const string& $from, const string& $to) : result<bool, ioerror>
 {
-    if (c_rename($from->cstr(), $to->cstr()) < 0) {
-        return .error(last_error());
-    }
-
-    return .ok(true);
+    return rename_path($from, $to);
 }

@@ -1,0 +1,34 @@
+string $name = 'echo-io-rmdir-';
+$name->append(str::from(std::env::pid()));
+string $path = std::env::join(std::env::tmp(), $name);
+
+bool $made = guard std::io::mkdir($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string $child = std::env::join($path, 'held.txt');
+
+usize $w = guard std::io::writefile($child, 'x') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+bool $busy = guard std::io::rmdir($path) else ($e) {
+    echo $e->missing();
+
+    bool $rc = guard std::io::remove($child) else ($err) {
+        echo $err->message();
+        return 1;
+    }
+
+    bool $ok = guard std::io::rmdir($path) else ($err) {
+        echo $err->message();
+        return 1;
+    }
+
+    echo $ok;
+    return 0;
+}
+
+echo 'removed-full';

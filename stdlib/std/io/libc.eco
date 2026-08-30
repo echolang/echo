@@ -39,6 +39,12 @@ internal extern {
 
     function isatty as c_isatty(int32 $fd) : int32;
     function ioctl as c_ioctl(int32 $fd, usize $request, variadic_args $args) : int32;
+
+    function opendir as c_opendir(ptr<const uint8> $path) : ptr<uint8>;
+    function readdir as c_readdir(ptr<uint8> $dir) : ptr<uint8>;
+    function closedir as c_closedir(ptr<uint8> $dir) : int32;
+    function mkdir as c_mkdir(ptr<const uint8> $path, uint32 $mode) : int32;
+    function rmdir as c_rmdir(ptr<const uint8> $path) : int32;
 }
 #[end]
 
@@ -102,18 +108,25 @@ internal extern {
         ptr<uint32> $written,
         ptr<uint8> $reserved
     ) : int32;
-    function MultiByteToWideChar as c_MultiByteToWideChar(
-        uint32 $cp,
-        uint32 $flags,
-        ptr<const uint8> $utf8,
-        int32 $utf8_n,
-        ptr<uint16> $wide,
-        int32 $wide_n
-    ) : int32;
     function GetConsoleScreenBufferInfo as c_GetConsoleScreenBufferInfo(
         ptr<uint8> $h,
         ptr<console_screen_buffer_info> $info
     ) : int32;
+
+    function FindFirstFileW as c_FindFirstFileW(
+        ptr<uint16> $pattern, ptr<uint8> $data) : ptr<uint8>;
+    function FindNextFileW as c_FindNextFileW(
+        ptr<uint8> $h, ptr<uint8> $data) : int32;
+    function FindClose as c_FindClose(ptr<uint8> $h) : int32;
+    function GetFileAttributesW as c_GetFileAttributesW(ptr<uint16> $path) : uint32;
+    function GetLastError as c_GetLastError() : uint32;
+
+    function _wopen as c_wopen(ptr<uint16> $path, int32 $flags, variadic_args $args) : int32;
+    function _wunlink as c_wunlink(ptr<uint16> $path) : int32;
+    function _wrename as c_wrename(ptr<uint16> $from, ptr<uint16> $to) : int32;
+    function _waccess as c_waccess(ptr<uint16> $path, int32 $amode) : int32;
+    function _wmkdir as c_wmkdir(ptr<uint16> $path) : int32;
+    function _wrmdir as c_wrmdir(ptr<uint16> $path) : int32;
 }
 
 // a console is not `_write`. `console_write` answers the byte count it
@@ -192,8 +205,11 @@ internal const int32 O_BINARY = 0;
 internal const int32 EPERM = 1;
 internal const int32 ENOENT = 2;
 internal const int32 EBADF = 9;
+internal const int32 ENOMEM = 12;
 internal const int32 EACCES = 13;
 internal const int32 EEXIST = 17;
+internal const int32 ENOTDIR = 20;
+internal const int32 EINVAL = 22;
 
 internal const int32 SEEK_SET = 0;
 internal const int32 SEEK_CUR = 1;
@@ -203,6 +219,9 @@ internal const int32 F_OK = 0;
 
 // 0666. the umask takes its usual cut
 internal const uint32 OPEN_MODE = 438;
+
+// 0777. mkdir's bargain with the umask, matching open's 0666
+internal const uint32 MKDIR_MODE = 511;
 
 internal const usize IO_BUF = 8192;
 
@@ -225,6 +244,41 @@ internal const usize TIOCGWINSZ = 1074295912;
 internal const usize TIOCGWINSZ = 21523;
 #[end]
 
+// `struct dirent` is a FAM; Echo has no fixed-size array, so listing copies
+// `d_name` at a platform offset rather than declaring the type. ABI-stable
+// on every libc this compiler targets, and the listing tests pin the name.
+#[if: os == darwin]
+internal const usize DIRENT_TYPE_OFF = 20;
+internal const usize DIRENT_NAME_OFF = 21;
+#[elif: os == linux]
+internal const usize DIRENT_TYPE_OFF = 18;
+internal const usize DIRENT_NAME_OFF = 19;
+#[elif: os != windows]
+internal const usize DIRENT_TYPE_OFF = 18;
+internal const usize DIRENT_NAME_OFF = 19;
+#[end]
+
+#[if: os != windows]
+internal const uint8 DT_UNKNOWN = 0;
+internal const uint8 DT_DIR = 4;
+internal const uint8 DT_REG = 8;
+#[end]
+
+#[if: os == windows]
+// WIN32_FIND_DATAW without the `_MAC` tail. `cFileName` is WCHAR[260] at 44
+internal const usize FIND_DATA_BYTES = 592;
+internal const usize FIND_NAME_OFF = 44;
+internal const uint32 FILE_ATTRIBUTE_DIRECTORY = 16;
+internal const uint32 FILE_ATTRIBUTE_REPARSE_POINT = 1024;
+internal const uint32 INVALID_FILE_ATTRIBUTES = 4294967295;
+internal const uint32 ERROR_FILE_NOT_FOUND = 2;
+internal const uint32 ERROR_PATH_NOT_FOUND = 3;
+internal const uint32 ERROR_ACCESS_DENIED = 5;
+internal const uint32 ERROR_NO_MORE_FILES = 18;
+internal const uint32 ERROR_ALREADY_EXISTS = 183;
+internal const uint32 ERROR_DIRECTORY = 267;
+#[end]
+
 /**
  * The `errno` the last failing libc call left, as an `ioerror`.
  *
@@ -236,4 +290,162 @@ internal function last_error() : ioerror
     int32 $code = $slot;
 
     return ioerror($code);
+}
+
+#[if: os == windows]
+internal function win32_ioerror() : ioerror
+{
+    uint32 $w = c_GetLastError();
+
+    if ($w == ERROR_FILE_NOT_FOUND) {
+        return ioerror(ENOENT);
+    }
+
+    if ($w == ERROR_PATH_NOT_FOUND) {
+        return ioerror(ENOENT);
+    }
+
+    if ($w == ERROR_DIRECTORY) {
+        return ioerror(ENOTDIR);
+    }
+
+    if ($w == ERROR_ACCESS_DENIED) {
+        return ioerror(EACCES);
+    }
+
+    if ($w == ERROR_ALREADY_EXISTS) {
+        return ioerror(EEXIST);
+    }
+
+    return ioerror(EINVAL);
+}
+
+internal function wide_error() : ioerror
+{
+    uint32 $w = c_GetLastError();
+
+    if ($w == 0) {
+        return ioerror(ENOMEM);
+    }
+
+    return win32_ioerror();
+}
+#[end]
+
+internal function open_path(const string& $path, int32 $flags) : result<int32, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+        return .error(wide_error());
+    }
+
+    int32 $fd = c_wopen($wide->data(), $flags, [OPEN_MODE]);
+#[else]
+    int32 $fd = c_open($path->cstr(), $flags, [OPEN_MODE]);
+#[end]
+
+    if ($fd < 0) {
+        return .error(last_error());
+    }
+
+    return .ok($fd);
+}
+
+internal function unlink_path(const string& $path) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+        return .error(wide_error());
+    }
+
+    if (c_wunlink($wide->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_unlink($path->cstr()) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function rename_path(const string& $from, const string& $to) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $from_w = guard std::env::utf8_to_wide($from) else {
+        return .error(wide_error());
+    }
+
+    std::env::wide_string $to_w = guard std::env::utf8_to_wide($to) else {
+        return .error(wide_error());
+    }
+
+    if (c_wrename($from_w->data(), $to_w->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_rename($from->cstr(), $to->cstr()) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function access_path(const string& $path, int32 $amode) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+        return .error(wide_error());
+    }
+
+    if (c_waccess($wide->data(), $amode) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_access($path->cstr(), $amode) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function mkdir_path(const string& $path) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+        return .error(wide_error());
+    }
+
+    if (c_wmkdir($wide->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_mkdir($path->cstr(), MKDIR_MODE) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function rmdir_path(const string& $path) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+        return .error(wide_error());
+    }
+
+    if (c_wrmdir($wide->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_rmdir($path->cstr()) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
 }

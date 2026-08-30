@@ -1,0 +1,8 @@
+dir $d = guard std::io::opendir('definitely-missing-echo-io-dir-xyz') else ($e) {
+    echo $e->missing();
+    echo $e->denied();
+    echo $e->exists();
+    return 0;
+}
+
+echo 'opened';

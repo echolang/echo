@@ -1,0 +1,376 @@
+/**
+ * A directory as a stream of entries, and the two verbs that make one.
+ *
+ * `opendir` then `foreach` is the whole of listing. `.` and `..` are skipped.
+ * Kind comes from what the listing already knew, not from a second `stat`.
+ * There is no recursive walk: one directory, its children, and you recurse.
+ */
+
+namespace std::io;
+
+/**
+ * What a directory listing already knew about a child.
+ *
+ * `unknown` is a filesystem that declined to say. `other` is something it did
+ * name that is neither a regular file nor a directory: a symlink, a socket, a
+ * device. Neither predicate is a guess, and neither is a `stat`.
+ */
+public enum dirent_kind
+{
+    case unknown;
+    case file;
+    case directory;
+    case other;
+}
+
+/**
+ * One child of a directory: a name, a joined path, and what kind of child it is.
+ *
+ * `path()` is `std::env::join` of the opened directory and the name. It is not
+ * canonical, and it is not absolute just because you asked: `opendir('foo')`
+ * yields `foo/bar`.
+ */
+public struct dirent
+{
+    private string $name;
+    private string $path;
+    private dirent_kind $kind;
+
+    internal constructor(string $name, string $path, dirent_kind $kind)
+    {
+        $this->name = $name;
+        $this->path = $path;
+        $this->kind = $kind;
+    }
+
+    const function name() : string
+    {
+        return $this->name;
+    }
+
+    const function path() : string
+    {
+        return $this->path;
+    }
+
+    const function kind() : dirent_kind
+    {
+        return $this->kind;
+    }
+
+    const function is_file() : bool
+    {
+        if ($this->kind == dirent_kind::file) {
+            return true;
+        }
+
+        return false;
+    }
+
+    const function is_directory() : bool
+    {
+        if ($this->kind == dirent_kind::directory) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+internal function is_dot_name(const string& $name) : bool
+{
+    if ($name == '.') {
+        return true;
+    }
+
+    if ($name == '..') {
+        return true;
+    }
+
+    return false;
+}
+
+#[if: os != windows]
+internal function kind_from_dtype(uint8 $dt) : dirent_kind
+{
+    if ($dt == DT_REG) {
+        return dirent_kind::file;
+    }
+
+    if ($dt == DT_DIR) {
+        return dirent_kind::directory;
+    }
+
+    if ($dt == DT_UNKNOWN) {
+        return dirent_kind::unknown;
+    }
+
+    return dirent_kind::other;
+}
+#[end]
+
+#[if: os == windows]
+internal function kind_from_attributes(uint32 $attr) : dirent_kind
+{
+    if (($attr & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return dirent_kind::other;
+    }
+
+    if (($attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return dirent_kind::directory;
+    }
+
+    return dirent_kind::file;
+}
+
+internal function invalid_handle(ptr<uint8> $h) : bool
+{
+    return mem::bit_cast<usize, ptr<uint8>>($h) == std::math::MAX_USIZE;
+}
+#[end]
+
+/**
+ * An owned directory stream. Last handle closes it.
+ *
+ * `iterate()` does not rewind. A second `foreach` over the same `dir` sees
+ * whatever the first one did not consume, which for a finished loop is nothing.
+ */
+public class dir : contract::iterable<dirent>
+{
+    private ptr<uint8> $handle;
+    private string $root;
+    private ioerror? $err;
+
+#[if: os == windows]
+    private ptr<uint8> $find;
+    private bool $pending;
+#[end]
+
+#[if: os == windows]
+    private constructor(ptr<uint8> $handle, string $root, ptr<uint8> $find)
+    {
+        $this->handle:$ = $handle;
+        $this->root = $root;
+        $this->err = null;
+        $this->find:$ = $find;
+        $this->pending = true;
+    }
+#[else]
+    private constructor(ptr<uint8> $handle, string $root)
+    {
+        $this->handle:$ = $handle;
+        $this->root = $root;
+        $this->err = null;
+    }
+#[end]
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    static function open(const string& $path) : result<dir, ioerror>
+    {
+#[if: os == windows]
+        std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+            return .error(wide_error());
+        }
+
+        uint32 $attr = c_GetFileAttributesW($wide->data());
+
+        if ($attr == INVALID_FILE_ATTRIBUTES) {
+            return .error(win32_ioerror());
+        }
+
+        if (($attr & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+            return .error(ioerror(ENOTDIR));
+        }
+
+        std::env::wide_string $pat = guard std::env::utf8_to_wide(std::env::join($path, '*')) else {
+            return .error(wide_error());
+        }
+
+        ptr<uint8> $find = mem::alloc<uint8>(FIND_DATA_BYTES);
+
+        if ($find:$ == null) {
+            return .error(ioerror(ENOMEM));
+        }
+
+        ptr<uint8> $h = c_FindFirstFileW($pat->data(), $find);
+
+        if (invalid_handle($h)) {
+            mem::free<uint8>($find);
+            return .error(win32_ioerror());
+        }
+
+        return .ok(dir($h, $path, $find));
+#[else]
+        ptr<uint8> $h = c_opendir($path->cstr());
+
+        if ($h:$ == null) {
+            return .error(last_error());
+        }
+
+        return .ok(dir($h, $path));
+#[end]
+    }
+
+    /**
+     * Null unless a `readdir` after a successful open failed. End of the
+     * directory is not an error.
+     */
+    const function error() : ioerror?
+    {
+        return $this->err;
+    }
+
+    function close() : void
+    {
+        if ($this->handle:$ == null) {
+            return;
+        }
+
+#[if: os == windows]
+        c_FindClose($this->handle);
+
+        if ($this->find:$ != null) {
+            mem::free<uint8>($this->find);
+            $this->find:$ = ptr<uint8>(null);
+        }
+
+        $this->pending = false;
+#[else]
+        c_closedir($this->handle);
+#[end]
+
+        $this->handle:$ = ptr<uint8>(null);
+    }
+
+    function iterate() : dir_iterator
+    {
+        $this->err = null;
+        return dir_iterator($this);
+    }
+
+    internal function note_error(ioerror $e) : void
+    {
+        $this->err = $e;
+    }
+
+    internal function pull() : dirent?
+    {
+        if ($this->handle:$ == null) {
+            return null;
+        }
+
+#[if: os == windows]
+        while (true) {
+            if (!$this->pending) {
+                if (c_FindNextFileW($this->handle, $this->find) == 0) {
+                    if (c_GetLastError() != ERROR_NO_MORE_FILES) {
+                        $this->note_error(win32_ioerror());
+                    }
+
+                    return null;
+                }
+            }
+
+            $this->pending = false;
+
+            ptr<uint32> $attrs = ptr<uint32>($this->find:$);
+            uint32 $attr = $attrs:$[0];
+            ptr<uint16> $wname = ptr<uint16>($this->find:$ + FIND_NAME_OFF);
+            string $name = guard std::env::wide_to_utf8($wname) else {
+                $this->note_error(wide_error());
+                return null;
+            }
+
+            if (is_dot_name($name)) {
+                continue;
+            }
+
+            return dirent($name, std::env::join($this->root, $name), kind_from_attributes($attr));
+        }
+#[else]
+        while (true) {
+            ptr<int32> $slot = c_errno_location();
+            $slot:$[0] = 0;
+
+            ptr<uint8> $ent = c_readdir($this->handle);
+
+            if ($ent:$ == null) {
+                int32 $code = $slot:$[0];
+
+                if ($code != 0) {
+                    $this->note_error(ioerror($code));
+                }
+
+                return null;
+            }
+
+            string $name = str::from($ent:$ + DIRENT_NAME_OFF);
+
+            if (is_dot_name($name)) {
+                continue;
+            }
+
+            uint8 $dt = $ent:$[DIRENT_TYPE_OFF];
+            return dirent($name, std::env::join($this->root, $name), kind_from_dtype($dt));
+        }
+#[end]
+    }
+}
+
+/**
+ * The cursor a `dir` hands `foreach`. `current()` borrows a field of this
+ * value, so there is somewhere to point; `range_iterator` is the same shape.
+ */
+public struct dir_iterator : contract::iterator<dirent>
+{
+    private dir $src;
+    private dirent $current;
+    private bool $done;
+
+    constructor(dir $src)
+    {
+        $this->src = $src;
+        $this->current = dirent('', '', dirent_kind::unknown);
+        $this->done = false;
+    }
+
+    function advance() : bool
+    {
+        if ($this->done) {
+            return false;
+        }
+
+        dirent? $next = $this->src->pull();
+        dirent $entry = guard $next else {
+            $this->done = true;
+            return false;
+        }
+
+        $this->current = $entry;
+        return true;
+    }
+
+    function current() : dirent&
+    {
+        return &$this->current;
+    }
+}
+
+public function opendir(const string& $path) : result<dir, ioerror>
+{
+    return dir::open($path);
+}
+
+public function mkdir(const string& $path) : result<bool, ioerror>
+{
+    return mkdir_path($path);
+}
+
+public function rmdir(const string& $path) : result<bool, ioerror>
+{
+    return rmdir_path($path);
+}

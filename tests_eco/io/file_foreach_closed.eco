@@ -1,0 +1,44 @@
+string $name = 'echo-io-foreach-closed-';
+$name->append(str::from(std::env::pid()));
+$name->append('.txt');
+string $path = std::env::join(std::env::tmp(), $name);
+
+usize $w = guard std::io::writefile($path, 'one\ntwo') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+file $f = guard std::io::open($path, .read) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+$f->close();
+
+int32 $n = 0;
+
+foreach ($f as $line) {
+    $n = $n + 1;
+}
+
+echo $n;
+
+ioerror $err = guard $f->error() else {
+    echo 0;
+    echo 0;
+
+    bool $gone = guard std::io::remove($path) else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    return 1;
+}
+
+echo 1;
+echo $err->missing();
+
+bool $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}

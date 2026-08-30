@@ -1,10 +1,9 @@
 /**
  * How a path is spelled on this machine, and how you name one as a `file://` URL.
  *
- * A path is still a `string`. There is no path type. These two are the whole of what the
- * library is willing to say about separators: `DS` is the one this OS uses between
- * components, and `file_url` turns a native path into a URL curl, a browser, and
- * `std::io` callers can agree on.
+ * A path is still a `string`. There is no path type. `DS` is the separator this OS
+ * uses between components, `join` puts two of them together with it, and `file_url`
+ * turns a native path into a URL curl, a browser, and `std::io` callers can agree on.
  */
 
 namespace std::env;
@@ -16,6 +15,43 @@ public const DS = "\u{5C}";
 #[else]
 public const DS = "/";
 #[end]
+
+private function is_separator(uint8 $b) : bool
+{
+#[if: os == windows]
+    if ($b == BACKSLASH) {
+        return true;
+    }
+#[end]
+    if ($b == SLASH) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * `$dir`, then `DS` if `$dir` does not already end in a separator, then `$name`.
+ *
+ * Empty `$dir` is just `$name`. On Windows a trailing `/` counts as already
+ * separated, the same as `\`. The result is not canonical and not absolute.
+ */
+public function join(string::view $dir, string::view $name) : string
+{
+    if ($dir->empty()) {
+        return string($name);
+    }
+
+    string $out = string($dir);
+    uint8 $last = $dir->byte($dir->size - 1);
+
+    if (!is_separator($last)) {
+        $out->append(DS);
+    }
+
+    $out->append($name->bytes, $name->size);
+    return $out;
+}
 
 private const HEX_DIGITS = '0123456789ABCDEF';
 private const uint8 SLASH = 0x2F;

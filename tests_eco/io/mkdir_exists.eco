@@ -1,0 +1,29 @@
+string $name = 'echo-io-mkdir-';
+$name->append(str::from(std::env::pid()));
+string $path = std::env::join(std::env::tmp(), $name);
+
+bool $made = guard std::io::mkdir($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $made;
+
+bool $again = guard std::io::mkdir($path) else ($e) {
+    echo $e->exists();
+    echo $e->missing();
+
+    bool $rm = guard std::io::rmdir($path) else ($err) {
+        echo $err->message();
+        return 1;
+    }
+
+    return 0;
+}
+
+echo 'twice';
+
+bool $gone = guard std::io::rmdir($path) else ($e) {
+    echo $e->message();
+    return 1;
+}

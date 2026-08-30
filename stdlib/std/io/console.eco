@@ -20,7 +20,6 @@
 namespace std::io;
 
 #[if: os == windows]
-internal const uint32 CONSOLE_CP_UTF8 = 65001;
 internal const uint32 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4;
 
 /**
@@ -105,56 +104,38 @@ internal function console_write(int32 $fd, ptr<const uint8> $buf, usize $count) 
         $utf8_n = $at as int32;
     }
 
-    int32 $wide_n = c_MultiByteToWideChar(
-        CONSOLE_CP_UTF8, 0, $utf8, $utf8_n, ptr<uint16>(null), 0);
-
-    if ($wide_n <= 0) {
+    std::env::wide_string $wide = guard std::env::utf8_to_wide($utf8, $utf8_n) else {
         if ($expanded:$ != null) {
             mem::free($expanded);
         }
 
         return -1;
     }
-
-    ptr<uint16> $wide = mem::alloc<uint16>($wide_n as usize);
-
-    if ($wide:$ == null) {
-        if ($expanded:$ != null) {
-            mem::free($expanded);
-        }
-
-        return -1;
-    }
-
-    c_MultiByteToWideChar(CONSOLE_CP_UTF8, 0, $utf8, $utf8_n, $wide, $wide_n);
 
     if ($expanded:$ != null) {
         mem::free($expanded);
     }
 
     usize $off = 0;
-    usize $need = $wide_n as usize;
+    usize $need = $wide->count();
+    ptr<uint16> $chars = $wide->data();
 
     while ($off < $need) {
         uint32 $written = 0;
         uint32 $chunk = ($need - $off) as uint32;
         int32 $ok = c_WriteConsoleW(
-            $handle, $wide:$ + $off, $chunk, &$written, ptr<uint8>(null));
+            $handle, $chars:$ + $off, $chunk, &$written, ptr<uint8>(null));
 
         if ($ok == 0) {
-            mem::free($wide);
             return -1;
         }
 
         if ($written == 0) {
-            mem::free($wide);
             return -1;
         }
 
         $off = $off + $written;
     }
-
-    mem::free($wide);
 
     return $count as isize;
 }

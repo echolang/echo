@@ -1,0 +1,7 @@
+// the windows arm of join uses a backslash, and still treats a trailing
+// slash as already separated. --target-os picks the arm without native-linking.
+
+echo std::env::join('foo', 'bar');
+echo std::env::join('foo/', 'bar');
+echo std::env::join("foo\u{5C}", 'bar');
+echo std::env::join('', 'bar');

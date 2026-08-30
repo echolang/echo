@@ -1,0 +1,136 @@
+/**
+ * UTF-16 for the Windows APIs that will not take UTF-8.
+ *
+ * Echo `string`s are UTF-8. Console output, directory listing, mkdir, and the
+ * executable path all talk to Win32 in UTF-16. One unique owner of that
+ * allocation, so a destructor is the free. Conversion failure is `null`, not
+ * an empty buffer: callers decide whether that is `die`, `-1`, or `ioerror`.
+ * `empty()` is no allocation.
+ */
+
+namespace std::env;
+
+#[if: os == windows]
+#[unique]
+internal struct wide_string
+{
+    private ptr<uint16> $p;
+    private usize $n;
+
+    constructor()
+    {
+        $this->p:$ = null;
+        $this->n = 0;
+    }
+
+    internal constructor(owned: ptr<uint16> $p, usize $n)
+    {
+        $this->p:$ = $p;
+        $this->n = $n;
+    }
+
+    destructor()
+    {
+        mem::free<uint16>($this->p);
+    }
+
+    const function empty() : bool
+    {
+        if ($this->p:$ == null) {
+            return true;
+        }
+
+        return false;
+    }
+
+    const function count() : usize
+    {
+        return $this->n;
+    }
+
+    function data() : ptr<uint16>
+    {
+        return $this->p;
+    }
+
+    function resize(usize $count) : bool
+    {
+        ptr<uint16> $next = mem::realloc<uint16>($this->p, $count);
+
+        if ($next:$ == null) {
+            return false;
+        }
+
+        $this->p:$ = $next;
+        $this->n = $count;
+        return true;
+    }
+}
+
+internal function utf8_to_wide(ptr<const uint8> $utf8, int32 $utf8_n) : wide_string?
+{
+    int32 $n = c_MultiByteToWideChar(
+        CP_UTF8, 0, $utf8, $utf8_n, ptr<uint16>(null), 0);
+
+    if ($n <= 0) {
+        return null;
+    }
+
+    ptr<uint16> $wide = mem::alloc<uint16>($n as usize);
+
+    if ($wide:$ == null) {
+        return null;
+    }
+
+    int32 $wrote = c_MultiByteToWideChar(CP_UTF8, 0, $utf8, $utf8_n, $wide, $n);
+
+    if ($wrote <= 0) {
+        mem::free<uint16>($wide);
+        return null;
+    }
+
+    return wide_string(owned: $wide, $n as usize);
+}
+
+internal function utf8_to_wide(const string& $s) : wide_string?
+{
+    return utf8_to_wide($s->cstr(), -1);
+}
+
+internal function wide_to_utf8(ptr<uint16> $wide, int32 $wide_n) : string?
+{
+    ptr<const uint16> $chars = ptr<const uint16>($wide:$);
+    int32 $n = c_WideCharToMultiByte(
+        CP_UTF8, 0, $chars, $wide_n,
+        ptr<uint8>(null), 0, ptr<uint8>(null), ptr<int32>(null));
+
+    if ($n <= 0) {
+        return null;
+    }
+
+    ptr<uint8> $utf8 = mem::alloc<uint8>(($n + 1) as usize);
+
+    if ($utf8:$ == null) {
+        return null;
+    }
+
+    $utf8:$[$n as usize] = 0;
+    int32 $wrote = c_WideCharToMultiByte(
+        CP_UTF8, 0, $chars, $wide_n,
+        $utf8, $n, ptr<uint8>(null), ptr<int32>(null));
+
+    if ($wrote <= 0) {
+        mem::free<uint8>($utf8);
+        return null;
+    }
+
+    string $out = str::from($utf8);
+    mem::free<uint8>($utf8);
+    return $out;
+}
+
+internal function wide_to_utf8(ptr<uint16> $wide) : string?
+{
+    return wide_to_utf8($wide, -1);
+}
+#[end]

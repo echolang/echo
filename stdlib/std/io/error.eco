@@ -1,8 +1,9 @@
 /**
  * Why an I/O call failed.
  *
- * An `errno` and the four questions you actually ask of one. Not an enum of every code the kernel
- * can invent: those differ by platform and most of them a program will only ever print.
+ * An `errno` and the questions you actually ask of one: missing, denied, exists, and not a
+ * directory. Not an enum of every code the kernel can invent: those differ by platform and most
+ * of them a program will only ever print.
  */
 
 namespace std::io;
@@ -53,6 +54,18 @@ public struct ioerror
     const function exists() : bool
     {
         if ($this->code == EEXIST) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * The path is not a directory. `ENOTDIR`. Opening a file with `opendir`.
+     */
+    const function not_a_directory() : bool
+    {
+        if ($this->code == ENOTDIR) {
             return true;
         }
 
