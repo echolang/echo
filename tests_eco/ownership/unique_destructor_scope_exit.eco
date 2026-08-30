@@ -1,0 +1,38 @@
+// `#[unique]` local with a destructor, filled in place: empty constructor, then an alloc on the
+// live value. the destructor must run once when the scope ends - a second call frees the same
+// pointer. this is the `mem::buffer` / `wide_string` shape
+
+#[unique]
+struct Handle
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    constructor()
+    {
+        $this->tag = 0;
+        $this->data:$ = null;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+
+    function fill(usize $tag) : void
+    {
+        $this->tag = $tag;
+        $this->data:$ = mem::alloc<uint8>(8);
+    }
+}
+
+function scoped() : void
+{
+    Handle $h = Handle();
+    $h->fill(1);
+    echo 100;
+}
+
+scoped();
+echo 200;

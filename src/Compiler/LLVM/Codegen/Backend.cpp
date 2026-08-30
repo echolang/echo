@@ -33,6 +33,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <direct.h>
 #include <fcntl.h>
 #include <io.h>
 #include <math.h>
@@ -133,8 +134,11 @@ bool Backend::prepare_execution()
     // Windows and exports printf/fflush/_write, so the JIT would bind those
     // independently of the UCRT echoc itself uses. echo of a string then
     // `_write`s through one CRT while echo of an int `printf`s through the
-    // other, and the two buffers flush in the wrong order. AddSymbol is
-    // consulted first, so these pins are the process's own UCRT.
+    // other, and the two buffers flush in the wrong order. The `_w*` twins of
+    // `_open`/`_unlink`/`_access` are the same split: an fd opened in msvcrt
+    // is not a UCRT fd, and `_wmkdir` sets msvcrt's errno while `last_error`
+    // reads UCRT's `_errno`. AddSymbol is consulted first, so these pins are
+    // the process's own UCRT.
     const auto pin = [](const char *name, auto *fn) {
         llvm::sys::DynamicLibrary::AddSymbol(
             name, reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(fn)));
@@ -148,11 +152,17 @@ bool Backend::prepare_execution()
     pin("_get_osfhandle", _get_osfhandle);
     pin("_read", _read);
     pin("_open", _open);
+    pin("_wopen", _wopen);
     pin("_close", _close);
     pin("_lseeki64", _lseeki64);
     pin("_unlink", _unlink);
+    pin("_wunlink", _wunlink);
     pin("_access", _access);
+    pin("_waccess", _waccess);
     pin("rename", rename);
+    pin("_wrename", _wrename);
+    pin("_wmkdir", _wmkdir);
+    pin("_wrmdir", _wrmdir);
     pin("_errno", _errno);
     pin("strerror", strerror);
     pin("strtod", strtod);

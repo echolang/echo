@@ -1,0 +1,24 @@
+// unique-as-field: the `mem::buffer` / `array` shape. a non-unique owner holds one unique value,
+// the unique constructor result is seated into the field, and the owner's teardown destroys it
+// once
+
+#[unique]
+struct Handle
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+struct Wrap
+{
+    Handle $inner;
+}
+
+Wrap $w = Wrap(Handle(1, mem::alloc<uint8>(1)));
+echo 0;

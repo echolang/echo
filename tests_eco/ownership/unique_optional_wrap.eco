@@ -1,0 +1,33 @@
+// wrapping a unique value into a tagged `T?` is a move of the payload into the pair, not a copy.
+// the destructor runs once, when the optional dies - not also on the unique that was wrapped
+
+#[unique]
+struct Handle
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function make(usize $tag) : Handle?
+{
+    Handle $h = Handle($tag, mem::alloc<uint8>(4));
+    return $h;
+}
+
+function declared() : void
+{
+    Handle? $x = Handle(1, mem::alloc<uint8>(1));
+    echo 100;
+}
+
+declared();
+echo 200;
+
+Handle? $y = make(7);
+echo 300;

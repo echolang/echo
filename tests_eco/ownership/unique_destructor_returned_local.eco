@@ -1,0 +1,25 @@
+// a returned unique local is moved, not copied - including a constructor's `$this`. exactly one
+// destructor line per handle, after the caller has printed. twin of destructor_returned_local_moves,
+// with `#[unique]`
+
+#[unique]
+struct Handle
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function make(usize $tag) : Handle
+{
+    Handle $h = Handle($tag, mem::alloc<uint8>(4));
+    return $h;
+}
+
+Handle $x = make(7);
+echo 0;
