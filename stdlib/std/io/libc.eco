@@ -335,7 +335,8 @@ internal function wide_error() : ioerror
 internal function open_path(const string& $path, int32 $flags) : result<int32, ioerror>
 {
 #[if: os == windows]
-    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+    std::env::wide_string $wide = std::env::wide_string::from_utf8($path);
+    if ($wide->empty()) {
         return .error(wide_error());
     }
 
@@ -354,7 +355,8 @@ internal function open_path(const string& $path, int32 $flags) : result<int32, i
 internal function unlink_path(const string& $path) : result<bool, ioerror>
 {
 #[if: os == windows]
-    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+    std::env::wide_string $wide = std::env::wide_string::from_utf8($path);
+    if ($wide->empty()) {
         return .error(wide_error());
     }
 
@@ -373,11 +375,13 @@ internal function unlink_path(const string& $path) : result<bool, ioerror>
 internal function rename_path(const string& $from, const string& $to) : result<bool, ioerror>
 {
 #[if: os == windows]
-    std::env::wide_string $from_w = guard std::env::utf8_to_wide($from) else {
+    std::env::wide_string $from_w = std::env::wide_string::from_utf8($from);
+    if ($from_w->empty()) {
         return .error(wide_error());
     }
 
-    std::env::wide_string $to_w = guard std::env::utf8_to_wide($to) else {
+    std::env::wide_string $to_w = std::env::wide_string::from_utf8($to);
+    if ($to_w->empty()) {
         return .error(wide_error());
     }
 
@@ -396,7 +400,8 @@ internal function rename_path(const string& $from, const string& $to) : result<b
 internal function access_path(const string& $path, int32 $amode) : result<bool, ioerror>
 {
 #[if: os == windows]
-    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+    std::env::wide_string $wide = std::env::wide_string::from_utf8($path);
+    if ($wide->empty()) {
         return .error(wide_error());
     }
 
@@ -415,7 +420,8 @@ internal function access_path(const string& $path, int32 $amode) : result<bool, 
 internal function mkdir_path(const string& $path) : result<bool, ioerror>
 {
 #[if: os == windows]
-    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+    std::env::wide_string $wide = std::env::wide_string::from_utf8($path);
+    if ($wide->empty()) {
         return .error(wide_error());
     }
 
@@ -434,7 +440,8 @@ internal function mkdir_path(const string& $path) : result<bool, ioerror>
 internal function rmdir_path(const string& $path) : result<bool, ioerror>
 {
 #[if: os == windows]
-    std::env::wide_string $wide = guard std::env::utf8_to_wide($path) else {
+    std::env::wide_string $wide = std::env::wide_string::from_utf8($path);
+    if ($wide->empty()) {
         return .error(wide_error());
     }
 
