@@ -172,8 +172,8 @@ public class dir : contract::iterable<dirent>
     static function open(const string& $path) : result<dir, ioerror>
     {
 #[if: os == windows]
-        std::env::wide_string $wide = std::env::wide_string::from_utf8($path);
-        if ($wide->empty()) {
+        std::env::wide_string $wide = std::env::wide_string();
+        if (!$wide->load_utf8($path)) {
             return .error(wide_error());
         }
 
@@ -187,8 +187,8 @@ public class dir : contract::iterable<dirent>
             return .error(ioerror(ENOTDIR));
         }
 
-        std::env::wide_string $pat = std::env::wide_string::from_utf8(std::env::join($path, '*'));
-        if ($pat->empty()) {
+        std::env::wide_string $pat = std::env::wide_string();
+        if (!$pat->load_utf8(std::env::join($path, '*'))) {
             return .error(wide_error());
         }
 

@@ -104,8 +104,8 @@ internal function console_write(int32 $fd, ptr<const uint8> $buf, usize $count) 
         $utf8_n = $at as int32;
     }
 
-    std::env::wide_string $wide = std::env::wide_string::from_utf8($utf8, $utf8_n);
-    if ($wide->empty()) {
+    std::env::wide_string $wide = std::env::wide_string();
+    if (!$wide->load_utf8($utf8, $utf8_n)) {
         if ($expanded:$ != null) {
             mem::free($expanded);
         }
