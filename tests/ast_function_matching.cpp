@@ -90,6 +90,11 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     // `w(int32&)` for `w(42)`. both are asserted end to end in tests_eco/functions/borrow_temporary_rank
     REQUIRE( ArgumentFit::t_borrow < ArgumentFit::t_borrow_temporary );
     REQUIRE( ArgumentFit::t_promotion < ArgumentFit::t_borrow_temporary );
+
+    // a `ptr<T>` at a `T&` sits below a read-through of the same pointer, so `f(T)` still beats
+    // `f(T&)` for a `ptr<T>` argument - a by-value parameter still copies
+    REQUIRE( ArgumentFit::t_read_through < ArgumentFit::t_borrow_through );
+    REQUIRE( ArgumentFit::t_borrow_through < ArgumentFit::t_promotion );
     REQUIRE( ArgumentFit::t_borrow_temporary < ArgumentFit::t_undetermined );
 
     // and the boundary that makes an overload pair over a type and its `#[implicit]` view usable at

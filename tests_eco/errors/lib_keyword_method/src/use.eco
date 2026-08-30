@@ -1,0 +1,6 @@
+// a second file of the same module. recovery that did not match braces used to eat this file's
+// tokens and take the compile down with no diagnostic - so this body has to parse
+function unused() : Entity
+{
+    return Entity(0);
+}

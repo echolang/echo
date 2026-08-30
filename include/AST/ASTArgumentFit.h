@@ -12,6 +12,8 @@
 #include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
 
+#include <cassert>
+
 namespace AST
 {
     // how well an argument answers a parameter. declaration order is best to worst, and that
@@ -40,14 +42,30 @@ namespace AST
         // writable one, so const overloading is unusable without it
         t_borrow_const,
 
-        // the mirror of it: the argument is a place holding a non-nullable borrow and the parameter
-        // wants the value, so the read goes one level through. PointerAdjuster::as_value_for already
-        // emits that deref - this rank is only the *scoring* of it, which was missing
+        // the mirror of it: the argument is a place holding a pointer (or a call that returned a
+        // non-nullable borrow) and the parameter wants the value, so the read goes one level through.
+        // PointerAdjuster::as_value_for already emits that deref - this rank is only the *scoring* of it
+        //
+        // a `ptr<T>` *place* ranks here too: the slot is certainly there, and that is the same auto-deref
+        // a lone `f(T)` candidate already got via match rule 2. ranking it is what keeps `f(T)` beating
+        // `f(T&)` once t_borrow_through exists - a by-value parameter still copies. a call that *returned*
+        // a `ptr<T>` stays out: read_reaches_storage refuses it, and reading through an address that may
+        // be absent is something the program has to say
         //
         // beside t_borrow rather than anywhere else because it is the same class of adjustment, and
         // the two can never compete for one argument: one needs a pointer parameter and a value
         // argument, the other the reverse
         t_read_through,
+
+        // a `ptr<T>` place handed to a `T&` parameter: the address of the pointee, not a load of `T`.
+        // CallResolver (direct) and PointerAdjuster (indirect) plant `AddrOf(Deref($p))`, the same
+        // shape `$p->method()` plants in the parser, and TypeChecker::check_unsafe_promotion on that
+        // AddrOf is the word - a raw address becoming a trusted borrow.
+        //
+        // **below t_read_through**, so `f(T)` still beats `f(T&)` for a `ptr<T>` argument: a by-value
+        // parameter still copies, as a read should. not t_widening: `ptr<T>` is nullable and `T&` is
+        // not, and is_implicitly_convertible staying false is the safety story
+        t_borrow_through,
 
         // a numeric conversion that stays inside its family and cannot lose anything: a wider
         // integer of the same signedness, or a wider float. ranked above a plain conversion so
@@ -68,9 +86,9 @@ namespace AST
         // different reasons.
         //
         // Below, because this is the only rank that adds a *declaration* to the program - an alloca, a
-        // lifetime, possibly a destructor call - where all six above only read or widen a value that
-        // already exists. So `w(int64)` beats `w(int32&)` for `w(42)`: a free numeric promotion is not
-        // out-ranked by fabricating storage. And t_borrow three ranks up means a borrow of real
+        // lifetime, possibly a destructor call - where every rank above only reads or adjusts a value
+        // that already exists. So `w(int64)` beats `w(int32&)` for `w(42)`: a free numeric promotion is
+        // not out-ranked by fabricating storage. And t_borrow several ranks up means a borrow of real
         // storage always beats a borrow of a value the compiler had to invent.
         //
         // Above, because every rank below *changes the type* and this one does not. Binding a
@@ -220,13 +238,15 @@ namespace AST
         return from.is_const() == to.pointee().is_const() ? matched : promised;
     }
 
-    // **did this fit score a wrapping in an address?** all four borrow ranks answer yes, because the
-    // const pair differs from the plain one only in how it *scores* - the node AST::CallResolver
-    // produces is the same address either way.
+    // **did this fit score a wrapping in a bare address?** the four ranks that plant AddrOf of the
+    // argument as it is. the const pair differs from the plain one only in how it *scores* - the node
+    // AST::CallResolver produces is the same address either way.
     //
     // named here, where the ranks are defined, rather than enumerated at the call site: each borrow
-    // arm gains a `_const` twin by construction, so a fifth rank added to the enum and not to a
-    // hand-written `if` is an argument that silently stops being addressed
+    // arm gains a `_const` twin by construction, so a rank added to the enum and not to this switch is
+    // an argument that silently stops being addressed. t_borrow_through is deliberately *not* one of
+    // these: its wrap is AddrOf(Deref), asked of fit_is_borrow_through, or a bare AddrOf would build
+    // `ptr<ptr<T>>`
     inline bool fit_is_borrow(ArgumentFit fit)
     {
         switch (fit) {
@@ -239,6 +259,36 @@ namespace AST
             default:
                 return false;
         }
+    }
+
+    // **did this fit score a peel-then-borrow?** `ptr<T>` at a `T&` parameter. not fit_is_borrow:
+    // that helper plants a bare AddrOf and would build `ptr<ptr<T>>`. the wrap is
+    // AST::borrow_through_pointer
+    inline bool fit_is_borrow_through(ArgumentFit fit)
+    {
+        return fit == ArgumentFit::t_borrow_through;
+    }
+
+    // **may a `ptr<T>` answer this `T&`?** the type half of t_borrow_through, on its own because
+    // PointerAdjuster's indirect-call arm has to ask the same question after CallResolver has
+    // already run on direct calls - two wrappers, one predicate, or a closure and an ordinary
+    // function disagree about whether `$fn($p)` is a load of `T`
+    //
+    // `from` is nullable and `to` is not: that narrowing is the whole of why this is not
+    // t_widening. the pointee comparison is the borrow arms', const rule included
+    inline bool pointer_borrows_through(const ValueType &from, const ValueType &to)
+    {
+        return from.is_pointer() && from.is_nullable()
+            && parameter_auto_borrows(to)
+            && borrow_type_matches(from.pointee(), to);
+    }
+
+    // `AddrOf(Deref(arg))` - the wrap t_borrow_through scores. one helper so CallResolver and
+    // PointerAdjuster cannot plant two different trees for one rank
+    inline ExprNode *borrow_through_pointer(NodeCollection &nodes, ExprNode *arg)
+    {
+        assert(arg != nullptr && "borrow_through_pointer of a missing argument");
+        return &nodes.emplace_back<AddrOfExprNode>(&nodes.emplace_back<DerefExprNode>(arg));
     }
 
     // **what a `#[implicit]` conversion has to return to answer this parameter.**
@@ -263,10 +313,11 @@ namespace AST
 
     // **does the argument arrive through a borrow this conversion reads past?**
     //
-    // the same predicate t_read_through uses: a place or a call that returned a borrow, and
-    // **non-nullable only**. a `ptr<T>` place still answers read_reaches_storage - the slot is
-    // certainly there - so without that last conjunct a conversion would be found on the pointee
-    // and PointerAdjuster would then deref `$p` with no null check.
+    // a place or a call that returned a borrow, and **non-nullable only**. t_read_through ranks a
+    // `ptr<T>` place as a copy of the pointee; converting through that place is a different question.
+    // a `ptr<T>` place still answers read_reaches_storage - the slot is certainly there - so without
+    // this conjunct a conversion would be found on the pointee and PointerAdjuster would then deref
+    // `$p` with no null check.
     //
     // two readers that have to agree or the receiver is addressed twice: the source peel below,
     // and the const gate in implicit_conversion_for. `const` is dropped for the target's reason;
@@ -440,22 +491,25 @@ namespace AST
         // without consulting types at all. With two it was a hard "no overload accepts these
         // arguments", so adding an unrelated overload broke a call that had always compiled.
         //
-        // **non-nullable only.** reading through a `ptr<T>` that may be null is an unchecked
-        // dereference, and the one narrowing that does emit a check goes the other way
-        // A nullable argument stays t_none,
-        // which is what it already was
-        //
         // asked of AST::read_reaches_storage rather than of is_place_expression, so a **call**
-        // returning a borrow ranks here too - `f($a->at(0))` at an `int32` parameter. that predicate
-        // draws the same non-nullable line this arm does, which is why the two compose without a
-        // second spelling of it. before it was shared, a borrow-returning call was t_none at every
-        // value parameter, so `str::from($a->at(0))` and `"{$a->at(0)}"` were "no overload accepts
-        // these arguments"
-        if (from.is_pointer() && !from.is_nullable() && !to.is_pointer()
+        // returning a borrow ranks here too - `f($a->at(0))` at an `int32` parameter. a call returning
+        // a `ptr<T>` does not: that predicate is non-nullable for calls, which is the line that keeps
+        // `if (c_getenv($name) == null)` from becoming a comparison of `uint8`. a `ptr<T>` *place*
+        // still ranks, because the slot is there - ranking it is how `f(T)` beats `f(T&)` for `$p`
+        if (from.is_pointer() && !to.is_pointer()
             && expr != nullptr && read_reaches_storage(*expr, from)) {
             if (ValueType::make_mutable(value_type_of(from)) == ValueType::make_mutable(to)) {
                 return ArgumentFit::t_read_through;
             }
+        }
+
+        // a `ptr<T>` place at a `T&` parameter. after t_read_through, which is the *value*
+        // destination of the same peel, and after the ordinary borrow arm, which is a `T` place
+        // already. one level, and a place - the same read_reaches_storage t_read_through asks. a call
+        // that returned a `ptr<T>` stays out of both ranks: there is no slot to peel from
+        if (pointer_borrows_through(from, to)
+            && expr != nullptr && read_reaches_storage(*expr, from)) {
+            return ArgumentFit::t_borrow_through;
         }
 
         // whatever is left between two primitives is a conversion TypeLowering::coerce_value

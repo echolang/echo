@@ -1,0 +1,75 @@
+// a `ptr<T>` at a `T&` parameter is the pointee's address, not a load of `T`. the wrap is
+// AddrOf(Deref($p)), the same shape `$p->method()` plants, and it is a raw-to-borrow promotion
+// so the call sits in `unsafe`
+struct Velocity
+{
+    public float32 $dx;
+}
+
+function zero(Velocity& $x) : void
+{
+    $x->dx = 0.0f;
+}
+
+function apply(function<void(Velocity&)> $fn, ptr<Velocity> $p) : void
+{
+    if ($p:$ == null) {
+        return;
+    }
+
+    unsafe {
+        $fn($p);
+    }
+}
+
+struct Handler
+{
+    public function<void(Velocity&)> $fn;
+}
+
+Velocity $v = Velocity(1.0f);
+ptr<Velocity> $p = &$v;
+
+unsafe {
+    zero($p);
+}
+
+echo $v->dx;
+
+$v->dx = 2.0f;
+apply(function(Velocity& $x) : void { $x->dx = 0.0f; }, $p);
+echo $v->dx;
+
+$v->dx = 3.0f;
+Handler $h = Handler(function(Velocity& $x) : void { $x->dx = 0.0f; });
+unsafe {
+    $h->fn($p);
+}
+echo $v->dx;
+
+// a by-value parameter still copies: writing through the parameter does not touch `$v`
+function take_copy(Velocity $x) : void
+{
+    $x->dx = 9.0f;
+}
+
+$v->dx = 4.0f;
+take_copy($p);
+echo $v->dx;
+
+// with both overloads, a `ptr<T>` still selects the by-value one: t_read_through outranks
+// t_borrow_through, so the copy wins and `$v` is left alone
+function choose(Velocity $x) : int32
+{
+    $x->dx = 9.0f;
+    return 1;
+}
+
+function choose(Velocity& $x) : int32
+{
+    $x->dx = 0.0f;
+    return 2;
+}
+
+echo choose($p);
+echo $v->dx;

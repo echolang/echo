@@ -1,5 +1,6 @@
 #include "AST/ASTPointerAdjuster.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTRegion.h"
@@ -130,8 +131,17 @@ void PointerAdjuster::adjust_call_arguments(std::vector<ExprNode *> &arguments, 
     for (size_t i = 0; i < arguments.size(); i++) {
         auto *&arg = arguments[i];
 
+        // a `ptr<T>` at a `T&` parameter of an *indirect* call - CallResolver does not see
+        // those, so this is the wrap t_borrow_through scores. planted before the AddrOf arm,
+        // which then treats it the same way a direct call's already-wrapped argument arrives
+        if (arg != nullptr && arg->get_node_type() != NodeType::n_expr_addrof
+            && pointer_borrows_through(arg->result_type(), wanted_at(i))) {
+            arg = borrow_through_pointer(_current_module->nodes, arg);
+        }
+
         // an argument already wrapped in an address-of was borrowed deliberately,
-        // by the coercion pass or by the user writing `&$x`; leave it as the address
+        // by the coercion pass, by the wrap above, or by the user writing `&$x`; leave it
+        // as the address
         if (arg != nullptr && arg->get_node_type() == NodeType::n_expr_addrof) {
             auto *addr = static_cast<AddrOfExprNode *>(arg);
             addr->operand = adjust_place(addr->operand);

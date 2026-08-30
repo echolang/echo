@@ -13,6 +13,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
 #include "AST/ASTCallResolution.h"
+#include "AST/ASTConformance.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTPlaceExpr.h"
@@ -172,6 +173,7 @@ namespace AST
         instance->instantiation_args = args;
 
         _func_instances[key] = instance;
+        tmpl->instances.push_back(instance);
 
         // make the instance visible to codegen, which emits bodies from the file root children
         File *file = home->files().first();
@@ -230,6 +232,58 @@ namespace AST
             if (instance) {
                 call->decl = instance;
                 progressed = true;
+            }
+        }
+
+        return progressed;
+    }
+
+    // a vtable slot is not a call site, so a method of View<int32> that nobody called has no
+    // instance to point a table at. interned class instantiations that can be stored as an
+    // interface get the *requirement* methods force-emitted here - the same list
+    // interface_implementation_templates names, the same get_or_create a direct call would - so
+    // OwnershipPass and PointerAdjuster walk the body in a later round. helpers that are not a
+    // slot stay lazy
+    bool Monomorphizer::instantiate_interface_methods()
+    {
+        bool progressed = false;
+
+        for (ComplexType *ct : _collector.type_registry.instantiations()) {
+            if (ct == nullptr || !ct->is_class_kind() || !ct->is_instantiated()) {
+                continue;
+            }
+
+            // interned as `Bag<E>` while the template is still being walked: instantiating a method
+            // with those args produces a "concrete" body that still mentions E, and TypeChecker
+            // then reports UnresolvedTypeParameter on `$this`
+            if (std::ranges::any_of(ct->instantiation_args, [](const ValueType &arg) {
+                    return contains_type_param(arg);
+                })) {
+                continue;
+            }
+
+            const ValueType from = ValueType::make_class(ct);
+
+            for (const ValueType &iface : ct->conformances()) {
+                if (!interface_erasure_refusal(from, iface).empty()) {
+                    continue;
+                }
+
+                for (FunctionDeclNode *tmpl_method :
+                     interface_implementation_templates(ct, iface, _collector.type_registry)) {
+                    if (tmpl_method == nullptr) {
+                        continue;
+                    }
+
+                    if (tmpl_method->instance_for(ct->instantiation_args) != nullptr) {
+                        continue;
+                    }
+
+                    if (get_or_create_function_instance(tmpl_method, ct->instantiation_args)
+                        != nullptr) {
+                        progressed = true;
+                    }
+                }
             }
         }
 
@@ -571,7 +625,9 @@ namespace AST
 
     bool Monomorphizer::bind(size_t round)
     {
-        return instantiate_generic_calls(round);
+        bool progressed = instantiate_generic_calls(round);
+        progressed |= instantiate_interface_methods();
+        return progressed;
     }
 
     bool Monomorphizer::decide()

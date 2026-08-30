@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] keyword_as_method_name.eco:8:28
+
+  'null' is reserved and cannot be a method name
+
+  7 | 
+  8 |     public static function null() : Entity
+    :                            ^^^^
+  9 |     {
+
+[error] keyword_as_method_name.eco:13:28
+
+  'true' is reserved and cannot be a method name
+
+  12 | 
+  13 |     public static function true() : Entity
+     :                            ^^^^
+  14 |     {
+
+[error] keyword_as_method_name.eco:18:21
+
+  'class' is reserved and cannot be a method name
+
+  17 | 
+  18 |     public function class() : uint32
+     :                     ^^^^^
+  19 |     {
+
+3 errors, nothing was compiled.

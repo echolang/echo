@@ -158,6 +158,11 @@ namespace AST
 
         // one round's steps, in the order they have to run in - see the comments on each
         bool instantiate_generic_calls(size_t round);
+
+        // a vtable slot is not a call site. interned class instantiations that can be stored as
+        // an interface get the methods interface_implementation_templates names force-emitted
+        // here, so OwnershipPass walks the body and interface_implementations can name the instance
+        bool instantiate_interface_methods();
         bool rederive_stale_variable_types();
         bool rederive_stale_capture_types();
         bool settle_calls();

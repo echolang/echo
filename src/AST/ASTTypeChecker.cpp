@@ -1515,6 +1515,12 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
 {
     const ValueType callee_type = node.callee_type();
 
+    // the call's token while walking arguments, so an UnsafePromotion on a synthesized
+    // AddrOf(Deref($p)) - t_borrow_through - lands at `$fn($p)` rather than on the pointer's
+    // declaration. the same `_context_token` visitFunctionCallExpr already sets
+    const TokenReference *prev = _context_token;
+    _context_token = &node.token;
+
     // the callee's *signature* is the parameter list here - there is no declaration to walk. the shape
     // ("this is not callable") and the arity are the parser's, reported where the call was written; what
     // is left is whether each argument reaches its parameter, which is the same question a direct call
@@ -1548,6 +1554,8 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
     }
 
     RecursiveVisitor::visit_indirect_call_expr(node);
+
+    _context_token = prev;
 }
 
 void TypeChecker::visitTypeCast(TypeCastNode &node)
@@ -1850,8 +1858,8 @@ void TypeChecker::check_const_target(AssignNode &node)
             : fmt::format("cannot assign to '{}' - it is declared const", name));
 }
 
-// the shapes that conform but cannot be *stored* - a struct, a generic instantiation, an interface with an
-// operator requirement. answered by AST::interface_erasure_refusal, the one owner of the question, and
+// the shapes that conform but cannot be *stored* - a struct, an interface with an operator requirement
+// or an associated type. answered by AST::interface_erasure_refusal, the one owner of the question, and
 // reported here at every arrival site: codegen's widening has no table to fall back on, so an unreported
 // one is an internal error rather than a diagnostic
 //

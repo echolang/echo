@@ -1,0 +1,28 @@
+// two instantiations of one generic class in one array<Store>. dispatch has to land on the
+// instance that was widened, not on the template and not on the other instantiation
+interface Store
+{
+    function contains(uint32 $e) : bool;
+}
+
+class View<T> : Store
+{
+    public uint32 $id;
+
+    public function contains(uint32 $e) : bool
+    {
+        return $e == $this->id;
+    }
+}
+
+View<int32> $ints = View<int32>(1);
+View<string> $text = View<string>(2);
+
+array<Store> $stores = [];
+$stores[] = $ints;
+$stores[] = $text;
+
+echo $stores[0]->contains(1);
+echo $stores[0]->contains(2);
+echo $stores[1]->contains(2);
+echo $stores[1]->contains(1);

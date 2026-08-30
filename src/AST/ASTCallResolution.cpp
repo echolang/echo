@@ -77,18 +77,22 @@ namespace AST
         // resolution predicts this decision exactly, and a candidate accepted there and then not
         // wrapped here would reach codegen passing a value where an address is expected.
         //
-        // **both borrow ranks produce the same node, and that is the point.** the difference between
-        // them - whether the operand already has storage or has to be given some - is a question about
-        // the operand's shape, which AST::OwnershipPass asks of the tree.
+        // the wrap a borrow rank scored. t_borrow_through peels first - AddrOf(Deref) - because a
+        // bare AddrOf of a `ptr<T>` would build `ptr<ptr<T>>`. the other four take the address of the
+        // argument as it is. both land as AddrOf, which is what PointerAdjuster's argument arm already
+        // routes through adjust_place without asking
         //
-        // Nothing between here and codegen should be able to tell the two apart, and
-        // AST::PointerAdjuster's argument arm already routes any AddrOf through adjust_place without
-        // asking
+        // the difference among the four - whether the operand already has storage or has to be given
+        // some - is a question about the operand's shape, which AST::OwnershipPass asks of the tree.
         ExprNode *borrow_if_wanted(NodeCollection &nodes, ExprNode *arg, ArgumentFit fit)
         {
-            // all four borrow ranks, asked of AST::fit_is_borrow rather than enumerated here: the const
-            // it gains is already on the operand's type, and which ranks are borrows is the fit
-            // ordering's own question
+            if (fit_is_borrow_through(fit)) {
+                return borrow_through_pointer(nodes, arg);
+            }
+
+            // the four ranks that plant a bare AddrOf, asked of AST::fit_is_borrow rather than
+            // enumerated here: the const it gains is already on the operand's type, and which ranks
+            // are those borrows is the fit ordering's own question
             if (!fit_is_borrow(fit)) {
                 return arg;
             }
@@ -698,7 +702,8 @@ namespace AST
             }
 
             // a place passed to a borrow parameter is coerced to its address here, so codegen sees a
-            // uniform AddrOfExprNode instead of sniffing the argument's kind
+            // uniform AddrOfExprNode instead of sniffing the argument's kind. t_borrow_through is
+            // the same owner: peel then borrow, not a second wrap beside this one
             call.arguments[i] = borrow_if_wanted(nodes, converted, fit);
 
             // once, for the two questions below: a receiver is an AddrOf over a `->` chain, and

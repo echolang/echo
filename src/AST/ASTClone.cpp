@@ -708,6 +708,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // under its symbol. the monomorphizer sets these on the instance right after cloning
     c->instantiation_args.clear();
     c->template_ref = nullptr;
+    c->instances.clear();
 
     // a clone is a new region. cc.shallow copy-constructs, so an instance of an already-owned
     // template would otherwise start t_owned and skip the ownership walk

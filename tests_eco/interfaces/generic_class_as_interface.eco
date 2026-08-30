@@ -1,0 +1,19 @@
+// a generic class is still a class: once instantiated it has concrete method bodies, and a vtable
+// can point at them. the constraint path always worked; this is the erased path
+interface Sized<T>
+{
+    function first() : T;
+}
+
+class Bag<E> : Sized<E>
+{
+    E $item;
+
+    function first() : E {
+        return $this->item;
+    }
+}
+
+$bag = Bag<int32>(7);
+Sized<int32> $erased = $bag;
+echo $erased->first();

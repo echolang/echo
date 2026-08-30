@@ -1,0 +1,24 @@
+// `null`, `true` and `class` are reserved. naming a method any of them is a parse error at that
+// word, not at `static` / `function` - and recovery has to consume the body, or a module compile
+// of the same shape exits 139 with nothing printed
+public struct Entity
+{
+    public const uint32 $id;
+
+    public static function null() : Entity
+    {
+        return Entity(0);
+    }
+
+    public static function true() : Entity
+    {
+        return Entity(1);
+    }
+
+    public function class() : uint32
+    {
+        return $this->id;
+    }
+}
+
+echo 0;

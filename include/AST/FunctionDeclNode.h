@@ -285,6 +285,22 @@ namespace AST
             return template_ref != nullptr;
         }
 
+        // interned instances of this template, filled by Monomorphizer::get_or_create_function_instance.
+        // a vtable slot is not a call site, so AST::interface_implementations looks the instance up
+        // here rather than waiting for a call to mint it. empty on an instance - clone clears it,
+        // the same standing instantiation_args and template_ref have
+        std::vector<FunctionDeclNode *> instances;
+
+        FunctionDeclNode *instance_for(const std::vector<ValueType> &args) const {
+            for (FunctionDeclNode *inst : instances) {
+                if (inst != nullptr && inst->instantiation_args == args) {
+                    return inst;
+                }
+            }
+
+            return nullptr;
+        }
+
         // nobody wrote this declaration: the compiler built it from a type's shape. Three producers -
         // the field-wise constructor registered in the declaration pass, and the class deinit and copy
         // constructor synthesized by AST::OwnershipPass.

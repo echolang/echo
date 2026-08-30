@@ -1,0 +1,21 @@
+// the C function-pointer spelling of ptr_to_borrow_param: a held `extern function` whose
+// parameter is `T&`, passed a `ptr<T>`. same wrap, same `unsafe`
+struct Velocity
+{
+    public float32 $dx;
+}
+
+function zero(Velocity& $x) : void
+{
+    $x->dx = 0.0f;
+}
+
+Velocity $v = Velocity(1.0f);
+ptr<Velocity> $p = &$v;
+extern function<void(Velocity&)> $fn = &zero;
+
+unsafe {
+    $fn($p);
+}
+
+echo $v->dx;

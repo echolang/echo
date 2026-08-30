@@ -1,0 +1,11 @@
+// the reserved name lives in one file of the module. recovery that does not match braces used to
+// eat the neighbour's tokens and take the compile down with no diagnostic
+public struct Entity
+{
+    public const uint32 $id;
+
+    public static function null() : Entity
+    {
+        return Entity(0);
+    }
+}

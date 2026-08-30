@@ -1,0 +1,15 @@
+// passing a `ptr<T>` into a `T&` is the same raw-to-borrow promotion `$p->method()` already is.
+// outside `unsafe` it is a located UnsafePromotion, never an IR verifier ICE
+struct Velocity
+{
+    public float32 $dx;
+}
+
+function apply(function<void(Velocity&)> $fn, ptr<Velocity> $p) : void
+{
+    $fn($p);
+}
+
+Velocity $v = Velocity(1.0f);
+ptr<Velocity> $p = &$v;
+apply(function(Velocity& $x) : void { $x->dx = 0.0f; }, $p);

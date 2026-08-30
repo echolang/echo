@@ -1,0 +1,16 @@
+modules: errors/lib_keyword_method
+expect: fail
+
+# two files of one module: entity.eco names a method `null`, use.eco is well formed. recovery that
+# did not match braces used to eat the second file and exit 139 with no diagnostic
+--- OUT --->
+[error] entity.eco:7:28
+
+  'null' is reserved and cannot be a method name
+
+  6 | 
+  7 |     public static function null() : Entity
+    :                            ^^^^
+  8 |     {
+
+1 error, nothing was compiled.

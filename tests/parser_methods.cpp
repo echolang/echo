@@ -532,3 +532,35 @@ TEST_CASE("a generic struct's const method keeps the qualifier through substitut
     // than about one declaration seen twice
     REQUIRE(calls[0]->decl != calls[1]->decl);
 }
+
+TEST_CASE("a reserved word cannot be a method name", "[methods]")
+{
+    // `null` is a keyword, so `function null()` is a parse error at `null` - not at `static`, which
+    // is what starts_funcdecl used to miss, sending the member walk to its unexpected-token arm
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "public struct Entity\n"
+        "{\n"
+        "    public const uint32 $id;\n"
+        "    public static function null() : Entity { return Entity(0); }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "'null' is reserved and cannot be a method name"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "Unexpected token 'static'"));
+}
+
+TEST_CASE("a reserved method name in a second file of the module is still a located error", "[methods]")
+{
+    // the 139: recovery that did not match braces ate the next file's tokens. two files, the
+    // neighbour calling the name, has to report and not crash
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "public struct Entity\n"
+        "{\n"
+        "    public const uint32 $id;\n"
+        "    public static function null() : Entity { return Entity(0); }\n"
+        "}\n",
+        "Entity $e = Entity::null();\n"
+        "echo $e->id;\n"});
+
+    REQUIRE(has_issue_containing(*bundle, "'null' is reserved and cannot be a method name"));
+    REQUIRE(bundle->collector.has_critical_issues());
+}

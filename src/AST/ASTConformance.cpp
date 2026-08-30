@@ -10,6 +10,7 @@
 #include "AST/VarDeclNode.h"
 
 #include <algorithm>
+#include <cassert>
 #include <fmt/core.h>
 
 bool AST::conforms_to(const AST::ComplexType *ct, const AST::ValueType &interface)
@@ -376,19 +377,44 @@ namespace
     // the comparison is ValueType::operator==, which is exact. deliberately not argument_fit's looser
     // ranking: a requirement is a contract, and a method that merely *accepts* what the requirement
     // promises is not the same method a dispatch through a vtable would land on
-    bool candidate_answers(const AST::FunctionDeclNode *candidate, const WantedSignature &wanted)
+    bool candidate_answers(
+        const AST::FunctionDeclNode *candidate,
+        const WantedSignature &wanted,
+        const AST::TypeSubstitution &impl_subst,
+        AST::TypeRegistry &types
+    )
     {
         if (!candidate_shape_answers(candidate, wanted)) {
             return false;
         }
 
         for (size_t i = 0; i < wanted.parameters.size(); i++) {
-            if (!(candidate->parameter_type(i + 1) == wanted.parameters[i])) {
+            const AST::ValueType have =
+                wanted_type(candidate->parameter_type(i + 1), impl_subst, types);
+
+            if (!(have == wanted.parameters[i])) {
                 return false;
             }
         }
 
-        return candidate->get_return_type() == wanted.return_type;
+        return wanted_type(candidate->get_return_type(), impl_subst, types) == wanted.return_type;
+    }
+
+    // the implementor's substitution when `ct` is an instantiation: `Bag<int32>`'s `E` is int32, so
+    // a template method returning `E` answers `first() : int32`. empty on a template, which is how
+    // first_unmet_requirement checks the declaration - both sides still mention the same TypeParamDecl
+    AST::TypeSubstitution implementor_substitution(const AST::ComplexType *ct)
+    {
+        if (ct == nullptr || !ct->is_instantiated() || ct->template_ref == nullptr) {
+            return {};
+        }
+
+        if (ct->template_ref->type_parameters.size() != ct->instantiation_args.size()) {
+            return {};
+        }
+
+        return AST::TypeSubstitution::positional(
+            ct->template_ref->type_parameters, ct->instantiation_args);
     }
 
     // **the one search** for the member of `ct` that answers a requirement, or null.
@@ -398,11 +424,21 @@ namespace
     // conformance is met. written twice they already had: only the *comparison* was shared, and a rule
     // added to one search (preferring a non-generic candidate, skipping a requirement) would have
     // reached one of them, which is precisely the "reported met, lowered wrong" split this prevents
-    AST::FunctionDeclNode *answering_member(const AST::ComplexType *ct, const WantedSignature &wanted)
+    //
+    // the candidate is always the *template* method find_member_functions returns. mapping it to
+    // an instance is interface_implementations' job, because first_unmet_requirement only asks
+    // whether one exists
+    AST::FunctionDeclNode *answering_member(
+        const AST::ComplexType *ct,
+        const WantedSignature &wanted,
+        AST::TypeRegistry &types
+    )
     {
+        const AST::TypeSubstitution impl_subst = implementor_substitution(ct);
+
         for (AST::FunctionDeclNode *candidate :
              AST::find_member_functions(ct, wanted.requirement->func_name())) {
-            if (candidate_answers(candidate, wanted)) {
+            if (candidate_answers(candidate, wanted, impl_subst, types)) {
                 return candidate;
             }
         }
@@ -595,7 +631,8 @@ std::optional<AST::UnmetRequirement> AST::first_unmet_requirement(
             bool answered = false;
             for (const AST::FunctionDeclNode *candidate :
                  functions->overloads(requirement->func_name(), *requirement->ast_namespace)) {
-                if (candidate != requirement && candidate_answers(candidate, wanted)) {
+                if (candidate != requirement
+                    && candidate_answers(candidate, wanted, AST::TypeSubstitution{}, types)) {
                     answered = true;
                     break;
                 }
@@ -608,7 +645,7 @@ std::optional<AST::UnmetRequirement> AST::first_unmet_requirement(
             continue;
         }
 
-        if (answering_member(ct, wanted) != nullptr) {
+        if (answering_member(ct, wanted, types) != nullptr) {
             continue;
         }
 
@@ -655,23 +692,11 @@ std::string AST::interface_erasure_refusal(const AST::ValueType &from, const AST
         return "";
     }
 
-    // **a generic implementor has no method bodies to point a vtable at.** a method of a template is
-    // instantiated per *call site* by the monomorphizer, and a vtable slot is not a call site - so the
-    // table would reference a symbol nothing ever emits. the constraint path works for a generic today,
-    // which is what makes this a hole rather than a wall
-    if (from.get_complex_type() != nullptr && from.get_complex_type()->is_instantiated()) {
-        return fmt::format(
-            "'{}' is a generic instantiation, and storing one as '{}' is not supported yet - a vtable "
-            "needs a body per requirement, which a template only gets per call site. Take it through a "
-            "constrained generic instead.",
-            from.get_type_desciption(), interface.get_type_desciption());
-    }
-
     // **an associated type has no binding at an erased use site.** a vtable *can* be built - every
     // requirement still has an answering member - but `iterate() : Iter` has no static result type once
     // the value has forgotten which implementor it holds. that is an existential, and there is no opaque
-    // type to give it. (the generic-instantiation refusal above is a frequent *consequence* of this, but
-    // it is a fact about `from`; this one is a fact about the interface, which is why it is separate)
+    // type to give it. a generic class instantiation used to be refused for a different reason (no body
+    // per slot); it is not one any more, and this hole is a fact about the interface either way
     const std::vector<AST::TypeParamDecl *> &associated =
         AST::interface_associated_types(interface.get_complex_type());
 
@@ -706,7 +731,7 @@ std::string AST::interface_erasure_refusal(const AST::ValueType &from, const AST
     return "";
 }
 
-std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
+std::vector<AST::FunctionDeclNode *> AST::interface_implementation_templates(
     const AST::ComplexType *ct,
     const AST::ValueType &interface,
     AST::TypeRegistry &types
@@ -736,7 +761,8 @@ std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
             continue;
         }
 
-        AST::FunctionDeclNode *found = answering_member(ct, wanted_signature(requirement, subst, types));
+        AST::FunctionDeclNode *found =
+            answering_member(ct, wanted_signature(requirement, subst, types), types);
 
         // unanswered, so there is no table to hand back. the diagnostic is first_unmet_requirement's,
         // reported once at the declaration rather than again at every widening
@@ -745,6 +771,40 @@ std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
         }
 
         filled.push_back(found);
+    }
+
+    return filled;
+}
+
+std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
+    const AST::ComplexType *ct,
+    const AST::ValueType &interface,
+    AST::TypeRegistry &types
+)
+{
+    std::vector<AST::FunctionDeclNode *> filled =
+        interface_implementation_templates(ct, interface, types);
+
+    if (filled.empty() || ct == nullptr || !ct->is_instantiated()) {
+        return filled;
+    }
+
+    // a vtable names a symbol. the template has none (`t_no_symbol`); the instance the
+    // monomorphizer force-emitted for this instantiation is the body. missing here is a
+    // compiler bug - instantiate_interface_methods walks this same template list
+    for (AST::FunctionDeclNode *&found : filled) {
+        if (found == nullptr) {
+            continue;
+        }
+
+        AST::FunctionDeclNode *instance = found->instance_for(ct->instantiation_args);
+
+        if (instance == nullptr) {
+            assert(false && "instantiate_interface_methods should have emitted this vtable instance");
+            return {};
+        }
+
+        found = instance;
     }
 
     return filled;

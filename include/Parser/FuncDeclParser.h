@@ -106,11 +106,13 @@ namespace Parser
     // introduces three different things, told apart by the one token after it -
     //
     //   function <ident> (...)   a declaration
+    //   function <word>  (...)   a declaration whose name is reserved - parse_funcdecl refuses it
     //   function < ... >         the callable type `function<R(P...)>`
     //   function ( ... ) { }     a closure literal, an expression
     //
     // the sole owner of that question, so the statement dispatch, the declaration-surface walk and the
-    // struct member walk cannot come to three different answers
+    // struct member walk cannot come to three different answers. a reserved word has to count as a
+    // declaration so the member walk does not recover as if `function` had not been seen
     bool starts_funcdecl(Parser::Cursor &cursor);
 
     // does a closure literal start here? `function (` or `function [` - the third of the three things

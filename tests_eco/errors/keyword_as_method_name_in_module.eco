@@ -1,0 +1,3 @@
+// the two-file module this case points at is the 139: one file names a method `null`, the other
+// calls it. compiling the graph must print the reserved-name diagnostic and exit 1
+echo 0;

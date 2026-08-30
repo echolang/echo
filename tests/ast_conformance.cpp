@@ -8,6 +8,8 @@
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 
+#include <vector>
+
 #include "helpers.h"
 
 using namespace AST;
@@ -349,4 +351,74 @@ TEST_CASE("a requirement's vtable slot survives instantiation", "[conformance]")
 
     REQUIRE(plain_reqs.size() == 2);
     REQUIRE(AST::interface_method_slot(&plain->complex_type(), plain_reqs[1]).value() == 1);
+}
+
+TEST_CASE("a generic class instantiation can be stored as an interface", "[conformance]")
+{
+    // the vtable is built from the instance, not the template: a method of View<T> is instantiated
+    // per call site, a vtable slot is not a call site, so the monomorphizer force-emits contains
+    // when View<int32> is interned as a class that can be stored as Store
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Store { function contains(uint32 $e) : bool; }\n"
+        "class View<T> : Store {\n"
+        "    public uint32 $id;\n"
+        "    public function contains(uint32 $e) : bool { return $e == $this->id; }\n"
+        "}\n"
+        "View<int32> $v = View<int32>(1);\n"
+        "Store $s = $v;\n"
+        "echo $s->contains(1);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *view = type_named(m, "View");
+    auto *store = type_named(m, "Store");
+    REQUIRE(view != nullptr);
+    REQUIRE(store != nullptr);
+
+    auto *view_int = bundle->collector.type_registry.get_or_create_instantiation(
+        &view->complex_type(), { prim(ValueTypePrimitive::t_int32) });
+
+    const ValueType from = ValueType::make_class(view_int);
+    const ValueType iface = store->value_type();
+
+    REQUIRE(AST::interface_erasure_refusal(from, iface).empty());
+
+    auto impls = AST::interface_implementations(view_int, iface, bundle->collector.type_registry);
+    REQUIRE(impls.size() == 1);
+    REQUIRE(impls[0] != nullptr);
+    REQUIRE(impls[0]->is_instantiated());
+    REQUIRE(impls[0]->instantiation_args == std::vector<ValueType>{ prim(ValueTypePrimitive::t_int32) });
+}
+
+TEST_CASE("force-emitting a vtable does not instantiate methods that are not requirements", "[conformance]")
+{
+    // the slot is contains. dump is an ordinary method of View<T>, and a vtable is not a reason
+    // to emit it - only a call site is
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Store { function contains(uint32 $e) : bool; }\n"
+        "class View<T> : Store {\n"
+        "    public uint32 $id;\n"
+        "    public function contains(uint32 $e) : bool { return $e == $this->id; }\n"
+        "    public function dump() : uint32 { return $this->id; }\n"
+        "}\n"
+        "View<int32> $v = View<int32>(1);\n"
+        "Store $s = $v;\n"
+        "echo $s->contains(1);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *view = type_named(m, "View");
+    REQUIRE(view != nullptr);
+
+    const std::vector<ValueType> args { prim(ValueTypePrimitive::t_int32) };
+
+    auto contains = AST::find_member_functions(&view->complex_type(), "contains");
+    REQUIRE(contains.size() == 1);
+    REQUIRE(contains[0]->instance_for(args) != nullptr);
+
+    auto dumps = AST::find_member_functions(&view->complex_type(), "dump");
+    REQUIRE(dumps.size() == 1);
+    REQUIRE(dumps[0]->instance_for(args) == nullptr);
 }

@@ -1311,8 +1311,8 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
         llvm::Constant *vtable = get_or_create_vtable(source, target, cmp_unit);
 
         // every shape that has no table - a non-conforming class, an unmet requirement, an operator
-        // requirement, a generic implementor - is refused with a located diagnostic before codegen, so
-        // this is a compiler bug rather than a program error
+        // requirement, a missing instance for a generic implementor - is refused with a located
+        // diagnostic before codegen, so this is a compiler bug rather than a program error
         if (vtable == nullptr) {
             throw _ctx.error(fmt::format(
                 "no vtable for '{}' as '{}' {}",

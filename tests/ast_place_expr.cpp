@@ -535,9 +535,9 @@ TEST_CASE("A cloned index carries exactly one owner of its operands", "[AST][poi
 }
 
 // the one answer to "is this a pointer index", read by the rewriter *and* by result_type(). it peels
-// **non-nullable** levels and stops at a nullable one, which is AST::argument_fit's t_read_through
-// line: reading through a `ptr<T>` that may be null is an unchecked dereference. that is the whole
-// of what makes `$a[0]` over an `Array<T>&` parameter index the array while `$p[0]` stays a pointer
+// **non-nullable** levels and stops at a nullable one: reading through a `ptr<T>` that may be null
+// is an unchecked dereference. that is the whole of what makes `$a[0]` over an `Array<T>&` parameter
+// index the array while `$p[0]` stays a pointer
 TEST_CASE("indexed_base_type peels borrows but stops at a nullable pointer", "[AST][pointer]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(

@@ -20,6 +20,7 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 #include "Parser/AttributeParser.h"
+#include "Token.h"
 
 #include <fmt/core.h>
 
@@ -231,7 +232,32 @@ bool Parser::starts_funcdecl(Parser::Cursor &cursor)
         offset++;
     }
 
-    return cursor.is_type_sequence(offset, { Token::Type::t_function, Token::Type::t_identifier });
+    if (!cursor.peek_is_type(offset, Token::Type::t_function)) {
+        return false;
+    }
+
+    const size_t name_offset = offset + 1;
+
+    if (cursor.peek_is_type(name_offset, Token::Type::t_identifier)) {
+        return true;
+    }
+
+    // a closure, a callable type, a capture list - not a declaration
+    if (cursor.peek_is_type(name_offset, Token::Type::t_open_paren)
+        || cursor.peek_is_type(name_offset, Token::Type::t_open_angle)
+        || cursor.peek_is_type(name_offset, Token::Type::t_open_bracket)) {
+        return false;
+    }
+
+    // a reserved word sitting where the name should be. treating it as "not a declaration" sent the
+    // member walk to its unexpected-token arm, which blamed `static` and recovered without matching
+    // braces - silent 139 in a multi-file module. enter parse_funcdecl so it can refuse at this token
+    // and skip_refused_function can consume the body
+    if (!cursor.is_valid_offset(name_offset)) {
+        return false;
+    }
+
+    return token_spells_a_word(cursor.peek(name_offset).value());
 }
 
 bool Parser::starts_closure_literal(Parser::Cursor &cursor)
@@ -689,9 +715,22 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // skip the function keyword
     cursor.skip();
 
-    // next token should be an identifier aka the function name
+    // next token should be an identifier aka the function name. a reserved word here is the one
+    // starts_funcdecl now admits so this arm can name it: `'null' is reserved and cannot be a method
+    // name`. skip_refused_function, not try_skip_to_next_statement - a body is full of `;` and `}`
     if (!cursor.is_type(Token::Type::t_identifier)) {
-        payload.collect_unexpected_token(Token::Type::t_identifier);
+        if (!cursor.is_done() && token_spells_a_word(cursor.current().value())) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                fmt::format(
+                    "'{}' is reserved and cannot be a {} name",
+                    cursor.current().value(),
+                    payload.context.self_struct_ptr != nullptr ? "method" : "function"));
+        }
+        else {
+            payload.collect_unexpected_token(Token::Type::t_identifier);
+        }
+
         Parser::skip_refused_function(payload);
         return nullptr;
     }

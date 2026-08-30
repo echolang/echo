@@ -234,6 +234,20 @@ namespace AST
         TypeRegistry &types,
         const FunctionRegistry *functions);
 
+    // **which template methods a vtable for `ct` as `interface` would name**, aligned index-for-index
+    // with interface_requirements(). empty when any requirement is unanswered. the candidate is always
+    // the *template* find_member_functions returns - mapping it to an instance is
+    // interface_implementations' job after the monomorphizer has force-emitted it
+    //
+    // one walk so instantiate_interface_methods and the vtable cannot disagree about which bodies the
+    // table holds. an entry is null only for an **operator** requirement, which has no receiver and
+    // therefore no slot
+    std::vector<FunctionDeclNode *> interface_implementation_templates(
+        const ComplexType *ct,
+        const ValueType &interface,
+        TypeRegistry &types
+    );
+
     // **which declaration answers each requirement**, aligned index-for-index with
     // interface_requirements() - so this *is* the vtable, in slot order, and the slot a dispatch site
     // reads is the slot this walk filled. empty when any requirement is unanswered, which is exactly
@@ -254,8 +268,11 @@ namespace AST
     // **why a value of `from` cannot be *stored* as `interface`**, or an empty string when it can.
     //
     // deliberately a different question from conforms_to, which is about the contract. this one is about
-    // whether an erased value can be built and dispatched at all, and the three answers are the three
-    // holes the storable half of the feature has. every one of them is a diagnostic the type checker owes:
+    // whether an erased value can be built and dispatched at all, and the answers are the holes the
+    // storable half of the feature has: a struct or enum, an associated type, an operator requirement.
+    // a generic class instantiation is not one of them - its requirement methods are force-emitted in
+    // the monomorphizer's fixpoint, and the vtable names those instances. every refusal is a diagnostic
+    // the type checker owes:
     // reaching codegen without it is an internal error, because coerce_value has no table to fall back on
     //
     // the message is a whole sentence, phrased for the author of the *widening* - they are the one who has

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnsafePromotion  ptr_to_borrow_needs_unsafe.eco:10:5
+
+  cannot form 'Velocity&' from a raw address outside an 'unsafe' block. A borrow is a trusted typed view: every access through it, here and in everything it is passed to, is optimized as 'Velocity&' - so establishing one over raw storage is a promise only you can make.
+
+   9 | {
+  10 |     $fn($p);
+     :     ^^^
+  11 | }
+
+  help: inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid value of that type, stays valid for as long as the borrow is used, and that reading it at that type is compatible with every other typed access to the same storage. It does not assert that the borrow is the only one
+
+1 error, nothing was compiled.
