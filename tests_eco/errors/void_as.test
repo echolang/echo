@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  void_as.eco:8:22
+
+  Invalid type conversion: 'nothing()' produces no value, so there is nothing to read as a 'int32'
+
+  7 | 
+  8 | int32 $x = nothing() as int32;
+    :                      ^^
+  9 | 
+
+1 error, nothing was compiled.

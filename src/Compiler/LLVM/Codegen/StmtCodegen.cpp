@@ -206,6 +206,12 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
     if (node.init_expr) {
         node.init_expr->accept(*_ctx.visitor);
 
+        // `int32 $x = die('gone')` / `die() as int32`: the initializer never comes back, so there
+        // is no value to store and this block has already ended
+        if (_ctx.block_is_terminated()) {
+            return;
+        }
+
         // check that the visited node pushed a value on the stack
         assert(_ctx.value_stack.size() > 0 && "No value on the stack");
 
@@ -744,6 +750,10 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
     // nothing below may be hoisted above this line. it is also where a class's retain sits, as a node
     // inside value_expr, which is what makes the release further down safe
     node.value_expr->accept(*_ctx.visitor);
+
+    if (_ctx.block_is_terminated()) {
+        return;
+    }
 
     llvm::Value *new_value = _ctx.value_stack.top();
     _ctx.value_stack.pop();

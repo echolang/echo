@@ -16,6 +16,7 @@
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTVariadic.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -192,6 +193,35 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
     _changed = true;
 }
 
+bool OperatorRewriter::require_integer_index(IndexExprNode &index_expr, const ValueType &base_type)
+{
+    ExprNode *index = index_expr.indices[0];
+    if (index == nullptr) {
+        return false;
+    }
+
+    // one auto-deref, the same peel a value-position read does. a borrow of an integer is an
+    // integer index; a nullable pointer is not, because reading through an absent address is
+    // something the program has to say
+    const ValueType index_type = value_type_of(index->result_type());
+    if (is_undetermined_type(index_type)) {
+        index_expr.resolution_decided = false;
+        return false;
+    }
+
+    if (index_type.is_integer_type()) {
+        return true;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(location_of_expression(index)),
+        fmt::format(
+            "'{}' is indexed by an integer, not a '{}'",
+            base_type.get_type_desciption(),
+            index_type.get_type_desciption()));
+    return false;
+}
+
 void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
 {
     if (index_expr.resolution_decided || index_expr.base == nullptr) {
@@ -245,7 +275,39 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
             return;
         }
 
+        if (!require_integer_index(index_expr, base_type)) {
+            return;
+        }
+
         // decided, and the existing GEP arm in the codegen is the answer. nothing to rewrite
+        return;
+    }
+
+    // `T[N]` is indexed by the language, the way a pointer is: a typed GEP, no operator.
+    // bounds belong on `fixed_array`'s operators; this is the storage primitive
+    if (base_type.is_inline_array()) {
+        if (index_expr.is_append()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(index_expr.token_bracket),
+                fmt::format(
+                    "'{}' has a fixed length, so '$a[] =' cannot grow it. Index an existing element.",
+                    base_type.get_type_desciption()));
+            return;
+        }
+
+        if (index_expr.indices.size() != 1) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(index_expr.token_bracket),
+                fmt::format(
+                    "an inline array takes exactly one index, but {} were written.",
+                    index_expr.indices.size()));
+            return;
+        }
+
+        if (!require_integer_index(index_expr, base_type)) {
+            return;
+        }
+
         return;
     }
 

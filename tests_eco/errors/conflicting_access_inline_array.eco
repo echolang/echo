@@ -1,0 +1,6 @@
+function poke(inout int32& $a, inout int32& $b) : void
+{
+}
+
+int32[4] $xs;
+poke(&$xs[0], &$xs[0]);

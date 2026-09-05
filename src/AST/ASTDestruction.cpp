@@ -23,6 +23,13 @@ bool AST::needs_destruction(const AST::ValueType &type)
         return true;
     }
 
+    // `T[N]` owns whatever T owns, N times. asked ahead of the leaf: an inline array has no
+    // ComplexType, so it would otherwise fall out as "owns nothing" and a `string[2]` field
+    // would leak both strings
+    if (type.is_inline_array()) {
+        return needs_destruction(type.array_element());
+    }
+
     // a primitive owns its own bytes and nothing else. a pointer and a borrow own nothing at all -
     // see the header, this is the leaf of the whole recursion
     if (!type.has_complex_type()) {

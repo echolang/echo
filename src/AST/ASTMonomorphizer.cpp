@@ -15,6 +15,7 @@
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTLiteralTyping.h"
+#include "AST/ASTTypeParam.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTPlaceExpr.h"
 #include "Debugging.h"
@@ -89,10 +90,20 @@ namespace AST
             return std::nullopt;
 
         case InstantiationBlame::t_constraint:
-            _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(code_ref_for(mod, call->token_function_name),
-                "Type parameter '" + inst.param->name + "' of '" + tmpl->func_name() +
-                "' is constrained to '" + inst.param->constraint_spelling +
-                "' but was given '" + inst.bound.get_type_desciption() + "'");
+            if (inst.param->is_value_param()
+                && inst.bound.is_const_value()
+                && !const_generic_bits_fit(inst.param->value_type, inst.bound.const_value_bits())) {
+                _collector.collect_issue<Issue::IntegerOverflow>(
+                    code_ref_for(mod, call->token_function_name),
+                    const_generic_overflow_sentence(
+                        inst.param->value_type, inst.bound.const_value_bits()));
+            } else {
+                _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(
+                    code_ref_for(mod, call->token_function_name),
+                    "Type parameter '" + inst.param->name + "' of '" + tmpl->func_name() +
+                    "' is constrained to '" + inst.param->constraint_spelling +
+                    "' but was given '" + inst.bound.get_type_desciption() + "'");
+            }
             is_error = true;
             return std::nullopt;
 

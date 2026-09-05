@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] void_used_as_value.eco:8:6
+
+  'nothing()' produces no value
+
+  7 | 
+  8 | echo nothing();
+    :      ^^^^^^^
+  9 | int32 $x = nothing() + 1;
+
+[error] void_used_as_value.eco:9:12
+
+  'nothing()' produces no value
+
+   8 | echo nothing();
+   9 | int32 $x = nothing() + 1;
+     :            ^^^^^^^
+  10 | echo nothing() == 1;
+
+[error] void_used_as_value.eco:10:6
+
+  'nothing()' produces no value
+
+   9 | int32 $x = nothing() + 1;
+  10 | echo nothing() == 1;
+     :      ^^^^^^^
+  11 | 
+
+3 errors, nothing was compiled.

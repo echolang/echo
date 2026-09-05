@@ -1,6 +1,7 @@
 // `argument_fit` treats void as t_undetermined, which is *neutral* rather than a mismatch - so a void
-// argument resolves with T = void and would reach codegen, where the failure is an internal compiler
-// error with no source location. reported here instead, which is check_ref_count_argument's reason
+// argument resolves with T = void and would reach codegen, where the failure is an empty value stack.
+// AST::expression_produces_no_value is the shared rule; TypeChecker asks it of every value/place
+// edge, including dprint's T& which arrives as AddrOf(call)
 
 function nothing() : void
 {

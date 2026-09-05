@@ -54,6 +54,7 @@ namespace AST
         n_expr_temp_bind,
         n_expr_match,
         n_expr_const_ref,
+        n_expr_generic_value,
         n_expr_const,
         n_release,
         n_func_decl,

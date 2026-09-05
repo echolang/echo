@@ -24,8 +24,55 @@
 
 #include <fmt/core.h>
 
+#include <cerrno>
+#include <cstdlib>
+#include <string>
+
 namespace AST
 {
+
+    bool token_is_integer_literal(Token::Type type)
+    {
+        return type == Token::Type::t_integer_literal
+            || type == Token::Type::t_hex_literal
+            || type == Token::Type::t_binary_literal;
+    }
+
+    std::optional<uint64_t> integer_token_bits(const TokenReference &token)
+    {
+        if (!token_is_integer_literal(token.type())) {
+            return std::nullopt;
+        }
+
+        const std::string &written = token.value();
+        int base = 10;
+        const char *digits = written.c_str();
+
+        if (token.type() == Token::Type::t_hex_literal) {
+            base = 16;
+        } else if (token.type() == Token::Type::t_binary_literal) {
+            base = 2;
+            // `0b` is not a prefix strtoull accepts at base 2
+            if (written.size() < 3) {
+                return std::nullopt;
+            }
+            digits = written.c_str() + 2;
+        }
+
+        if (*digits == '\0') {
+            return std::nullopt;
+        }
+
+        errno = 0;
+        char *end = nullptr;
+        const unsigned long long parsed = std::strtoull(digits, &end, base);
+
+        if (errno == ERANGE || end == nullptr || *end != '\0') {
+            return std::nullopt;
+        }
+
+        return static_cast<uint64_t>(parsed);
+    }
 
     // ---------------------------------------------------------------------------
     // the spellings, and the defaults read off them

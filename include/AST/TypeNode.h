@@ -52,6 +52,14 @@ namespace AST
     private:
 
     };
+
+    // **the placeholder a borrow binding is declared with.** a member call addresses its receiver
+    // unless the receiver is already an address, and the parser decides that from the type. MatchParser
+    // and ForeachParser plant this; the lowering replaces the pointee once V is known. a by-value
+    // binding stays untyped: a method on that `$m` *should* take `&$m`
+    inline ValueType untyped_borrow_type() {
+        return ValueType::make_pointer(ValueType::make_unknown(), false);
+    }
 };
 
 

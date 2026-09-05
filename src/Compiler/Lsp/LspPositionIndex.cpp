@@ -7,6 +7,7 @@
 #include "AST/ASTSourceToken.h"
 #include "AST/ConstDeclNode.h"
 #include "AST/ConstRefExprNode.h"
+#include "AST/GenericValueExprNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/MemberAccessNode.h"
@@ -212,6 +213,12 @@ namespace
         {
             record(node.token_name, &node);
             AST::RecursiveVisitor::visit_const_ref(node);
+        }
+
+        void visit_generic_value(AST::GenericValueExprNode &node) override
+        {
+            record(node.token_name, &node);
+            AST::RecursiveVisitor::visit_generic_value(node);
         }
 
         void visitType(AST::TypeNode &node) override

@@ -1,0 +1,8 @@
+mode: build
+flags: -g
+
+--- OUT --->
+1
+--- UNIT_IR --->
+CHECK: !DICompositeType(tag: DW_TAG_array_type
+CHECK: !DISubrange(count: 4

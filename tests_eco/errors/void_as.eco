@@ -1,0 +1,8 @@
+// a settled void call as the operand of a written `as` is refused at the `as`, naming the call.
+// an unresolved call in the same position stays pending — see tests_eco/casts/pending_call_as_pointer.eco
+
+function nothing() : void
+{
+}
+
+int32 $x = nothing() as int32;

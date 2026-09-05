@@ -1,0 +1,19 @@
+// a void method on a call result is a TemporaryBind whose body is the void call. asked of the
+// bind on the value edge, not of a bare FunctionCallExprNode sitting on the initializer
+
+struct Cell
+{
+    int32 $n;
+
+    function id() : Cell
+    {
+        return $this;
+    }
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+int32 $x = Cell(1)->id()->bump();

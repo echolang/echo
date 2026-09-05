@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_indirect_call.eco:4:12
+
+  this call produces no value
+
+  3 | function<void()> $greet = function() : void {};
+  4 | int32 $x = $greet();
+    :            ^^^^^^
+  5 | 
+
+1 error, nothing was compiled.

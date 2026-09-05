@@ -1,0 +1,3 @@
+fixed_array<int32, 0> $empty = [];
+echo $empty->count();
+echo $empty->empty();

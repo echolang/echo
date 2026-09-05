@@ -1,5 +1,6 @@
 #include "Parser/ForeachParser.h"
 
+#include "AST/TypeNode.h"
 #include "Parser/ExprParser.h"
 #include "Parser/ScopeParser.h"
 
@@ -124,7 +125,17 @@ AST::ForeachNode *Parser::parse_foreach(Parser::Payload &payload)
         return give_up();
     }
 
-    node.element = &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), nullptr);
+    // **typed `unknown&` rather than left untyped** when the binding is a borrow.
+    // AST::untyped_borrow_type is the plant MatchParser uses; AST::ForeachLowering replaces it
+    // once V is known. a by-value binding stays untyped: a method on that `$m` *should* take `&$m`
+    AST::TypeNode *element_type = nullptr;
+
+    if (node.binding == AST::ForeachNode::Binding::t_borrow
+        || node.binding == AST::ForeachNode::Binding::t_const_borrow) {
+        element_type = &payload.context.emplace_node<AST::TypeNode>(AST::untyped_borrow_type());
+    }
+
+    node.element = &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), element_type);
     cursor.skip();
 
     if (!cursor.is_type(Token::Type::t_close_paren)) {

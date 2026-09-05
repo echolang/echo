@@ -3,6 +3,8 @@
 #include "Parser/TypeParser.h"
 #include "Parser/NamespaceParser.h"
 
+#include "AST/ASTLiteralTyping.h"
+#include "AST/ASTTypeParam.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/TypeNode.h"
@@ -21,7 +23,9 @@
 
 #include <fmt/core.h>
 #include <cassert>
+#include <cstdint>
 #include <map>
+#include <optional>
 #include <functional>
 #include <unordered_map>
 
@@ -67,22 +71,60 @@ static bool parse_explicit_type_args(
         // token, it skips the token and answers `unknown`. ungated, the `<` of `$a->count < 3`
         // consumed every remaining token in the file - one arena-allocated TypeNode each, which
         // outlive the rollback, so a file of such comparisons was quadratic in time and memory
-        if (cursor.is_done() || !Parser::can_parse_type(payload)) {
+        //
+        // an integer literal is a const-generic argument (`fill<4>($a)` / `fill<0x10>($a)`),
+        // not a type. accepted here rather than in can_parse_type, which is also the
+        // statement-head scan. a value parameter in the same position is the sibling:
+        // `fill<N>($a)` inside `function f<const usize N>` - parse_type would refuse it
+        const AST::TypeParamDecl *value_param = nullptr;
+        if (cursor.is_type(Token::Type::t_identifier)) {
+            const AST::TypeParamDecl *named = payload.context.find_type_param(cursor.current().value());
+            if (named != nullptr && named->is_value_param()) {
+                value_param = named;
+            }
+        }
+
+        if (!cursor.is_done() && AST::token_is_integer_literal(cursor.current().type())) {
+            const TokenReference token = cursor.current();
+            cursor.skip();
+
+            const std::optional<uint64_t> bits = AST::integer_token_bits(token);
+            if (!bits.has_value()) {
+                if (!speculative) {
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(token),
+                        "This integer is not a valid const generic argument");
+                }
+                return false;
+            }
+
+            AST::TypeNode &node = payload.context.emplace_node<AST::TypeNode>(
+                AST::ValueType::make_const_value(
+                    AST::ValueTypePrimitive::t_int32, *bits),
+                token);
+            type_args.push_back(&node);
+        } else if (value_param != nullptr) {
+            AST::TypeNode &node = payload.context.emplace_node<AST::TypeNode>(
+                AST::ValueType::make_type_param(value_param),
+                cursor.current());
+            type_args.push_back(&node);
+            cursor.skip();
+        } else if (cursor.is_done() || !Parser::can_parse_type(payload)) {
             if (!speculative) {
                 payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
                     payload.context.code_ref(at_token), Token::Type::t_close_angle, Token::Type::t_unknown);
             }
 
             return false;
-        }
+        } else {
+            auto *type_node = Parser::parse_type(payload);
+            if (type_node == nullptr) {
+                // parse_type has already reported whatever it could not read
+                return false;
+            }
 
-        auto *type_node = Parser::parse_type(payload);
-        if (type_node == nullptr) {
-            // parse_type has already reported whatever it could not read
-            return false;
+            type_args.push_back(type_node);
         }
-
-        type_args.push_back(type_node);
 
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();

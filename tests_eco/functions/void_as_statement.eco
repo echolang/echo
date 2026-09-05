@@ -1,0 +1,8 @@
+// a void call as a statement is the ordinary way to call one
+
+function nothing() : void
+{
+}
+
+nothing();
+echo 1;

@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] ConflictingAccess  conflicting_access_inline_array.eco:6:1
+
+  This names the same storage as another argument of the same call. '$a' takes 'inout' access, which is exclusive, so nothing else may reach that storage while the call runs - and '$b' takes 'inout' access to it too
+
+  5 | int32[4] $xs;
+  6 | poke(&$xs[0], &$xs[0]);
+    : ^^^^
+  7 | 
+
+  help: a value cannot be both written and read by one call - read the source into a separate value first
+
+1 error, nothing was compiled.

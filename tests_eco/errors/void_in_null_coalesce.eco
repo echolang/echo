@@ -1,0 +1,8 @@
+// a settled void call as a `??` fallback is a consumed value. die() is exempt; nothing() is not
+
+function nothing() : void
+{
+}
+
+int32? $n = 1;
+int32 $x = $n ?? nothing();

@@ -1,0 +1,9 @@
+fixed_array<string, 2> $words = ['a', 'b'];
+echo $words[0];
+echo $words[1];
+
+fixed_array<string, 2> $copy = $words;
+$copy[0] = 'c';
+
+echo $words[0];
+echo $copy[0];

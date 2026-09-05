@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] const_generic_non_integer.eco:1:18
+
+  A value parameter's type must be an integer, not 'float64'
+
+  1 | function f<const float64 N>() : void
+    :                  ^^^^^^^
+  2 | {
+
+1 error, nothing was compiled.

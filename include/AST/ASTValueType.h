@@ -90,7 +90,18 @@ namespace AST
         // set the way `numeric` is. stored as a ValueType so it sits in TypeParamDecl::constraint
         // with every other atom and `constraint_admits` stays the one owner of "is this argument
         // allowed". `is_class()` is false: that question is "is this a class", and this atom is not
-        t_kind_class
+        t_kind_class,
+        // **a compile-time integer used as a generic argument**, the bound `10` in
+        // `fixed_array<int32, 10>`. not a type a program holds: it sits in `instantiation_args`
+        // so the intern cache, TypeSubstitution and the mangler keep talking in ValueType. the
+        // primitive is the value's type (`usize`); `_const_bits` is the payload, stored the way
+        // ConstFoldResult stores integers
+        t_const_value,
+        // **`T[N]`**, an inline sequence of N elements. structural like a pointer: identity is
+        // (element, length), there is no declaration, LLVM already has `[N x T]`. the element
+        // lives in `_pointee`; the length is a ValueType that is either a value parameter or a
+        // `t_const_value`
+        t_inline_array
     };
 
     // **the two properties of a tagged optional, by index.** `ComplexType::is_optional` says a layout is
@@ -285,6 +296,36 @@ namespace AST
             return ValueType(ValueTypeKind::t_generic, param);
         }
 
+        // a bound const-generic argument. `type` is what `N` was declared as, `bits` is the
+        // integer stored the way ConstFoldResult stores one: sign-extended or zero-extended
+        // to 64 bits according to that primitive
+        static ValueType make_const_value(ValueTypePrimitive type, uint64_t bits) {
+            assert(
+                type == ValueTypePrimitive::t_int8 ||
+                type == ValueTypePrimitive::t_int16 ||
+                type == ValueTypePrimitive::t_int32 ||
+                type == ValueTypePrimitive::t_int64 ||
+                type == ValueTypePrimitive::t_uint8 ||
+                type == ValueTypePrimitive::t_uint16 ||
+                type == ValueTypePrimitive::t_uint32 ||
+                type == ValueTypePrimitive::t_uint64 ||
+                type == ValueTypePrimitive::t_usize ||
+                type == ValueTypePrimitive::t_isize
+            );
+            ValueType value(ValueTypeKind::t_const_value, type);
+            value._const_bits = bits;
+            return value;
+        }
+
+        // `T[N]`. `length` is a value parameter or a t_const_value; substitution walks it
+        // the way it walks a pointer's pointee, so `T[N]` with N := 4 becomes `int32[4]`
+        static ValueType make_inline_array(ValueType element, ValueType length) {
+            ValueType type(ValueTypeKind::t_inline_array, ValueTypePrimitive::t_void);
+            type._pointee = std::make_shared<const ValueType>(std::move(element));
+            type._length = std::make_shared<const ValueType>(std::move(length));
+            return type;
+        }
+
         // const applies to the level it is attached to, so make_const(make_pointer(t)) is
         // `const ptr<T>` while make_pointer(make_const(t)) is `ptr<const T>`
         static ValueType make_const(ValueType type) {
@@ -420,6 +461,44 @@ namespace AST
 
         bool is_weak() const {
             return kind == ValueTypeKind::t_weak;
+        }
+
+        bool is_const_value() const {
+            return kind == ValueTypeKind::t_const_value;
+        }
+
+        bool is_inline_array() const {
+            return kind == ValueTypeKind::t_inline_array;
+        }
+
+        uint64_t const_value_bits() const {
+            assert(is_const_value());
+            return _const_bits;
+        }
+
+        ValueTypePrimitive const_value_primitive() const {
+            assert(is_const_value());
+            return primitive;
+        }
+
+        const ValueType &array_element() const {
+            assert(is_inline_array() && _pointee);
+            return *_pointee;
+        }
+
+        const ValueType &array_length() const {
+            assert(is_inline_array() && _length);
+            return *_length;
+        }
+
+        // bound length of a `T[N]`, or nullopt while `N` is still a parameter. the one
+        // question layout, GEP and literal expansion all ask
+        std::optional<uint64_t> bound_array_length() const {
+            if (!is_inline_array() || _length == nullptr || !_length->is_const_value()) {
+                return std::nullopt;
+            }
+
+            return _length->const_value_bits();
         }
 
         // **is this level one machine address, whose null value is already "absent"?**
@@ -705,6 +784,15 @@ namespace AST
                 // no extra state: every `class` atom is the same predicate
                 case ValueTypeKind::t_kind_class:
                     return true;
+
+                // identity is the value: same primitive (what N was declared as) and the same
+                // bits, so `fixed_array<int32, 10>` and `<int32, 11>` intern apart
+                case ValueTypeKind::t_const_value:
+                    return primitive == other.primitive && _const_bits == other._const_bits;
+
+                // structural, like a pointer: same element and same length, all the way down
+                case ValueTypeKind::t_inline_array:
+                    return *_pointee == *other._pointee && *_length == *other._length;
             }
 
             return false;
@@ -746,6 +834,13 @@ namespace AST
         // compared, for the same reason _pointee is. the *signature* is the same question; the
         // calling shape is the kind
         std::shared_ptr<const CallableSignature> _signature = nullptr;
+
+        // t_const_value payload. unused for every other kind
+        uint64_t _const_bits = 0;
+
+        // t_inline_array length: a value parameter or a t_const_value. shared like _pointee,
+        // for its reason - the length has no identity of its own
+        std::shared_ptr<const ValueType> _length = nullptr;
 
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
         ValueType(ValueTypeKind kind, ComplexType *complex_type) :
@@ -1400,6 +1495,14 @@ namespace std
                 for (const auto &param : vt.signature().parameter_types) {
                     h ^= (*this)(param) + 0x9e3779b9 + (h << 6) + (h >> 2);
                 }
+            }
+            else if (vt.is_const_value()) {
+                h ^= static_cast<size_t>(vt.const_value_primitive());
+                h ^= std::hash<uint64_t>{}(vt.const_value_bits()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            }
+            else if (vt.is_inline_array()) {
+                h ^= (*this)(vt.array_element()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                h ^= (*this)(vt.array_length()) + 0x9e3779b9 + (h << 6) + (h >> 2);
             }
             return h;
         }

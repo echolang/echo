@@ -23,6 +23,7 @@ namespace AST
     class PointerValueNode;
     class MoveExprNode;
     class ConstRefExprNode;
+    class GenericValueExprNode;
     class ClassAllocExprNode;
     class RetainExprNode;
     class GuardNode;
@@ -84,6 +85,7 @@ namespace AST
         virtual void visit_pointer_value(PointerValueNode &node) = 0;
         virtual void visit_move_expr(MoveExprNode &node) = 0;
         virtual void visit_const_ref(ConstRefExprNode &node) = 0;
+        virtual void visit_generic_value(GenericValueExprNode &node) = 0;
         virtual void visit_class_alloc_expr(ClassAllocExprNode &node) = 0;
         virtual void visit_retain_expr(RetainExprNode &node) = 0;
         virtual void visit_strong_expr(StrongExprNode &node) = 0;

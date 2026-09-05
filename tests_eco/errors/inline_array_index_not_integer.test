@@ -1,0 +1,23 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] inline_array_index_not_integer.eco:2:10
+
+  'int32[4]' is indexed by an integer, not a 'bool'
+
+  1 | int32[4] $xs;
+  2 | echo $xs[true];
+    :          ^^^^
+  3 | echo $xs[1.5];
+
+[error] inline_array_index_not_integer.eco:3:10
+
+  'int32[4]' is indexed by an integer, not a 'float64'
+
+  2 | echo $xs[true];
+  3 | echo $xs[1.5];
+    :          ^^^
+  4 | 
+
+2 errors, nothing was compiled.

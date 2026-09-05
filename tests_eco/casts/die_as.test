@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: gone
+  at die_as.eco:5

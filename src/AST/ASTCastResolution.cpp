@@ -31,7 +31,9 @@ namespace AST
         const CastLookup lookup = cast_plan_for(*node.expr, node.cast_to);
 
         if (lookup.result == CastLookup::Result::t_pending) {
-            if (_finalizing) {
+            // the operand is often an unresolved call, and that call already has a diagnostic of
+            // its own. two reports of one failure is worse than one; keep the call's
+            if (_finalizing && !_collector.has_critical_issues()) {
                 refuse(
                     node,
                     location_of_expression(&node),

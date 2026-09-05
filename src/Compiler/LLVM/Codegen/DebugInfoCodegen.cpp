@@ -20,6 +20,7 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <optional>
 
 namespace Compiler::LLVM
 {
@@ -858,6 +859,34 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
     // this one already gets right. tools/echo_lldb.py is where that presentation belongs
     if (type.is_struct() || type.is_enum()) {
         return struct_type_of(type, cmp_unit);
+    }
+
+    if (type.is_inline_array()) {
+        const std::optional<uint64_t> length = type.bound_array_length();
+
+        if (!length.has_value()) {
+            return nullptr;
+        }
+
+        llvm::DIType *element = type_of(type.array_element(), cmp_unit);
+
+        if (element == nullptr) {
+            return nullptr;
+        }
+
+        llvm::Type *lowered = _ctx.types->get_llvm_type(type, cmp_unit);
+        llvm::DINodeArray subscripts = unit->builder->getOrCreateArray({
+            unit->builder->getOrCreateSubrange(0, static_cast<int64_t>(*length))
+        });
+
+        llvm::DIType *result = unit->builder->createArrayType(
+            _ctx.layout().getTypeSizeInBits(lowered),
+            _ctx.layout().getABITypeAlign(lowered).value() * 8,
+            element,
+            subscripts);
+
+        unit->types[type] = result;
+        return result;
     }
 
     // a generic parameter that reached codegen unbound, or a kind added later. not inspectable, and

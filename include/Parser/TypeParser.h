@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTContext.h"
+#include "AST/ASTTypeParam.h"
 #include "AST/TypeNode.h"
 #include "Parser/ParserPayload.h"
 
@@ -85,6 +86,22 @@ namespace Parser
         TokenReference name_token;
         std::vector<AST::ValueType> constraint;
         std::string constraint_spelling;
+        AST::TypeParamKind param_kind = AST::TypeParamKind::t_type;
+        AST::ValueType value_type;
+
+        ParsedTypeParam(
+            TokenReference name_token,
+            std::vector<AST::ValueType> constraint = {},
+            std::string constraint_spelling = "",
+            AST::TypeParamKind param_kind = AST::TypeParamKind::t_type,
+            AST::ValueType value_type = {}
+        ) :
+            name_token(name_token),
+            constraint(std::move(constraint)),
+            constraint_spelling(std::move(constraint_spelling)),
+            param_kind(param_kind),
+            value_type(std::move(value_type))
+        {}
 
         const std::string &name() const {
             return name_token.value();

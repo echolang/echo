@@ -9,6 +9,8 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTSymbol.h"
 #include "AST/ASTTypeParam.h"
+#include "AST/ASTIssue.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
 
@@ -91,8 +93,10 @@ bool Parser::can_parse_type(Parser::Payload &payload)
 // silently `unknown` rather than a diagnostic
 //
 // the grammar it walks mirrors parse_value_type:
-//   type      := 'const'? ( 'ptr' '<' type '>' | 'weak' '<' type '>' | qualified ) nullable? ref?
-//   qualified := ( identifier '::' )* identifier ( '<' type ( ',' type )* '>' )?
+//   type      := 'const'? ( 'ptr' '<' arg '>' | 'weak' '<' arg '>' | qualified ) array* nullable? ref?
+//   qualified := ( identifier '::' )* identifier ( '<' arg ( ',' arg )* '>' )?
+//   arg       := integer | type
+//   array     := '[' ( integer | identifier ) ']'
 //   nullable  := '?'
 //   ref       := '&'
 // it consumes its closing angle brackets through the cursor's own '>>' split rather than counting
@@ -118,6 +122,13 @@ static bool skip_nullable_suffix(Parser::Cursor &cursor)
     }
 
     return seen;
+}
+
+static bool cursor_is_integer_literal(Parser::Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_integer_literal)
+        || cursor.is_type(Token::Type::t_hex_literal)
+        || cursor.is_type(Token::Type::t_binary_literal);
 }
 
 static bool skip_type_shape(Parser::Cursor &cursor);
@@ -217,12 +228,39 @@ static bool skip_type_shape(Parser::Cursor &cursor)
         if (cursor.is_type(Token::Type::t_open_angle)) {
             cursor.skip();
 
-            if (!skip_type_list(cursor, [](Parser::Cursor &c) { return c.is_generic_close(); })) {
-                return false;
+            // a generic argument is a type *or* a const integer, so `sized<4>` / `sized<0x10>`
+            // scans as a type here the same way it parses. callable parameter lists stay types-only
+            while (!cursor.is_generic_close()) {
+                if (cursor_is_integer_literal(cursor)) {
+                    cursor.skip();
+                } else if (cursor.is_done() || !skip_type_shape(cursor)) {
+                    return false;
+                }
+
+                if (cursor.is_type(Token::Type::t_comma)) {
+                    cursor.skip();
+                } else if (!cursor.is_generic_close()) {
+                    return false;
+                }
             }
 
             cursor.consume_generic_close();
         }
+    }
+
+    // `T[N]` postfix, before `?` and `&`, so `int32[4]&` is a borrow of four ints
+    while (cursor.is_type(Token::Type::t_open_bracket)) {
+        cursor.skip();
+
+        if (!cursor_is_integer_literal(cursor) && !cursor.is_type(Token::Type::t_identifier)) {
+            return false;
+        }
+        cursor.skip();
+
+        if (!cursor.is_type(Token::Type::t_close_bracket)) {
+            return false;
+        }
+        cursor.skip();
     }
 
     // the nullable suffix, then the borrow suffix, in that order and in either of the two spellings the
@@ -544,6 +582,170 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
     }
 }
 
+// an integer token of any radix the lexer produces. `t_absent` leaves the cursor;
+// `t_invalid` has consumed the token and the caller reports
+enum class IntegerConstRead
+{
+    t_absent,
+    t_ok,
+    t_invalid,
+};
+
+static IntegerConstRead take_integer_const(
+    Parser::Payload &payload,
+    uint64_t &bits
+)
+{
+    auto &cursor = payload.cursor;
+    if (!cursor_is_integer_literal(cursor)) {
+        return IntegerConstRead::t_absent;
+    }
+
+    const TokenReference token = cursor.current();
+    cursor.skip();
+
+    const std::optional<uint64_t> parsed = AST::integer_token_bits(token);
+    if (!parsed.has_value()) {
+        return IntegerConstRead::t_invalid;
+    }
+
+    bits = *parsed;
+    return IntegerConstRead::t_ok;
+}
+
+// an in-scope value parameter at the cursor. does not consume a type-parameter name
+static const AST::TypeParamDecl *take_value_param(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+    if (!cursor.is_type(Token::Type::t_identifier)) {
+        return nullptr;
+    }
+
+    const AST::TypeParamDecl *named = payload.context.find_type_param(cursor.current().value());
+    if (named == nullptr || !named->is_value_param()) {
+        return nullptr;
+    }
+
+    cursor.skip();
+    return named;
+}
+
+// a const-generic argument: an integer literal (untyped - intern specialises it onto the
+// parameter), or a value parameter in scope. reports and answers unknown when the slot needed
+// a value and did not get one
+static AST::ValueType parse_const_generic_arg(
+    Parser::Payload &payload,
+    const AST::TypeParamDecl *param,
+    const TokenReference &at
+)
+{
+    auto &cursor = payload.cursor;
+    const bool was_integer = cursor_is_integer_literal(cursor);
+    const TokenReference integer_token = was_integer ? cursor.current() : at;
+    uint64_t bits = 0;
+
+    switch (take_integer_const(payload, bits)) {
+    case IntegerConstRead::t_ok:
+        // overflow is asked here because this is the token; intern/allows is the owner of
+        // whether the bits *fit*, and of which primitive they become
+        if (param != nullptr && !AST::const_generic_bits_fit(param->value_type, bits)) {
+            payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+                payload.context.code_ref(integer_token),
+                AST::const_generic_overflow_sentence(param->value_type, bits));
+            return AST::ValueType::make_unknown();
+        }
+
+        return AST::ValueType::make_const_value(AST::ValueTypePrimitive::t_int32, bits);
+
+    case IntegerConstRead::t_invalid:
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(integer_token),
+            "This integer is not a valid const generic argument");
+        return AST::ValueType::make_unknown();
+
+    case IntegerConstRead::t_absent:
+        break;
+    }
+
+    if (const AST::TypeParamDecl *named = take_value_param(payload)) {
+        return AST::ValueType::make_type_param(named);
+    }
+
+    payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.context.code_ref(at),
+        fmt::format(
+            "Type parameter '{}' is a value of type '{}', not a type",
+            param != nullptr ? param->name : "<value>",
+            param != nullptr ? param->value_type.get_type_desciption() : "usize"));
+
+    if (!cursor.is_done() && !cursor.is_generic_close() && !cursor.is_type(Token::Type::t_comma)) {
+        cursor.skip();
+    }
+
+    return AST::ValueType::make_unknown();
+}
+
+static AST::ValueType parse_array_suffix(Parser::Payload &payload, AST::ValueType type)
+{
+    auto &cursor = payload.cursor;
+
+    while (cursor.is_type(Token::Type::t_open_bracket)) {
+        const TokenReference at = cursor.current();
+        cursor.skip();
+
+        AST::ValueType length = AST::ValueType::make_unknown();
+        const bool was_integer = cursor_is_integer_literal(cursor);
+        const TokenReference integer_token = was_integer ? cursor.current() : at;
+        uint64_t bits = 0;
+
+        switch (take_integer_const(payload, bits)) {
+        case IntegerConstRead::t_ok:
+            length = AST::ValueType::make_const_value(AST::ValueTypePrimitive::t_usize, bits);
+            break;
+
+        case IntegerConstRead::t_invalid:
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(integer_token),
+                "This integer is not a valid array length");
+            return AST::ValueType::make_unknown();
+
+        case IntegerConstRead::t_absent:
+            if (const AST::TypeParamDecl *named = take_value_param(payload)) {
+                length = AST::ValueType::make_type_param(named);
+            } else if (cursor.is_type(Token::Type::t_identifier)) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(cursor.current()),
+                    "An inline array's length must be a compile-time integer or a value parameter");
+                cursor.skip();
+                return AST::ValueType::make_unknown();
+            } else {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(at),
+                    "Expected an array length inside the brackets");
+                return AST::ValueType::make_unknown();
+            }
+            break;
+        }
+
+        if (!cursor.is_type(Token::Type::t_close_bracket)) {
+            payload.collect_unexpected_token(Token::Type::t_close_bracket);
+            return AST::ValueType::make_unknown();
+        }
+        cursor.skip();
+
+        if (type.is_void()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(at),
+                "void has no size, so it cannot be an array element");
+            return AST::ValueType::make_unknown();
+        }
+
+        type = AST::ValueType::make_inline_array(std::move(type), std::move(length));
+    }
+
+    return type;
+}
+
 // parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
 // applied to `template_decl`, and returns the interned application ValueType. Arguments are
 // themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type
@@ -566,11 +768,30 @@ static AST::ValueType parse_generic_application(
             return AST::ValueType::make_unknown();
         }
 
-        auto arg_type = parse_value_type(payload, names);
-        if (!arg_type.has_value()) {
-            return AST::ValueType::make_unknown();
+        const size_t index = args.size();
+        const AST::TypeParamDecl *slot =
+            (template_ct->is_generic() && index < template_ct->type_parameters.size())
+                ? template_ct->type_parameters[index]
+                : nullptr;
+
+        if (slot != nullptr && slot->is_value_param()) {
+            args.push_back(parse_const_generic_arg(payload, slot, name_token));
+        } else if (cursor_is_integer_literal(cursor)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                fmt::format(
+                    "Type parameter '{}' of '{}' is a type, not a value",
+                    slot != nullptr ? slot->name : std::to_string(index),
+                    template_ct->name.value_or(name_token.value())));
+            cursor.skip();
+            args.push_back(AST::ValueType::make_unknown());
+        } else {
+            auto arg_type = parse_value_type(payload, names);
+            if (!arg_type.has_value()) {
+                return AST::ValueType::make_unknown();
+            }
+            args.push_back(arg_type.value());
         }
-        args.push_back(arg_type.value());
 
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
@@ -581,6 +802,13 @@ static AST::ValueType parse_generic_application(
     }
 
     cursor.consume_generic_close(); // consume '>' (splitting a '>>' if present)
+
+    // a value argument that overflowed (or failed to parse) already reported. intern nothing
+    for (const auto &arg : args) {
+        if (arg.is_unknown()) {
+            return AST::ValueType::make_unknown();
+        }
+    }
 
     if (!template_ct->is_generic() || template_ct->type_parameters.size() != args.size()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -596,12 +824,21 @@ static AST::ValueType parse_generic_application(
     if (const auto violation = AST::first_constraint_violation(template_ct->type_parameters, args)) {
         const auto *param = template_ct->type_parameters[*violation];
 
-        payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
-            payload.context.code_ref(name_token),
-            "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
-            "' is constrained to '" + param->constraint_spelling +
-            "' but was given '" + args[*violation].get_type_desciption() + "'"
-        );
+        if (param->is_value_param()
+            && args[*violation].is_const_value()
+            && !AST::const_generic_bits_fit(param->value_type, args[*violation].const_value_bits())) {
+            payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+                payload.context.code_ref(name_token),
+                AST::const_generic_overflow_sentence(
+                    param->value_type, args[*violation].const_value_bits()));
+        } else {
+            payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
+                payload.context.code_ref(name_token),
+                "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
+                "' is constrained to '" + param->constraint_spelling +
+                "' but was given '" + args[*violation].get_type_desciption() + "'"
+            );
+        }
         return AST::ValueType::make_unknown();
     }
 
@@ -776,6 +1013,27 @@ bool Parser::parse_constraint_atoms(Parser::Payload &payload, ParsedTypeParam &p
     return true;
 }
 
+static bool record_type_param(
+    Parser::Payload &payload,
+    std::vector<Parser::ParsedTypeParam> &type_parameters,
+    Parser::ParsedTypeParam param
+)
+{
+    for (const auto &seen : type_parameters) {
+        if (seen.name() == param.name()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(param.name_token),
+                fmt::format("Type parameter '{}' is already declared in this list", param.name())
+            );
+            payload.cursor.try_skip_to_next_statement();
+            return false;
+        }
+    }
+
+    type_parameters.push_back(std::move(param));
+    return true;
+}
+
 std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -794,35 +1052,58 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
             return type_parameters;
         }
 
-        if (!cursor.is_type(Token::Type::t_identifier)) {
-            payload.collect_unexpected_token(Token::Type::t_identifier);
-            cursor.try_skip_to_next_statement();
-            return type_parameters;
-        }
+        if (cursor.is_type(Token::Type::t_const)) {
+            cursor.skip();
 
-        ParsedTypeParam param { cursor.current(), {}, "" };
+            const TokenReference type_token = cursor.current();
+            auto value_type = parse_value_type(payload, nullptr);
+            if (!value_type.has_value()) {
+                return type_parameters;
+            }
 
-        // a repeated name would silently alias, since name resolution takes the first match and
-        // every later same-named parameter becomes unreachable
-        for (const auto &seen : type_parameters) {
-            if (seen.name() == param.name()) {
+            if (!value_type->is_integer_type()) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(param.name_token),
-                    fmt::format("Type parameter '{}' is already declared in this list", param.name())
-                );
+                    payload.context.code_ref(type_token),
+                    fmt::format(
+                        "A value parameter's type must be an integer, not '{}'",
+                        value_type->get_type_desciption()));
+                if (cursor.is_type(Token::Type::t_identifier)) {
+                    cursor.skip();
+                }
+                continue;
+            }
+
+            if (!cursor.is_type(Token::Type::t_identifier)) {
+                payload.collect_unexpected_token(Token::Type::t_identifier);
                 cursor.try_skip_to_next_statement();
                 return type_parameters;
             }
+
+            ParsedTypeParam param(
+                cursor.current(), {}, "", AST::TypeParamKind::t_value, *value_type);
+            cursor.skip();
+
+            if (!record_type_param(payload, type_parameters, std::move(param))) {
+                return type_parameters;
+            }
+        } else {
+            if (!cursor.is_type(Token::Type::t_identifier)) {
+                payload.collect_unexpected_token(Token::Type::t_identifier);
+                cursor.try_skip_to_next_statement();
+                return type_parameters;
+            }
+
+            ParsedTypeParam param { cursor.current(), {}, "" };
+            cursor.skip();
+
+            if (!parse_constraint_atoms(payload, param)) {
+                return type_parameters;
+            }
+
+            if (!record_type_param(payload, type_parameters, std::move(param))) {
+                return type_parameters;
+            }
         }
-
-        cursor.skip();
-
-        // optional constraint: `: atom (| atom)*`
-        if (!parse_constraint_atoms(payload, param)) {
-            return type_parameters;
-        }
-
-        type_parameters.push_back(std::move(param));
 
         // comma separator or closing angle
         //
@@ -874,6 +1155,8 @@ static std::vector<AST::TypeParamDecl *> declare_params(
         // the types a constraint atom names were resolvable
         decl->constraint = parsed[i].constraint;
         decl->constraint_spelling = parsed[i].constraint_spelling;
+        decl->param_kind = parsed[i].param_kind;
+        decl->value_type = parsed[i].value_type;
         result.push_back(decl);
     }
 
@@ -950,6 +1233,7 @@ static AST::ValueType parse_nullable_suffix(Parser::Payload &payload, AST::Value
 
 static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type)
 {
+    type = parse_array_suffix(payload, std::move(type));
     type = parse_nullable_suffix(payload, type);
 
     if (!payload.cursor.is_type(Token::Type::t_ref) && !payload.cursor.is_type(Token::Type::t_and)) {
@@ -1175,7 +1459,17 @@ static std::optional<AST::ValueType> parse_value_type(
         const AST::TypeParamDecl *type_param = is_qualified ? nullptr : payload.context.find_type_param(token.value());
 
         if (type_param) {
-            primitive_type = AST::ValueType::make_type_param(type_param);
+            if (type_param->is_value_param()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(token),
+                    fmt::format(
+                        "Type parameter '{}' is a value of type '{}', not a type",
+                        type_param->name,
+                        type_param->value_type.get_type_desciption()));
+                primitive_type = AST::ValueType::make_unknown();
+            } else {
+                primitive_type = AST::ValueType::make_type_param(type_param);
+            }
         } else {
             // check for user-defined types (structs/classes). an unqualified name is searched from
             // the enclosing namespace *outward*, the way an unqualified call already resolves; a

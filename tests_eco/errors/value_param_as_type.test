@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] value_param_as_type.eco:3:5
+
+  Type parameter 'N' is a value of type 'usize', not a type
+
+  2 | {
+  3 |     N $x;
+    :     ^
+  4 | }
+
+1 error, nothing was compiled.

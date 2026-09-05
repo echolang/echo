@@ -11,6 +11,7 @@
 #include "AST/ConstExprNode.h"
 #include "AST/ConstIfNode.h"
 #include "AST/ConstRefExprNode.h"
+#include "AST/GenericValueExprNode.h"
 #include "AST/ExprNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -84,6 +85,11 @@ namespace
         // the invariant enforces itself if that order ever moves - this walk answers a body exactly once,
         // ever, and an early yes cannot be revisited
         void visit_const_ref(ConstRefExprNode &) override
+        {
+            pending = true;
+        }
+
+        void visit_generic_value(GenericValueExprNode &) override
         {
             pending = true;
         }

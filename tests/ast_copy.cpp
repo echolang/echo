@@ -126,6 +126,29 @@ TEST_CASE("classify_copy answers a value that owns nothing with a byte copy", "[
     REQUIRE(kind_of(m, "HoldsPointer") == CopyKind::t_bytes);
 }
 
+TEST_CASE("classify_copy answers an inline array from its element", "[copy]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(k_types);
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    const ValueType four = ValueType::make_const_value(ValueTypePrimitive::t_usize, 4);
+
+    // T[N] is not a layout: it has no constructor slot. the element's own answer is repeated N
+    // times, which is CopyKind::t_elements when that answer is not bytes
+    REQUIRE(classify_copy(ValueType::make_inline_array(
+        EchoTests::prim(ValueTypePrimitive::t_int32), four)) == CopyKind::t_bytes);
+
+    REQUIRE(classify_copy(ValueType::make_inline_array(
+        type_named(m, "Handle")->value_type(), four)) == CopyKind::t_elements);
+
+    REQUIRE(classify_copy(ValueType::make_inline_array(
+        type_named(m, "HoldsClass")->value_type(), four)) == CopyKind::t_elements);
+
+    REQUIRE(classify_copy(ValueType::make_inline_array(
+        type_named(m, "OwnsRaw")->value_type(), four)) == CopyKind::t_none);
+}
+
 TEST_CASE("classify_copy prefers the constructor its author wrote", "[copy]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(k_types);

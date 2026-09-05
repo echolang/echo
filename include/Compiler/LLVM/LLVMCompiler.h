@@ -111,6 +111,7 @@ public:
     void visit_pointer_value(AST::PointerValueNode &node);
     void visit_move_expr(AST::MoveExprNode &node);
     void visit_const_ref(AST::ConstRefExprNode &node);
+    void visit_generic_value(AST::GenericValueExprNode &node);
     void visit_class_alloc_expr(AST::ClassAllocExprNode &node);
     void visit_retain_expr(AST::RetainExprNode &node);
     void visit_strong_expr(AST::StrongExprNode &node);

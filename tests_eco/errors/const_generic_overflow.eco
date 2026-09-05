@@ -1,0 +1,5 @@
+struct tiny<const uint8 N>
+{
+}
+
+tiny<300> $t;

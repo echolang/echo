@@ -1,0 +1,21 @@
+fixed_array<int32, 4> $quad = [1, 2, 3, 4];
+
+echo $quad->count();
+echo $quad[0];
+echo $quad[3];
+
+$quad[0] = 9;
+echo $quad[0];
+
+fixed_array<int32, 4> $copy = $quad;
+$copy[1] = 8;
+echo $quad[1];
+echo $copy[1];
+
+foreach ($quad as $n) {
+    echo $n;
+}
+
+slice<int32> $window = $quad->sub();
+echo $window->count();
+echo $window[0];

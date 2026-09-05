@@ -3,10 +3,12 @@
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/TemporaryBindExprNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/LiteralValueNode.h"
 
+#include <fmt/core.h>
 #include <map>
 
 // **`!` answers bool whatever it was applied to, and `-` answers its operand.** the two are not one
@@ -131,6 +133,76 @@ AST::ValueType AST::FunctionCallExprNode::result_type() const
     }
 
     return decl->get_return_type();
+}
+
+bool AST::call_returns_void(const FunctionCallExprNode &call)
+{
+    if (is_print_call(call)) {
+        return true;
+    }
+
+    return call.decl != nullptr && call.decl->get_return_type().is_void();
+}
+
+AST::ExprNode *AST::produced_value_of(ExprNode *expr)
+{
+    expr = strip_implicit_casts(expr);
+
+    while (expr != nullptr) {
+        if (expr->get_node_type() == NodeType::n_expr_temp_bind) {
+            expr = strip_implicit_casts(static_cast<TemporaryBindExprNode *>(expr)->body);
+            continue;
+        }
+
+        // `$a?->save()`: the continuation is the original expression. a void method as a
+        // statement is legal; as a value it is not. peel so both questions name the call
+        if (expr->get_node_type() == NodeType::n_expr_optional_chain) {
+            expr = strip_implicit_casts(static_cast<OptionalChainExprNode *>(expr)->continuation);
+            continue;
+        }
+
+        break;
+    }
+
+    return expr;
+}
+
+const AST::ExprNode *AST::produced_value_of(const ExprNode *expr)
+{
+    return produced_value_of(const_cast<ExprNode *>(expr));
+}
+
+bool AST::expression_produces_no_value(const ExprNode &expr)
+{
+    const ExprNode *source = produced_value_of(&expr);
+
+    if (source == nullptr || expression_never_returns(*source)) {
+        return false;
+    }
+
+    if (source->get_node_type() == NodeType::n_expr_call) {
+        return call_returns_void(static_cast<const FunctionCallExprNode &>(*source));
+    }
+
+    if (source->get_node_type() == NodeType::n_expr_indirect_call) {
+        const auto &call = static_cast<const IndirectCallExprNode &>(*source);
+        const ValueType type = call.callee_type();
+        return type.has_signature() && type.signature().return_type.is_void();
+    }
+
+    return false;
+}
+
+std::string AST::no_value_reason(const ExprNode &expr)
+{
+    const ExprNode *source = produced_value_of(&expr);
+
+    if (source != nullptr && source->get_node_type() == NodeType::n_expr_call) {
+        const auto &call = static_cast<const FunctionCallExprNode &>(*source);
+        return fmt::format("'{}()' produces no value", call.token_function_name.value());
+    }
+
+    return "this call produces no value";
 }
 
 const std::string AST::FunctionCallExprNode::decorated_func_name() const
@@ -397,6 +469,14 @@ AST::ValueType AST::IndexExprNode::result_type() const
     }
 
     const ValueType indexed = indexed_base_type();
+
+    if (indexed.is_inline_array()) {
+        ValueType element = indexed.array_element();
+        if (indexed.is_const()) {
+            element = ValueType::make_const(element);
+        }
+        return element;
+    }
 
     // **only a pointer answers for its own element.** anything else is a container whose contract
     // AST::OperatorRewriter has not attached yet, and peeling the base there would hand back the

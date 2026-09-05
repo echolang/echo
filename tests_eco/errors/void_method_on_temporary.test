@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_method_on_temporary.eco:19:27
+
+  'bump()' produces no value
+
+  18 | 
+  19 | int32 $x = Cell(1)->id()->bump();
+     :                           ^^^^
+  20 | 
+
+1 error, nothing was compiled.

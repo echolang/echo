@@ -1,0 +1,4 @@
+fixed_array<string, 2> $w = fixed_array<string, 2>();
+echo $w->count();
+$w[0] = 'a';
+echo $w[0];

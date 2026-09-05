@@ -1,13 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] dprint_void.eco:10:1
+[error] dprint_void.eco:11:8
 
-  'dprint' has nothing to print - this expression produces no value
+  'nothing()' produces no value
 
-   9 | 
-  10 | dprint(nothing());
-     : ^^^^^^
-  11 | 
+  10 | 
+  11 | dprint(nothing());
+     :        ^^^^^^^
+  12 | 
 
 1 error, nothing was compiled.

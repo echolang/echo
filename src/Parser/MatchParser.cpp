@@ -174,16 +174,11 @@ AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload)
                         break;
                     }
 
-                    // **typed `unknown&` rather than left untyped**, and the pointer level is the
-                    // load-bearing half. what a binding holds is the case's payload and nothing has
-                    // said which case this is - but that it is a *borrow* of one is decided here, and
-                    // the parser needs to know it: a member call addresses its receiver unless the
-                    // receiver is already an address, and it decides that from the type. left untyped,
-                    // `$body->size()` addressed a borrow a second time and read `string&&`
-                    //
-                    // AST::MatchResolution replaces the pointee once the case is known
+                    // **typed `unknown&` rather than left untyped.** AST::untyped_borrow_type is the
+                    // plant ForeachParser uses; AST::MatchResolution replaces the pointee once the
+                    // case is known
                     auto &binding_type = payload.context.emplace_node<AST::TypeNode>(
-                        AST::ValueType::make_pointer(AST::ValueType::make_unknown(), false));
+                        AST::untyped_borrow_type());
 
                     bindings.push_back(
                         &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), &binding_type));

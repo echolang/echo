@@ -7,7 +7,10 @@
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTValueType.h"
 
+#include <functional>
+#include <map>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -332,10 +335,10 @@ namespace AST
         // `$__elemN` without a second counter. the default is what every other mint already prints
         VarDeclNode &make_temporary(ExprNode *init, const TokenReference &site, const char *prefix = "temp");
 
-        // binds the target's address to a local when the place reaches through a container element, so the
-        // teardown below and the store in gen_assign address it once between them. a no-op for every other
-        // place shape - a member path is a route the teardown can simply rebuild. the target has already
-        // been walked; this must not walk the bind
+        // binds the target's address to a local when the place reaches through a container element
+        // or a `T[N]` index, so the teardown below and the store in gen_assign address it once
+        // between them. a no-op for every other place shape - a member path is a route the teardown
+        // can simply rebuild. the target has already been walked; this must not walk the bind
         void bind_indexed_target(AssignNode &assign);
 
         // **answers the expression to use in place of `expr`**, which is `expr` itself for everything
@@ -488,6 +491,31 @@ namespace AST
         void emit_drop_of_place(
             ExprNode *place,
             const ValueType &type,
+            const TokenReference &at,
+            std::vector<NodeReference> &out);
+
+        // `$i = 0; while ($i < n) { body; $i = $i + 1 }` or the reverse counted form drops use.
+        // `fill` writes the per-element work into the loop body; the counter step is this
+        // helper's, so the two T[N] loops cannot drift
+        void emit_counted_loop(
+            uint64_t length,
+            bool reverse,
+            const TokenReference &at,
+            ScopeNode &into,
+            const std::function<void(VarDeclNode &index, ScopeNode &body)> &fill);
+
+        // copy or drop each element of a `T[N]` place. N is bound; the loop is ordinary Echo
+        // statements so the per-element copy and drop reuse the rest of this pass
+        void emit_inline_array_copies(
+            ExprNode *dst,
+            ExprNode *src,
+            const ValueType &array_type,
+            const TokenReference &at,
+            ScopeNode &into);
+
+        void emit_inline_array_drops(
+            ExprNode *place,
+            const ValueType &array_type,
             const TokenReference &at,
             std::vector<NodeReference> &out);
 
@@ -708,6 +736,11 @@ namespace AST
         // static does not build a second body for it
         std::map<std::pair<const ComplexType *, size_t>, StaticInit> _static_inits;
 
+        // the T[N] copy function ensure_inline_array_copy already wrote, so a second copy of the
+        // same array type does not build a second body. keyed on the mutable array type, which is
+        // also the return type of the function
+        std::unordered_map<ValueType, FunctionDeclNode *> _inline_array_copies;
+
         // builds the body: the type's own destructor first, then each owning property in reverse
         // declaration order, out of emit_destructor_call and emit_property_drops.
         //
@@ -843,6 +876,17 @@ namespace AST
         // than it is now, and would put a per-instantiation declaration into a name-keyed overload set
         // the parser owns. `$q = $p` is the spelling
         FunctionDeclNode *ensure_copy_constructor(const ValueType &type, const TokenReference &site);
+
+        // **the function that copies a `T[N]` whose element is not a byte copy.** T[N] has no
+        // ComplexType, so there is no constructor slot to fill - CopyKind::t_elements is that fact.
+        // the body is the same counted loop emit_inline_array_copies writes into a struct's copy
+        // constructor for an inline-array *field*; arriving at a T[N] *value* has to produce an
+        // expression, and a call is the shape every other non-byte copy already is.
+        //
+        // one function per interned T[N], `linkonce_odr`, so two modules that copy the same
+        // `string[2]` write identical bytes and LLVM can inline the loop at a site that cares.
+        // memoized on the mutable array type: a `const T[N]` source still produces a fresh T[N]
+        FunctionDeclNode *ensure_inline_array_copy(const ValueType &type, const TokenReference &site);
 
         // **there is no copy of this value, and this is what the author is told.** two wordings, and
         // which one applies is not a property of the type: a source that names no variable has no `mv`

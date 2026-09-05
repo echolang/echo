@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] index_pointer_not_integer.eco:2:11
+
+  'ptr<int32>' is indexed by an integer, not a 'string'
+
+  1 | ptr<int32> $p = mem::alloc<int32>(1);
+  2 | echo $p:$['x'];
+    :           ^^^
+  3 | 
+
+1 error, nothing was compiled.

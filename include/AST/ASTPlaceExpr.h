@@ -81,6 +81,9 @@ namespace AST
             // initializer before anything asks about storage, and whatever *that* is answers for it. one
             // that survives is a compiler defect, so the honest answer here is "not addressable"
             case NodeType::n_expr_const_ref:
+            // a const generic parameter as a value. it becomes a literal at instantiation, and
+            // the address of a compile-time integer is not a thing the program can be given
+            case NodeType::n_expr_generic_value:
             // transient for the same reason and answered the same way: a `const(...)` is replaced by the
             // literal it folded to before anything asks about storage, and *that* literal answers. the
             // question would be incoherent anyway - the address of a value the compiler worked out is not

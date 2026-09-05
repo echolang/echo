@@ -4,6 +4,7 @@
 #include "AST/FunctionDeclNode.h"
 
 #include <cassert>
+#include <fmt/core.h>
 
 bool AST::constraint_admits(const std::vector<ValueType> &constraint, const ValueType &type)
 {
@@ -46,8 +47,49 @@ bool AST::constraint_admits(const std::vector<ValueType> &constraint, const Valu
     return false;
 }
 
+bool AST::const_generic_bits_fit(const ValueType &dest, uint64_t bits)
+{
+    if (!dest.is_integer_type()) {
+        return false;
+    }
+
+    return bits <= get_integer_size(dest.get_primitive_type()).get_max_positive_value();
+}
+
+std::string AST::const_generic_overflow_sentence(const ValueType &dest, uint64_t bits)
+{
+    const IntegerSize size = get_integer_size(dest.get_primitive_type());
+    return fmt::format(
+        "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.",
+        bits,
+        get_primitive_name(dest.get_primitive_type()),
+        size.get_max_positive_value());
+}
+
 bool AST::TypeParamDecl::allows(const ValueType &type) const
 {
+    if (param_kind == TypeParamKind::t_value) {
+        if (type.is_const_value()) {
+            return ValueType(type.const_value_primitive()).is_integer_type()
+                && const_generic_bits_fit(value_type, type.const_value_bits());
+        }
+
+        if (type.is_type_param() && type.get_type_param()->is_value_param()) {
+            return type.get_type_param()->value_type.is_integer_type()
+                && value_type.is_integer_type();
+        }
+
+        return false;
+    }
+
+    if (type.is_const_value()) {
+        return false;
+    }
+
+    if (type.is_type_param() && type.get_type_param()->is_value_param()) {
+        return false;
+    }
+
     return AST::constraint_admits(constraint, type);
 }
 

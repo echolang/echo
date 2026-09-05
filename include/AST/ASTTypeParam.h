@@ -38,16 +38,32 @@ namespace AST
     // still the sole owner of "is this type argument allowed" - two callers, one rule
     bool constraint_admits(const std::vector<ValueType> &constraint, const ValueType &type);
 
+    // do these bits sit inside `dest`, a value parameter's integer type. asked by TypeParamDecl::allows
+    // so a `tiny<300>` over `const uint8 N` is refused at the argument rather than interned as bits
+    // the body cannot hold
+    bool const_generic_bits_fit(const ValueType &dest, uint64_t bits);
+
+    // the sentence TypeParamDecl::allows' reporters use, matching AST::type_literal_at's overflow wording
+    std::string const_generic_overflow_sentence(const ValueType &dest, uint64_t bits);
+
+    // a parameter is a type, or a compile-time value. the split is a kind rather than a flag so
+    // a site that meant `T` cannot silently accept `10`, and so `fixed_array<int32, 10>` and
+    // `fixed_array<int32, 11>` intern as two types because their second argument's bits differ
+    enum class TypeParamKind
+    {
+        t_type,
+        t_value,
+    };
+
     // one generic type parameter as written at its declaration site - the `T` in `struct Box<T>`
-    // or `function twice<T>(...)`. a ValueType of kind t_generic refers to one of these, so the
-    // name, the declaration token and any constraint travel with every use of the parameter
-    // instead of having to be recovered from the owner by index
+    // or `function twice<T>(...)`, and the `N` in `struct fixed_array<T, const usize N>`. a
+    // ValueType of kind t_generic refers to one of these, so the name, the declaration token and
+    // any constraint travel with every use of the parameter instead of having to be recovered
+    // from the owner by index
     //
     // owned by a TypeParamRegistry, referenced everywhere else by raw pointer. that is forced,
     // not preferred: CloneContext::shallow copy-constructs nodes and ComplexType is copy-assigned,
     // so a unique_ptr member on either would break all cloning
-    //
-    // @TODO a non-type parameter (the `10` in FixedArray<int, 10>) would become a kind tag here
     class TypeParamDecl
     {
     public:
@@ -80,6 +96,14 @@ namespace AST
         // as add_type_parameter stamps ordinal and owner - so the two cannot disagree
         bool is_associated = false;
 
+        // `t_type` is `<T>`, `t_value` is `<const usize N>`. a value parameter is constrained by
+        // its *value type* rather than by a `: numeric`-style atom list, and a use of `N` in an
+        // expression is a compile-time integer, not a type
+        TypeParamKind param_kind = TypeParamKind::t_type;
+
+        // meaningful iff `param_kind == t_value`. the type `N` has as a value, typically `usize`
+        ValueType value_type;
+
         TypeParamDecl(std::string name, size_t ordinal, std::optional<TokenReference> name_token) :
             name(std::move(name)),
             name_token(name_token),
@@ -92,8 +116,17 @@ namespace AST
             return !constraint.empty();
         }
 
+        bool is_value_param() const {
+            return param_kind == TypeParamKind::t_value;
+        }
+
         // true if `type` satisfies the constraint (always true when unconstrained)
         // const/pointer flags on `type` are ignored
+        //
+        // a value parameter admits a `t_const_value` whose bits fit `value_type` (or another value
+        // parameter of an integer type), and refuses a type. a type parameter refuses a
+        // `t_const_value`, even when unconstrained - otherwise `Box<4>` would intern as a type
+        // whose argument is a number
         bool allows(const ValueType &type) const;
 
         // the declaring struct/class template. asserts no function owner is set

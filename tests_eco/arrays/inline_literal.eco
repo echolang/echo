@@ -1,0 +1,5 @@
+int32[4] $xs = [1, 2, 3, 4];
+echo $xs[0];
+echo $xs[3];
+$xs[1] = 8;
+echo $xs[1];

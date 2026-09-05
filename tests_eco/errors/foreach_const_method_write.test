@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConstViolation  foreach_const_method_write.eco:17:9
+
+  Const violation: cannot call 'M::bump()' on a const 'M' - the method is not declared const, so it may write. Mark it `const function bump(...)` if it only reads.
+
+  16 | foreach ($ms as const &$m) {
+  17 |     $m->bump();
+     :         ^^^^
+  18 | }
+
+1 error, nothing was compiled.

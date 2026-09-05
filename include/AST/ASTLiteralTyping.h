@@ -4,7 +4,9 @@
 #pragma once
 
 #include "AST/ASTValueType.h"
+#include "Token.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -19,6 +21,16 @@ namespace AST
     class NodeCollection;
     struct CodeRef;
     struct Operator;
+
+    // **the three tokens the lexer produces for a written integer.** decimal, hex (`0x`), binary
+    // (`0b`). the type grammar, an array length and a call's explicit type arguments all ask this,
+    // so a `sized<0x10>` cannot scan as a type in one walk and fail to parse in the other
+    bool token_is_integer_literal(Token::Type type);
+
+    // **the bits a written integer token holds.** one owner so a const-generic argument, an array
+    // length and a call's explicit type argument cannot disagree about what the digits mean. the
+    // token's *type* chooses the radix - hex and binary are not prefixes on `t_integer_literal`
+    std::optional<uint64_t> integer_token_bits(const TokenReference &token);
 
     // **is this literal's type a default nobody chose?**
     //

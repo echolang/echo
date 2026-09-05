@@ -509,6 +509,13 @@ namespace Compiler::LLVM
         }
 
         llvm::Value *pop() {
+            // a void call pushes nothing. TypeChecker refuses that in a value position; this is
+            // the seam if that gate is bypassed, so the failure is a located ICE rather than
+            // top() on an empty stack (exit 139, no message)
+            if (value_stack.empty()) {
+                throw error("value stack empty - a void expression was used as a value");
+            }
+
             auto value = value_stack.top();
             value_stack.pop();
             return value;

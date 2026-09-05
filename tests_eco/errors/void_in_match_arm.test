@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_in_match_arm.eco:14:13
+
+  'nothing()' produces no value
+
+  13 | int32 $x = match (E::a) {
+  14 |     E::a => nothing(),
+     :             ^^^^^^^
+  15 |     E::b => 1,
+
+1 error, nothing was compiled.

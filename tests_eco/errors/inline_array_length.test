@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] inline_array_length.eco:1:16
+
+  this literal has 3 elements, 'int32[4]' has 4
+
+  1 | int32[4] $xs = [1, 2, 3];
+    :                ^
+  2 | 
+
+1 error, nothing was compiled.

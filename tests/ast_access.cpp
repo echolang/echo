@@ -268,6 +268,23 @@ TEST_CASE("a root that only holds an address may name anything", "[access]")
     REQUIRE(path_overlap(owned, borrowed) == Overlap::t_unknown);
 }
 
+TEST_CASE("a T[N] index is an element projection, so two inout borrows of one slot conflict", "[access]")
+{
+    auto conflict = EchoTests::tests_make_parsed_bundle(
+        "function poke(inout int32& $a, inout int32& $b) : void {}\n"
+        "int32[4] $xs;\n"
+        "poke(&$xs[0], &$xs[0]);\n");
+
+    REQUIRE(EchoTests::has_issue_containing(*conflict, "same storage"));
+
+    auto distinct = EchoTests::tests_make_parsed_bundle(
+        "function poke(inout int32& $a, inout int32& $b) : void {}\n"
+        "int32[4] $xs;\n"
+        "poke(&$xs[0], &$xs[1]);\n");
+
+    REQUIRE_FALSE(distinct->collector.has_critical_issues());
+}
+
 TEST_CASE("silence conflicts with nothing", "[access]")
 {
     // exclusivity is not symmetric with silence. a parameter that declared no effect made no promise

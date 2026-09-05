@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_in_null_coalesce.eco:8:18
+
+  'nothing()' produces no value
+
+  7 | int32? $n = 1;
+  8 | int32 $x = $n ?? nothing();
+    :                  ^^^^^^^
+  9 | 
+
+1 error, nothing was compiled.

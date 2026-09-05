@@ -358,6 +358,22 @@ std::string AST::ValueType::get_mangled_name() const
             mangled_name += param.get_mangled_name();
         }
         mangled_name += "E";
+    } else if (is_const_value()) {
+        // `V` <primitive char> <decimal bits> `E`, self-delimiting so two adjacent const
+        // arguments cannot be read back as one. the primitive is in the token because
+        // `usize 4` and `int32 4` are different identities even when the bits agree
+        mangled_name += "V";
+        mangled_name += get_primitive_id_char(primitive);
+        mangled_name += std::to_string(_const_bits);
+        mangled_name += "E";
+    } else if (is_inline_array()) {
+        // `A` <element> <length> `E`. length is itself a ValueType (value param or const
+        // value), so the terminator is what keeps `int32[4]` from colliding with a nested
+        // application that happens to start the same way
+        mangled_name += "A";
+        mangled_name += array_element().get_mangled_name();
+        mangled_name += array_length().get_mangled_name();
+        mangled_name += "E";
     } else {
         assert(
             kind != ValueTypeKind::t_kind_class
@@ -448,6 +464,14 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + "class" + suffix;
     }
 
+    if (is_const_value()) {
+        return prefix + std::to_string(_const_bits) + suffix;
+    }
+
+    if (is_inline_array()) {
+        return prefix + array_element().get_type_desciption() + "[" + array_length().get_type_desciption() + "]" + suffix;
+    }
+
     // handle unknown or other types
     return prefix + "[unknown]" + suffix;
 }
@@ -536,7 +560,23 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
 {
     assert(tmpl->is_generic() && tmpl->type_parameters.size() == args.size());
 
-    auto key = std::make_tuple(tmpl, args);
+    // a const-generic argument written as a literal is an untyped integer (int32). the
+    // parameter says usize. intern on the parameter's primitive so `sized<4>` as a type
+    // and `sized<4>()` as a constructor name the same instance rather than two that
+    // both print as `sized<4>`
+    std::vector<ValueType> normalized = args;
+    for (size_t i = 0; i < tmpl->type_parameters.size(); i++) {
+        const TypeParamDecl *param = tmpl->type_parameters[i];
+        if (param->is_value_param()
+            && normalized[i].is_const_value()
+            && param->value_type.is_integer_type()) {
+            normalized[i] = ValueType::make_const_value(
+                param->value_type.get_primitive_type(),
+                normalized[i].const_value_bits());
+        }
+    }
+
+    auto key = std::make_tuple(tmpl, normalized);
     if (auto it = _instantiations.find(key); it != _instantiations.end()) {
         ComplexType *inst = it->second;
 
@@ -552,7 +592,7 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
                 || inst->conformances().size() < tmpl->conformances().size();
 
             if (stale) {
-                derive_instantiation(inst, tmpl, args);
+                derive_instantiation(inst, tmpl, normalized);
             }
         }
 
@@ -564,7 +604,7 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     _owned.push_back(std::move(owned));
 
     if (tmpl->name) {
-        instantiated->name = tmpl->name.value() + "<" + args_description(args) + ">";
+        instantiated->name = tmpl->name.value() + "<" + args_description(normalized) + ">";
     }
     instantiated->ast_namespace = tmpl->ast_namespace;
     // the storage class is the template's: `Box<int32>` is a class exactly when `Box` is one. without
@@ -596,14 +636,14 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     instantiated->enum_backing = tmpl->enum_backing;
 
     instantiated->template_ref = tmpl;
-    instantiated->instantiation_args = args;
+    instantiated->instantiation_args = normalized;
 
     // insert into the cache BEFORE substituting properties, so a self-referential generic
     // (e.g. a property of type ptr<Self<T>>) resolves back to this in-progress instance
     // instead of recursing forever
     _instantiations[key] = instantiated;
 
-    derive_instantiation(instantiated, tmpl, args);
+    derive_instantiation(instantiated, tmpl, normalized);
 
     return instantiated;
 }
@@ -882,6 +922,12 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
         return contains_type_param(type.weak_target(), param);
     }
 
+    // a `T[N]` is unresolved if the element is, or if the length is still a value parameter
+    if (type.is_inline_array()) {
+        return contains_type_param(type.array_element(), param)
+            || contains_type_param(type.array_length(), param);
+    }
+
     // structurally, like a pointer: `function<void(T)>` is as unresolved as `ptr<T>` is. answering
     // false here would make the monomorphizer stop chasing it and TypeLowering throw on the T far away.
     // a C function pointer is the same walk over the same signature
@@ -1009,6 +1055,14 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
         // `const Node`, and `T?` is a `Node?` - both are properties the *use* declared, not the
         // bound type's to have
         return with_level_flags(*bound, type, registry);
+    }
+
+    // `T[N]` substitutes through both halves and is rebuilt, so `T[N]` with T := int32, N := 4
+    // becomes `int32[4]` rather than keeping the template's spelling
+    if (type.is_inline_array()) {
+        ValueType element = substitute_type(type.array_element(), subst, registry);
+        ValueType length = substitute_type(type.array_length(), subst, registry);
+        return with_level_flags(ValueType::make_inline_array(std::move(element), std::move(length)), type, registry);
     }
 
     // the two arms that substitute *through* a layout, sharing the one pointer they both need - and

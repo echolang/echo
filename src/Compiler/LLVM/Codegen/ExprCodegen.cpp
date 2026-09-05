@@ -69,8 +69,14 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     // visit the expression
     node.expr->accept(*_ctx.visitor);
 
-    auto value = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    // a never-returning operand (`die() as T`) terminates and pushes nothing. the conversion
+    // is unreachable; pushing a dummy so the parent can pop would still store after a
+    // terminator. match and `??` already skip the read for the same reason
+    if (_ctx.block_is_terminated()) {
+        return;
+    }
+
+    auto value = _ctx.pop();
 
     // asked once each rather than five times: result_type() builds its answer, and for a pointer
     // it heap-allocates the pointee

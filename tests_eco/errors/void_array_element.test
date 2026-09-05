@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_array_element.eco:7:23
+
+  'nothing()' produces no value
+
+  6 | 
+  7 | array<int32> $a = [1, nothing()];
+    :                       ^^^^^^^
+  8 | 
+
+1 error, nothing was compiled.

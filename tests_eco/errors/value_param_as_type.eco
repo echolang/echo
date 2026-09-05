@@ -1,0 +1,4 @@
+struct sized<const usize N>
+{
+    N $x;
+}

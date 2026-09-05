@@ -26,6 +26,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/ConstDeclNode.h"
 #include "AST/ConstRefExprNode.h"
+#include "AST/GenericValueExprNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/AssignNode.h"
@@ -501,6 +502,21 @@ Node *ConstRefExprNode::clone(CloneContext &cc) const
 {
     // nothing to fix up: every field is the name and where to look for it, and the resolved declaration is
     // deliberately not among them - a clone is resolved by the expander like any other reference
+    return cc.shallow(this);
+}
+
+Node *GenericValueExprNode::clone(CloneContext &cc) const
+{
+    if (param != nullptr) {
+        const ValueType *bound = cc.subst.lookup(param);
+        if (bound != nullptr && bound->is_const_value()) {
+            LiteralIntExprNode *literal = cc.make<LiteralIntExprNode>(
+                this, token_name, bound->const_value_primitive());
+            literal->override_literal_value = std::to_string(bound->const_value_bits());
+            return literal;
+        }
+    }
+
     return cc.shallow(this);
 }
 

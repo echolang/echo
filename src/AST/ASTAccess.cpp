@@ -203,6 +203,29 @@ static bool collect_projections(AST::ExprNode *expr, AST::AccessPath &into, bool
                 break;
             }
 
+            // T[N] is language-indexed, the way a pointer is: never rewritten to an operator, so
+            // element_call stays null. the index is the node's own, and the walk continues through
+            // the array itself
+            if (index->indexed_base_type().is_inline_array()) {
+                if (record) {
+                    AST::Projection step;
+                    step.kind = AST::ProjectionKind::t_dynamic;
+
+                    if (index->indices.size() == 1 && index->indices[0] != nullptr) {
+                        const AST::ConstFoldResult folded = AST::const_fold(index->indices[0]);
+                        if (folded.is_folded() && folded.type.is_integer_type()) {
+                            step.kind = AST::ProjectionKind::t_element;
+                            step.index = folded.bits;
+                        }
+                    }
+
+                    into.projections.push_back(std::move(step));
+                }
+
+                expr = index->base;
+                break;
+            }
+
             // an unsettled or already-refused bracket names nothing this can follow
             if (index->element_call == nullptr) {
                 return false;

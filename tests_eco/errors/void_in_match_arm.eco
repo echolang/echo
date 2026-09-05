@@ -1,0 +1,16 @@
+// a settled void call as a match arm is a consumed value. die() is exempt (B55); nothing() is not
+
+enum E
+{
+    case a;
+    case b;
+}
+
+function nothing() : void
+{
+}
+
+int32 $x = match (E::a) {
+    E::a => nothing(),
+    E::b => 1,
+};

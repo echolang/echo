@@ -89,15 +89,46 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
                 return LValue{ address, index_expr.result_type(), Provenance::t_typed };
             }
 
-            // GEP over the pointee type scales the offset by the element size, so `+ 1` on a
-            // ptr<int32> advances four bytes rather than one
-            llvm::Value *base_address = gen_address_value(*index_expr.base);
-
             index_expr.indices[0]->accept(*_ctx.visitor);
             llvm::Value *offset = _ctx.value_stack.top();
             _ctx.value_stack.pop();
 
-            AST::ValueType element_type = AST::value_type_of(index_expr.base->result_type());
+            const AST::ValueType base_type = index_expr.base->result_type();
+            const AST::ValueType indexed = index_expr.indexed_base_type();
+
+            // `T[N]` and `T[N]&` are one GEP: {0, offset} over the array type. the borrow is
+            // indexed_base_type's peel - OperatorRewriter already decided this is an array index
+            // rather than a pointer one, so a single-index GEP here would step by the whole
+            // array rather than by T
+            if (indexed.is_inline_array()) {
+                llvm::Value *array_address;
+                Provenance provenance;
+
+                if (base_type.is_inline_array()) {
+                    LValue array_place = gen_lvalue(*index_expr.base);
+                    array_address = array_place.address;
+                    provenance = array_place.provenance;
+                } else {
+                    array_address = gen_address_value(*index_expr.base);
+                    provenance = Provenance::t_typed;
+                }
+
+                llvm::Value *zero = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(*_ctx.llvm_context), 0);
+                llvm::Value *address = _ctx.builder->CreateGEP(
+                    _ctx.types->get_llvm_type(indexed, *_ctx.current_cmp_unit),
+                    array_address,
+                    { zero, offset },
+                    "elem");
+
+                return LValue{ address, index_expr.result_type(), provenance };
+            }
+
+            llvm::Value *base_address = gen_address_value(*index_expr.base);
+
+            // GEP over the pointee type scales the offset by the element size, so `+ 1` on a
+            // ptr<int32> advances four bytes rather than one
+            AST::ValueType element_type = AST::value_type_of(base_type);
 
             llvm::Value *address = _ctx.builder->CreateGEP(
                 _ctx.types->get_llvm_type(element_type, *_ctx.current_cmp_unit),

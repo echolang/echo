@@ -630,6 +630,11 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
         case NodeType::n_expr_const:
             return const_fold(static_cast<const ConstExprNode *>(expr)->operand);
 
+        // unbound until CloneContext replaces it with a literal. pending rather than refused, so
+        // `const if (N == 0)` inside a template waits for instantiation instead of dying
+        case NodeType::n_expr_generic_value:
+            return ConstFoldResult::pending();
+
         // **a cast folds exactly when it does not change the value.** the rule in one line, and it is
         // what keeps this from becoming a second answer to TypeLowering::coerce_value: the widening a
         // reconciliation performs leaves the value alone, so folding through it cannot disagree with what

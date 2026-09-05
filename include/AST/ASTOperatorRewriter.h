@@ -120,6 +120,11 @@ namespace AST
         // marked so on the node, which is what stops a reported error being reported every round
         void resolve_index(IndexExprNode &index_expr);
 
+        // language-indexed forms (a pointer GEP and T[N]) have no operator to type the index, so
+        // the integer question is asked here. shared so the two cannot drift. answers false when
+        // the index is still undetermined (ask again) or was refused
+        bool require_integer_index(IndexExprNode &index_expr, const ValueType &base_type);
+
         // rule 6 - **`$c[...] = v` over a container that declares an element-*write* contract becomes one
         // call that owns the whole write.** `scope.children[index]` is the statement to look at; anything
         // that is not an assignment through a bracket is left alone, and so is one whose receiver declares

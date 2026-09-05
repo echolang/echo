@@ -17,6 +17,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/ConstDeclNode.h"
 #include "AST/ConstRefExprNode.h"
+#include "AST/GenericValueExprNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/AssignNode.h"
@@ -322,6 +323,11 @@ void RecursiveVisitor::visit_const_ref(ConstRefExprNode &node)
 {
     // a leaf: `decl` is a cross-reference into a declaration this walk does not own, and the initializer it
     // points at is walked in its own right - once, by AST::ConstantExpander, rather than once per use site
+}
+
+void RecursiveVisitor::visit_generic_value(GenericValueExprNode &node)
+{
+    // a leaf: the parameter is a cross-reference into a declaration this walk does not own
 }
 
 void RecursiveVisitor::visit_class_alloc_expr(ClassAllocExprNode &node)

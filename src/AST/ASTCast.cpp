@@ -3,6 +3,7 @@
 #include "AST/ASTAccess.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTConformance.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTNode.h"
 #include "AST/ASTNullability.h"
 #include "AST/ExprNode.h"
@@ -17,12 +18,31 @@ namespace AST
     {
         const ValueType from = from_expr.result_type();
 
-        // void is "no information" to is_undetermined_type, and a written `as void` is a real
-        // refusal rather than a not-yet. asked first so it cannot stall the fixpoint
-        if (from.is_void() || to.is_void()) {
+        // a written `as void` is a real refusal rather than a not-yet. asked first so it cannot
+        // stall the fixpoint. operand void is two states — an unresolved call's result_type() is
+        // also void — and collapsing them here made `f($x) as T` a finished refusal before the
+        // call could settle. destination void stays a refusal; operand void is the next two arms
+        if (to.is_void()) {
             return CastLookup::refused(fmt::format(
                 "'{}' cannot be read as a '{}'",
                 from.get_type_desciption(), to.get_type_desciption()));
+        }
+
+        // a never-returning operand (`die`) is a legal value: the conversion is unreachable, the
+        // same standing a match arm and a `??` fallback already have. asked before the void-call
+        // arm so `die() as T` is not a finished refusal, and before is_undetermined_type so void
+        // return does not stall the fixpoint as pending
+        if (expression_never_returns(from_expr)) {
+            return CastLookup::ok(CastKind::t_identity);
+        }
+
+        // a settled void call is a value-less expression, not "no information". named here so the
+        // diagnostic points at the call rather than at the word void, which the author never wrote.
+        // AST::expression_produces_no_value is the shared question TypeChecker asks
+        if (expression_produces_no_value(from_expr)) {
+            return CastLookup::refused(fmt::format(
+                "{}, so there is nothing to read as a '{}'",
+                no_value_reason(from_expr), to.get_type_desciption()));
         }
 
         if (is_undetermined_type(from) || is_undetermined_type(to)) {

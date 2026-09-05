@@ -1,0 +1,7 @@
+// a settled void call as an array-literal element is a consumed value
+
+function nothing() : void
+{
+}
+
+array<int32> $a = [1, nothing()];

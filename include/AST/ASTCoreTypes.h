@@ -41,6 +41,11 @@ namespace AST
         // conformance rather than by name
         t_array,
 
+        // `struct fixed_array<T, N>` - the owning, inline sequence of exactly N elements. bound so
+        // a `[1, 2, 3, 4]` literal at a `fixed_array<int32, 4>` destination expands by index
+        // rather than by append. it knows no method and no shape of it
+        t_fixed_array,
+
         // `struct map<K, V>` - the owning, unordered hash map. bound for exactly `t_array`'s reason and
         // with exactly its scope: so the compiler can **say** `map<K, V>` for a `["k" => "v"]` literal
         // that has no destination to take a type from, and for nothing else. It knows no method, no

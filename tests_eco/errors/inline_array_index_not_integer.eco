@@ -1,0 +1,3 @@
+int32[4] $xs;
+echo $xs[true];
+echo $xs[1.5];

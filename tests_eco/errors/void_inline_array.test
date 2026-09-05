@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] void_inline_array.eco:1:5
+
+  void has no size, so it cannot be an array element
+
+  1 | void[4] $xs;
+    :     ^
+  2 | 
+
+1 error, nothing was compiled.

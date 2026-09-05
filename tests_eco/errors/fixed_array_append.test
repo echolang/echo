@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  fixed_array_append.eco:2:6
+
+  no overload of operator '[]' accepts a 'fixed_array<int32,4>'. Declare one for it, or convert the operands first.
+
+  1 | fixed_array<int32, 4> $quad = [1, 2, 3, 4];
+  2 | $quad[] = 5;
+    :      ^^^^^^^
+  3 | 
+
+1 error, nothing was compiled.

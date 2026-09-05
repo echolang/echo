@@ -3,10 +3,16 @@
 #include <AST/ASTCast.h>
 #include <AST/ASTModule.h>
 #include <AST/ASTValueType.h>
+#include <AST/ExprNode.h>
+#include <AST/FunctionDeclNode.h>
 #include <AST/LiteralValueNode.h>
+#include <AST/TemporaryBindExprNode.h>
 #include <AST/TypeCastNode.h>
+#include <AST/TypeNode.h>
 
 #include "helpers.h"
+
+#include <vector>
 
 // AST::cast_plan_for - the sole answer to "what does this written `$x as T` mean"
 
@@ -136,6 +142,61 @@ TEST_CASE("void is refused, not pending", "[cast]")
     const CastLookup lookup = cast_plan_for(lit, ValueType::void_type());
     REQUIRE(lookup.result == CastLookup::Result::t_refused);
     REQUIRE(lookup.refusal.find("cannot be read as") != std::string::npos);
+}
+
+TEST_CASE("an unresolved call as a destination waits rather than refusing", "[cast]")
+{
+    auto tm = EchoTests::tests_make_tokenized_module("f");
+    auto &call = tm.nodes.emplace_back<FunctionCallExprNode>(
+        tm.tokens[0], std::vector<ExprNode *>{});
+
+    const CastLookup lookup = cast_plan_for(call, prim(ValueTypePrimitive::t_int32));
+    REQUIRE(lookup.result == CastLookup::Result::t_pending);
+}
+
+TEST_CASE("a settled void call as a destination is refused, naming the call", "[cast]")
+{
+    auto tm = EchoTests::tests_make_tokenized_module("nothing");
+    auto &decl = tm.nodes.emplace_back<FunctionDeclNode>(tm.tokens[0]);
+    decl.return_type = &tm.nodes.emplace_back<TypeNode>(ValueType::void_type());
+    auto &call = tm.nodes.emplace_back<FunctionCallExprNode>(
+        tm.tokens[0], std::vector<ExprNode *>{});
+    call.decl = &decl;
+
+    const CastLookup lookup = cast_plan_for(call, prim(ValueTypePrimitive::t_int32));
+    REQUIRE(lookup.result == CastLookup::Result::t_refused);
+    REQUIRE(lookup.refusal.find("nothing()") != std::string::npos);
+    REQUIRE(lookup.refusal.find("produces no value") != std::string::npos);
+}
+
+TEST_CASE("a TemporaryBind around a void call is refused, naming the call", "[cast]")
+{
+    auto tm = EchoTests::tests_make_tokenized_module("bump");
+    auto &decl = tm.nodes.emplace_back<FunctionDeclNode>(tm.tokens[0]);
+    decl.return_type = &tm.nodes.emplace_back<TypeNode>(ValueType::void_type());
+    auto &call = tm.nodes.emplace_back<FunctionCallExprNode>(
+        tm.tokens[0], std::vector<ExprNode *>{});
+    call.decl = &decl;
+    auto &bind = tm.nodes.emplace_back<TemporaryBindExprNode>(&call, tm.tokens[0]);
+
+    const CastLookup lookup = cast_plan_for(bind, prim(ValueTypePrimitive::t_int32));
+    REQUIRE(lookup.result == CastLookup::Result::t_refused);
+    REQUIRE(lookup.refusal.find("bump()") != std::string::npos);
+}
+
+TEST_CASE("a never-returning operand is identity, not a void refusal", "[cast]")
+{
+    auto tm = EchoTests::tests_make_tokenized_module("die");
+    auto &decl = tm.nodes.emplace_back<FunctionDeclNode>(tm.tokens[0]);
+    decl.return_type = &tm.nodes.emplace_back<TypeNode>(ValueType::void_type());
+    decl.builtin = "die";
+    auto &call = tm.nodes.emplace_back<FunctionCallExprNode>(
+        tm.tokens[0], std::vector<ExprNode *>{});
+    call.decl = &decl;
+
+    const CastLookup lookup = cast_plan_for(call, prim(ValueTypePrimitive::t_int32));
+    REQUIRE(lookup.result == CastLookup::Result::t_ok);
+    REQUIRE(lookup.plan.kind == CastKind::t_identity);
 }
 
 TEST_CASE("unrelated primitives still convert", "[cast]")

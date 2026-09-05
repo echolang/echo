@@ -3,6 +3,7 @@
 #include "Parser/TypeParser.h"
 
 #include "AST/ConstRefExprNode.h"
+#include "AST/GenericValueExprNode.h"
 #include "AST/ASTImport.h"
 #include "AST/ASTSymbol.h"
 #include "AST/ASTOperatorSemantics.h"
@@ -2081,21 +2082,28 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // comparison operand - a compile-time constant is one - so `LIMIT < $n` would otherwise be
     // read as a call to `LIMIT<$n>`. parse_funccall speculates for us and hands the tokens back
     // untouched when it declines
+    const AST::TypeParamDecl *bare_type_param = nullptr;
+    if (ast_namespace == nullptr && cursor.is_type(Token::Type::t_identifier)) {
+        bare_type_param = payload.context.find_type_param(cursor.current().value());
+    }
+
     if (
-        cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren }) ||
-        cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
+        (bare_type_param == nullptr || !bare_type_param->is_value_param())
+        && (
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
+        )
     ) {
         bool is_call = false;
         Parser::CallLookup lookup;
 
         // `T(...)` where T is a type parameter: constructing that type, not looking up a function
         // named T. only the bare `T(` spelling - `T<...>(` is a generic application, which a type
-        // parameter is not. a qualified name is never a type parameter
-        if (ast_namespace == nullptr
+        // parameter is not. a qualified name is never a type parameter. a value parameter is a
+        // compile-time integer: `N(...)` is postfix on GenericValueExprNode, not a constructor
+        if (bare_type_param != nullptr
             && cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
-            if (const AST::TypeParamDecl *param = payload.context.find_type_param(cursor.current().value())) {
-                lookup.constructed_type = AST::ValueType::make_type_param(param);
-            }
+            lookup.constructed_type = AST::ValueType::make_type_param(bare_type_param);
         }
 
         auto fcall = parse_funccall(payload, ast_namespace, &is_call, lookup);
@@ -2121,7 +2129,22 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // declaration or in another module is the ordinary case rather than the exception. So the node records
     // the name and where to look for it, and AST::ConstantExpander replaces it with a clone of the
     // constant's value - or reports an unknown constant, at this token
+    //
+    // a value parameter in the same position is the sibling: `return N;` inside
+    // `struct sized<const usize N>`. claimed ahead of the constant, because the parameter is in
+    // scope and a constant of the same name would be a different thing
     if (cursor.is_type(Token::Type::t_identifier)) {
+        if (ast_namespace == nullptr) {
+            if (const AST::TypeParamDecl *param = payload.context.find_type_param(cursor.current().value())) {
+                if (param->is_value_param()) {
+                    auto &value = payload.context.emplace_node<AST::GenericValueExprNode>(
+                        cursor.current(), param);
+                    cursor.skip();
+                    return Parser::parse_postfix_chain(payload, AST::make_ref(value));
+                }
+            }
+        }
+
         const AST::Namespace *lookup = ast_namespace != nullptr
             ? ast_namespace
             : payload.context.current_namespace;

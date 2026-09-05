@@ -6,6 +6,7 @@
 #include "AST/ConstExprNode.h"
 #include "AST/ConstIfNode.h"
 #include "AST/ConstRefExprNode.h"
+#include "AST/GenericValueExprNode.h"
 #include "AST/ExprNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -281,6 +282,9 @@ const TokenReference *source_token_of(const Node &node)
 
         case NodeType::n_expr_const_ref:
             return &static_cast<const ConstRefExprNode &>(node).token_name;
+
+        case NodeType::n_expr_generic_value:
+            return &static_cast<const GenericValueExprNode &>(node).token_name;
 
         case NodeType::n_expr_const:
             return &static_cast<const ConstExprNode &>(node).token_const;

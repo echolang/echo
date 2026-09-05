@@ -167,6 +167,7 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         { NodeType::n_expr_move, StorageClass::t_addressless },
         { NodeType::n_expr_temp_bind, StorageClass::t_addressless },
         { NodeType::n_expr_const_ref, StorageClass::t_addressless },
+        { NodeType::n_expr_generic_value, StorageClass::t_addressless },
 
         // a `const(...)` is transparent while it is here and gone by codegen - it becomes the literal it
         // folded to. addressless because there is nothing to take the address *of*: asking for one would be

@@ -18,7 +18,7 @@ namespace AST
     // than a layout, so the guard belongs here once instead of at each of them
     FunctionDeclNode *copy_constructor_for(const ValueType &type);
 
-    // **how a value of this type is copied** - the four ways there are, plus the refusal, and the one
+    // **how a value of this type is copied** - the five ways there are, plus the refusal, and the one
     // place that decides between them
     //
     // declaration order is the order they are decided in, and the order is load-bearing: a class is
@@ -51,6 +51,11 @@ namespace AST
         // nobody has said what a copy would mean, and the compiler will not guess. the ownership
         // pass's located error
         t_none,
+
+        // an inline array whose element is copyable by something other than bytes: repeat that
+        // element's copy N times. not a constructor - `T[N]` has no ComplexType to hang one on -
+        // and not synthesizable, which means "write a constructor on this layout"
+        t_elements,
     };
 
     // **the sole answer to "how is a value of this type copied".** every arm is named above, and both
@@ -84,6 +89,8 @@ namespace AST
     // what a borrow is
     inline bool copy_needs_constructor(const ValueType &type)
     {
+        // everything that is not a byte copy goes through arrive_value's constructor switch,
+        // including t_none (so the refusal is that switch's) and t_elements (so the loop is)
         return classify_copy(type) != CopyKind::t_bytes;
     }
 

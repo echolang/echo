@@ -328,6 +328,66 @@ class SequenceProvider:
             "[%d]" % index, self.base + index * self.element_size, self.element_type)
 
 
+@_safe_provider
+class FixedArrayProvider:
+    """`fixed_array<T, N>` is one inline `T[N]` field. DWARF already describes the array;
+    this just presents the elements as children of the collection rather than of `$items`."""
+
+    def __init__(self, value, _internal):
+        self.value = value
+        self.items = None
+        self.count = 0
+
+    def update(self):
+        self.count = 0
+        self.items = _member(self.value, "items")
+        if self.items is None:
+            return False
+
+        ty = self.items.GetType()
+        if not ty.IsArrayType():
+            return False
+
+        n = ty.GetNumberOfElements() if hasattr(ty, "GetNumberOfElements") else ty.GetArrayNumElements()
+        if n > MAX_ELEMENTS:
+            return False
+
+        self.count = int(n)
+        return False
+
+    def num_children(self, max_count=None):
+        return self.count
+
+    def get_child_index(self, name):
+        try:
+            return int(name.strip("[]"))
+        except ValueError:
+            return -1
+
+    def get_child_at_index(self, index):
+        if self.items is None or index < 0 or index >= self.count:
+            return None
+
+        return self.items.GetChildAtIndex(index)
+
+
+@_summary
+def fixed_array_summary(value, _internal):
+    items = _member(value, "items")
+    if items is None:
+        return "<uninitialized?>"
+
+    ty = items.GetType()
+    if not ty.IsArrayType():
+        return "<uninitialized?>"
+
+    n = ty.GetNumberOfElements() if hasattr(ty, "GetNumberOfElements") else ty.GetArrayNumElements()
+    if n > MAX_ELEMENTS:
+        return "<uninitialized?>"
+
+    return _preview(items, PREVIEW_ITEMS, "[", "]", _display)
+
+
 @_summary
 def sequence_summary(value, _internal):
     if value.GetNumChildren() == 0 and _unsigned(_member(value, "len")) > MAX_ELEMENTS:
@@ -655,6 +715,7 @@ SUMMARIES = [
     ("string", "echo_lldb.string_summary", False),
     ("string::view", "echo_lldb.view_summary", False),
     (r"^array<.+>$", "echo_lldb.sequence_summary", True),
+    (r"^fixed_array<.+>$", "echo_lldb.fixed_array_summary", True),
     (r"^slice<.+>$", "echo_lldb.sequence_summary", True),
     (r"^mem::buffer<.+>$", "echo_lldb.buffer_summary", True),
     (r"^ordered_map<.+>$", "echo_lldb.map_summary", True),
@@ -671,6 +732,7 @@ SUMMARIES = [
 
 SYNTHETICS = [
     (r"^array<.+>$", "echo_lldb.SequenceProvider"),
+    (r"^fixed_array<.+>$", "echo_lldb.FixedArrayProvider"),
     (r"^slice<.+>$", "echo_lldb.SequenceProvider"),
     (r"^ordered_map<.+>$", "echo_lldb.OrderedMapProvider"),
     (r"^map<.+>$", "echo_lldb.MapProvider"),

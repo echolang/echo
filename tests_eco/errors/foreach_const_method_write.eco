@@ -1,0 +1,18 @@
+// a mutating method through `const &$el` is still const-checked
+
+struct M
+{
+    int32 $n;
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+array<M> $ms = [];
+$ms[] = M(1);
+
+foreach ($ms as const &$m) {
+    $m->bump();
+}

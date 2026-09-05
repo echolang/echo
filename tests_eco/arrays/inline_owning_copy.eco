@@ -1,0 +1,18 @@
+string[2] $a;
+$a[0] = 'x';
+$a[1] = 'y';
+
+string[2] $b = $a;
+$b[0] = 'z';
+
+echo $a[0];
+echo $b[0];
+echo $a[1];
+
+function first(string[2] $xs) : string
+{
+    return $xs[0];
+}
+
+echo first($a);
+echo $a[0];

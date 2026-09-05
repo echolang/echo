@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] IntegerOverflow  const_generic_overflow.eco:5:6
+
+  Integer overflow: The literal '300' is too large for the integer type 'uint8'. The maximum value is '255'.
+
+  4 | 
+  5 | tiny<300> $t;
+    :      ^^^
+  6 | 
+
+1 error, nothing was compiled.

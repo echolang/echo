@@ -1,0 +1,2 @@
+fixed_array<int32, 4> $quad = [1, 2, 3, 4];
+$quad[] = 5;

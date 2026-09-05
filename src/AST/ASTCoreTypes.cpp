@@ -15,6 +15,7 @@ namespace
             { "string", AST::CoreTypeKind::t_string },
             { "string_view", AST::CoreTypeKind::t_string_view },
             { "array", AST::CoreTypeKind::t_array },
+            { "fixed_array", AST::CoreTypeKind::t_fixed_array },
             { "map", AST::CoreTypeKind::t_map },
             { "buffer", AST::CoreTypeKind::t_buffer },
             { "iterator", AST::CoreTypeKind::t_iterator },

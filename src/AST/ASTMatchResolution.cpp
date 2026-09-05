@@ -9,6 +9,7 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -339,6 +340,19 @@ void MatchResolution::resolve(MatchExprNode &node)
         // as an arm's value and one written as a statement cannot disagree
         if (arm.value != nullptr && expression_never_returns(*arm.value)) {
             continue;
+        }
+
+        // a settled void call is not "no type yet": it produced nothing. asked before
+        // is_undetermined_type so finalize does not say that about a call that settled. the
+        // sentence is AST::no_value_reason, the same TypeChecker reports from rewrite_value_edge,
+        // so the two cannot disagree and Collector dedups the pair
+        if (arm.value != nullptr && expression_produces_no_value(*arm.value)) {
+            ExprNode *source = produced_value_of(arm.value);
+            refuse(
+                node,
+                location_of_expression(source != nullptr ? source : arm.value),
+                no_value_reason(*arm.value));
+            return;
         }
 
         // **and the same for a `{ }` arm control never leaves the bottom of**, which is the shape a reader

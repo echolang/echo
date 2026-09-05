@@ -56,6 +56,7 @@ namespace AST
         void visit_pointer_value(PointerValueNode &node) override;
         void visit_move_expr(MoveExprNode &node) override;
         void visit_const_ref(ConstRefExprNode &node) override;
+        void visit_generic_value(GenericValueExprNode &node) override;
         void visit_class_alloc_expr(ClassAllocExprNode &node) override;
         void visit_retain_expr(RetainExprNode &node) override;
         void visit_strong_expr(StrongExprNode &node) override;

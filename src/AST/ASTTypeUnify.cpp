@@ -74,10 +74,49 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // against `slice<const int32>` still binds T=int32: the parameter said const, and what it is matching
     // is what is left
     if (param.is_type_param()) {
+        const TypeParamDecl *decl = param.get_type_param();
+
+        if (decl->is_value_param()) {
+            if (arg.is_const_value()) {
+                if (!ValueType(arg.const_value_primitive()).is_integer_type()
+                    || !decl->value_type.is_integer_type()) {
+                    return false;
+                }
+
+                out.bind(decl, ValueType::make_const_value(
+                    decl->value_type.get_primitive_type(), arg.const_value_bits()));
+                return true;
+            }
+
+            if (arg.is_type_param() && arg.get_type_param()->is_value_param()) {
+                out.bind(decl, arg);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (arg.is_const_value()) {
+            return false;
+        }
+
+        if (arg.is_type_param() && arg.get_type_param()->is_value_param()) {
+            return false;
+        }
+
         const bool consumes_const = param.is_const() || position == UnifyPosition::t_level;
 
-        out.bind(param.get_type_param(), consumes_const ? ValueType::make_mutable(arg) : arg);
+        out.bind(decl, consumes_const ? ValueType::make_mutable(arg) : arg);
         return true;
+    }
+
+    if (param.is_const_value() && arg.is_const_value()) {
+        return param == arg;
+    }
+
+    if (param.is_inline_array() && arg.is_inline_array()) {
+        return unify_type(param.array_element(), arg.array_element(), out, false, UnifyPosition::t_type_argument)
+            && unify_type(param.array_length(), arg.array_length(), out, false, UnifyPosition::t_type_argument);
     }
 
     // a generic application binds structurally, e.g. Box<T> against Box<int> binds T=int

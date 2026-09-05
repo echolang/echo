@@ -1,0 +1,160 @@
+/**
+ * A contiguous, **owning**, fixed-length sequence of one element type.
+ *
+ * `array<T>` grows on the heap. This stores N elements inline, wherever the value lives - a
+ * local, a field, a return slot. No allocation, no capacity, no append. Copying one copies
+ * the elements; destroying one destroys them. Both fall out of `T[N]`'s place in the copy
+ * and destruction taxonomy, so this file declares neither a destructor nor a copy constructor.
+ *
+ * `#[core: fixed_array]` lets the compiler recognise a destination for an array literal, so
+ * `fixed_array<int32, 4> $q = [1, 2, 3, 4];` expands to four indexed writes rather than
+ * appends. It knows no method and no shape of this type.
+ *
+ * Counts and indices are `usize` throughout, matching `array<T>` and `slice<T>`.
+ */
+#[core: fixed_array]
+public struct fixed_array<T, const usize N> : contract::iterable<T>, contract::const_iterable<const T>
+{
+    // **not private**, and the element operators are why: an operator is a free declaration,
+    // so it sits outside this type in the sense `private` means. the same seam `array::$storage`
+    T[N] $items;
+
+    /**
+     * N zeroed elements. The local is zero-filled storage; assigning it is what
+     * `check_construction` wants to see, and for a `T` that is bytes it is a memcpy of zeros.
+     */
+    constructor()
+    {
+        T[N] $zero;
+        $this->items = mv $zero;
+    }
+
+    /**
+     * How many elements it holds. Always `N`.
+     */
+    const function count() : usize
+    {
+        return N;
+    }
+
+    /**
+     * True when `N` is zero.
+     */
+    const function empty() : bool
+    {
+        if (N > 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * A copy of the element at `$index`.
+     */
+    const function get(usize $index) : T
+    {
+        return $this[$index];
+    }
+
+    /**
+     * A borrow of the element at `$index`.
+     */
+    function at(usize $index) : T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * The same borrow, read-only, for when the array itself is `const`.
+     */
+    const function at(usize $index) : const T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * A borrowed window over everything. Written out rather than implicit, for `array`'s reason:
+     * handing out a borrow is a decision you should see.
+     */
+    function sub() : slice<T>
+    {
+        return $this->sub(0, N);
+    }
+
+    /**
+     * The same window over a `const` array: read-only, and said in the window's own type.
+     */
+    const function sub() : slice<const T>
+    {
+        return $this->sub(0, N);
+    }
+
+    /**
+     * A borrowed window over `$count` elements from `$from`.
+     */
+    function sub(usize $from, usize $count) : slice<T>
+    {
+        assert($from <= N, "slice start out of range");
+        assert($count <= N - $from, "slice length out of range");
+
+        return slice<T>(&$this->items[$from], $count);
+    }
+
+    /**
+     * The same narrower window, read-only.
+     */
+    const function sub(usize $from, usize $count) : slice<const T>
+    {
+        assert($from <= N, "slice start out of range");
+        assert($count <= N - $from, "slice length out of range");
+
+        return slice<const T>(&$this->items[$from], $count);
+    }
+
+    /**
+     * A cursor over the elements. Written through `->sub()` so the window rules have one
+     * implementation.
+     */
+    function iterate() : slice_iterator<T>
+    {
+        return slice_iterator<T>($this->sub());
+    }
+
+    /**
+     * A cursor over the elements of an array nobody may write.
+     */
+    const function iterate() : slice_iterator<const T>
+    {
+        return slice_iterator<const T>($this->sub());
+    }
+
+    /**
+     * An explicit copy - the same thing `$b = $a` does, said out loud at the call site.
+     */
+    const function clone() : fixed_array<T, N>
+    {
+        return $this;
+    }
+}
+
+/**
+ * The element contract. Bounds-checked with `assert`, so a debug build catches the mistake
+ * and a release build pays nothing.
+ */
+operator<T, const usize N> (fixed_array<T, N>& $a)[usize $index] : T&
+{
+    assert($index < N, "fixed_array index out of range");
+
+    return &$a->items[$index];
+}
+
+/**
+ * The same contract over a `const` array: it reads, and it does not write.
+ */
+operator<T, const usize N> (const fixed_array<T, N>& $a)[usize $index] : const T&
+{
+    assert($index < N, "fixed_array index out of range");
+
+    return &$a->items[$index];
+}

@@ -1,0 +1,34 @@
+// a call that cannot settle until its argument does, wrapped in a written `as`.
+// dropping the `as` always compiled; with it, an unresolved call's void used to be a
+// finished refusal and plan_decided never let a later round repair it
+
+struct Cell
+{
+    int32 $n;
+}
+
+function valuePtr(const Cell& $c) : ptr<const int32>
+{
+    const int32& $first = &$c->n;
+    return $first:$ as ptr<const int32>;
+}
+
+function bytesPtr(const array<Cell>& $a) : ptr<const uint8>
+{
+    return valuePtr($a[0]) as ptr<const uint8>;
+}
+
+function floatsPtr(const array<Cell>& $a) : ptr<const int32>
+{
+    return valuePtr($a[0]);
+}
+
+Cell $c = Cell(65);
+array<Cell> $a = [];
+$a[] = $c;
+
+ptr<const int32> $q = floatsPtr($a);
+echo $q:$[0];
+
+ptr<const uint8> $p = bytesPtr($a);
+echo $p:$[0];

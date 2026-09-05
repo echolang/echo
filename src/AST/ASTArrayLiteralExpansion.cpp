@@ -3,12 +3,14 @@
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
+#include "AST/LiteralValueNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
@@ -16,6 +18,8 @@
 #include "AST/VarRefNode.h"
 
 #include <fmt/core.h>
+#include <optional>
+#include <string>
 
 namespace AST
 {
@@ -189,12 +193,14 @@ bool ArrayLiteralExpansion::build_expansion(
     std::vector<NodeReference> &appends
 )
 {
-    // has_property_layout, not has_complex_type: the expansion below asks the destination for a
-    // zero-argument constructor and appends into the places it makes, and an interface declares
-    // neither
-    ComplexType *ct = type.has_property_layout() ? type.get_complex_type() : nullptr;
+    // `T[N]` is storage, not a collection: zero-filled, then one indexed write per element.
+    // no constructor to call, and the length is the type's rather than a core-type argument
+    const bool fills_inline = type.is_inline_array();
 
-    if (ct == nullptr) {
+    ComplexType *ct = type.has_property_layout() ? type.get_complex_type() : nullptr;
+    const ComplexType *tmpl = ct != nullptr ? ct->template_or_self() : nullptr;
+
+    if (!fills_inline && ct == nullptr) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(literal.token_bracket),
             fmt::format(
@@ -204,39 +210,88 @@ bool ArrayLiteralExpansion::build_expansion(
         return false;
     }
 
-    // **the constructor of the destination type, named rather than looked up.** an instantiation
-    // carries its template's name and its own type arguments, which is exactly what a call site
-    // writes as `array<int32>()`
-    const ComplexType *tmpl = ct->template_or_self();
+    const ComplexType *fixed_tmpl = _collector.core_types.declared_template(CoreTypeKind::t_fixed_array);
+    const bool fills_by_index = fills_inline
+        || (fixed_tmpl != nullptr && tmpl == fixed_tmpl);
 
-    std::vector<TypeNode *> type_args;
-    for (const auto &arg : ct->instantiation_args) {
-        type_args.push_back(&_module.nodes.emplace_back<TypeNode>(arg));
+    // length is always a T[N] question. the destination itself, or the inline-array field a
+    // `fixed_array` wraps - never instantiation_args[1], which is a shape this pass does not own
+    std::optional<uint64_t> length;
+    if (fills_inline) {
+        length = type.bound_array_length();
+        // the local is already storage; a constructor would be a second answer to how T[N]
+        // starts. null here is the zero-init gen_var_decl already does
+        *slot = nullptr;
+    } else {
+        // **the constructor of the destination type, named rather than looked up.** an instantiation
+        // carries its template's name and its own type arguments, which is exactly what a call site
+        // writes as `array<int32>()`
+        std::vector<TypeNode *> type_args;
+        for (const auto &arg : ct->instantiation_args) {
+            type_args.push_back(&_module.nodes.emplace_back<TypeNode>(arg));
+        }
+
+        auto &ctor = build_constructor_call(
+            tmpl->name.value_or(std::string()),
+            literal.token_bracket,
+            tmpl->ast_namespace != nullptr ? tmpl->ast_namespace : &_collector.namespaces.root());
+
+        ctor.explicit_type_args = std::move(type_args);
+
+        *slot = &ctor;
+
+        if (fills_by_index) {
+            for (size_t i = 0; i < ct->property_count(); i++) {
+                const ValueType &field = ct->get_property_type(i);
+                if (field.is_inline_array()) {
+                    length = field.bound_array_length();
+                    break;
+                }
+            }
+        }
     }
 
-    auto &ctor = build_constructor_call(
-        tmpl->name.value_or(std::string()),
-        literal.token_bracket,
-        tmpl->ast_namespace != nullptr ? tmpl->ast_namespace : &_collector.namespaces.root());
+    if (fills_by_index) {
+        if (!length.has_value()) {
+            return false;
+        }
 
-    ctor.explicit_type_args = std::move(type_args);
+        if (literal.elements.size() != *length) {
+            literal.expansion_decided = true;
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(literal.token_bracket),
+                fmt::format(
+                    "this literal has {} elements, '{}' has {}",
+                    literal.elements.size(), type.get_type_desciption(), *length));
+            return false;
+        }
+    }
 
-    *slot = &ctor;
-
-    // one `$dest[] = element` per element. each gets its **own** place naming the destination - one
+    // one write per element. each gets its **own** place naming the destination - one
     // subtree per append, because PointerAdjuster rewrites edges in place and a shared one would be
     // adjusted once per use
     appends.reserve(literal.elements.size());
 
-    for (auto *element : literal.elements) {
+    for (size_t i = 0; i < literal.elements.size(); i++) {
+        ExprNode *element = literal.elements[i];
         auto &var_ref = local_place(_module, into);
 
-        auto &slot_expr = _module.nodes.emplace_back<IndexExprNode>(
-            &var_ref, std::vector<ExprNode *>{}, literal.token_bracket);
+        std::vector<ExprNode *> indices;
+        if (fills_by_index) {
+            const TokenReference index_token = _module.make_virtual_token(
+                std::to_string(i), Token::Type::t_integer_literal, literal.token_bracket);
+            auto &index = _module.nodes.emplace_back<LiteralIntExprNode>(
+                index_token, ValueTypePrimitive::t_usize);
+            indices.push_back(&index);
+        }
 
-        // the three facts the parser records for a hand-written `$a[] = v`, recorded here for the same
-        // reasons: the slot is bound rather than read, there is an `=` behind the bracket, and the write
-        // into it initializes storage that holds nothing, so no teardown is owed
+        auto &slot_expr = _module.nodes.emplace_back<IndexExprNode>(
+            &var_ref, std::move(indices), literal.token_bracket);
+
+        // the three facts the parser records for a hand-written `$a[] = v` / `$a[$i] = v`,
+        // recorded here for the same reasons: the slot is bound rather than read, there is an
+        // `=` behind the bracket, and the write into it initializes storage that holds nothing,
+        // so no teardown is owed
         slot_expr.slot_is_bound = true;
         slot_expr.is_assignment_target = true;
 

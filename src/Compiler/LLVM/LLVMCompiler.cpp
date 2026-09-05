@@ -690,6 +690,10 @@ void LLVMCompiler::visit_const_ref(AST::ConstRefExprNode &node)
 {
     throw _ctx.error("a constant reference survived AST::ConstantExpander");
 }
+void LLVMCompiler::visit_generic_value(AST::GenericValueExprNode &node)
+{
+    throw _ctx.error("a const generic value survived instantiation - it should have become a literal");
+}
 void LLVMCompiler::visit_const_decl(AST::ConstDeclNode &node)
 {
     // a compile-time constant has no storage and no symbol - it was copied into each of its use sites, and

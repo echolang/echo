@@ -42,6 +42,7 @@ namespace
                 case AST::CopyKind::t_retain:
                 case AST::CopyKind::t_constructor:
                 case AST::CopyKind::t_synthesizable:
+                case AST::CopyKind::t_elements:
                     anything_to_arrange = true;
                     break;
             }
@@ -100,6 +101,22 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
     // something is t_synthesizable, and one whose cases own nothing copies as bytes. a union buffer
     // would arrive here as a `[N x i8]` property and fold to t_bytes - silently, and for exactly the
     // shape that must not
+    if (type.is_inline_array()) {
+        switch (AST::classify_copy(type.array_element())) {
+        case AST::CopyKind::t_bytes:
+            return AST::CopyKind::t_bytes;
+
+        case AST::CopyKind::t_none:
+            return AST::CopyKind::t_none;
+
+        case AST::CopyKind::t_retain:
+        case AST::CopyKind::t_constructor:
+        case AST::CopyKind::t_synthesizable:
+        case AST::CopyKind::t_elements:
+            return AST::CopyKind::t_elements;
+        }
+    }
+
     if (!type.is_struct() && !type.is_enum()) {
         return AST::CopyKind::t_bytes;
     }
@@ -156,6 +173,11 @@ bool AST::copy_source_may_be_const(const AST::ValueType &type)
         // anything reads it - AST::OwnershipPass reports this arm and never reaches a synthesis
         case AST::CopyKind::t_none:
             return true;
+
+        // the loop copies each element the way that element is copied, so a const source is
+        // readable exactly when T is
+        case AST::CopyKind::t_elements:
+            return AST::copy_source_may_be_const(type.array_element());
     }
 
     return true;

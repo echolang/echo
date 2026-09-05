@@ -8,6 +8,7 @@
 #include "AST/ASTConstructor.h"
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTCopy.h"
+#include "AST/ASTOps.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTLastRead.h"
@@ -25,6 +26,7 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/MatchExprNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/OperatorNode.h"
 #include "AST/GuardNode.h"
 #include "AST/ReleaseNode.h"
 #include "AST/ReturnNode.h"
@@ -41,6 +43,8 @@
 #include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
+#include <functional>
+#include <string>
 #include <unordered_map>
 
 namespace AST
@@ -1090,7 +1094,12 @@ void OwnershipPass::bind_indexed_target(AssignNode &assign)
             case NodeType::n_expr_index:
             {
                 auto *index = static_cast<IndexExprNode *>(place);
-                if (index->element_call == nullptr) {
+                // a container's `operator []` hands back a borrow, and a `T[N]` index *is* a
+                // place of T - both are storage this pass accounts for. a raw pointer
+                // element is the one that is not: `$p[$i]` is unaccounted, and the
+                // refusal below names `mem::take` / `mem::init` for it
+                if (index->element_call == nullptr
+                    && !index->indexed_base_type().is_inline_array()) {
                     return;
                 }
 
@@ -2192,12 +2201,20 @@ ExprNode *OwnershipPass::arrive_value(
         case CopyKind::t_none:
             reject_uncopyable(expr, wanted, source, destination);
             return expr;
+
+        // a `T[N]` whose element is not a byte copy. no ComplexType, so no constructor to hang
+        // the loop on - ensure_inline_array_copy is the function that *is* that loop, and the
+        // emission below is the same call the two constructor arms make
+        case CopyKind::t_elements:
+            copy_ctor = ensure_inline_array_copy(copy_target, location_of_expression(expr));
+            break;
     }
 
-    // the classifier named a constructor for both arms that reach here - t_constructor because it read
-    // the slot, t_synthesizable because ensure_copy_constructor has just filled it - so a null is a
-    // compiler bug rather than a program error. reporting the author-facing refusal instead would blame
-    // them for it, which is exactly the divergence this switch exists to make impossible
+    // the classifier named a function for every arm that reaches here - t_constructor because it
+    // read the slot, t_synthesizable because ensure_copy_constructor has just filled it,
+    // t_elements because ensure_inline_array_copy has just written the loop. a null is a
+    // compiler bug rather than a program error. reporting the author-facing refusal instead would
+    // blame them for it, which is exactly the divergence this switch exists to make impossible
     assert(copy_ctor != nullptr && "a copy the classifier named has no constructor to call");
 
     // the type's own name, positioned at the copy rather than at the declaration: this is the call
@@ -2341,6 +2358,132 @@ void OwnershipPass::emit_drop(
     emit_drop_of_place(make_place(root, path), type, root->token_varname, out);
 }
 
+void OwnershipPass::emit_counted_loop(
+    uint64_t length,
+    bool reverse,
+    const TokenReference &at,
+    ScopeNode &into,
+    const std::function<void(VarDeclNode &index, ScopeNode &body)> &fill
+)
+{
+    const ValueType usize = ValueType(ValueTypePrimitive::t_usize);
+
+    auto &i_type = _current_module->nodes.emplace_back<TypeNode>(usize);
+    auto &i_decl = _current_module->nodes.emplace_back<VarDeclNode>(
+        virtual_token(fmt::format("$__i{}", ++_temporary_count), Token::Type::t_varname, at),
+        &i_type);
+    i_decl.init_expr = &_current_module->nodes.emplace_back<LiteralIntExprNode>(
+        virtual_token(reverse ? std::to_string(length) : "0", Token::Type::t_integer_literal, at),
+        ValueTypePrimitive::t_usize);
+    into.add_vardecl(i_decl);
+
+    const char *cmp_spelling = reverse ? ">" : "<";
+    const char *step_spelling = reverse ? "-" : "+";
+    const Operator *cmp = _collector.operators.get_operator(cmp_spelling);
+    const Operator *step = _collector.operators.get_operator(step_spelling);
+    assert(cmp != nullptr && step != nullptr);
+
+    auto &cmp_op = _current_module->nodes.emplace_back<OperatorNode>(
+        virtual_token(cmp_spelling, Token::Type::t_unknown, at), cmp);
+    auto &step_op = _current_module->nodes.emplace_back<OperatorNode>(
+        virtual_token(step_spelling, Token::Type::t_unknown, at), step);
+
+    auto &i_read = AST::local_place(*_current_module, i_decl);
+    auto &bound = _current_module->nodes.emplace_back<LiteralIntExprNode>(
+        virtual_token(reverse ? "0" : std::to_string(length), Token::Type::t_integer_literal, at),
+        ValueTypePrimitive::t_usize);
+    auto &condition = _current_module->nodes.emplace_back<BinaryExprNode>(&cmp_op, &i_read, &bound);
+
+    auto &loop_scope = _current_module->nodes.emplace_back<ScopeNode>();
+
+    auto add_step = [&]() {
+        auto &i_lhs = AST::local_place(*_current_module, i_decl);
+        auto &i_rhs = AST::local_place(*_current_module, i_decl);
+        auto &one = _current_module->nodes.emplace_back<LiteralIntExprNode>(
+            virtual_token("1", Token::Type::t_integer_literal, at), ValueTypePrimitive::t_usize);
+        auto &next = _current_module->nodes.emplace_back<BinaryExprNode>(&step_op, &i_rhs, &one);
+        auto &i_assign = _current_module->nodes.emplace_back<AssignNode>(&i_lhs, &next, at);
+        loop_scope.children.push_back(make_ref(i_assign));
+    };
+
+    if (reverse) {
+        add_step();
+    }
+
+    fill(i_decl, loop_scope);
+
+    if (!reverse) {
+        add_step();
+    }
+
+    auto &loop = _current_module->nodes.emplace_back<WhileStatementNode>(&condition, &loop_scope);
+    into.children.push_back(make_ref(loop));
+    _changed = true;
+}
+
+void OwnershipPass::emit_inline_array_copies(
+    ExprNode *dst,
+    ExprNode *src,
+    const ValueType &array_type,
+    const TokenReference &at,
+    ScopeNode &into
+)
+{
+    const std::optional<uint64_t> length = array_type.bound_array_length();
+    if (!length.has_value() || dst == nullptr || src == nullptr) {
+        return;
+    }
+
+    emit_counted_loop(*length, false, at, into, [&](VarDeclNode &index, ScopeNode &body) {
+        auto &i_idx = AST::local_place(*_current_module, index);
+        auto &dst_elem = _current_module->nodes.emplace_back<IndexExprNode>(
+            dst, std::vector<ExprNode *>{&i_idx}, at);
+        dst_elem.slot_is_bound = true;
+        dst_elem.is_assignment_target = true;
+
+        auto &i_src = AST::local_place(*_current_module, index);
+        auto &src_elem = _current_module->nodes.emplace_back<IndexExprNode>(
+            src, std::vector<ExprNode *>{&i_src}, at);
+
+        auto &elem_assign = _current_module->nodes.emplace_back<AssignNode>(&dst_elem, &src_elem, at);
+        elem_assign.is_initialization = true;
+        body.children.push_back(make_ref(elem_assign));
+    });
+}
+
+void OwnershipPass::emit_inline_array_drops(
+    ExprNode *place,
+    const ValueType &array_type,
+    const TokenReference &at,
+    std::vector<NodeReference> &out
+)
+{
+    const std::optional<uint64_t> length = array_type.bound_array_length();
+    if (!length.has_value() || *length == 0 || place == nullptr) {
+        return;
+    }
+
+    if (!needs_destruction(array_type.array_element())) {
+        return;
+    }
+
+    auto &block = _current_module->nodes.emplace_back<ScopeNode>();
+
+    emit_counted_loop(*length, true, at, block, [&](VarDeclNode &index, ScopeNode &body) {
+        auto &i_idx = AST::local_place(*_current_module, index);
+        auto &elem = _current_module->nodes.emplace_back<IndexExprNode>(
+            place, std::vector<ExprNode *>{&i_idx}, at);
+
+        std::vector<NodeReference> elem_drops;
+        emit_drop_of_place(&elem, array_type.array_element(), at, elem_drops);
+        for (auto &drop : elem_drops) {
+            body.children.push_back(drop);
+        }
+    });
+
+    out.push_back(make_ref(block));
+}
+
 void OwnershipPass::emit_drop_of_place(
     ExprNode *place,
     const ValueType &type,
@@ -2348,6 +2491,11 @@ void OwnershipPass::emit_drop_of_place(
     std::vector<NodeReference> &out
 )
 {
+    if (type.is_inline_array()) {
+        emit_inline_array_drops(place, type, at, out);
+        return;
+    }
+
     // a callable owes one release of its environment and has no properties to walk - so it answers here,
     // before the ComplexType it does not have is asked for. no deinit to ensure either: the environment's
     // teardown is uniform, because a callable's static type never says which environment it holds
@@ -3183,6 +3331,11 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
         ExprNode *target = make_place(&this_decl, path);
         ExprNode *source = make_place(&other_decl, path);
 
+        if (prop.type.is_inline_array() && classify_copy(prop.type) == CopyKind::t_elements) {
+            emit_inline_array_copies(target, source, prop.type, site, body);
+            continue;
+        }
+
         // a pointer property is *bound* here, not written through: the slot has never been seated,
         // so a plain assignment would write through uninitialized memory. `$this->prop:$ = $other->prop`,
         // the same re-seating form the synthesized field-wise constructor spells
@@ -3228,6 +3381,62 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
     AST::plant_init_call(*_current_module, decl, AST::find_init(ct));
 
+    publish_synthesized_decl(decl);
+
+    return &decl;
+}
+
+FunctionDeclNode *OwnershipPass::ensure_inline_array_copy(
+    const ValueType &type,
+    const TokenReference &site
+)
+{
+    // the value produced is a fresh T[N], never a const one. a const source is the parameter's
+    // question, answered below through copy_source_may_be_const the way a synthesized copy
+    // constructor answers it
+    const ValueType own_type = ValueType::make_mutable(type);
+
+    if (auto found = _inline_array_copies.find(own_type); found != _inline_array_copies.end()) {
+        return found->second;
+    }
+
+    // the caller's switch reaches this from the t_elements arm only. restated because a body
+    // built around an assumption held in another file is how the copy ladder came to be walked
+    // twice
+    if (classify_copy(own_type) != CopyKind::t_elements) {
+        return nullptr;
+    }
+
+    auto &decl = begin_synthesized_decl("$copy_inline_array", site);
+    const BodyMutationScope mutating(*this, decl);
+
+    auto &return_type = _current_module->nodes.emplace_back<TypeNode>(own_type);
+    decl.return_type = &return_type;
+
+    const ValueType source_type =
+        copy_source_may_be_const(own_type) ? ValueType::make_const(own_type) : own_type;
+
+    auto &other_decl = add_borrow_parameter(decl, "$other", source_type, site);
+
+    ScopeNode &body = *decl.body;
+
+    auto &dst_type = _current_module->nodes.emplace_back<TypeNode>(own_type);
+    auto &dst_decl = _current_module->nodes.emplace_back<VarDeclNode>(
+        virtual_token("$dst", Token::Type::t_varname, site), &dst_type);
+    body.add_vardecl(dst_decl);
+
+    emit_inline_array_copies(
+        &local_place(*_current_module, dst_decl),
+        &local_place(*_current_module, other_decl),
+        own_type,
+        site,
+        body);
+
+    auto &ret = _current_module->nodes.emplace_back<ReturnNode>(
+        &local_place(*_current_module, dst_decl));
+    body.children.push_back(make_ref(ret));
+
+    _inline_array_copies[own_type] = &decl;
     publish_synthesized_decl(decl);
 
     return &decl;

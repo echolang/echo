@@ -1,0 +1,4 @@
+// an indirect call whose signature returns void is a consumed value, the same as a direct one
+
+function<void()> $greet = function() : void {};
+int32 $x = $greet();

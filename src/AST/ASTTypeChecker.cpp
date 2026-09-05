@@ -34,7 +34,9 @@
 #include "AST/ASTNullability.h"
 #include "AST/ASTAccess.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
 
@@ -548,6 +550,15 @@ void TypeChecker::visitReturn(ReturnNode &node)
         }
     }
 
+    // a void function's `return nothing();` is a void statement, not a consumed value
+    if (_current_function != nullptr
+        && _current_function->get_return_type().is_void()
+        && node.expr != nullptr) {
+        node.expr->accept(*this);
+        statement_edges(node.unwind);
+        return;
+    }
+
     RecursiveVisitor::visitReturn(node);
 }
 
@@ -880,7 +891,13 @@ void TypeChecker::visit_optional_chain(OptionalChainExprNode &node)
 {
     check_optional_operand(OptionalForm::t_optional_chain, node.base, node.token);
 
-    RecursiveVisitor::visit_optional_chain(node);
+    // the continuation is the original expression, the same standing TemporaryBind's body has.
+    // `$a?->save();` is a void *statement*; if this chain is a value, rewrite_value_edge already
+    // asked about the chain (expression_produces_no_value peels it)
+    value_edge(node.base);
+    if (node.continuation != nullptr) {
+        node.continuation->accept(*this);
+    }
 }
 
 // **an address of something that has no address.**
@@ -1024,25 +1041,40 @@ void TypeChecker::check_assume_is_unsafe(FunctionCallExprNode &node)
         "check");
 }
 
-void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
+ExprNode *TypeChecker::rewrite_value_edge(ExprNode *expr)
 {
-    if (!node.decl->is_builtin() || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_dprint) {
+    ExprNode *walked = RecursiveVisitor::rewrite_value_edge(expr);
+    check_value_is_produced(walked);
+    return walked;
+}
+
+void TypeChecker::visit_temporary_bind(TemporaryBindExprNode &node)
+{
+    for (auto *temp : node.temporaries) {
+        statement_edge(temp);
+    }
+
+    // the body is the original expression. if this bind is a statement, the body is a statement
+    // (`get()->write($t);`); if this bind is a value, rewrite_value_edge already asked about the
+    // bind (expression_produces_no_value peels it). descending with accept keeps nested value
+    // edges checked without treating the body node itself as a consumed value
+    if (node.body != nullptr) {
+        node.body->accept(*this);
+    }
+
+    statement_edges(node.teardown);
+}
+
+void TypeChecker::check_value_is_produced(ExprNode *expr)
+{
+    if (expr == nullptr || !expression_produces_no_value(*expr)) {
         return;
     }
 
-    if (node.arguments.empty() || node.arguments[0] == nullptr) {
-        return;
-    }
-
-    // the parameter is `T&`, so what arrives is the address of the slot - one level out from the value
-    // being printed, exactly as ref_count's argument is
-    const ValueType printed_type = value_type_of(node.arguments[0]->result_type());
-
-    if (printed_type.is_void()) {
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(node.token_function_name),
-            "'dprint' has nothing to print - this expression produces no value");
-    }
+    ExprNode *source = produced_value_of(expr);
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(location_of_expression(source != nullptr ? source : expr)),
+        no_value_reason(*expr));
 }
 
 // `mem::take<T>(T& $place)` hands the value at a place over and writes nothing back, so the storage it
@@ -1374,12 +1406,11 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         }
     }
 
-    // **outside the generic gate below**, unlike its two neighbours, because the one thing it catches is
-    // precisely a call the monomorphizer could not instantiate: `dprint(some_void_call())` binds T to
-    // void, which is a type there is no slot to allocate, so `decl` is still the template when this pass
-    // runs. inside the gate it would never fire and the failure would stay a location-less codegen throw
+    // **outside the generic gate below**, unlike its two neighbours: a call the monomorphizer could
+    // not instantiate still has a `decl` (the template), and these questions do not need a concrete
+    // instance. `dprint(nothing())` is not here — rewrite_value_edge walks every argument, including
+    // the AddrOf dprint's T& plants as a place edge, and does not go through this decl-is-set gate
     if (node.decl != nullptr) {
-        check_dprint_argument(node);
         check_assume_is_unsafe(node);
 
         // outside the gate too, and for a plainer reason than its neighbour's: the question is whether
@@ -1631,6 +1662,14 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(location_of_expression(&node)),
             "internal: a written cast was not classified");
+    }
+
+    // an explicit `as` owns a void operand through CastResolution. value-edging it would be a
+    // second report of the same mistake, worded worse. implicit casts peel in
+    // expression_produces_no_value, so the TypeCast's own value_edge already asked
+    if (!node.is_implcit && node.expr != nullptr) {
+        node.expr->accept(*this);
+        return;
     }
 
     RecursiveVisitor::visitTypeCast(node);

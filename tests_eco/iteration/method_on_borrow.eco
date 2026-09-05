@@ -1,0 +1,37 @@
+// a method call on a `&` or `const &` foreach binding. the parser plants `unknown&` on the
+// binding so parse_member_call's peel+AddrOf is identity once ForeachLowering retypes V
+
+struct M
+{
+    int32 $n;
+
+    const function trace() : int32
+    {
+        return $this->n;
+    }
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+array<M> $ms = [];
+$ms[] = M(7);
+$ms[] = M(8);
+
+foreach ($ms as const &$m) {
+    echo $m->trace();
+}
+
+foreach ($ms as &$m) {
+    echo $m->trace();
+}
+
+foreach ($ms as &$m) {
+    $m->bump();
+}
+
+foreach ($ms as $m) {
+    echo $m->n;
+}

@@ -1,0 +1,5 @@
+// a never-returning operand of a written `as` is a legal value: the conversion is unreachable.
+// AST::expression_produces_no_value exempts die, and cast_plan_for answers identity rather than
+// stalling as pending on void
+
+int32 $x = die('gone') as int32;

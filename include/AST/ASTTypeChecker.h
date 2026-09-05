@@ -108,6 +108,12 @@ namespace AST
         void visit_addr_of_expr(AddrOfExprNode &node) override;
         void visit_function_ref_expr(FunctionRefExprNode &node) override;
         void visitReturn(ReturnNode &node) override;
+        void visit_temporary_bind(TemporaryBindExprNode &node) override;
+
+        // **the consumption seam.** a settled void call is refused here, once, rather than from a
+        // list of visit methods that forget a wrapper. TemporaryBind's body, an optional-chain
+        // continuation and an explicit `as` operand skip this on purpose — see those visits
+        ExprNode *rewrite_value_edge(ExprNode *expr) override;
 
     private:
         Bundle &_bundle;
@@ -243,8 +249,13 @@ namespace AST
         // every other call
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
-        void check_dprint_argument(FunctionCallExprNode &node);
         void check_assume_is_unsafe(FunctionCallExprNode &node);
+
+        // a settled void call where a value is consumed. asked from rewrite_value_edge, so every
+        // value and place edge is covered and a TemporaryBind around a void method is not a hole.
+        // AST::expression_produces_no_value is the question; `die(...)` is exempt because a
+        // never-returning arm is a legal value
+        void check_value_is_produced(ExprNode *expr);
 
         // `mem::take<T>` ends its source's claim on a value without writing anything back and
         // `mem::init<T>` starts one without ending what was there, so both are only sound over storage

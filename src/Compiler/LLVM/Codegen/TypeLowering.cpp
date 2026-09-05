@@ -1243,6 +1243,22 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
             "instantiated with concrete types before compilation",
             param->describe(), declared_at, _ctx.function_context()));
     }
+    else if (type.is_inline_array()) {
+        const std::optional<uint64_t> length = type.bound_array_length();
+        if (!length.has_value()) {
+            throw _ctx.error(fmt::format(
+                "Cannot lower inline array '{}' with an unbound length {}",
+                type.get_type_desciption(), _ctx.function_context()));
+        }
+
+        llvm::Type *element = get_llvm_type(type.array_element(), cmp_unit);
+        base_type = llvm::ArrayType::get(element, *length);
+    }
+    else if (type.is_const_value()) {
+        throw _ctx.error(fmt::format(
+            "Cannot lower a const generic value '{}' as a machine type {}",
+            type.get_type_desciption(), _ctx.function_context()));
+    }
     else {
         throw _ctx.error(fmt::format(
             "Unsupported type '{}' {}", type.get_type_desciption(), _ctx.function_context()));

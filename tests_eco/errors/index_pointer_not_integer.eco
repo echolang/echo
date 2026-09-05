@@ -1,0 +1,2 @@
+ptr<int32> $p = mem::alloc<int32>(1);
+echo $p:$['x'];

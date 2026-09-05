@@ -1,0 +1,10 @@
+// a settled void call in a value position is a located error, not a codegen crash.
+// AST::expression_produces_no_value is the question; TypeChecker asks it on rewrite_value_edge
+
+function nothing() : void
+{
+}
+
+echo nothing();
+int32 $x = nothing() + 1;
+echo nothing() == 1;

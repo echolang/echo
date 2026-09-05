@@ -1,0 +1,18 @@
+struct sized<const usize N>
+{
+    const function n() : usize
+    {
+        return N;
+    }
+}
+
+sized<4> $a = sized<4>();
+sized<8> $b = sized<8>();
+sized<0x10> $c = sized<0x10>();
+sized<0b100> $d = sized<0b100>();
+
+echo $a->n();
+echo $b->n();
+echo $a->n() == $b->n();
+echo $c->n();
+echo $d->n();

@@ -241,6 +241,40 @@ namespace AST
         return call.decl == nullptr && call.token_function_name.type() == Token::Type::t_echo;
     }
 
+    // **does this call produce no value?** echo, or a chosen callee whose return type is void.
+    //
+    // an unresolved call (`decl == nullptr`, not echo) is *not* this: its result_type() is also
+    // void, and is_undetermined_type answers true for that on purpose, so ranking treats it as
+    // "no information" rather than as a mismatch. the two states sharing a spelling is why the
+    // parser must not refuse a void operand — a call the fixpoint has not settled yet is a
+    // well-formed program. TypeChecker runs after the fixpoint and AST::cast_plan_for asks this
+    // before is_undetermined_type, so a settled void is a real refusal and an unsettled one stays
+    // pending
+    //
+    // implemented in ExprNode.cpp because it reads FunctionDeclNode::get_return_type, and this
+    // header only forward-declares that class
+    bool call_returns_void(const FunctionCallExprNode &call);
+
+    // **the expression that actually produced this**, under implicit casts, TemporaryBind and
+    // optional-chain wrapping. those do not change what is produced, so every question about
+    // "is this a void call" and every caret that names one has to be asked underneath them.
+    // an explicit `as` stops the walk: the user wrote that one
+    ExprNode *produced_value_of(ExprNode *expr);
+    const ExprNode *produced_value_of(const ExprNode *expr);
+
+    // **does this expression produce no value a consumer can read?** the expression-level question
+    // TypeChecker and AST::cast_plan_for both ask, so a TemporaryBind around a void call and a
+    // `die(...)` cannot get two answers.
+    //
+    // asked of produced_value_of. true only for a *settled* void: echo, a chosen callee whose
+    // return is void, or an indirect call whose signature returns void. an unresolved call is
+    // not this. `die(...)` is not this: a never-returning arm is a legal value (B55)
+    bool expression_produces_no_value(const ExprNode &expr);
+
+    // the sentence the two askers share, after expression_produces_no_value answered true. names
+    // the call the author wrote, not a TemporaryBind nobody did
+    std::string no_value_reason(const ExprNode &expr);
+
     // **is this expression a string literal, and what does it say?** the text if it is, nullopt if
     // it is not, one question because two subsystems ask it about the same argument and must agree:
     // AST::TypeChecker rejects an `assert` message that has no answer, and ExprCodegen folds
