@@ -1,0 +1,23 @@
+// the published call site: statement `guard` over a `status<E>`
+
+function start(bool $ok) : status<string>
+{
+    if (!$ok) {
+        return .error('nope');
+    }
+
+    return .ok;
+}
+
+function go(bool $ok) : void
+{
+    guard start($ok) else ($e) {
+        echo $e;
+        return;
+    }
+
+    echo "ok";
+}
+
+go(true);
+go(false);

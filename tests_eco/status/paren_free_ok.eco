@@ -1,0 +1,12 @@
+// a payload-free case is a static of no arguments, so `status<E>::ok` needs no list
+
+function start() : status<int32>
+{
+    return status<int32>::ok;
+}
+
+guard start() else {
+    die("no");
+}
+
+echo 1;

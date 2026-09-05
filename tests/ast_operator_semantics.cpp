@@ -193,6 +193,12 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         // declared `operator` - `string == string` is the standard library's, not the language's
         { Token::Type::t_logical_eq, value(s.structure), value(s.structure), false, "two structs look for a declaration" },
         { Token::Type::t_op_add, value(s.structure), value(s.structure), false, "whatever the symbol" },
+
+        // **void is determined and has no arm.** a true here would claim gen_binary_expr lowers it.
+        // a void *call* as an operand is expression_produces_no_value's, skipped before this predicate
+        // is asked; a determined void that is not a call is the ordinary unsupported-operand diagnostic
+        { Token::Type::t_op_add, value(ValueType::make_void()), value(s.i32), false, "void has no arithmetic" },
+        { Token::Type::t_logical_eq, value(s.i32), value(ValueType::make_void()), false, "and no comparison" },
     };
 
     for (const Row &row : rows) {

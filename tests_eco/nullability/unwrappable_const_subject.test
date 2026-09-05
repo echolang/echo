@@ -1,22 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] unwrappable_const_subject.eco:32:10
+[error] unwrappable_const_subject.eco:34:10
 
   'const Box&' cannot be guarded through a 'const' - taking the value out hands back a borrow that may be written, and 'contract::unwrappable::unwrap()' is not declared const. guard a value nobody promised to leave alone.
 
-  31 | {
-  32 |     $v = guard $b else { return -1; }
+  33 | {
+  34 |     $v = guard $b else { return -1; }
      :          ^^^^^
-  33 |     return $v;
+  35 |     return $v;
 
-[error] unwrappable_const_subject.eco:32:10
-
-  'guard' needs a value that may be absent, and 'const Box' always is one - write 'const Box?' if it may not be, or drop the guard
-
-  31 | {
-  32 |     $v = guard $b else { return -1; }
-     :          ^^^^^
-  33 |     return $v;
-
-2 errors, nothing was compiled.
+1 error, nothing was compiled.

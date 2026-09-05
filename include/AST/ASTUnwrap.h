@@ -30,6 +30,11 @@ namespace AST
         // FunctionDeclNode::is_interface_requirement(). the same call `IterationSource` makes about its
         // own erased arm
         t_protocol,
+
+        // presence without a payload - `contract::checkable`, or an erased application of it. the
+        // same "one kind" call as t_protocol: GuardLowering branches on this rather than on a null
+        // `unwrap`, and the initializer form is a refusal there, not a dummy binding
+        t_checkable,
     };
 
     struct UnwrapPlan
@@ -42,8 +47,8 @@ namespace AST
         ValueType payload_type;
 
         // **the two callees, named through the conformance rather than by their spelling** - the rule
-        // IterationPlan::iterate states. null on the t_builtin_nullable arm,
-        // where the compiler answers the presence question itself and there is nothing to call.
+        // IterationPlan::iterate states. null on t_builtin_nullable and t_checkable (the latter has
+        // `has_value` and nothing to unwrap), where there is nothing to call.
         //
         // this matters three ways, and only the first is tidiness. `stdlib/core/contract.eco` could
         // rename everything it declares and only Echo source would notice, which is precisely what
@@ -122,6 +127,10 @@ namespace AST
     //
     // that arm also short-circuits a `T?` that only became one after substitution, which is what makes
     // the deferred path answer identically to the immediate one.
+    //
+    // **const is not this function's question.** `has_value()` is const; `unwrap()` and `failure()`
+    // are not. which of those this `guard` actually calls is a fact about the form, and
+    // AST::GuardLowering refuses only the callee it would mint
     UnwrapLookup unwrap_plan_for(const ValueType &subject, const CoreTypes &core, TypeRegistry &types);
 
     // **the declared type against what is actually inside**, worded once for its two moments:

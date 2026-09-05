@@ -810,6 +810,15 @@ static AST::ValueType parse_generic_application(
         }
     }
 
+    for (const auto &arg : args) {
+        if (auto refusal = AST::void_as_value_refusal(arg)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(name_token),
+                std::move(refusal.value()));
+            return AST::ValueType::make_unknown();
+        }
+    }
+
     if (!template_ct->is_generic() || template_ct->type_parameters.size() != args.size()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(name_token),
@@ -1335,6 +1344,7 @@ static std::optional<AST::ValueType> parse_value_type(
     // `ptr<T>` is a real type constructor, so it recurses: the pointee is an arbitrary type,
     // which is what makes ptr<ptr<T>> and ptr<Box<int>> representable at all
     if (payload.cursor.is_type(Token::Type::t_ptr)) {
+        auto ptr_token = payload.cursor.current();
         payload.cursor.skip();
 
         if (!payload.cursor.is_type(Token::Type::t_open_angle)) {
@@ -1347,6 +1357,17 @@ static std::optional<AST::ValueType> parse_value_type(
 
         auto pointee = parse_value_type(payload, names);
         if (!pointee.has_value()) {
+            return std::nullopt;
+        }
+
+        // **not C's void*.** Echo's untyped handle is `ptr<Handle>` over `extern struct`.
+        // lowering this as i8* would be a second untyped pointer the rest of the language
+        // does not have
+        if (pointee->is_void()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(ptr_token),
+                "'ptr<void>' is not an untyped pointer - write 'ptr<Handle>' over an "
+                "'extern struct' for a C handle.");
             return std::nullopt;
         }
 

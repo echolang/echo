@@ -23,7 +23,11 @@ namespace AST
     public:
         // returns the type this expression will return
         virtual ValueType result_type() const {
-            return ValueType::void_type();
+            // not yet, not the empty type and not C void. a missing override used to
+            // answer void, which was "no information" only while void sat in
+            // is_undetermined_type. after the split a forgotten override would be a
+            // determined type ranking as T = void
+            return ValueType::make_unknown();
         }
 
         bool is_implcit = false;
@@ -48,10 +52,12 @@ namespace AST
         }
 
         ValueType result_type() const override {
-            return ValueType::void_type();
+            // a dummy for a missing expression. unknown so ranking waits rather than
+            // treating a refused constant as a determined type
+            return ValueType::make_unknown();
         }
 
-        // void goes into the void
+        // a dummy: later walks stop here
         void accept(Visitor &visitor) override {}
 
         Node *clone(CloneContext &cc) const override;
@@ -161,7 +167,7 @@ namespace AST
         //
         // set at parse time for `Type::f(...)`, and by AST::bind_shorthand_to for the shorthand
         // `.f(...)`, whose owner its *destination* names. so a shorthand sits here unset, answering
-        // `void` from result_type() - honestly undetermined, which is what stops it from being ranked
+        // `unknown` from result_type() - honestly undetermined, which is what stops it from being ranked
         // against an overload set it cannot choose between.
         //
         // **it is also the substitution seed**, and that is the half easy to miss: AST::can_instantiate
@@ -241,15 +247,10 @@ namespace AST
         return call.decl == nullptr && call.token_function_name.type() == Token::Type::t_echo;
     }
 
-    // **does this call produce no value?** echo, or a chosen callee whose return type is void.
-    //
-    // an unresolved call (`decl == nullptr`, not echo) is *not* this: its result_type() is also
-    // void, and is_undetermined_type answers true for that on purpose, so ranking treats it as
-    // "no information" rather than as a mismatch. the two states sharing a spelling is why the
-    // parser must not refuse a void operand — a call the fixpoint has not settled yet is a
-    // well-formed program. TypeChecker runs after the fixpoint and AST::cast_plan_for asks this
-    // before is_undetermined_type, so a settled void is a real refusal and an unsettled one stays
-    // pending
+    // **does this call produce no LLVM value?** echo, or a chosen callee whose return type is void
+    // (the C ABI is `CreateRetVoid`). an unresolved call is not this: its result_type() is
+    // unknown, and is_undetermined_type answers true for that. a settled `: void` call is
+    // determined and produces no value - AST::expression_produces_no_value asks this
     //
     // implemented in ExprNode.cpp because it reads FunctionDeclNode::get_return_type, and this
     // header only forward-declares that class
@@ -266,9 +267,9 @@ namespace AST
     // TypeChecker and AST::cast_plan_for both ask, so a TemporaryBind around a void call and a
     // `die(...)` cannot get two answers.
     //
-    // asked of produced_value_of. true only for a *settled* void: echo, a chosen callee whose
-    // return is void, or an indirect call whose signature returns void. an unresolved call is
-    // not this. `die(...)` is not this: a never-returning arm is a legal value (B55)
+    // asked of produced_value_of. true for echo, a chosen callee whose return is void, or an
+    // indirect call whose signature returns void. an unresolved call is not this (`unknown`).
+    // `die(...)` is not this: a never-returning arm is a legal value (B55)
     bool expression_produces_no_value(const ExprNode &expr);
 
     // the sentence the two askers share, after expression_produces_no_value answered true. names
@@ -652,11 +653,11 @@ namespace AST
         ~IndirectCallExprNode() {}
 
         // what the callee reads as: a `ptr<function<...>>` is read through first, which is the one
-        // thing every reader of this node has to know. void when there is no callee - callers ask
+        // thing every reader of this node has to know. unknown when there is no callee - callers ask
         // is_callable() from here, and the type they get back is also what a diagnostic names
         ValueType callee_type() const;
 
-        // the callee's signature's return type. void when the callee is not (yet) callable, so a
+        // the callee's signature's return type. unknown when the callee is not (yet) callable, so a
         // half-resolved tree answers rather than asserting - the same contract a call with no decl has
         ValueType result_type() const override;
 

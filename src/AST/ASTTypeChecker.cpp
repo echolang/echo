@@ -220,15 +220,18 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     if (node.name_token.has_value()) {
         check_c_function_type(node.get_return_type(), node.name_token.value());
         check_incomplete_use(node.get_return_type(), node.name_token.value());
+        check_void_nested(node.get_return_type(), node.name_token.value());
 
         // a generic template returns before the args are walked as VarDecls, so they
         // are asked here. a concrete body walks them through visitVarDecl instead -
-        // checking both is two sentences for one parameter
+        // checking both is two sentences for one parameter. an implicit constructor's
+        // parameters are the fields; visitVarDecl on the property already said so
         if (node.is_generic()) {
             for (VarDeclNode *arg : node.args) {
                 if (arg != nullptr && arg->has_type()) {
                     check_c_function_type(arg->type(), node.name_token.value());
                     check_incomplete_use(arg->type(), node.name_token.value());
+                    check_void_as_value(arg->type(), node.name_token.value());
                 }
             }
         }
@@ -469,6 +472,35 @@ void TypeChecker::check_incomplete_use(const ValueType &type, const TokenReferen
     }
 }
 
+void TypeChecker::check_void_as_value(const ValueType &type, const TokenReference &at)
+{
+    if (auto refusal = void_as_value_refusal(type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
+    }
+}
+
+void TypeChecker::check_void_type_args(FunctionCallExprNode &node)
+{
+    if (node.decl == nullptr) {
+        return;
+    }
+
+    for (const ValueType &arg : node.decl->instantiation_args) {
+        check_void_as_value(arg, node.token_function_name);
+    }
+}
+
+void TypeChecker::check_void_nested(const ValueType &type, const TokenReference &at)
+{
+    if (auto refusal = nested_void_as_value_refusal(type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
+    }
+}
+
 void TypeChecker::check_variadic_args_position(FunctionDeclNode &node)
 {
     // **one sweep over every declaration, rather than a check wherever a type gets bound.** a
@@ -562,7 +594,8 @@ void TypeChecker::visitReturn(ReturnNode &node)
         }
     }
 
-    // a void function's `return nothing();` is a void statement, not a consumed value
+    // a void function's `return nothing();` is a void statement, not a consumed value.
+    // the call produces no value, so rewrite_value_edge would refuse it
     if (_current_function != nullptr
         && _current_function->get_return_type().is_void()
         && node.expr != nullptr) {
@@ -724,7 +757,7 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     //
     // is_undetermined_type is what makes this safe to ask here. It is the one spelling of "no
     // information", so a type parameter or an unresolved call passes through rather than earning a
-    // second diagnostic - such a call's result_type() is void, on top of the UnknownFunction already
+    // second diagnostic - such a call's result_type() is unknown, on top of the UnknownFunction already
     // reported.
     //
     // An interface is excluded because the check above already covers it: it has a complex type and no
@@ -889,15 +922,25 @@ void TypeChecker::check_optional_operand(
 
 void TypeChecker::visit_guard(GuardNode &node)
 {
-    // the initializer is the tested value, and it is the declaration's own - a guard has no separate
-    // condition edge.
+    // the tested value - `tested()`, the one reader. do not re-derive the decl-vs-subject ternary.
     //
     // **on the `T?` form only, and `presence_test` is what says which form this is.** with one set the
     // type answered the presence question itself, and AST::GuardLowering has written the protocol's
-    // `deref(unwrap())` onto that same edge - which answers V and is emphatically not nullable, so
-    // asking here would refuse a correct program for being certainly present
-    if (node.decl != nullptr && node.presence_test == nullptr) {
-        check_optional_operand(OptionalForm::t_guard, node.decl->init_expr, node.token);
+    // `deref(unwrap())` onto the binding when there is one - which answers V and is emphatically not
+    // nullable, so asking here would refuse a correct program for being certainly present. the
+    // statement form on the T? path still has no presence_test, so it is checked here too
+    if (node.presence_test == nullptr) {
+        ExprNode *tested = node.tested();
+        const ValueType subject = tested != nullptr
+            ? tested->result_type()
+            : ValueType::make_unknown();
+
+        // the T? form, including a `T` that substituted to a nullable. a settled non-nullable
+        // with no presence_test is a protocol subject lowering already refused - do not add the
+        // nullable sentence on top
+        if (tested == nullptr || subject.is_nullable() || is_undetermined_type(subject)) {
+            check_optional_operand(OptionalForm::t_guard, tested, node.token);
+        }
     }
 
     RecursiveVisitor::visit_guard(node);
@@ -906,6 +949,11 @@ void TypeChecker::visit_guard(GuardNode &node)
 void TypeChecker::visit_null_coalesce(NullCoalesceExprNode &node)
 {
     check_optional_operand(OptionalForm::t_null_coalesce, node.lhs, node.token);
+
+    if (node.lhs != nullptr && node.rhs != nullptr && !expression_never_returns(*node.rhs)) {
+        const ValueType wanted = ValueType::make_non_nullable(node.lhs->result_type());
+        check_destination_fits(Destination::t_declaration, wanted, *node.rhs, node.token);
+    }
 
     RecursiveVisitor::visit_null_coalesce(node);
 }
@@ -1362,6 +1410,10 @@ void TypeChecker::check_call_argument(
     const TokenReference &at
 )
 {
+    if (argument != nullptr && expression_produces_no_value(*argument)) {
+        return;
+    }
+
     const bool callee_is_operator = callee != nullptr && callee->is_operator();
 
     // **built where a refusal is written and not before.** an operator's spelling is recovered from its
@@ -1525,6 +1577,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         check_raw_storage_argument(node);
         check_atomic_operand(node);
         check_layout_query(node);
+        check_void_type_args(node);
         check_variadic_argument(node);
     }
 
@@ -1548,7 +1601,15 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
             // Compiler::LLVM::printf_conversion_for asks: this arm decides what is *accepted* and that
             // table what is *emitted*, so a second spelling of the condition is a program accepted here
             // and thrown at by the other half
+            if (expression_produces_no_value(*arg)) {
+                continue;
+            }
+
             const ValueType type = echo_printed_type_of(arg->result_type());
+
+            if (is_undetermined_type(type)) {
+                continue;
+            }
 
             // the one complex type `echo` prints, so it is admitted ahead of the blanket refusal below.
             // ExprCodegen::gen_echo_string is the other half of this rule and the two have to agree, or
@@ -1807,13 +1868,21 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         const ValueType &lhs = lhs_facts.type;
         const ValueType &rhs = rhs_facts.type;
 
+        // a void-producing operand is rewrite_value_edge's question. reporting an unsupported
+        // operator here as well would be two sentences for one call
+        const bool operand_produces_no_value =
+            expression_produces_no_value(*node.lhs)
+            || expression_produces_no_value(*node.rhs);
+
         // **what is wrong with the operands**, asked of AST::binary_operand_refusal rather than
         // decided here. the same two rules have to be reachable from an operator *call*, which is what
         // a use site becomes as soon as anybody in the program declares an infix form of the symbol -
         // see that function
-        if (auto refusal = binary_operand_refusal(node.op_node->op, lhs_facts, rhs_facts)) {
-            _collector.collect_issue<Issue::GenericError>(
-                code_ref_for(node.op_node->token_literal), *refusal);
+        if (!operand_produces_no_value) {
+            if (auto refusal = binary_operand_refusal(node.op_node->op, lhs_facts, rhs_facts)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.op_node->token_literal), *refusal);
+            }
         }
 
         // **a shift count the compiler can see, checked here as well as in the folder.** at or above the
@@ -1842,10 +1911,12 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         // a second spelling here, with the parser asking the same question its own way, is exactly
         // how the two would come to different answers - one of them silently
         //
-        // an undeterminable operand needs no guard here: has_complex_type() is false for unknown, void
-        // and a bare type parameter, so the predicate already answers "there is a meaning" for them and
-        // leaves the diagnostic to whichever pass actually knows what went wrong
-        if (!binary_has_builtin_meaning(node.op_node->op, lhs_facts, rhs_facts)) {
+        // an undeterminable operand needs no guard here: has_complex_type() is false for unknown
+        // and a bare type parameter, so the predicate already answers "there is a meaning" for them
+        // and leaves the diagnostic to whichever pass actually knows what went wrong. a determined
+        // void operand is rewrite_value_edge's
+        if (!operand_produces_no_value
+            && !binary_has_builtin_meaning(node.op_node->op, lhs_facts, rhs_facts)) {
 
             // **a declared operator that did not fire** is a different thing to say, and the only
             // place it can be said. the parser decides from the operand types it can see, so inside a
@@ -2015,6 +2086,10 @@ bool TypeChecker::check_interface_erasure(const ValueType &to, const ExprNode &v
 
 void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, const ExprNode &value, const TokenReference &at)
 {
+    if (expression_produces_no_value(value)) {
+        return;
+    }
+
     const ValueType from = value.result_type();
 
     // scoped to the destinations that have no conversion to fall back on: that is the surface where
@@ -2033,7 +2108,7 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
             || ref->decl == nullptr
             || c_function_ref_refusal(*ref->decl).has_value());
 
-    if (to.is_void() || from.is_void()
+    if (is_undetermined_type(to) || is_undetermined_type(from)
         || function_ref_is_elsewhere
         || is_written_null(&value)
         || (!demands_exact_conversion(to) && !demands_exact_conversion(from))
@@ -2172,6 +2247,13 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
     if (node.has_type()) {
         check_c_function_type(node.type(), node.token_varname);
         check_incomplete_use(node.type(), node.token_varname);
+        // an implicit constructor's parameters are the fields; the property already said so.
+        // minted tokens would not collapse a second sentence
+        if (!(_current_function != nullptr
+                && _current_function->is_implicitly_generated
+                && _current_function->is_constructor())) {
+            check_void_as_value(node.type(), node.token_varname);
+        }
     }
 
     if (node.has_type() && contains_type_param(node.type())) {

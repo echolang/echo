@@ -1,0 +1,27 @@
+// `status<E>` is ok, or why not. `.ok` takes no list. nothing in the compiler knows this type
+
+function start(bool $ok) : status<string>
+{
+    if (!$ok) {
+        return .error('nope');
+    }
+
+    return .ok;
+}
+
+status<string> $good = start(true);
+status<string> $bad = start(false);
+
+echo $good->has_value();
+echo $bad->failed();
+echo $bad->failure();
+
+echo match ($good) {
+    status<string>::ok        => "ok",
+    status<string>::error($e) => $e,
+};
+
+echo match ($bad) {
+    .ok        => "ok",
+    .error($e) => $e,
+};

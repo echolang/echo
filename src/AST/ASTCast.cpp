@@ -18,27 +18,16 @@ namespace AST
     {
         const ValueType from = from_expr.result_type();
 
-        // a written `as void` is a real refusal rather than a not-yet. asked first so it cannot
-        // stall the fixpoint. operand void is two states — an unresolved call's result_type() is
-        // also void — and collapsing them here made `f($x) as T` a finished refusal before the
-        // call could settle. destination void stays a refusal; operand void is the next two arms
-        if (to.is_void()) {
-            return CastLookup::refused(fmt::format(
-                "'{}' cannot be read as a '{}'",
-                from.get_type_desciption(), to.get_type_desciption()));
-        }
-
         // a never-returning operand (`die`) is a legal value: the conversion is unreachable, the
-        // same standing a match arm and a `??` fallback already have. asked before the void-call
-        // arm so `die() as T` is not a finished refusal, and before is_undetermined_type so void
-        // return does not stall the fixpoint as pending
+        // same standing a match arm and a `??` fallback already have. asked before is_undetermined_type
+        // so an unresolved call stays pending and `die() as T` is not a finished refusal
         if (expression_never_returns(from_expr)) {
             return CastLookup::ok(CastKind::t_identity);
         }
 
-        // a settled void call is a value-less expression, not "no information". named here so the
-        // diagnostic points at the call rather than at the word void, which the author never wrote.
-        // AST::expression_produces_no_value is the shared question TypeChecker asks
+        // echo, and a settled `: void` call, produce no value a consumer can read - so they are
+        // not a cast operand. identity for `as void` is the arm below, reached only by a void-typed
+        // expression that is not one of those
         if (expression_produces_no_value(from_expr)) {
             return CastLookup::refused(fmt::format(
                 "{}, so there is nothing to read as a '{}'",
@@ -47,6 +36,16 @@ namespace AST
 
         if (is_undetermined_type(from) || is_undetermined_type(to)) {
             return CastLookup::pending();
+        }
+
+        if (to.is_void()) {
+            if (from.is_void()) {
+                return CastLookup::ok(CastKind::t_identity);
+            }
+
+            return CastLookup::refused(fmt::format(
+                "'{}' cannot be read as a '{}'",
+                from.get_type_desciption(), to.get_type_desciption()));
         }
 
         if (ValueType::make_mutable(from) == ValueType::make_mutable(to)) {
@@ -66,7 +65,7 @@ namespace AST
             return CastLookup::ok(CastKind::t_function_pointer);
         }
 
-        if (from.is_primitive() && to.is_primitive()) {
+        if (from.is_primitive() && to.is_primitive() && !from.is_void() && !to.is_void()) {
             return CastLookup::ok(CastKind::t_numeric);
         }
 

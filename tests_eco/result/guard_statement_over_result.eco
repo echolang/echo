@@ -1,0 +1,23 @@
+// a `result<int32, E>` discarded on purpose. the payload is unread; presence is the whole question
+
+function doubled(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok($n * 2);
+}
+
+function run(int32 $n) : void
+{
+    guard doubled($n) else {
+        echo "fail";
+        return;
+    }
+
+    echo "ok";
+}
+
+run(21);
+run(-1);

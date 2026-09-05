@@ -8,6 +8,8 @@
 #include "AST/TypeNode.h"
 
 #include <fmt/core.h>
+#include <optional>
+#include <vector>
 
 namespace
 {
@@ -49,6 +51,9 @@ namespace
         t_slot_has_value = 0,
         t_slot_unwrap = 1,
         t_unwrappable_slot_count = 2,
+
+        t_slot_checkable_has_value = 0,
+        t_checkable_slot_count = 1,
     };
 
     // **is this list the two slots above, in that order?** the arity and the two shapes together.
@@ -66,6 +71,15 @@ namespace
 
         return slots[t_slot_has_value]->get_return_type().is_boolean_type()
             && slots[t_slot_unwrap]->get_return_type().is_pointer();
+    }
+
+    bool slots_are_checkable(const std::vector<AST::FunctionDeclNode *> &slots)
+    {
+        if (slots.size() != t_checkable_slot_count || slots[t_slot_checkable_has_value] == nullptr) {
+            return false;
+        }
+
+        return slots[t_slot_checkable_has_value]->get_return_type().is_boolean_type();
     }
 
     // **binds `contract::failable<E>` onto the plan, or hands back the answer its caller owes.**
@@ -129,6 +143,217 @@ namespace
 
         return std::nullopt;
     }
+
+    AST::CoreTypeKind core_kind_of(AST::UnwrapSource source)
+    {
+        return source == AST::UnwrapSource::t_checkable
+            ? AST::CoreTypeKind::t_checkable
+            : AST::CoreTypeKind::t_unwrappable;
+    }
+
+    // seats has_value / unwrap / payload from slots the conformance (or the erased interface) already
+    // answered, then bind_failure. the two protocols differ only in whether there is a V and an
+    // unwrap, so the walk that found the slots is not a second copy of this
+    AST::UnwrapLookup seat_protocol(
+        const std::vector<AST::FunctionDeclNode *> &slots,
+        AST::UnwrapSource source,
+        AST::ComplexType *subject_ct,
+        const AST::ValueType &peeled,
+        const AST::CoreTypes &core,
+        AST::TypeRegistry &types,
+        const AST::ValueType *payload
+    )
+    {
+        AST::UnwrapLookup lookup;
+        lookup.result = AST::UnwrapLookup::Result::t_ok;
+        lookup.plan.kind = source;
+
+        if (source == AST::UnwrapSource::t_checkable) {
+            if (!slots_are_checkable(slots)) {
+                return pending();
+            }
+
+            lookup.plan.has_value = slots[t_slot_checkable_has_value];
+        }
+        else {
+            if (!slots_are_the_protocol(slots) || payload == nullptr) {
+                return pending();
+            }
+
+            lookup.plan.payload_type = *payload;
+            lookup.plan.has_value = slots[t_slot_has_value];
+            lookup.plan.unwrap = slots[t_slot_unwrap];
+        }
+
+        if (auto answer = bind_failure(lookup.plan, subject_ct, peeled, core, types)) {
+            return *answer;
+        }
+
+        return lookup;
+    }
+
+    // nullopt: this erased value is not an application of tmpl. otherwise a finished lookup
+    std::optional<AST::UnwrapLookup> from_erased(
+        AST::ComplexType *subject_ct,
+        const AST::ComplexType *tmpl,
+        AST::UnwrapSource source,
+        const AST::ValueType &peeled,
+        const AST::CoreTypes &core,
+        AST::TypeRegistry &types
+    )
+    {
+        if (tmpl == nullptr || subject_ct->template_or_self() != tmpl->template_or_self()) {
+            return std::nullopt;
+        }
+
+        const AST::ValueType *payload = nullptr;
+
+        if (source == AST::UnwrapSource::t_protocol) {
+            if (subject_ct->instantiation_args.size() != 1) {
+                return pending();
+            }
+
+            payload = &subject_ct->instantiation_args[0];
+        }
+
+        return seat_protocol(
+            AST::interface_requirements(subject_ct),
+            source,
+            subject_ct,
+            peeled,
+            core,
+            types,
+            payload);
+    }
+
+    // nullopt: the type does not declare tmpl. otherwise a finished lookup, including "more than one"
+    std::optional<AST::UnwrapLookup> from_conformance(
+        AST::ComplexType *subject_ct,
+        const AST::ComplexType *tmpl,
+        AST::UnwrapSource source,
+        const AST::ValueType &subject,
+        const AST::ValueType &peeled,
+        const AST::CoreTypes &core,
+        AST::TypeRegistry &types
+    )
+    {
+        if (tmpl == nullptr) {
+            return std::nullopt;
+        }
+
+        const std::vector<AST::ValueType> conformances =
+            AST::conformances_matching_template(subject_ct, tmpl);
+
+        if (conformances.empty()) {
+            return std::nullopt;
+        }
+
+        const std::string name = core.spelling(core_kind_of(source));
+
+        if (conformances.size() != 1) {
+            if (source == AST::UnwrapSource::t_checkable) {
+                return refuse(fmt::format(
+                    "'{}' declares more than one '{}', so 'guard' cannot tell which presence test to "
+                    "use.",
+                    subject.get_type_desciption(), name));
+            }
+
+            return refuse(fmt::format(
+                "'{}' declares more than one '{}', so 'guard' cannot tell which value to bind. unwrap the "
+                "one you mean explicitly.",
+                subject.get_type_desciption(), name));
+        }
+
+        const AST::ComplexType *applied = conformances.front().get_complex_type();
+        const AST::ValueType *payload = nullptr;
+
+        if (source == AST::UnwrapSource::t_protocol) {
+            if (applied == nullptr || applied->instantiation_args.size() != 1) {
+                return pending();
+            }
+
+            payload = &applied->instantiation_args[0];
+        }
+
+        const auto redirected = AST::template_conformance_for(subject_ct, conformances.front());
+
+        if (!redirected.has_value()) {
+            return pending();
+        }
+
+        const std::vector<AST::FunctionDeclNode *> filled =
+            AST::interface_implementations(redirected->owner, redirected->conformance, types);
+
+        if (filled.empty()) {
+            return unanswered();
+        }
+
+        return seat_protocol(filled, source, subject_ct, peeled, core, types, payload);
+    }
+
+    // **--no-stdlib vs one protocol bound vs both is a table**, not four format strings. the
+    // erased-interface arm and the "could conform and does not" arm share which names exist;
+    // they differ in the sentence around them
+    std::string cannot_guard_erased(
+        const AST::ValueType &subject,
+        const AST::ComplexType *unwrappable,
+        const AST::ComplexType *checkable,
+        const std::string &unwrappable_name,
+        const std::string &checkable_name
+    )
+    {
+        if (unwrappable != nullptr && checkable != nullptr) {
+            return fmt::format(
+                "'{}' cannot be guarded - it is neither a '{}' nor a '{}'.",
+                subject.get_type_desciption(), unwrappable_name, checkable_name);
+        }
+
+        return fmt::format(
+            "'{}' cannot be guarded - it is not a '{}'.",
+            subject.get_type_desciption(),
+            unwrappable != nullptr ? unwrappable_name : checkable_name);
+    }
+
+    std::string cannot_guard_undeclared(
+        const AST::ValueType &subject,
+        AST::ComplexType *subject_ct,
+        const AST::ComplexType *unwrappable,
+        const AST::ComplexType *checkable,
+        const std::string &unwrappable_name,
+        const std::string &checkable_name
+    )
+    {
+        const std::string type_name = subject_ct->template_or_self()->name.value_or("TheType");
+        const std::string desc = subject.get_type_desciption();
+
+        std::string protocols;
+        std::string advise;
+
+        if (unwrappable != nullptr && checkable != nullptr) {
+            protocols = fmt::format("neither '{}' nor '{}'", unwrappable_name, checkable_name);
+            advise = fmt::format(
+                "declare 'struct {} : {}<V>' to unwrap a payload, or ': {}' for presence without one",
+                type_name, unwrappable_name, checkable_name);
+        } else if (unwrappable != nullptr) {
+            protocols = fmt::format("no '{}'", unwrappable_name);
+            advise = fmt::format(
+                "declare 'struct {} : {}<V>' to make the type itself unwrappable",
+                type_name, unwrappable_name);
+        } else {
+            protocols = fmt::format("no '{}'", checkable_name);
+            advise = fmt::format(
+                "declare 'struct {} : {}' for presence without a payload",
+                type_name, checkable_name);
+        }
+
+        // both-bound joins with a comma ("absent, declare"); one protocol with "or"
+        const char *join = (unwrappable != nullptr && checkable != nullptr) ? ", " : ", or ";
+
+        return fmt::format(
+            "'{}' cannot be guarded: it is not nullable, and it declares {}. write '{}?' if the "
+            "value may be absent{}{}.",
+            desc, protocols, desc, join, advise);
+    }
 }
 
 AST::UnwrapLookup AST::unwrap_plan_for(
@@ -161,22 +386,26 @@ AST::UnwrapLookup AST::unwrap_plan_for(
 
     const AST::ComplexType *unwrappable_tmpl =
         core.declared_template(AST::CoreTypeKind::t_unwrappable);
+    const AST::ComplexType *checkable_tmpl =
+        core.declared_template(AST::CoreTypeKind::t_checkable);
 
-    if (unwrappable_tmpl == nullptr) {
+    if (unwrappable_tmpl == nullptr && checkable_tmpl == nullptr) {
         return refuse(fmt::format(
             "'{}' cannot be guarded: it is not nullable, and nothing in this program declares "
-            "'#[core: unwrappable]' for it to conform to. that interface lives in the standard library, "
-            "which this compilation left out - a 'T?' still guards without it.",
+            "'#[core: unwrappable]' or '#[core: checkable]' for it to conform to. those interfaces "
+            "live in the standard library, which this compilation left out - a 'T?' still guards "
+            "without them.",
             subject.get_type_desciption()));
     }
 
-    // the interface as the stdlib spells it. every refusal below quotes this rather than a literal, so
-    // moving or renaming it moves what the diagnostics tell the author to write
+    // the interfaces as the stdlib spells them. every refusal below quotes these rather than a literal,
+    // so moving or renaming one moves what the diagnostics tell the author to write
     const std::string unwrappable_name = core.spelling(AST::CoreTypeKind::t_unwrappable);
+    const std::string checkable_name = core.spelling(AST::CoreTypeKind::t_checkable);
 
     // the subject is read *through* a borrow exactly as every other reader reads one, and the const is
-    // kept rather than peeled with it - AST::iteration_plan_for's rule, and here it is what makes the
-    // const refusal below reachable at all
+    // kept rather than peeled with it - AST::iteration_plan_for's rule. const itself is not refused
+    // here: statement `guard` only calls `has_value()`, which is already const
     const AST::ValueType peeled = AST::target_type_of(subject);
 
     if (!peeled.has_complex_type()) {
@@ -185,145 +414,56 @@ AST::UnwrapLookup AST::unwrap_plan_for(
         return refuse(AST::certainly_present_refusal(AST::OptionalForm::t_guard, subject));
     }
 
-    if (peeled.is_const()) {
-        return refuse(fmt::format(
-            "'{}' cannot be guarded through a 'const' - taking the value out hands back a borrow that "
-            "may be written, and '{}::unwrap()' is not declared const. guard a value nobody promised to "
-            "leave alone.",
-            subject.get_type_desciption(), unwrappable_name));
-    }
-
     AST::ComplexType *subject_ct = peeled.get_complex_type();
 
-    AST::UnwrapLookup lookup;
-    lookup.result = AST::UnwrapLookup::Result::t_ok;
-    lookup.plan.kind = AST::UnwrapSource::t_protocol;
-
-    // **an erased value is the same kind, not a second one.** find_member_functions finds a requirement
-    // in the same `_methods` list an implementation would be in, and gen_function_call already routes on
-    // FunctionDeclNode::is_interface_requirement() - so the lowering needs no arm for this at all.
+    // **an erased value is the same kind as its declared twin, not a second one.** find_member_functions
+    // finds a requirement in the same `_methods` list an implementation would be in, and
+    // gen_function_call already routes on FunctionDeclNode::is_interface_requirement() - so the
+    // lowering needs no arm for this at all.
     //
     // it did not run at first, and not for a reason that lived here: a call through an erased *generic*
     // interface had no vtable slot, AST::interface_method_slot matching the requirement by pointer
-    // identity against the template's methods while the call carries the instantiation's. that was
-    // it predated this protocol: `foreach` over an erased `contract::iterator<V>` failed the
-    // same way, which is why `IterationSource::t_erased_iterator` had never been exercised either.
-    // it is fixed. `tests_eco/nullability/unwrappable_erased` is this arm
+    // identity against the template's methods while the call carries the instantiation's. that
+    // predated this protocol: `foreach` over an erased `contract::iterator<V>` failed the same way,
+    // which is why `IterationSource::t_erased_iterator` had never been exercised either. it is fixed.
+    // `tests_eco/nullability/unwrappable_erased` is this arm
     if (peeled.is_interface()) {
-        if (subject_ct->template_or_self() != unwrappable_tmpl->template_or_self()) {
-            return refuse(fmt::format(
-                "'{}' cannot be guarded - it is not a '{}'.",
-                subject.get_type_desciption(), unwrappable_name));
-        }
-
-        if (subject_ct->instantiation_args.size() != 1) {
-            return pending();
-        }
-
-        lookup.plan.payload_type = subject_ct->instantiation_args[0];
-
-        // **the requirements themselves are the callees here**, which is why this arm costs the lowering
-        // nothing: AST::find_member_functions would have found them in this same `_methods` list, and
-        // the dispatch through the vtable is ExprCodegen::gen_function_call's question, asked of
-        // FunctionDeclNode::is_interface_requirement(). read through interface_requirements so the
-        // `template_or_self` redirect is taken once and in one place - a generic interface's own
-        // application declares nothing, which is what the template_or_self redirect settled
-        const std::vector<FunctionDeclNode *> &requirements = AST::interface_requirements(subject_ct);
-
-        if (!slots_are_the_protocol(requirements)) {
-            return pending();
-        }
-
-        lookup.plan.has_value = requirements[t_slot_has_value];
-        lookup.plan.unwrap = requirements[t_slot_unwrap];
-
-        // an erased value's own ComplexType is the interface application, and an interface declares no
-        // conformances - so a `failable` never applies here, and asking is what says so once
-        if (auto answer = bind_failure(lookup.plan, subject_ct, peeled, core, types)) {
+        if (auto answer = from_erased(
+                subject_ct, unwrappable_tmpl, AST::UnwrapSource::t_protocol,
+                peeled, core, types)) {
             return *answer;
         }
 
-        return lookup;
+        if (auto answer = from_erased(
+                subject_ct, checkable_tmpl, AST::UnwrapSource::t_checkable,
+                peeled, core, types)) {
+            return *answer;
+        }
+
+        return refuse(cannot_guard_erased(
+            subject, unwrappable_tmpl, checkable_tmpl, unwrappable_name, checkable_name));
     }
 
-    const std::vector<AST::ValueType> conformances =
-        AST::conformances_matching_template(subject_ct, unwrappable_tmpl);
-
-    // **a purpose-built sentence rather than a composed one.** this arm is a genuinely different
-    // situation from the primitive above: the type *could* conform and does not, so there are two
-    // remedies and the message owes the author both. AST::certainly_present_refusal already ends on
-    // "or drop the guard", and appending a second "or" to it read as a sentence nobody wrote
-    if (conformances.empty()) {
-        return refuse(fmt::format(
-            "'{}' cannot be guarded: it is not nullable, and it declares no '{}'. write '{}?' if the "
-            "value may be absent, or declare 'struct {} : {}<V>' to make the type itself unwrappable.",
-            subject.get_type_desciption(),
-            unwrappable_name,
-            subject.get_type_desciption(),
-            subject_ct->template_or_self()->name.value_or("TheType"),
-            unwrappable_name));
-    }
-
-    // more than one application and there is no answer to "which value does this bind", so the program
-    // has to say. AST::iteration_plan_for makes the same call for the same reason
-    if (conformances.size() != 1) {
-        return refuse(fmt::format(
-            "'{}' declares more than one '{}', so 'guard' cannot tell which value to bind. unwrap the "
-            "one you mean explicitly.",
-            subject.get_type_desciption(), unwrappable_name));
-    }
-
-    const AST::ComplexType *applied = conformances.front().get_complex_type();
-
-    if (applied == nullptr || applied->instantiation_args.size() != 1) {
-        return pending();
-    }
-
-    // V is read straight off the applied conformance - TypeRegistry::derive_instantiation already
-    // substituted it, so there is no substitution machinery here
-    lookup.plan.payload_type = applied->instantiation_args[0];
-
-    // **the requirements have to be answered, not merely declared.** a conformance whose `unwrap()` is
-    // missing is AST::TypeChecker's diagnostic to report; here it is simply not lowerable, ever, and
-    // saying so as `unanswered()` is what keeps the two from doubling up on one mistake
-    const auto redirected = AST::template_conformance_for(subject_ct, conformances.front());
-
-    if (!redirected.has_value()) {
-        return pending();
-    }
-
-    // **and the declarations it answered with are kept, not counted and thrown away.** this lookup used
-    // to run purely to test the set was non-empty, and AST::GuardLowering then minted `has_value` and
-    // `unwrap` by name and let the matcher choose all over again - a second answer to the question this
-    // very call had just answered. AST::iteration_plan_for states the rule in so many words
-    const std::vector<AST::FunctionDeclNode *> filled =
-        AST::interface_implementations(redirected->owner, redirected->conformance, types);
-
-    // **empty is the unanswered conformance and is not the same as a wrong shape.** an empty list is
-    // precisely when first_unmet_requirement returns a value, so the implementor already has a diagnostic
-    // coming; a list of the right length carrying the wrong shapes is stdlib/core/contract.eco having
-    // been reordered, which nobody else reports and which therefore has to stay loud
-    if (filled.empty()) {
-        return unanswered();
-    }
-
-    if (!slots_are_the_protocol(filled)) {
-        return pending();
-    }
-
-    // the *template's* declarations, deliberately - AST::interface_implementations reads them off
-    // `redirected->owner`. AST::GuardLowering sets them as callees with CallSettlement::t_uncoerced and
-    // the monomorphizer's next round binds the owner's parameters from the receiver and rewires the call
-    // to the instance: the ordinary path every other generic member call takes, and
-    // AST::ForeachLowering's `plan.iterate` for the same reason
-    lookup.plan.has_value = filled[t_slot_has_value];
-    lookup.plan.unwrap = filled[t_slot_unwrap];
-
-    if (auto answer = bind_failure(lookup.plan, subject_ct, peeled, core, types)) {
+    // unwrappable first: a type that declared both would rather bind a payload than invent a dummy.
+    // checkable is presence without one - `status<E>` and anything else that succeeded or failed
+    if (auto answer = from_conformance(
+            subject_ct, unwrappable_tmpl, AST::UnwrapSource::t_protocol,
+            subject, peeled, core, types)) {
         return *answer;
     }
 
-    return lookup;
+    if (auto answer = from_conformance(
+            subject_ct, checkable_tmpl, AST::UnwrapSource::t_checkable,
+            subject, peeled, core, types)) {
+        return *answer;
+    }
+
+    // **a purpose-built sentence rather than a composed one.** this arm is a genuinely different
+    // situation from the primitive above: the type *could* conform and does not, so the message owes
+    // the author both protocols. AST::certainly_present_refusal already ends on "or drop the guard",
+    // and appending a second "or" to it read as a sentence nobody wrote
+    return refuse(cannot_guard_undeclared(
+        subject, subject_ct, unwrappable_tmpl, checkable_tmpl, unwrappable_name, checkable_name));
 }
 
 std::string AST::guard_payload_refusal(

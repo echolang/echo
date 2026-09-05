@@ -1,0 +1,47 @@
+// arrays as C buffers: reserve, spare, write through the pointer, commit.
+// data() is the live prefix. room() is how much spare remains.
+
+array<float32> $frames = arr::room<float32>(4);
+
+echo $frames->count();
+echo $frames->capacity();
+echo $frames->room();
+echo $frames->data() == null;
+echo $frames->spare() != null;
+
+ptr<float32> $p = $frames->spare();
+$p:$[0] = 1.0f;
+$p:$[1] = 2.0f;
+$p:$[2] = 3.0f;
+$frames->commit(3);
+
+echo $frames->count();
+echo $frames->room();
+echo $frames[0];
+echo $frames[1];
+echo $frames[2];
+
+ptr<float32> $live = $frames->data();
+echo $live:$[0];
+echo $live:$[2];
+
+// a second write into the leftover spare
+ptr<float32> $q = $frames->spare();
+$q:$[0] = 4.0f;
+$frames->commit(1);
+
+echo $frames->count();
+echo $frames->room();
+echo $frames[3];
+
+// empty and unallocated: no pointer to hand over
+array<int32> $empty;
+echo $empty->data() == null;
+echo $empty->spare() == null;
+echo $empty->room();
+
+// commit(0) is a no-op even with room
+array<int32> $held = arr::room<int32>(2);
+$held->commit(0);
+echo $held->count();
+echo $held->room();

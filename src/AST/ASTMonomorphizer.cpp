@@ -14,6 +14,7 @@
 #include "AST/VarNode.h"
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTConformance.h"
+#include "AST/ASTIssue.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTOwnership.h"
@@ -127,6 +128,28 @@ namespace AST
 
         if (!inst.decided) {
             return std::nullopt;
+        }
+
+        bool argument_produces_no_value = false;
+        for (ExprNode *arg : call->arguments) {
+            if (arg != nullptr && expression_produces_no_value(*arg)) {
+                argument_produces_no_value = true;
+                break;
+            }
+        }
+
+        for (const ValueType &arg : inst.type_arguments) {
+            if (auto refusal = void_as_value_refusal(arg)) {
+                // a void *call* is rewrite_value_edge's "'f()' produces no value". do not
+                // instantiate T = void on top of that, and do not add a second sentence
+                if (!argument_produces_no_value) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(mod, call->token_function_name),
+                        std::move(refusal.value()));
+                }
+                is_error = true;
+                return std::nullopt;
+            }
         }
 
         return inst.type_arguments;

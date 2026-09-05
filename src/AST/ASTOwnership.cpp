@@ -760,6 +760,14 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // test that materialises a temporary would silently not be an arrival
             stmt->presence_test = walk_value_edge(stmt->presence_test);
 
+            // statement form's subject. an rvalue T? was hoisted by GuardLowering into `$__guardN`,
+            // so this is a place the frame already owns; a place subject was never hoisted. either
+            // way it is a discarded read for the test, not a TemporaryBind this pass mints
+            if (stmt->subject != nullptr) {
+                stmt->subject = walk_value_edge(
+                    stmt->subject, MaterializationScope::BoundValue::t_discarded);
+            }
+
             // no merge, though, and that is the difference from an `if`: the arm cannot fall through
             // (Parser::parse_guard refused one that could), so there is no path on which its moves are
             // visible afterwards. taking the union would mark things moved that this statement's
@@ -1155,8 +1163,9 @@ PendingEdge OwnershipPass::pending_edge(ExprNode *owner) const
         // the form that reads *through* a nullable holds its base in a named field. it is here because a
         // `weak<T>` operand was upgraded on the way in, and an upgrade **retains** - so the handle it is
         // branching on is one reference nobody holds, and without a temporary to own it the object it
-        // names is never released. `guard` needs no arm: its binding is a declared local, which already
-        // owns one, and `??` registers nothing at all (see the walker's arm for why)
+        // names is never released. initializer `guard` needs no arm here: its binding is a declared
+        // local, which already owns one. statement `guard` over a T? rvalue is hoisted by
+        // GuardLowering into `$__guardN`. `??` registers nothing at all (see the walker's arm for why)
         case NodeType::n_expr_optional_chain:
             return {&static_cast<OptionalChainExprNode *>(owner)->base, nullptr};
 

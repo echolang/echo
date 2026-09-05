@@ -1,0 +1,16 @@
+// statement `guard` over a const result& only calls has_value(), which is const.
+// the subject is already a pointer, so the hoist must not wrap it again.
+
+function doubled(int32 $n) : result<int32, string>
+{
+    return .ok($n * 2);
+}
+
+function peek(const result<int32, string>& $r) : void
+{
+    guard $r else { return; }
+    echo "ok";
+}
+
+result<int32, string> $r = doubled(21);
+peek(&$r);

@@ -1,0 +1,6 @@
+// a generic leftover with T = void is refused. status<E> is the published boundary
+
+function go() : result<void, string>
+{
+    die('nope');
+}

@@ -1,0 +1,21 @@
+// inferring T = void from an argument is the same refusal as writing void as a type argument.
+// a match whose every arm leaves produces void without being a void *call*, so rewrite_value_edge
+// does not already name it
+enum Flag
+{
+    case on;
+}
+
+function id<T>(T $x) : T
+{
+    return $x;
+}
+
+function go() : void
+{
+    id(match (Flag::on()) {
+        Flag::on => { return; }
+    });
+}
+
+go();

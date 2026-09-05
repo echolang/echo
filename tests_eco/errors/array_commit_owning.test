@@ -1,0 +1,8 @@
+expect: fail
+
+# die is baked into the method, so the location names array.eco. update the number if
+# the die moves; the claim is that an owning element is refused rather than committed
+
+--- OUT --->
+fatal error: commit() needs elements that are just bytes - C cannot construct an owning T
+  at array.eco:366

@@ -221,16 +221,26 @@ AST::ScopeNode & Parser::parse_scope(
         else if (cursor.is_type(Token::Type::t_if)) {
             scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
         }
-        // **`guard` is no longer a statement head**, it is an initializer form on an ordinary
-        // declaration - `T $x = guard <nullable> else { ... }`. so this arm reports and recovers rather
-        // than parsing: the declaration branch below claims the new spelling through starts_vardecl,
-        // and a `guard` reaching the head of a statement can only be the old one
+        // **`guard <expr> else { ... }` is a statement.** the initializer form `T $x = guard <expr>`
+        // is claimed by starts_vardecl below. a `guard` followed by a declaration is the *old* spelling
+        // (`guard T $x = ...`) and is still refused - that is not the statement form, which unwraps an
+        // expression, not a declaration
         else if (cursor.is_type(Token::Type::t_guard)) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(
-                payload.context.code_ref(cursor.current()),
-                "'guard' introduces a declaration's initializer, so the name it binds goes on the left "
-                "of the '=' - write 'T $x = guard <value> else { ... }'");
-            cursor.try_skip_to_next_statement();
+            const auto at_guard = cursor.snapshot();
+            cursor.skip();
+            const bool old_spelling = starts_vardecl(payload);
+            cursor.restore(at_guard);
+
+            if (old_spelling) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(cursor.current()),
+                    "'guard' at the head of a statement unwraps without binding - write "
+                    "'guard <value> else { ... }'. a name goes on the left of the '=': "
+                    "'T $x = guard <value> else { ... }'");
+                cursor.try_skip_to_next_statement();
+            } else if (auto *guard = parse_guard(payload, nullptr, false)) {
+                scope_node.children.push_back(AST::make_ref(*guard));
+            }
         }
         else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));

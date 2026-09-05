@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] const_subject_failure.eco:10:20
+
+  'else ($e)' cannot take a failure out of a 'const' - 'contract::failable::failure()' is not declared const. drop the '($e)', or guard a value nobody promised to leave alone.
+
+   9 | {
+  10 |     guard $s else ($e) {
+     :                    ^^
+  11 |         echo $e;
+
+1 error, nothing was compiled.

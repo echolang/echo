@@ -403,7 +403,8 @@ namespace AST
         bound.reserve(candidates.size());
 
         for (auto *candidate : candidates) {
-            ArgumentBinding binding = bind_arguments(*candidate, call.arguments, call.argument_names);
+            ArgumentBinding binding = bind_arguments(
+                *candidate, call.arguments, call.argument_names);
 
             if (binding.kind != ArgumentBindKind::t_ok) {
                 continue;
@@ -495,7 +496,7 @@ namespace AST
             // unbound `null`, a string literal, a variable typed from a generic call. the only
             // deferrable outcome: the fixpoint may answer those types, and reporting here would
             // reject a program that is perfectly well typed. `decl` stays null, which
-            // result_type() answers as void and is_undetermined_type reads as "no information", so
+            // result_type() answers as unknown and is_undetermined_type reads as "no information", so
             // a caller waiting on *this* call is undecidable in turn rather than wrongly decided
             if (!report) {
                 return Result::t_pending;
@@ -683,6 +684,12 @@ namespace AST
                     }
                 }
 
+                continue;
+            }
+
+            // a void-producing argument is rewrite_value_edge's. wrapping it in a cast would be
+            // "cannot convert 'void' to 'void&'" on top of "produces no value"
+            if (expression_produces_no_value(*argument)) {
                 continue;
             }
 

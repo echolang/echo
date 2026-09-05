@@ -160,6 +160,18 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     }
 
     /**
+     * How many elements `spare()` can accept without growing.
+     *
+     * `capacity() - count()`. Named for the string method, and a different question from
+     * `arr::room`, which *builds* an array of this capacity. Growing the buffer after
+     * `spare()` invalidates the pointer, the same rule `reserve` states.
+     */
+    const function room() : usize
+    {
+        return $this->storage->capacity() - $this->len;
+    }
+
+    /**
      * Makes room for at least `$count` elements without changing `count()`.
      *
      * Doubling rather than fitting exactly, so a run of appends costs an amortized constant each
@@ -266,6 +278,93 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         // `mem::realloc` over a zero count is the same shape as `mem::free` plus a null, and `$data` may
         // legitimately end up null here - which every method in this type is already written for
         $this->storage->resize($this->len);
+    }
+
+    /**
+     * Address of the live prefix. C that already has a length.
+     *
+     * Empty is `null`, which is what a count of zero wants. The pointer is only the
+     * live slots: the spare past `count()` is `spare()`, and growing the buffer
+     * afterwards invalidates it, the same rule `sub()` states.
+     */
+    const function data() : ptr<const T>
+    {
+        if ($this->len == 0) {
+            return null;
+        }
+
+        return &$this[0];
+    }
+
+    /**
+     * The same address, writable. The buffer is `#[unique]`, so there is no
+     * copy-on-write gate the way `string` has one: exactly one array names this
+     * allocation.
+     *
+     * A write through this pointer is a write of bits. For a `T` that owns
+     * something, that skips the destructor of whatever was in the slot. Reach for
+     * `$a[$i] =` when the element needs to end.
+     */
+    function data() : ptr<T>
+    {
+        if ($this->len == 0) {
+            return null;
+        }
+
+        return &$this[0];
+    }
+
+    /**
+     * Address of the first free slot. C writes here. `room()` is how many
+     * elements it may write. `commit($n)` is what makes those slots live.
+     *
+     * Does not grow. `reserve` / `arr::room` / `fit` first, the same sequence
+     * `string` asks for. An array that has not allocated answers `null`. Growing
+     * the buffer after this invalidates the pointer.
+     *
+     * **Only for a `T` that is bytes.** C cannot construct an owning Echo value,
+     * and bumping `len` over bits it wrote would be a destructor over uninitialized
+     * storage. `slot()` is the Echo-side fill for that `T`.
+     */
+    function spare() : ptr<T>
+    {
+        const if (mem::is_trivially_copyable<T>()) {
+            usize $cap = $this->storage->capacity();
+
+            if ($cap == 0) {
+                return null;
+            }
+
+            // the first free slot, or one-past-end when the spare is empty. `at` is
+            // unchecked against `len` on purpose: a buffer has a capacity, and that
+            // is the bound that says the address exists. forming a `T&` of an
+            // uninitialized slot is the promotion; widening it to `ptr<T>` is what
+            // C is handed
+            return $this->storage->at($this->len);
+        }
+        else {
+            die('spare() needs elements that are just bytes - C cannot construct an owning T');
+        }
+    }
+
+    /**
+     * Takes the first `$n` spare slots as live elements.
+     *
+     * `$n` must not exceed `room()`. The bits themselves are whoever wrote
+     * `spare()`'s business; this only moves `len`. Same gate as `spare()`: a `T`
+     * that owns something has no honest C constructor, so this dies rather than
+     * invent one.
+     */
+    function commit(usize $n) : void
+    {
+        const if (mem::is_trivially_copyable<T>()) {
+            assert($n <= $this->storage->capacity() - $this->len, 'commit past the end of the spare');
+
+            $this->len = $this->len + $n;
+        }
+        else {
+            die('commit() needs elements that are just bytes - C cannot construct an owning T');
+        }
     }
 
     /**

@@ -1,0 +1,13 @@
+// omitted else still aborts. the statement form is the "I am not writing an arm" spelling
+
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n;
+}
+
+guard pick(21);
+echo 1;

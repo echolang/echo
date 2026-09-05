@@ -58,7 +58,7 @@ TEST_CASE("each call site resolves to the overload matching its arguments", "[ov
 TEST_CASE("an overloaded call still types the variable it initializes", "[overloads]")
 {
     // resolution happens during parsing precisely because of this: a variable declared from a
-    // call takes its type from the call's return type, and an unresolved call answers void
+    // call takes its type from the call's return type, and an unresolved call answers unknown
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function f(int32 $a) : float64 { return 1.5; }\n"
         "function f(float64 $a) : int32 { return 2; }\n"

@@ -1,0 +1,4 @@
+// C cannot construct an owning T. spare dies rather than hand over uninitialised string slots
+
+array<string> $words = arr::room<string>(2);
+$words->spare();

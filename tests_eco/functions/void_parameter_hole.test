@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_parameter_hole.eco:3:20
+
+  'void' is not a value type - a function that returns nothing says ': void'
+
+  2 | 
+  3 | function take(void $x) : int32
+    :                    ^^
+  4 | {
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+// else still has to leave - that is the meaning of `guard`, not a workaround for an unbound name
+
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n;
+}
+
+guard pick(7) else { echo "no"; }
+echo 1;

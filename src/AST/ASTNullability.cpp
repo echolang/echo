@@ -145,14 +145,11 @@ AST::ValueType AST::optional_chain_result_type(const AST::ExprNode *continuation
         : ValueType::make_unknown();
 
     // a call that answers nothing has nothing to be absent. `$a?->save()` is a statement either way, and
-    // wrapping void would invent a value for a statement to discard
+    // wrapping void would intern `void?` for a statement to discard
     //
     // an undetermined type is a *not yet*: the continuation is still a bare `T`, and wrapping it would
     // intern a pair around a type parameter that the next round is about to replace
-    //
-    // one question rather than three, because is_undetermined_type *is* unknown, void and
-    // still-mentions-a-parameter - the single spelling of "no information"
-    if (is_undetermined_type(reached)) {
+    if (is_undetermined_type(reached) || reached.is_void()) {
         return reached;
     }
 

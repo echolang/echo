@@ -1,0 +1,17 @@
+// a fixed array is already a C buffer: every slot is live, data() is the first element
+
+fixed_array<int32, 4> $quad = [1, 2, 3, 4];
+
+echo $quad->data() != null;
+echo $quad->count();
+
+ptr<int32> $p = $quad->data();
+echo $p:$[0];
+echo $p:$[3];
+
+$p:$[0] = 9;
+echo $quad[0];
+
+fixed_array<int32, 0> $empty = [];
+echo $empty->data() == null;
+echo $empty->count();

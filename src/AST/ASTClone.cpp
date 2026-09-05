@@ -592,6 +592,7 @@ Node *GuardNode::clone(CloneContext &cc) const
 {
     GuardNode *c = cc.shallow(this);
     c->decl = cc.child(c->decl);
+    c->subject = cc.child(c->subject);
 
     // the copy the binding is given, when there is one. an instance whose payload became owning gets its
     // own from AST::OwnershipPass, but a template that already had one must not hand the instance the

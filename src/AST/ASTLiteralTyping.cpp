@@ -691,7 +691,7 @@ namespace AST
             if (node.target != nullptr && node.value_expr != nullptr) {
                 // the *storage's* type, peeled through the borrow an element operator hands back -
                 // AST::value_result_type, the same peel Parser::parse_varexpr makes for a written
-                // assignment. an index that has not resolved yet answers void and waits a round
+                // assignment. an index that has not resolved yet answers unknown and waits a round
                 write_at(
                     node.value_expr,
                     value_result_type(*node.target),

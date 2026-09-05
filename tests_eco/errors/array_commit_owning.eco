@@ -1,0 +1,4 @@
+// C cannot construct an owning T. commit dies rather than bump len over unconstructed strings
+
+array<string> $words = arr::room<string>(2);
+$words->commit(1);

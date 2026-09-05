@@ -403,6 +403,8 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     // would answer differently depending on which file was walked first
     if (op_node != nullptr && op_node->op != nullptr
         && op_node->op->has_fixity(AST::OpFixity::t_infix)
+        && !AST::expression_produces_no_value(*lhs_expr)
+        && !AST::expression_produces_no_value(*rhs_expr)
         && !AST::binary_has_builtin_meaning(
             op_node->op,
             AST::parse_time_operand(lhs_expr, lhs_type),
@@ -1659,7 +1661,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // absence arrive here", this one's is "which type declares this"
     //
     // it is an ordinary FunctionCallExprNode with no owner rather than a node of its own, and that is
-    // what makes the rest free: `result_type()` already answers `void` for a call with no decl, which
+    // what makes the rest free: `result_type()` already answers `unknown` for a call with no decl, which
     // is_undetermined_type accepts - so argument_fit scores it t_undetermined at its first arm,
     // strictly_better skips it on both sides, and **a shorthand can never take part in choosing an
     // overload**, enforced by construction with no rule anywhere saying so
@@ -2347,13 +2349,14 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
     //
     // it is not an expression on purpose: a guard's else arm may hold a bare `return` precisely because
     // AST::scope_always_exits refuses an arm that rejoins, so the arm can never produce a value. an
-    // expression form would make that `return` read two ways at once
+    // expression form would make that `return` read two ways at once. the statement form is a statement
+    // head, claimed by Parser::parse_scope, not here
     if (cursor.is_type(Token::Type::t_guard)) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(cursor.current()),
-            "'guard' is not an expression - it is how a declaration's initializer is written, so it "
-            "may only follow the '=' of a declaration. Write 'T $x = guard <value> else { ... }' above "
-            "this statement and read '$x' here.");
+            "'guard' is not an expression - it unwraps as a statement, or as a declaration's "
+            "initializer. Write 'guard <value> else { ... }' or 'T $x = guard <value> else { ... }' "
+            "and read the name here.");
         cursor.try_skip_to_next_statement();
         return AST::make_void_ref();
     }

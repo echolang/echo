@@ -24,6 +24,7 @@ namespace
             { "keyed", AST::CoreTypeKind::t_keyed },
             { "unwrappable", AST::CoreTypeKind::t_unwrappable },
             { "failable", AST::CoreTypeKind::t_failable },
+            { "checkable", AST::CoreTypeKind::t_checkable },
             { "variadic_args", AST::CoreTypeKind::t_variadic_args },
             { "crash_info", AST::CoreTypeKind::t_crash_info },
             { "type_id", AST::CoreTypeKind::t_type_id },

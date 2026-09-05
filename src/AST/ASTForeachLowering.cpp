@@ -7,7 +7,6 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTMutation.h"
-#include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/ScopeNode.h"
@@ -190,24 +189,12 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
         iterator_decl.set_type_node(
             &_current_module->nodes.emplace_back<TypeNode>(plan.iterator_type));
     }
-    else if (is_place_expression(*loop->source)) {
-        // the source already *is* a cursor, and driving it advances it - so the caller has to see that.
-        // a borrow, not a copy
-        iterator_decl.init_expr = &_current_module->nodes.emplace_back<AddrOfExprNode>(loop->source);
-        iterator_decl.set_type_node(&_current_module->nodes.emplace_back<TypeNode>(
-            ValueType::make_pointer(plan.iterator_type, false)));
-    }
     else {
-        // a cursor produced by a call - `foreach ($a->iterate() as ...)`. `$__it` owns it, and the
-        // ownership pass drops it at the wrapper's end through the ordinary frame machinery
-        iterator_decl.init_expr = loop->source;
-
-        // **typed here for the same reason the iterable arm is**, and not left to the re-derivation
-        // sweep: until `$__it` has a type, `advance()` has no receiver type to resolve against, and the
-        // call reaches codegen carrying a declaration nothing emitted a body for. the plan already
-        // carries the cursor's type - for the two iterator kinds it is the source's own
-        iterator_decl.set_type_node(
-            &_current_module->nodes.emplace_back<TypeNode>(plan.iterator_type));
+        // the source already *is* a cursor, or a call produced one. seat_receiver_local is the
+        // addressing: a place that is not already an address is borrowed, a call's result is
+        // owned. a cursor that arrived as `Iter&` must not become `ptr<ptr<Iter>>` - the same
+        // rule GuardLowering's `$__guardN` uses, and the reason this is not a second AddrOf
+        seat_receiver_local(*_current_module, iterator_decl, loop->source);
     }
 
     // used exactly once on every path above, so "one subtree per use" holds by construction

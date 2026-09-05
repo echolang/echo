@@ -30,6 +30,20 @@ TEST_CASE("Default-constructed ValueType is well-defined unknown", "[types]")
     REQUIRE(vt == ValueType());
 }
 
+TEST_CASE("void is determined, unknown is not", "[types]")
+{
+    REQUIRE(is_undetermined_type(ValueType::make_unknown()));
+    REQUIRE_FALSE(is_undetermined_type(ValueType::make_void()));
+    REQUIRE_FALSE(is_undetermined_type(prim(ValueTypePrimitive::t_int32)));
+}
+
+TEST_CASE("void is not a value type", "[types]")
+{
+    REQUIRE(void_as_value_refusal(ValueType::make_void()).has_value());
+    REQUIRE_FALSE(nested_void_as_value_refusal(ValueType::make_void()).has_value());
+    REQUIRE_FALSE(void_as_value_refusal(prim(ValueTypePrimitive::t_int32)).has_value());
+}
+
 TEST_CASE("substitute_type resolves a bare type parameter", "[types][generics]")
 {
     TypeRegistry reg;

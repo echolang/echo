@@ -56,11 +56,11 @@ void MatchResolution::refuse(MatchExprNode &node, const TokenReference &at, std:
 {
     _collector.collect_issue<Issue::GenericError>(code_ref_for(at), std::move(why));
 
-    // **decided, so nothing asks again** - and `void`, so a use site of the value asks nothing further
+    // **decided, so nothing asks again** - and unknown, so a use site of the value asks nothing further
     // either. the node stays in the tree: its arms are read after it, and forgetting the subtree would
     // free declarations those reads still point at
     node.patterns_decided = true;
-    node.result = ValueType::make_void();
+    node.result = ValueType::make_unknown();
 }
 
 void MatchResolution::resolve(MatchExprNode &node)
@@ -316,7 +316,7 @@ void MatchResolution::resolve(MatchExprNode &node)
         }
     }
 
-    ValueType unified = ValueType::make_void();
+    ValueType unified = ValueType::make_unknown();
     bool first = true;
 
     // **every arm that produces anything produces a place**, which is what makes the whole form one - a
@@ -324,13 +324,14 @@ void MatchResolution::resolve(MatchExprNode &node)
     // kind or the other. an arm that leaves says nothing either way, so it does not spoil this
     bool all_places = true;
     bool place_pointee_const = false;
+    bool unified_from_block = false;
 
     for (MatchExprNode::Arm &arm : node.arms) {
         // **an arm that never comes back contributes no type**, and is skipped before the settled-type
-        // question below rather than answered by it. `die('...')` is declared `: void`, and `void` is one
-        // of the three shapes AST::is_undetermined_type covers - so without this arm the honest "this
-        // case cannot produce a value" was reported as "this arm's value has no settled type", which is a
-        // sentence about an inference that never happened.
+        // question below rather than answered by it. `die('...')` is declared `: void` and never
+        // returns, so without this arm the honest "this case cannot produce a value" was reported as
+        // "this arm's value has no settled type", which is a sentence about an inference that never
+        // happened.
         //
         // it is what makes a case whose payload is the wrong type answerable at all. `unwrap() : T&` over
         // a `result<T, E>` has an `error` arm holding an `E` and no `T` anywhere to hand back, so
@@ -405,6 +406,7 @@ void MatchResolution::resolve(MatchExprNode &node)
 
         if (first) {
             unified = arm_type;
+            unified_from_block = arm.value == nullptr;
             first = false;
             continue;
         }
@@ -422,6 +424,7 @@ void MatchResolution::resolve(MatchExprNode &node)
 
         if (is_implicitly_convertible(unified, arm_type)) {
             unified = arm_type;
+            unified_from_block = arm.value == nullptr;
             continue;
         }
 
@@ -430,7 +433,7 @@ void MatchResolution::resolve(MatchExprNode &node)
             "is '{}'.{}",
             arm_type.get_type_desciption(),
             unified.get_type_desciption(),
-            (arm_type.is_void() || unified.is_void())
+            (arm.value == nullptr || unified_from_block)
                 ? " An arm written '{ ... }' produces nothing, so every arm has to be one."
                 : ""));
 
@@ -452,7 +455,11 @@ void MatchResolution::resolve(MatchExprNode &node)
     // is no storage in that to name. reading this in a value position costs nothing extra - the auto-deref
     // every read of a borrow performs is what turns it back into a value, which is why the shape is
     // transparent to every existing use of a match as an expression
-    if (all_places && !first && !unified.is_void()) {
+    if (first) {
+        unified = ValueType::make_void();
+    }
+
+    if (all_places && !first) {
         if (place_pointee_const) {
             unified = ValueType::make_const(unified);
         }

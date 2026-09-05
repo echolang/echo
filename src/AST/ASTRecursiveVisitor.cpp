@@ -356,6 +356,10 @@ void RecursiveVisitor::visit_guard(GuardNode &node)
     // never sees the initializer at all. that was two silent bugs before this walk was shared
     statement_edge(node.decl);
 
+    // the statement form's subject. null on the initializer form, where the subject *is* the
+    // binding's initializer and walking it here as well would visit it twice
+    value_edge(node.subject);
+
     // the `has_value()` call, in the position it is evaluated: before the branch, so before both arms.
     // a value edge, because it is read as a bool
     value_edge(node.presence_test);

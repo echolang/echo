@@ -314,6 +314,7 @@ namespace
         void visit_guard(AST::GuardNode &node) override
         {
             collect_node(node.decl);
+            collect_value(node.subject);
             collect_value(node.presence_test);
             collect_value(node.bound_value);
 

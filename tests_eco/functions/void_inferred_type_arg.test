@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_inferred_type_arg.eco:16:5
+
+  'void' is not a value type - a function that returns nothing says ': void'
+
+  15 | {
+  16 |     id(match (Flag::on()) {
+     :     ^^
+  17 |         Flag::on => { return; }
+
+1 error, nothing was compiled.

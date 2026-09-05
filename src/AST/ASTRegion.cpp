@@ -104,13 +104,12 @@ namespace
                 return;
             }
 
-            // an inferred local typed `void` from a call that has since settled to a real type:
-            // retype copies the call's result onto the declaration next round. walking now would
-            // decide "owns nothing" permanently. a memberwise constructor whose type declared
-            // `init` stays pending at parse (arity may still shrink), so `$a = Foo(...)` is
-            // still void on the first monomorphizer round
-            if (node.type().is_void() && node.init_expr != nullptr
-                && !(node.init_expr->result_type() == node.type())) {
+            // an inferred local typed from a call that has not settled: retype copies the call's
+            // result onto the declaration next round. walking now would decide "owns nothing"
+            // permanently. a memberwise constructor whose type declared `init` stays pending at
+            // parse (arity may still shrink), so `$a = Foo(...)` is still unknown on the first
+            // monomorphizer round
+            if (is_undetermined_type(node.type()) && node.init_expr != nullptr) {
                 pending = true;
                 return;
             }

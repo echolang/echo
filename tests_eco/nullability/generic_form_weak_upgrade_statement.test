@@ -1,0 +1,17 @@
+--- OUT --->
+1
+1
+1
+99
+--- RAST --->
+CHECK: Module: [main]
+// the *template* dumps first, and it is the before picture: a bare `T` with no upgrade in sight
+CHECK: function through_guard
+CHECK: guard varref<T>(var($w))
+// then the instance, where the round that revealed the weak inserted the same node the parser would
+// have. the upgraded handle is a value with no storage, so GuardLowering hoists it into `$__guardN`
+// and the frame releases it - which is what keeps the count balanced
+CHECK: function through_guard
+CHECK: $__guard0
+CHECK: strong<Res?>(varref<weak<Res>>(var($w)))
+CHECK: guard varref<Res?>(var($__guard0))

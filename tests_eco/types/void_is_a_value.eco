@@ -1,0 +1,8 @@
+// void is not a value type: not a local, not a field, not a type argument
+
+void $x;
+
+struct Hold
+{
+    void $gap;
+}

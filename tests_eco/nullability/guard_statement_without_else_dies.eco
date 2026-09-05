@@ -1,0 +1,14 @@
+// omitted else on the statement form still stops, same runtime as the initializer form
+
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n;
+}
+
+echo 1;
+guard pick(-1);
+echo 2;

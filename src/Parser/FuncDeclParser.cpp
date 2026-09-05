@@ -530,7 +530,7 @@ void Parser::publish_implicit_conversion(
     // an unknown or still-generic return type was already reported where it was written, and
     // AST::argument_fit answers t_undetermined for it - so there is nothing here to say that would
     // not be a second diagnostic for one mistake
-    if (target.is_unknown() || target.is_void()) {
+    if (target.is_unknown()) {
         return;
     }
 

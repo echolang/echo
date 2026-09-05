@@ -606,9 +606,9 @@ namespace AST
             return is_primitive_of_type(ValueTypePrimitive::t_void);
         }
 
-        // no type has been determined yet. distinct from void, which is a type: an unknown is a
-        // question nothing has answered, and every consumer reads it as "says nothing" rather
-        // than as a mismatch
+        // no type has been determined yet. distinct from void, which is a determined
+        // function-return type that produces no value: an unknown is a question nothing has
+        // answered, and every consumer reads it as "says nothing" rather than as a mismatch
         bool is_unknown() const {
             return kind == ValueTypeKind::t_unknown;
         }
@@ -1769,16 +1769,32 @@ namespace AST
     // operand mentions, because nothing at a use site could ever bind it
     bool contains_type_param(const ValueType &type, const TypeParamDecl *param);
 
-    // true when nothing has answered what this type is yet: unknown, void, or still mentioning a
+    // true when nothing has answered what this type is yet: unknown, or still mentioning a
     // type parameter that a substitution has not bound
     //
     // the single spelling of "no information", because every pass that reasons about types before
-    // they are all known needs the same three-way distinction - a wrong type, a right type, and no
-    // type yet. overload ranking reads it as neutral, generic inference as "cannot bind from this,
-    // ask again later"
+    // they are all known needs the same distinction - a wrong type, a right type, and no type yet.
+    // overload ranking reads it as neutral, generic inference as "cannot bind from this, ask again
+    // later"
+    //
+    // **void is not this.** unknown is "not yet"; void is a determined function-return type
+    // that produces no value. an unresolved call answers unknown, so ranking a still-open
+    // site cannot start meaning T = void
     inline bool is_undetermined_type(const ValueType &type) {
-        return type.is_unknown() || type.is_void() || contains_type_param(type);
+        return type.is_unknown() || contains_type_param(type);
     }
+
+    // **why may this type not sit where a value lives?** a local, a field, a parameter, a
+    // type argument. nullopt when it may. `: void` and `function<void()>` are returns, not
+    // this - those ask nested_void_as_value_refusal so a `result<void, E>` is still refused
+    //
+    // asked by TypeChecker of every declaration, and by the type grammar of every type
+    // argument, so the sentence cannot drift between the two moments
+    std::optional<std::string> void_as_value_refusal(const ValueType &type);
+
+    // the nested half: the type itself may be void (a function return). type arguments,
+    // optional payloads, array elements, pointees and callable parameters still may not
+    std::optional<std::string> nested_void_as_value_refusal(const ValueType &type);
 
     // the type a value-position read of `type` yields: the pointee for a pointer, the type itself
     // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`

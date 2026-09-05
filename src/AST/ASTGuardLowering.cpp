@@ -1,11 +1,13 @@
 #include "AST/ASTGuardLowering.h"
 
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
@@ -63,6 +65,33 @@ FunctionCallExprNode &GuardLowering::subject_call(
         *_current_module, callee, at, &local_place(*_current_module, subject));
 }
 
+VarDeclNode &GuardLowering::hoist_subject(
+    ScopeNode &scope,
+    size_t index,
+    GuardNode &guard,
+    ExprNode *expr
+)
+{
+    auto &subject_decl = _current_module->nodes.emplace_back<VarDeclNode>(
+        _current_module->make_virtual_token(
+            fmt::format("$__guard{}", next_hoist_index()), Token::Type::t_varname, guard.token),
+        nullptr);
+
+    seat_receiver_local(*_current_module, subject_decl, expr);
+
+    if (guard.decl != nullptr) {
+        guard.decl->init_expr = nullptr;
+    }
+
+    guard.subject = nullptr;
+
+    scope.children.insert(
+        scope.children.begin() + static_cast<long>(index), make_ref(subject_decl));
+    scope.declare_variable(subject_decl);
+
+    return subject_decl;
+}
+
 bool GuardLowering::bind_payload_type(
     GuardNode &guard,
     const ValueType &payload,
@@ -72,6 +101,11 @@ bool GuardLowering::bind_payload_type(
     // an inferred binding takes the payload, keeping whatever `const` the author wrote - the parser left
     // a placeholder carrying exactly that and nothing else. an *undetermined* type is one, so the two
     // conditions are one question
+    // statement form: nothing to bind, so nothing to type. the payload is unread
+    if (guard.decl == nullptr) {
+        return true;
+    }
+
     if (!guard.decl->has_type() || is_undetermined_type(guard.decl->type())) {
         const bool wants_const = guard.decl->has_type() && guard.decl->type().is_const();
 
@@ -126,11 +160,16 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
 {
     auto *guard = scope.children[index].unsafe_ptr<GuardNode>();
 
-    if (guard == nullptr || guard->decl == nullptr || guard->decl->init_expr == nullptr) {
+    if (guard == nullptr) {
         return;
     }
 
-    ExprNode *subject = guard->decl->init_expr;
+    ExprNode *subject = guard->tested();
+
+    if (subject == nullptr) {
+        return;
+    }
+
     const ValueType subject_type = subject->result_type();
 
     const UnwrapLookup look =
@@ -190,18 +229,66 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
         return;
     }
 
-    // **the deferred nullable case mints nothing at all.** a `T?` that only became one after
-    // substitution runs the same four lines the parser's immediate path runs, which is also what fixes a
-    // latent bug: `$v = guard $w` in a template over `T = int32?` would type the binding
-    // `unwrapped_type_of(T)` = `T`, substituting back to `int32?` - one level too nullable
+    // **the deferred nullable case mints nothing at all for the initializer form.** a `T?` that only
+    // became one after substitution runs the same four lines the parser's immediate path runs, which
+    // is also what fixes a latent bug: `$v = guard $w` in a template over `T = int32?` would type
+    // the binding `unwrapped_type_of(T)` = `T`, substituting back to `int32?` - one level too
+    // nullable. statement form has no payload to type: an rvalue subject is hoisted so the frame
+    // owns it, a place is already somebody else's
     if (plan.kind == UnwrapSource::t_builtin_nullable) {
         if (!bind_payload_type(*guard, plan.payload_type, subject_type)) {
             return;
         }
 
+        if (guard->decl == nullptr && !is_place_expression(*subject)) {
+            VarDeclNode &subject_decl = hoist_subject(scope, index, *guard, subject);
+            guard->set_tested(&local_place(*_current_module, subject_decl));
+        }
+
         guard->plan_decided = true;
         _changed = true;
         return;
+    }
+
+    // presence without a payload: statement `guard` is the form, because there is nothing to bind.
+    // initializer form would invent a dummy. refused here rather than in unwrap_plan_for, which does
+    // not know whether a binding was written
+    if (plan.kind == UnwrapSource::t_checkable && guard->decl != nullptr) {
+        refuse(*guard, guard->decl->token_varname, fmt::format(
+            "this succeeded or it didn't, so there is nothing to bind to '{}' - write "
+            "'guard <value> else {{ ... }}' for a subject that has no payload.",
+            guard->decl->token_varname.value()));
+        return;
+    }
+
+    // **const is a fact about the callee this form would mint**, not about guarding in general.
+    // `has_value()` is const, so statement `guard` over a const `status` / `result` is fine.
+    // `unwrap()` and `failure()` are not: refused here rather than at the synthesized call, which
+    // would report against a token the author never wrote - AST::iteration_plan_for's const-cursor
+    // call, and the reason this left unwrap_plan_for
+    const ValueType peeled = target_type_of(subject_type);
+
+    if (peeled.is_const()) {
+        if (guard->decl != nullptr && plan.unwrap != nullptr && !receiver_is_const(*plan.unwrap)) {
+            refuse(*guard, guard->token, fmt::format(
+                "'{}' cannot be guarded through a 'const' - taking the value out hands back a borrow "
+                "that may be written, and '{}::unwrap()' is not declared const. guard a value nobody "
+                "promised to leave alone.",
+                subject_type.get_type_desciption(),
+                _collector.core_types.spelling(CoreTypeKind::t_unwrappable)));
+            return;
+        }
+
+        if (guard->failure != nullptr && plan.failure != nullptr
+            && !receiver_is_const(*plan.failure)) {
+            const std::string name = guard->failure->token_varname.value();
+
+            refuse(*guard, guard->failure->token_varname, fmt::format(
+                "'else ({})' cannot take a failure out of a 'const' - '{}::failure()' is not declared "
+                "const. drop the '({})', or guard a value nobody promised to leave alone.",
+                name, _collector.core_types.spelling(CoreTypeKind::t_failable), name));
+            return;
+        }
     }
 
     // ---- the protocol case ----
@@ -210,58 +297,35 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
     // deliberately not a wrapper scope: the *binding* has to live to the end of the enclosing scope, and
     // a wrapper would have AST::OwnershipPass drop it at the guard's own closing brace. as an ordinary
     // local of this scope it needs no ownership rule, no codegen and no drop rule - gen_var_decl seats it
-    // and the frame ends it
-    auto &subject_decl = _current_module->nodes.emplace_back<VarDeclNode>(
-        _current_module->make_virtual_token(
-            fmt::format("$__guard{}", next_hoist_index()), Token::Type::t_varname, guard->token),
-        nullptr);
-
-    if (is_place_expression(*subject)) {
-        // **a borrow, not a copy**, and the difference is observable: `unwrap()` is not declared const,
-        // so it may write, and it has to write through to the value the author named
-        subject_decl.init_expr = &_current_module->nodes.emplace_back<AddrOfExprNode>(subject);
-        subject_decl.set_type_node(&_current_module->nodes.emplace_back<TypeNode>(
-            ValueType::make_pointer(subject_type, false)));
-    }
-    else {
-        // a subject produced by a call. `$__guardN` owns it, and the ordinary frame machinery drops it
-        subject_decl.init_expr = subject;
-        subject_decl.set_type_node(&_current_module->nodes.emplace_back<TypeNode>(subject_type));
-    }
-
-    // **the subject moved into the hoisted declaration and is used exactly once**, so "one subtree per
-    // use" holds by construction - AST::ForeachLowering's `loop->source = nullptr` is the same line for
-    // the same reason. the guard branches on `presence_test` from here on, and the slot the subject
-    // vacated is what the unwrap is written back into below
-    guard->decl->init_expr = nullptr;
-
-    scope.children.insert(
-        scope.children.begin() + static_cast<long>(index), make_ref(subject_decl));
-
-    // the name has to resolve for the calls minted below, and this is the scope they live in
-    scope.declare_variable(subject_decl);
+    // and the frame ends it. AST::seat_receiver_local is the addressing, shared with ForeachLowering
+    VarDeclNode &subject_decl = hoist_subject(scope, index, *guard, subject);
 
     guard->presence_test = &subject_call(subject_decl, plan.has_value, guard->token);
 
-    // **the unwrap is the declaration's ordinary initializer, and that is the whole of what this pass
-    // owes the binding.** AST::OwnershipPass::resolve_value_arrival then sees a value arriving at a
-    // declaration and covers it with no arm at all - the copy when the payload owns something, the drop
-    // that pairs with it, and every rule that edge grows later. AST::ForeachLowering lowers `$el` into
-    // exactly this shape and its own comment says exactly this.
-    //
-    // writing it onto `bound_value` instead is what made a protocol guard byte-copy the payload out of
-    // storage somebody else still owned: two producers of that edge with two different rules, and the
-    // owner of "what does an arriving value owe" knowing about one of them.
-    //
-    // **the deref is written here rather than hoped for.** `unwrap()` hands back `V&`, and this is the
-    // round in which the ownership pass decides the binding's copy - so the edge it reads has to be the
-    // one that will actually be read. AST::ForeachLowering writes the same deref over `current()` for
-    // the same reason
-    guard->decl->init_expr = &_current_module->nodes.emplace_back<DerefExprNode>(
-        &subject_call(subject_decl, plan.unwrap, guard->decl->token_varname));
+    // **the statement form does not call `unwrap()`.** presence is the whole question; there is
+    // nothing to bind. skipping it is what lets a `result<bool, E>` and a `status<E>` be
+    // guarded without naming a dummy. t_checkable never reaches here with a decl
+    if (plan.kind == UnwrapSource::t_protocol && guard->decl != nullptr) {
+        // **the unwrap is the declaration's ordinary initializer, and that is the whole of what this pass
+        // owes the binding.** AST::OwnershipPass::resolve_value_arrival then sees a value arriving at a
+        // declaration and covers it with no arm at all - the copy when the payload owns something, the drop
+        // that pairs with it, and every rule that edge grows later. AST::ForeachLowering lowers `$el` into
+        // exactly this shape and its own comment says exactly this.
+        //
+        // writing it onto `bound_value` instead is what made a protocol guard byte-copy the payload out of
+        // storage somebody else still owned: two producers of that edge with two different rules, and the
+        // owner of "what does an arriving value owe" knowing about one of them.
+        //
+        // **the deref is written here rather than hoped for.** `unwrap()` hands back `V&`, and this is the
+        // round in which the ownership pass decides the binding's copy - so the edge it reads has to be the
+        // one that will actually be read. AST::ForeachLowering writes the same deref over `current()` for
+        // the same reason
+        guard->decl->init_expr = &_current_module->nodes.emplace_back<DerefExprNode>(
+            &subject_call(subject_decl, plan.unwrap, guard->decl->token_varname));
 
-    if (!bind_payload_type(*guard, plan.payload_type, subject_type)) {
-        return;
+        if (!bind_payload_type(*guard, plan.payload_type, subject_type)) {
+            return;
+        }
     }
 
     if (guard->failure != nullptr) {

@@ -206,6 +206,10 @@ ReturnAbi TypeLowering::return_abi_of(
         return ReturnAbi{};
     }
 
+    if (node->get_return_type().is_void()) {
+        return ReturnAbi{};
+    }
+
     return return_abi_for(get_llvm_type(node->get_return_type(), cmp_unit));
 }
 
@@ -1118,7 +1122,8 @@ llvm::FunctionType *TypeLowering::get_llvm_function_type(
     // **t_c is always-direct.** Echo's sret convention is not C's, and claiming it for a C
     // function pointer is a silent ABI miss the moment a struct slips through
     // c_function_signature_refusal. return_abi_of is the declaration half of the same
-    // exemption; this is the callable / indirect-call half
+    // exemption; this is the callable / indirect-call half. LLVM void is not an aggregate,
+    // so a `: void` Echo function also answers direct with no extra is_void arm
     const ReturnAbi abi = shape == FunctionCallingShape::t_c
         ? ReturnAbi{}
         : return_abi_for(lowered_return);
@@ -1444,7 +1449,7 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
         return value;
     }
 
-    // BinaryExprNode::result_type() answers void whenever its operands differ, so `from` is
+    // BinaryExprNode::result_type() answers unknown whenever its operands differ, so `from` is
     // frequently undeterminable at a decl/assign site. fall back to what the value actually
     // is, and let the target supply the signedness
     bool source_known = source.is_primitive() && !source.is_void();

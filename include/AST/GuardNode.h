@@ -10,11 +10,13 @@
 
 namespace AST
 {
-    // `guard T $x = <nullable> else { ... }` - bind the value if it is there, and leave otherwise
+    // `T $x = guard <nullable> else { ... }` - bind the value if it is there, and leave otherwise
+    // `guard <expr> else { ... }` - the same, with nothing to bind
     //
     // one of the three forms that read through a `T?`, and the only one that is a *statement*. it is what
     // the other two are compared against: `??` supplies a replacement and `?->` skips the work, while this
-    // one says the rest of the scope has no meaning without the value - which is usually the truth
+    // one says the rest of the scope has no meaning without the value - which is usually the truth.
+    // the statement form is that sentence when success carries nothing to name
     //
     // **a nullability feature, not a weak one.** the initializer may be any `T?` whatever `T` is - a
     // nullable primitive, struct, class, interface or callable, or a `ptr<T>`, which is the same flag on a
@@ -35,8 +37,17 @@ namespace AST
         ECO_AST_NODE_TYPE(n_guard);
 
         // the binding, already typed non-null. its `init_expr` is the nullable being tested, and it is
-        // the *same* expression - evaluated once, on the path that enters
+        // the *same* expression - evaluated once, on the path that enters.
+        //
+        // **null is the statement form** - `guard <expr> else { ... }` - success with nothing to bind.
+        // the subject then lives on `subject` below. AST::GuardNode::tested() is the one reader of
+        // whichever storage holds it
         VarDeclNode *decl = nullptr;
+
+        // **the tested expression, when there is no binding.** null on the initializer form, where
+        // the subject *is* `decl->init_expr` and must stay that (the T? path evaluates it once for
+        // both the test and the unwrap). a second copy here would double-evaluate
+        ExprNode *subject = nullptr;
 
         // where control goes when the value is absent
         ScopeNode *else_scope = nullptr;
@@ -76,10 +87,12 @@ namespace AST
         // AST::OwnershipPass keys its arm on it, AST::TypeChecker asks "is this certainly present"
         // only for the other form, and StmtCodegen::gen_guard branches on it twice.
         //
-        // the invariant, stated once: **`presence_test` if set is the value evaluated before the branch
-        // and `decl->init_expr` is then evaluated inside the bound block; with none, `init_expr` is
-        // evaluated before the branch and is both what is tested and what is unwrapped. either way
-        // nothing is evaluated twice and nothing on the absent path is evaluated at all**
+        // the invariant, stated once: **`presence_test` if set is the value evaluated before the
+        // branch; with a binding, `decl->init_expr` is then the unwrap, evaluated inside the bound
+        // block. with none, `tested()` is the optional evaluated before the branch, once, for both
+        // the test and (when there is a binding) the unwrap. the statement form on the T? path still
+        // evaluates `tested()` for the condition and stores nothing. either way nothing is evaluated
+        // twice and nothing on the absent path is evaluated at all**
         ExprNode *presence_test = nullptr;
 
         // `else ($e)` - the reason the subject was not holding a value, when it declares
@@ -118,11 +131,38 @@ namespace AST
 
         ~GuardNode() {}
 
+        // **the one reader of "what is being tested."** initializer form stores it on the binding
+        // (`decl->init_expr` is also the T? unwrap); statement form stores it on `subject`. do not
+        // re-derive the ternary at each site
+        ExprNode *tested() const {
+            return decl != nullptr ? decl->init_expr : subject;
+        }
+
+        // **the one writer of the same.** OperatorRewriter's weak upgrade, the parser seating the
+        // subject - anything that mutates "what is being tested". a getter with no setter is how
+        // the statement form missed the generic `weak<T>` upgrade
+        void set_tested(ExprNode *expr) {
+            if (decl != nullptr) {
+                decl->init_expr = expr;
+            } else {
+                subject = expr;
+            }
+        }
+
         // **the existing text is byte for byte what it was**, and the new clauses append only when the
         // new edges are non-null - which is what keeps four RAST goldens intact across a syntax change
-        // and a protocol. a `T?` guard renders exactly as it always did
+        // and a protocol. a `T?` guard renders exactly as it always did. the statement form names the
+        // expression rather than a binding
         const std::string node_description() override {
-            std::string desc = "guard " + (decl != nullptr ? decl->node_description() : "<none>");
+            std::string desc = "guard ";
+
+            if (decl != nullptr) {
+                desc += decl->node_description();
+            } else if (subject != nullptr) {
+                desc += subject->node_description();
+            } else {
+                desc += "<none>";
+            }
 
             if (presence_test != nullptr) {
                 desc += " if " + presence_test->node_description();

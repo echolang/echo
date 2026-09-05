@@ -1,0 +1,16 @@
+// statement `guard` over a const status only calls has_value(), which is const.
+// unwrap_plan_for does not refuse every const protocol subject.
+
+function start() : status<string>
+{
+    return .ok;
+}
+
+function peek(const status<string> $s) : void
+{
+    guard $s else { return; }
+    echo "ok";
+}
+
+status<string> $s = start();
+peek($s);

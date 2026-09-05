@@ -1172,3 +1172,61 @@ bool AST::CallableSignature::operator==(const AST::CallableSignature &other) con
 
     return true;
 }
+
+namespace
+{
+    const char *k_void_value_sentence =
+        "'void' is not a value type - a function that returns nothing says ': void'";
+}
+
+std::optional<std::string> AST::void_as_value_refusal(const ValueType &type)
+{
+    const ValueType bare = ValueType::make_mutable(type);
+
+    if (bare.is_void()) {
+        return std::string(k_void_value_sentence);
+    }
+
+    return nested_void_as_value_refusal(bare);
+}
+
+std::optional<std::string> AST::nested_void_as_value_refusal(const ValueType &type)
+{
+    const ValueType bare = ValueType::make_mutable(type);
+
+    if (bare.is_pointer()) {
+        return void_as_value_refusal(bare.pointee());
+    }
+
+    if (bare.is_wrapped_optional()) {
+        return void_as_value_refusal(bare.optional_payload());
+    }
+
+    if (bare.is_inline_array()) {
+        return void_as_value_refusal(bare.array_element());
+    }
+
+    if (bare.has_complex_type()) {
+        const ComplexType *ct = bare.get_complex_type();
+        if (ct != nullptr) {
+            for (const ValueType &arg : ct->instantiation_args) {
+                if (auto refusal = void_as_value_refusal(arg)) {
+                    return refusal;
+                }
+            }
+        }
+    }
+
+    if (bare.has_signature()) {
+        const CallableSignature &sig = bare.signature();
+        for (const ValueType &param : sig.parameter_types) {
+            if (auto refusal = void_as_value_refusal(param)) {
+                return refusal;
+            }
+        }
+
+        return nested_void_as_value_refusal(sig.return_type);
+    }
+
+    return std::nullopt;
+}

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] status_initializer_guard.eco:8:8
+
+  this succeeded or it didn't, so there is nothing to bind to '$x' - write 'guard <value> else { ... }' for a subject that has no payload.
+
+  7 | 
+  8 | string $x = guard start() else {
+    :        ^^
+  9 |     die("no");
+
+1 error, nothing was compiled.

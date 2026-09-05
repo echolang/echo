@@ -2,9 +2,11 @@
 
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTModule.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
@@ -273,6 +275,15 @@ AST::ExprNode *AST::receiver_for_member_call(AST::NodeCollection &nodes, AST::Ex
 AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode *place)
 {
     return receiver_for_member_call(module.nodes, place);
+}
+
+void AST::seat_receiver_local(AST::Module &module, AST::VarDeclNode &local, AST::ExprNode *expr)
+{
+    local.init_expr = is_place_expression(*expr)
+        ? receiver_for_member_call(module, expr)
+        : expr;
+    local.set_type_node(&module.nodes.emplace_back<AST::TypeNode>(
+        local.init_expr->result_type()));
 }
 
 AST::VarRefNode &AST::local_place(AST::Module &module, AST::VarDeclNode &local)

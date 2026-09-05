@@ -75,10 +75,10 @@ TEST_CASE("a shorthand takes its owner from a declared variable's type", "[short
     REQUIRE(calls[0]->decl != nullptr);
 }
 
-TEST_CASE("an unbound shorthand answers void, which is what stops it choosing an overload", "[shorthand]")
+TEST_CASE("an unbound shorthand answers unknown, which is what stops it choosing an overload", "[shorthand]")
 {
     // **the property the whole design rests on, and it needs no code.** a call with no decl already
-    // answers `void` from result_type(), which is_undetermined_type accepts - so argument_fit scores a
+    // answers `unknown` from result_type(), which is_undetermined_type accepts - so argument_fit scores a
     // shorthand t_undetermined at its first arm and strictly_better skips it on both sides
     auto bundle = EchoTests::tests_make_parsed_bundle(
         std::string(POINT_SOURCE) + "$r = draw(.nope());\n");

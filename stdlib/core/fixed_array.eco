@@ -50,6 +50,35 @@ public struct fixed_array<T, const usize N> : contract::iterable<T>, contract::c
     }
 
     /**
+     * Address of the first element. C that already has a length, which here is `N`.
+     *
+     * `N == 0` is `null`. There is no spare: every slot is live, and the length
+     * is the type.
+     */
+    const function data() : ptr<const T>
+    {
+        const if (N == 0) {
+            return null;
+        }
+        else {
+            return &$this->items[0];
+        }
+    }
+
+    /**
+     * The same address, writable.
+     */
+    function data() : ptr<T>
+    {
+        const if (N == 0) {
+            return null;
+        }
+        else {
+            return &$this->items[0];
+        }
+    }
+
+    /**
      * A copy of the element at `$index`.
      */
     const function get(usize $index) : T

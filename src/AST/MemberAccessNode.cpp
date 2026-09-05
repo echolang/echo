@@ -31,7 +31,10 @@ AST::ValueType AST::MemberAccessNode::result_type() const
     // no property table to answer from and the type checker reports it as an unknown member
     auto base_type = base_target_type();
     if (!base_type.has_property_layout()) {
-        return ValueType::void_type();
+        // unknown, not void: void is the empty value, and collapsing "cannot tell" into it
+        // made `$m[0]->x + $m[0]->y` look like a determined void+void before the index
+        // rewrote. the type checker reports the missing member; ranking waits
+        return ValueType::make_unknown();
     }
 
     auto *complex = base_type.get_complex_type();
@@ -44,7 +47,7 @@ AST::ValueType AST::MemberAccessNode::result_type() const
         complex == nullptr ? nullptr : complex->find_property(_member_name.value());
 
     if (prop == nullptr) {
-        return ValueType::void_type();
+        return ValueType::make_unknown();
     }
 
     // **const is a property of the path, not of the declaration.** a property reached through a

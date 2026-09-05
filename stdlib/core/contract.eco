@@ -6,11 +6,11 @@
  * else, and there is no arm anywhere in the compiler that knows what an `array<T>` is. A type of your own
  * conforms exactly the way `array<T>` does, and loops exactly as well. See docs/collections/iteration.md.
  *
- * The last two are the **unwrapping** protocol, which is to `guard` what iteration is to `foreach`. It
+ * The last three are the **unwrapping** protocol, which is to `guard` what iteration is to `foreach`. It
  * has one asymmetry worth knowing: a `T?` is answered by the compiler directly, so `guard` over a
- * nullable never consults `unwrappable` at all and keeps working under `--no-stdlib`. What these two are
- * for is everything else - a result, a parse outcome, a cache lookup - types that mean "maybe a value"
- * and could not previously reach `guard` at all.
+ * nullable never consults `unwrappable` at all and keeps working under `--no-stdlib`. What these are
+ * for is everything else - a result, a status, a parse outcome - types that mean "maybe a value"
+ * or "ok or why not" and could not previously reach `guard` at all.
  *
  * They sit in `contract` rather than at the root because they are not vocabulary you write every line -
  * you name one where you declare a conformance or constrain a type parameter, and `array`, `string` and
@@ -126,8 +126,10 @@ public interface keyed<K>
  *
  * **`has_value()` is const and `unwrap()` is not**, and that split is a decision rather than an
  * oversight: reading *whether* a value is there promises nothing about the storage, while taking it out
- * hands back a borrow that may be written. A `const` subject is therefore refused at the `guard`, which
- * is where a future `const_unwrappable<const V>` would attach - the shape `const_iterable` already has.
+ * hands back a borrow that may be written. Statement `guard` only asks `has_value()`, so a const
+ * subject is fine there. The initializer form - and `else ($e)` via `failure()` - refuse a const
+ * subject, which is where a future `const_unwrappable<const V>` would attach, the shape
+ * `const_iterable` already has.
  *
  * A `T?` does **not** conform, and cannot: over a pointer, a class handle or a weak it is a per-level
  * flag with no declaration anywhere, and the tagged spelling is a layout the compiler interns. The
@@ -145,6 +147,25 @@ public interface unwrappable<V>
      * The value. Only valid after `has_value()` answered true.
      */
     function unwrap() : V&;
+}
+
+/**
+ * Presence without a payload - and that `guard` as a statement can therefore read.
+ *
+ * Deliberately apart from `unwrappable<V>` for `keyed<K>`'s reason: a subject that succeeded or
+ * failed, and has no value to hand back, should not pretend to hold a dummy. Statement `guard`
+ * asks only `has_value()`. The initializer form still needs `unwrappable<V>`, because that is
+ * the form that binds.
+ *
+ *     guard $sound->start() else ($e) { die($e); }
+ */
+#[core: checkable]
+public interface checkable
+{
+    /**
+     * Did this succeed? Asked first, and its answer gates the rest of the scope.
+     */
+    const function has_value() : bool;
 }
 
 /**

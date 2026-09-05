@@ -450,11 +450,17 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     // for uint8. without it `return 0` in a `: float64` function reached CreateRet as an i32,
     // because a literal is typed where it is written and nothing there knows the return type
     //
-    // result_type() may answer void (a binary expression whose operands differ does), which
+    // result_type() may answer unknown (a binary expression whose operands differ does), which
     // coerce_value takes as "read the signedness off the value itself". a file-scope return has
-    // no signature to answer to, and a value handed back from a `void` function is a semantic
-    // error for the checker rather than a conversion to invent here
-    if (_ctx.current_function != nullptr && !_ctx.current_function->get_return_type().is_void()) {
+    // no signature to answer to. a `: void` function still `CreateRetVoid` - the LLVM ABI for
+    // a function that produces no value
+    if (_ctx.current_function != nullptr && _ctx.current_function->get_return_type().is_void()) {
+        emit_unwind();
+        _ctx.builder->CreateRetVoid();
+        return;
+    }
+
+    if (_ctx.current_function != nullptr) {
         ret = _ctx.types->coerce_value(
             ret, node.expr->result_type(), _ctx.current_function->get_return_type(),
             *_ctx.current_cmp_unit);
@@ -486,14 +492,16 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     auto *else_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "guard.else", function);
 
     // the slot before the branch, like every other local: ensure_var_slot allocates in the function's
-    // entry block, so where the declaration sits among its siblings decides nothing
-    llvm::AllocaInst *slot = ensure_var_slot(*node.decl);
+    // entry block, so where the declaration sits among its siblings decides nothing. the statement
+    // form has no binding and so no slot
+    llvm::AllocaInst *slot = node.decl != nullptr ? ensure_var_slot(*node.decl) : nullptr;
 
     // **`presence_test` is what decides which of the two shapes this is**, and it is the whole of what
     // this function knows about which protocol answered. with one set it is the value evaluated before
-    // the branch and `init_expr` is evaluated inside the bound block; with none, `init_expr` is the
+    // the branch and `init_expr` is evaluated inside the bound block; with none, `tested()` is the
     // tested optional and is evaluated before the branch, once, for both. that is GuardNode's stated
-    // invariant
+    // invariant. the statement form on the T? path still evaluates `tested()` for the condition and
+    // stores nothing
     llvm::Value *condition = nullptr;
 
     // the tested optional, on the builtin path only. the protocol path leaves both unset - there is no
@@ -505,7 +513,8 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
         // **the type answered the presence question**, through `contract::unwrappable<V>::has_value()`.
         // there is no optional here to unwrap: AST::GuardLowering hoisted the subject into an ordinary
         // declaration ahead of this statement and wrote the protocol's `deref(unwrap())` onto
-        // `init_expr`, which the bound block below evaluates like any other initializer
+        // `init_expr` when there is a binding, which the bound block below evaluates like any other
+        // initializer
         node.presence_test->accept(*_ctx.visitor);
 
         condition = _ctx.types->coerce_value(
@@ -521,55 +530,60 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
         // the `bound_value` path below stores a *copy* read back out of this same place instead. that
         // re-reads the place, it does not re-evaluate a call: AST::OwnershipPass mints that path only for
         // a place, and a call's result is a wrapper nobody owns whose payload it moves out of here
-        node.decl->init_expr->accept(*_ctx.visitor);
+        AST::ExprNode *tested = node.tested();
+        tested->accept(*_ctx.visitor);
         optional = _ctx.pop();
-        optional_type = node.decl->init_expr->result_type();
+        optional_type = tested->result_type();
 
         condition = _ctx.types->gen_has_value(optional, optional_type);
     }
 
     _ctx.builder->CreateCondBr(condition, bound_block, else_block);
 
-    // the bound path: unwrap and store. `coerce_value` is still asked, because the declared type may be a
-    // widening of the payload - `guard int64 $v = lookup($k)` over an `int32?`
+    // the bound path: unwrap and store, or just continue when nothing was bound. `coerce_value` is
+    // still asked when there is a slot, because the declared type may be a widening of the payload -
+    // `guard int64 $v = lookup($k)` over an `int32?`
     _ctx.set_insert_point(bound_block);
 
-    llvm::Value *bound = nullptr;
-    AST::ValueType bound_type;
+    if (node.decl != nullptr) {
+        llvm::Value *bound = nullptr;
+        AST::ValueType bound_type;
 
-    if (node.presence_test != nullptr) {
-        // **the protocol's unwrap, evaluated here and not before the branch** - `has_value()` gates it,
-        // which is the whole of what `contract::unwrappable<V>` promises, so calling `unwrap()` on the
-        // absent path would be reading a value the type just said it is not holding.
-        //
-        // an ordinary initializer at this point: AST::OwnershipPass walked this edge like any other
-        // declaration's, so whatever copy an owning payload owes is already in it
-        node.decl->init_expr->accept(*_ctx.visitor);
+        if (node.presence_test != nullptr) {
+            // **the protocol's unwrap, evaluated here and not before the branch** - `has_value()` gates it,
+            // which is the whole of what `contract::unwrappable<V>` promises, so calling `unwrap()` on the
+            // absent path would be reading a value the type just said it is not holding.
+            //
+            // an ordinary initializer at this point: AST::OwnershipPass walked this edge like any other
+            // declaration's, so whatever copy an owning payload owes is already in it
+            node.decl->init_expr->accept(*_ctx.visitor);
 
-        bound = _ctx.pop();
-        bound_type = node.decl->init_expr->result_type();
+            bound = _ctx.pop();
+            bound_type = node.decl->init_expr->result_type();
+        }
+        else if (node.bound_value != nullptr) {
+            // **the payload was copied rather than moved out**, because the tested value is a place somebody
+            // else still owns. AST::OwnershipPass built the copy over the `__value` place and hung it here
+            node.bound_value->accept(*_ctx.visitor);
+
+            bound = _ctx.pop();
+            bound_type = node.bound_value->result_type();
+        }
+        else {
+            bound = _ctx.types->gen_unwrapped(optional, optional_type);
+            bound_type = AST::unwrapped_type_of(optional_type);
+        }
+
+        // one store for both, because only the value and the type it comes from differ: what a guard's binding
+        // is *given* is the arm's question, how it is seated is the statement's
+        _ctx.builder->CreateStore(
+            _ctx.types->coerce_value(bound, bound_type, node.decl->type(), *_ctx.current_cmp_unit),
+            slot);
     }
-    else if (node.bound_value != nullptr) {
-        // **the payload was copied rather than moved out**, because the tested value is a place somebody
-        // else still owns. AST::OwnershipPass built the copy over the `__value` place and hung it here
-        node.bound_value->accept(*_ctx.visitor);
-
-        bound = _ctx.pop();
-        bound_type = node.bound_value->result_type();
-    }
-    else {
-        bound = _ctx.types->gen_unwrapped(optional, optional_type);
-        bound_type = AST::unwrapped_type_of(optional_type);
-    }
-
-    // one store for both, because only the value and the type it comes from differ: what a guard's binding
-    // is *given* is the arm's question, how it is seated is the statement's
-    _ctx.builder->CreateStore(
-        _ctx.types->coerce_value(bound, bound_type, node.decl->type(), *_ctx.current_cmp_unit),
-        slot);
 
     // and control falls out of the *bound* block into whatever follows the guard, which is the whole
-    // shape of the statement: the binding is in scope from here, unconditionally
+    // shape of the statement: the binding is in scope from here, unconditionally - or, with none, the
+    // rest of the scope simply runs
     auto *continue_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "guard.continue", function);
     _ctx.builder->CreateBr(continue_block);
 

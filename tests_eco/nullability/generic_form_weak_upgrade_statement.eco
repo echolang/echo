@@ -1,0 +1,32 @@
+// the statement-form twin of generic_form_weak_upgrade.eco. OperatorRewriter must reseat
+// the subject through GuardNode::set_tested; rewriting only decl->init_expr leaves a
+// substituted `weak<Res>` un-upgraded on the new spelling.
+//
+// **the counts are the assertion**: through_guard has to leave `$r`'s count exactly where
+// it found it. the upgrade is a value with no storage, so the ownership pass binds it to
+// a temporary and releases it after
+
+class Res
+{
+    int32 $tag;
+    destructor() { echo $this->tag; }
+}
+
+function through_guard<T>(T $w) : void
+{
+    guard $w else { return; }
+}
+
+function balanced() : void
+{
+    Res $r = Res(1);
+    weak<Res> $w = &$r;
+
+    echo mem::refs($r);
+    through_guard($w);
+    echo mem::refs($r);
+}
+
+balanced();
+
+echo 99;

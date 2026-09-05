@@ -1,0 +1,65 @@
+/**
+ * `status<E>` - ok, or the reason there is not.
+ *
+ * `result<T, E>` is a value of type `T`, or a failure of type `E`. This is the one with no T:
+ * the call worked, or here is why not. Nothing in the compiler knows what a status is. `guard`
+ * reaches it through `contract::checkable` and `contract::failable<E>`. `.ok` / `.error(...)`
+ * are the ordinary static shorthand every enum's cases get.
+ *
+ * Why a second enum rather than `result` with a dummy T: a payload-free `ok` takes no list, and
+ * there is no `unwrap()` of a value that is not there. See docs/stdlib/status.md.
+ */
+
+/**
+ * Ok, or a failure of type `E`.
+ *
+ * Built with `ok` / `error`, or `.ok` / `.error` wherever the destination already names the type.
+ * Read with statement `guard`. There is nothing to bind on success.
+ */
+public enum status<E> : contract::checkable, contract::failable<E>
+{
+    /**
+     * The success arm. No payload, so `status<E>::ok` and `.ok` take no list.
+     */
+    case ok;
+
+    /**
+     * The failure arm. `error` rather than `failure`, which is the *reader* below.
+     */
+    case error(E $failure);
+
+    /**
+     * Did this succeed? `contract::checkable`, and what statement `guard` asks.
+     */
+    const function has_value() : bool
+    {
+        return match ($this) {
+            status<E>::ok         => true,
+            status<E>::error($e)  => false,
+        };
+    }
+
+    /**
+     * True when this holds a failure - `has_value()`'s complement and nothing more.
+     */
+    const function failed() : bool
+    {
+        return match ($this) {
+            status<E>::ok         => false,
+            status<E>::error($e)  => true,
+        };
+    }
+
+    /**
+     * Why this failed - `contract::failable<E>` in full, and what `else ($e)` binds a borrow of.
+     *
+     * Only valid when there is a failure. The `ok` arm stops, mirroring `result`'s `failure()`.
+     */
+    function failure() : E&
+    {
+        return match ($this) {
+            status<E>::ok         => die('failure() on a status that succeeded'),
+            status<E>::error($e)  => $e,
+        };
+    }
+}

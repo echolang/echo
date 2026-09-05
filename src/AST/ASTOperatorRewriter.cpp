@@ -149,9 +149,9 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
     // asked before the operand types, because it is the cheap half and it is false for all but a
     // handful of nodes: already reconciled - by the parser, or by an earlier round of this.
     //
-    // a void answer is what "not reconciled" looks like from the outside; anything else is either not
-    // ready yet or not this function's business, since a class and a nullable both have their own arms
-    // in BinaryExprNode::result_type() and never reach a void answer through width alone
+    // an unknown answer is what "not reconciled" looks like from the outside; anything else is either
+    // not ready yet or not this function's business, since a class and a nullable both have their own
+    // arms in BinaryExprNode::result_type() and never reach an unknown answer through width alone
     //
     // **a comparison is the one shape that answer cannot speak for**, and it has to be asked separately:
     // it is a `bool` whatever it compared, so a `usize` against an `int32` literal looks perfectly
@@ -162,7 +162,7 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
     const bool is_comparison = bin.op_node != nullptr && bin.op_node->op != nullptr
         && bin.op_node->op->is_comparison();
 
-    if (!is_comparison && !bin.result_type().is_void()) {
+    if (!is_comparison && !is_undetermined_type(bin.result_type())) {
         return;
     }
 
@@ -233,7 +233,7 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
     const ValueType base_type = index_expr.indexed_base_type();
 
     // nothing to decide yet. a type parameter is substituted by a later round, and an unsettled call
-    // answers void - both are "ask again", not "wrong"
+    // answers unknown - both are "ask again", not "wrong"
     if (is_undetermined_type(base_type)) {
         return;
     }
@@ -554,6 +554,8 @@ ExprNode *OperatorRewriter::resolve_builtin_operator(ExprNode *expr)
 
         if (bin->op_node == nullptr || bin->op_node->op == nullptr
             || !bin->op_node->op->has_fixity(OpFixity::t_infix)
+            || (bin->lhs != nullptr && expression_produces_no_value(*bin->lhs))
+            || (bin->rhs != nullptr && expression_produces_no_value(*bin->rhs))
             || binary_has_builtin_meaning(
                 bin->op_node->op, parse_time_operand(bin->lhs), parse_time_operand(bin->rhs))) {
             return expr;
@@ -687,10 +689,10 @@ void OperatorRewriter::visit_guard(GuardNode &node)
 {
     RecursiveVisitor::visit_guard(node);
 
-    // the tested value is the declaration's own initializer - a guard has no separate condition edge
-    if (node.decl != nullptr) {
-        node.decl->init_expr = upgrade_optional_operand(node.decl->init_expr, node.token);
-    }
+    // `tested()` / `set_tested()`: the initializer stores the subject on the binding, the
+    // statement form on `subject`. rewriting only `init_expr` left a substituted `weak<T>`
+    // un-upgraded on the new spelling
+    node.set_tested(upgrade_optional_operand(node.tested(), node.token));
 }
 
 void OperatorRewriter::visit_null_coalesce(NullCoalesceExprNode &node)

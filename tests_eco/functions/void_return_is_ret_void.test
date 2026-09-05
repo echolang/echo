@@ -1,0 +1,6 @@
+--- OUT --->
+1
+--- IR --->
+CHECK: define void @_log
+CHECK: ret void
+CHECK-NOT: ret {}

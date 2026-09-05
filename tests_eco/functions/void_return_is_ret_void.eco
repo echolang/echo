@@ -1,0 +1,7 @@
+function log() : void
+{
+    return;
+}
+
+log();
+echo 1;

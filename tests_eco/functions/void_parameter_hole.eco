@@ -1,0 +1,6 @@
+// a void parameter is not a hole to fill. void is not a value type
+
+function take(void $x) : int32
+{
+    return 1;
+}

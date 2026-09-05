@@ -1,0 +1,12 @@
+// initializer `guard` over a `status<E>` has nothing to bind. the statement form is the one that fits
+
+function start() : status<string>
+{
+    return .ok;
+}
+
+string $x = guard start() else {
+    die("no");
+}
+
+echo $x;

@@ -956,7 +956,8 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
             ? TypeLowering::FunctionCallingShape::t_c
             : TypeLowering::FunctionCallingShape::t_echo);
 
-    // the same exemption get_llvm_function_type applies: a C function pointer is never sret
+    // the same exemption get_llvm_function_type applies: a C function pointer is never sret.
+    // LLVM void is not an aggregate, so a `: void` Echo signature answers direct
     const ReturnAbi abi = c_function
         ? ReturnAbi{}
         : return_abi_for(
@@ -1588,9 +1589,7 @@ llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
     _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
     _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", adapt));
 
-    llvm::Type *lowered_return = _ctx.types->get_llvm_type(
-        decl->get_return_type(), *_ctx.current_cmp_unit);
-    const ReturnAbi abi = return_abi_for(lowered_return);
+    const ReturnAbi abi = _ctx.types->return_abi_of(decl, *_ctx.current_cmp_unit);
 
     std::vector<llvm::Value *> forwarded;
     unsigned i = 0;

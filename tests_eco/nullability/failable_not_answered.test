@@ -5,8 +5,8 @@ expect: fail
 # rather than by an unknown-function error inside a call AST::GuardLowering synthesized, and that the guard
 # then says nothing of its own about it.
 #
-# the second error is the tail every refused guard has - see `unwrappable_not_declared` and
-# `failable_not_declared`, which both carry the same one
+# a refused protocol guard used to grow a second, wrong, 'always present' sentence from TypeChecker.
+# the struct already owns the mistake
 --- OUT --->
 [error] UnmetInterfaceRequirement  failable_not_answered.eco:27:8
 
@@ -17,13 +17,4 @@ expect: fail
      :        ^^^^
   28 | {
 
-[error] failable_not_answered.eco:44:16
-
-  'guard' needs a value that may be absent, and 'cell' always is one - write 'cell?' if it may not be, or drop the guard
-
-  43 | 
-  44 |     int32 $v = guard $c else ($e) { return $e->code; }
-     :                ^^^^^
-  45 | 
-
-2 errors, nothing was compiled.
+1 error, nothing was compiled.

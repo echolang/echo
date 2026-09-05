@@ -152,11 +152,26 @@ TEST_CASE("guard is not an expression", "[parser][nullability]")
 
 TEST_CASE("the old statement spelling says where the name goes", "[parser][nullability]")
 {
-    // one spelling only, and a `guard` at the head of a statement can only be the old one
+    // `guard T $x = ...` is the retired head. the statement form unwraps an expression, not a
+    // declaration, so this still refuses - with a sentence that names both live spellings
     auto bundle = EchoTests::tests_make_parsed_bundle(
         HALVE +
         "guard int32 $v = halve(10) else { die('no'); }\n");
 
     REQUIRE(EchoTests::has_issue_containing(
-        *bundle, "'guard' introduces a declaration's initializer"));
+        *bundle, "'guard' at the head of a statement unwraps without binding"));
+}
+
+TEST_CASE("statement guard binds nothing", "[parser][nullability]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        HALVE +
+        "function run(int32 $n) : void { guard halve($n) else { return; } echo 1; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    AST::GuardNode *guard = first_guard(*bundle);
+    REQUIRE(guard != nullptr);
+    REQUIRE(guard->decl == nullptr);
+    REQUIRE(guard->subject != nullptr);
+    REQUIRE(guard->tested() == guard->subject);
 }

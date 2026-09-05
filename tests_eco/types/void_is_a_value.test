@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] void_is_a_value.eco:3:6
+
+  'void' is not a value type - a function that returns nothing says ': void'
+
+  2 | 
+  3 | void $x;
+    :      ^^
+  4 | 
+
+[error] void_is_a_value.eco:7:10
+
+  'void' is not a value type - a function that returns nothing says ': void'
+
+  6 | {
+  7 |     void $gap;
+    :          ^^^^
+  8 | }
+
+2 errors, nothing was compiled.

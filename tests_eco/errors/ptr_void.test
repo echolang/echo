@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] ptr_void.eco:1:1
+
+  'ptr<void>' is not an untyped pointer - write 'ptr<Handle>' over an 'extern struct' for a C handle.
+
+  1 | ptr<void> $p;
+    : ^^^
+  2 | 
+
+1 error, nothing was compiled.

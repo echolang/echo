@@ -386,9 +386,15 @@ namespace AST
     // That is what a *cast* wants: a cast is not an address-of
     inline ArgumentFit argument_fit(const ValueType &from, const ExprNode *expr, const ValueType &to)
     {
-        // no information. checked first so an undetermined argument can never be read as a
+        // void produces no value. a concrete destination is a mismatch; an unbound T stays
+        // undetermined below so the call waits and rewrite_value_edge names the void call
+        if (from.is_void() && !to.is_void() && !is_undetermined_type(to)) {
+            return ArgumentFit::t_none;
+        }
+
+        // no information. checked so an undetermined argument can never be read as a
         // mismatch - the type checker and the monomorphizer's inference both already treat
-        // unknown and void this way
+        // unknown this way. void vs int32 is a mismatch (above)
         if (is_undetermined_type(from) || is_undetermined_type(to)) {
             return ArgumentFit::t_undetermined;
         }
@@ -514,7 +520,7 @@ namespace AST
 
         // whatever is left between two primitives is a conversion TypeLowering::coerce_value
         // knows how to emit. a pointer, struct or class on either side has no such table
-        if (from.is_primitive() && to.is_primitive()) {
+        if (from.is_primitive() && to.is_primitive() && !from.is_void() && !to.is_void()) {
             return is_value_preserving_promotion(from, to)
                 ? ArgumentFit::t_promotion
                 : ArgumentFit::t_conversion;

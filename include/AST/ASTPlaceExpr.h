@@ -161,7 +161,7 @@ namespace AST
     //
     // the place test comes first because it is the cheap one and what almost everything answers, and the
     // node test sits ahead of result_type() so a literal, a binary or a cast never pays for the
-    // derivation. an unsettled call answers `void`, so this is false until the call settles - which is
+    // derivation. an unsettled call answers `unknown`, so this is false until the call settles - which is
     // what makes it safe to ask from inside the monomorphizer's fixpoint
     inline bool read_reaches_storage(const ExprNode &expr, const ValueType &result_type)
     {
@@ -356,11 +356,10 @@ namespace AST
     // produce, a literal and an arithmetic result included, not only the struct and class a member base
     // has to be
     //
-    // is_undetermined_type is the one predicate covering all three shapes that cannot be given a slot,
-    // and each for its own reason: an unsettled call, whose result_type() is still void; an unknown; and
-    // anything still mentioning a type parameter, which a template body must never allocate for before
-    // the monomorphizer has substituted it. all three are left to the type checker's located error,
-    // which is where a reason belongs
+    // is_undetermined_type is the one predicate covering the shapes that cannot be given a slot:
+    // an unsettled call, whose result_type() is still unknown; and anything still mentioning a type
+    // parameter, which a template body must never allocate for before the monomorphizer has
+    // substituted it. both are left to the type checker's located error, which is where a reason belongs
     //
     // **two passes must agree on this exactly**, which is why it lives here rather than beside either:
     // AST::OwnershipPass mints the slot, and AST::TypeChecker's guard rail reports the case where nothing
@@ -461,11 +460,12 @@ namespace AST
     // its *elements* by AST::array_literal_type_for, and only the `const` half applies there
     inline ValueType infer_declaration_type(const ValueType &inferred, bool is_const)
     {
-        // a pointer to unknown/void is still no information: `&$a[0]` is `void&` until the
+        // a pointer to unknown/void is still no information: `&$a[0]` is `unknown&` until the
         // bracket becomes an `operator []` call. collapsing it here - the one owner of what
         // an inferred declaration takes from its initializer - is what keeps the stale-variable
         // sweep asking, without teaching that sweep to peel. a `T&` stays `T&`: a type
-        // parameter is information, and collapsing it would erase a generic's borrow
+        // parameter is information, and collapsing it would erase a generic's borrow. void is
+        // not a value, so a `void&` is the same "no information" as unknown
         if (inferred.is_pointer()) {
             const ValueType inner = value_type_of(inferred);
             if (inner.is_unknown() || inner.is_void()) {

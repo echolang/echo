@@ -1,0 +1,7 @@
+function start() : status<string>
+{
+    return .ok;
+}
+
+guard start();
+echo 1;

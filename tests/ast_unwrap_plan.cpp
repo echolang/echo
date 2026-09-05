@@ -102,7 +102,8 @@ TEST_CASE("a non-nullable subject with no protocol bound is refused, and says so
 
     REQUIRE(lookup.result == AST::UnwrapLookup::Result::t_refused);
     REQUIRE(lookup.refusal.find("#[core: unwrappable]") != std::string::npos);
-    REQUIRE(lookup.refusal.find("still guards without it") != std::string::npos);
+    REQUIRE(lookup.refusal.find("#[core: checkable]") != std::string::npos);
+    REQUIRE(lookup.refusal.find("still guards without them") != std::string::npos);
 
     // and it is a refusal rather than a pending, which is what keeps a guard over a plainly wrong subject
     // from being re-reported once per round

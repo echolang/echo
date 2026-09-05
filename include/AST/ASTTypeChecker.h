@@ -203,6 +203,16 @@ namespace AST
         // one - AST::incomplete_use_refusal is the sentence
         void check_incomplete_use(const ValueType &type, const TokenReference &at);
 
+        // every declaration whose type is void used as a value - AST::void_as_value_refusal.
+        // function returns ask nested_void_as_value_refusal so `: void` stays legal
+        void check_void_as_value(const ValueType &type, const TokenReference &at);
+        void check_void_nested(const ValueType &type, const TokenReference &at);
+
+        // bound type arguments on a call's instance. parse already refused a written `f<void>()`;
+        // this is the inferred leftover, and the same sentence. asked of every instantiation arg
+        // so a `dprint` of void is not a second rule
+        void check_void_type_args(FunctionCallExprNode &node);
+
         // `size_of` / `align_of` over an incomplete type. the type argument is the subject,
         // same shape as check_atomic_operand. typed `mem::alloc<T>` reports through the
         // size_of call its body makes once T is bound
@@ -262,9 +272,9 @@ namespace AST
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_assume_is_unsafe(FunctionCallExprNode &node);
 
-        // a settled void call where a value is consumed. asked from rewrite_value_edge, so every
-        // value and place edge is covered and a TemporaryBind around a void method is not a hole.
-        // AST::expression_produces_no_value is the question; `die(...)` is exempt because a
+        // echo, or a settled `: void` call, where a value is consumed. asked from rewrite_value_edge,
+        // so every value and place edge is covered and a TemporaryBind around a void method is not a
+        // hole. AST::expression_produces_no_value is the question; `die(...)` is exempt because a
         // never-returning arm is a legal value
         void check_value_is_produced(ExprNode *expr);
 

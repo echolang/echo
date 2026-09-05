@@ -1,9 +1,11 @@
-// **a `const` subject cannot be guarded**, because `unwrap()` is not declared const: taking the value
-// out hands back a borrow that may be written, and a const place promised nobody would.
+// **initializer `guard` cannot take a value out of a const subject**, because `unwrap()` is not
+// declared const: taking the value out hands back a borrow that may be written, and a const place
+// promised nobody would.
 //
-// refused in AST::unwrap_plan_for rather than at the synthesized `unwrap()` call, which would report
+// refused in AST::GuardLowering rather than at the synthesized `unwrap()` call, which would report
 // against a token the author never wrote - the same call AST::iteration_plan_for makes about a const
-// cursor. this is where a future `#[core: const_unwrappable]` would attach
+// cursor. statement `guard` over a const subject is fine: it only asks `has_value()`. this is where
+// a future `#[core: const_unwrappable]` would attach
 
 struct Box : contract::unwrappable<int32>
 {

@@ -5,6 +5,7 @@
 
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTTypeParam.h"
+#include "AST/ASTValueType.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/TypeNode.h"
@@ -24,10 +25,11 @@
 #include <fmt/core.h>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
-#include <functional>
 #include <unordered_map>
+#include <utility>
 
 // takes an already-built call node as far as the types known at parse time allow, through
 // AST::CallResolver - which is also what the monomorphizer's fixpoint re-enters to finish it
@@ -120,6 +122,16 @@ static bool parse_explicit_type_args(
             auto *type_node = Parser::parse_type(payload);
             if (type_node == nullptr) {
                 // parse_type has already reported whatever it could not read
+                return false;
+            }
+
+            if (auto refusal = AST::void_as_value_refusal(type_node->type)) {
+                if (!speculative) {
+                    const TokenReference &at = type_node->type_token.value_or(at_token);
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(at),
+                        std::move(refusal.value()));
+                }
                 return false;
             }
 
@@ -687,7 +699,7 @@ static AST::CallResolver::Result resolve_funccall(Parser::Payload &payload, AST:
     // finishes it, and that is the same fixpoint that answers what they are
     //
     // so a pending call is kept rather than discarded, and the callers return the node. a null `decl`
-    // between here and codegen is a legitimate intermediate state: result_type() answers void, which
+    // between here and codegen is a legitimate intermediate state: result_type() answers unknown, which
     // is_undetermined_type reads as "no information", and TypeChecker, PointerAdjuster and
     // OwnershipPass all already guard the pointer. nothing reaches codegen unsettled, because the
     // finalizing sweep at the end of the fixpoint reports whatever never resolved

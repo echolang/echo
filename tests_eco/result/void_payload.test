@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] void_payload.eco:3:17
+
+  'void' is not a value type - a function that returns nothing says ': void'
+
+  2 | 
+  3 | function go() : result<void, string>
+    :                 ^^^^^^
+  4 | {
+
+1 error, nothing was compiled.

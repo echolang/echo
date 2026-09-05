@@ -65,8 +65,8 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     REQUIRE( AST::argument_fit(t_int32, nullptr, ValueType::make_unknown()) == ArgumentFit::t_undetermined );
     REQUIRE( AST::argument_fit(ValueType::make_unknown(), nullptr, t_int32) == ArgumentFit::t_undetermined );
 
-    // void as a source says nothing either; it is what a mixed-operand binary expression answers
-    REQUIRE( AST::argument_fit(ValueType::void_type(), nullptr, t_int32) == ArgumentFit::t_undetermined );
+    // void is determined: void vs int32 is a mismatch, not "no information"
+    REQUIRE( AST::argument_fit(ValueType::void_type(), nullptr, t_int32) == ArgumentFit::t_none );
 
     // a value cannot become a pointer without a place to take the address of, and no expression
     // was handed over here

@@ -191,6 +191,14 @@ namespace AST
     ExprNode *receiver_for_member_call(NodeCollection &nodes, ExprNode *place);
     ExprNode *receiver_for_member_call(Module &module, ExprNode *place);
 
+    // **seat `expr` as the initializer of a local a later member call will receive.** a place that
+    // is not already an address is borrowed, through receiver_for_member_call; a call's result is
+    // owned. the local is typed from what it holds, so `$local->m()` has a receiver type to
+    // resolve against. GuardLowering's `$__guardN` and ForeachLowering's cursor `$__it` are the
+    // two readers - one function so a place that is already `T&` cannot become `ptr<ptr<T>>` in
+    // one lowering and not the other
+    void seat_receiver_local(Module &module, VarDeclNode &local, ExprNode *expr);
+
     // **`$local` as a place expression**, for a pass minting a call on a local it just declared. two
     // nodes and no rule of its own - it exists so the two shapes below share one spelling of it, since a
     // pass reaching for a *resolved* call on a local wants the receiver the unresolved one already builds

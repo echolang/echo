@@ -98,6 +98,11 @@ namespace AST
         // is absent and nothing about why - needs no arm anywhere to be refused one
         t_failable,
 
+        // `interface contract::checkable` - presence without a payload. statement `guard` needs
+        // `has_value()` and nothing else; `unwrappable<V>` is the form that also hands the value
+        // back. a type declares one or the other, not both. `status<E>` is this plus `failable<E>`
+        t_checkable,
+
         // `struct variadic_args` - the C variadic bridge, and a marker rather than a type with a
         // shape: it is legal only as the *last parameter of an extern declaration*, and the only
         // thing that may arrive at one is a list written at the call site.

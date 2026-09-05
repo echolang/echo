@@ -537,7 +537,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
     // the statement itself; the declaration is handed back the way any other is, so the caller that
     // knows it is reading a body can still refuse a `static` on it
     if (guard_initializer) {
-        AST::GuardNode *guard = parse_guard(payload, *vardecl, is_const);
+        AST::GuardNode *guard = parse_guard(payload, vardecl, is_const);
 
         // appended to the same scope the *name* went into above, so the two halves of the statement
         // cannot end up in different blocks. `scope` is non-null here by construction:

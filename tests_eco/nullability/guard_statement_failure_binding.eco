@@ -1,0 +1,23 @@
+// `else ($e)` on the statement form still binds the reason. nothing is bound on success
+
+function start(bool $ok) : result<int32, string>
+{
+    if (!$ok) {
+        return .error('nope');
+    }
+
+    return .ok(1);
+}
+
+function go(bool $ok) : void
+{
+    guard start($ok) else ($e) {
+        echo $e;
+        return;
+    }
+
+    echo "ok";
+}
+
+go(true);
+go(false);

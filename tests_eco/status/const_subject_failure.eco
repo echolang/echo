@@ -1,0 +1,19 @@
+// else ($e) over a const status would call failure(), which is not const
+
+function start() : status<string>
+{
+    return .ok;
+}
+
+function peek(const status<string> $s) : void
+{
+    guard $s else ($e) {
+        echo $e;
+        return;
+    }
+
+    echo "ok";
+}
+
+status<string> $s = start();
+peek($s);

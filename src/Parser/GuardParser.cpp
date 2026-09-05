@@ -18,7 +18,7 @@
 
 AST::GuardNode *Parser::parse_guard(
     Parser::Payload &payload,
-    AST::VarDeclNode &binding,
+    AST::VarDeclNode *binding,
     bool is_const
 )
 {
@@ -52,44 +52,45 @@ AST::GuardNode *Parser::parse_guard(
     // `plan_decided` staying false until then is what stops AST::OwnershipPass walking the body early
     const bool decide_now = init_type.is_nullable();
 
-    if (decide_now) {
-        // the binding holds the **non-null** type, which is the whole point of the form: from here on
-        // `$n` is an ordinary local that certainly has a value, and every later read of it is unchecked
-        const AST::ValueType payload_type = AST::unwrapped_type_of(init_type);
+    // the statement form has no binding to type. the subject lives on the node, not on a declaration
+    if (binding != nullptr) {
+        if (decide_now) {
+            // the binding holds the **non-null** type, which is the whole point of the form: from here on
+            // `$n` is an ordinary local that certainly has a value, and every later read of it is unchecked
+            const AST::ValueType payload_type = AST::unwrapped_type_of(init_type);
 
-        if (!binding.has_type()) {
-            binding.set_type_node(&payload.context.emplace_node<AST::TypeNode>(
-                AST::infer_declaration_type(payload_type, is_const)));
-        }
-        // a *written* type is checked against what is actually inside the nullable, here rather than
-        // downstream: AST::TypeChecker skips its usual fit rule for this declaration - the whole point
-        // is that the initializer is one level more nullable - so this is the only place the two are
-        // both in hand. the wording is AST::guard_payload_refusal's, shared with the fixpoint moment
-        else {
-            const std::string mismatch =
-                AST::guard_payload_refusal(binding.type(), payload_type, init_type);
+            if (!binding->has_type()) {
+                binding->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
+                    AST::infer_declaration_type(payload_type, is_const)));
+            }
+            // a *written* type is checked against what is actually inside the nullable, here rather than
+            // downstream: AST::TypeChecker skips its usual fit rule for this declaration - the whole point
+            // is that the initializer is one level more nullable - so this is the only place the two are
+            // both in hand. the wording is AST::guard_payload_refusal's, shared with the fixpoint moment
+            else {
+                const std::string mismatch =
+                    AST::guard_payload_refusal(binding->type(), payload_type, init_type);
 
-            if (!mismatch.empty()) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(binding.token_varname), mismatch);
-                cursor.try_skip_to_next_statement();
-                return nullptr;
+                if (!mismatch.empty()) {
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(binding->token_varname), mismatch);
+                    cursor.try_skip_to_next_statement();
+                    return nullptr;
+                }
             }
         }
-    }
-    // deferred. a written type is left exactly as the author wrote it; an inferred one gets a
-    // placeholder so the `const` they wrote survives to the lowering pass, which is the state an
-    // array-literal declaration is already in for the same reason
-    else if (!binding.has_type()) {
-        binding.set_type_node(&payload.context.emplace_node<AST::TypeNode>(
-            AST::infer_declaration_type(AST::ValueType::make_unknown(), is_const)));
-    }
+        // deferred. a written type is left exactly as the author wrote it; an inferred one gets a
+        // placeholder so the `const` they wrote survives to the lowering pass, which is the state an
+        // array-literal declaration is already in for the same reason
+        else if (!binding->has_type()) {
+            binding->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
+                AST::infer_declaration_type(AST::ValueType::make_unknown(), is_const)));
+        }
 
-    binding.init_expr = init;
-
-    // see VarDeclNode::binds_unwrapped - the one bit that tells the type checker this declaration's
-    // initializer is legitimately one level more nullable than the declaration is
-    binding.binds_unwrapped = true;
+        // see VarDeclNode::binds_unwrapped - the one bit that tells the type checker this declaration's
+        // initializer is legitimately one level more nullable than the declaration is
+        binding->binds_unwrapped = true;
+    }
 
     if (!cursor.is_type(Token::Type::t_else)) {
         // omitted else is abort: mint a real never-returning call so scope_always_exits,
@@ -103,9 +104,12 @@ AST::GuardNode *Parser::parse_guard(
         auto &else_scope = payload.context.emplace_node<AST::ScopeNode>();
         else_scope.children.push_back(AST::make_ref(abort));
 
-        auto &node = payload.context.emplace_node<AST::GuardNode>(&binding, &else_scope, guard_token);
+        auto &node = payload.context.emplace_node<AST::GuardNode>(binding, &else_scope, guard_token);
+        node.set_tested(init);
         node.implicit_abort = true;
-        node.plan_decided = decide_now;
+        // initializer T? is decided here. statement T? still needs GuardLowering to hoist an
+        // rvalue subject so the frame owns it
+        node.plan_decided = decide_now && binding != nullptr;
 
         // a written else ends at the block. an omitted one ends like any other declaration
         if (!cursor.is_type(Token::Type::t_semicolon)) {
@@ -176,29 +180,35 @@ AST::GuardNode *Parser::parse_guard(
     }
     cursor.skip();
 
-    // **the else arm must not fall through.** a guard's binding is only meaningful on the path where
-    // the value was there, so an arm that ran on and rejoined would leave `$n` bound to nothing at all.
-    // refused here rather than left to codegen, so it is a located error about the block the author
-    // wrote - and refused at *parse* time, this being one of the two askers of AST::scope_always_exits
-    // that run while the tree is still being built
+    // **the else arm must not fall through.** that is the meaning of `guard`, not a workaround for an
+    // uninitialized binding: the rest of the scope has no meaning without success. the initializer
+    // form's sentence names the binding; the statement form has none to name. refused here rather than
+    // left to codegen, so it is a located error about the block the author wrote - and refused at
+    // *parse* time, this being one of the two askers of AST::scope_always_exits that run while the
+    // tree is still being built
     if (!AST::scope_always_exits(else_scope)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(else_brace),
-            fmt::format(
+        const std::string sentence = binding != nullptr
+            ? fmt::format(
                 "the 'else' of a guard has to leave - end it with 'return', 'break', 'continue' or "
                 "'die'. otherwise '{}' would be read after the value it names turned out not to be there",
-                binding.token_varname.value()));
+                binding->token_varname.value())
+            : "the rest of this scope has no meaning if this failed - end the 'else' with 'return', "
+                "'break', 'continue' or 'die'";
+
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(else_brace), sentence);
     }
 
-    auto &node = payload.context.emplace_node<AST::GuardNode>(&binding, &else_scope, guard_token);
-
+    auto &node = payload.context.emplace_node<AST::GuardNode>(binding, &else_scope, guard_token);
+    node.set_tested(init);
     node.failure = failure;
 
     // **a guard that writes `else ($e)` never takes the fast path, even over a `T?`.** that puts "a
     // nullable records only that a value is absent, so there is nothing to bind" in exactly one place -
     // AST::GuardLowering, beside the failable-but-not-declared refusal it belongs with - and it costs
-    // nothing, no program written before this existing one
-    node.plan_decided = decide_now && failure == nullptr;
+    // nothing, no program written before this existing one. statement T? is also not decided: an
+    // rvalue subject still has to be hoisted so the frame owns it
+    node.plan_decided = decide_now && failure == nullptr && binding != nullptr;
 
     return &node;
 }

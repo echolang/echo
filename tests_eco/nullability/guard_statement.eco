@@ -1,0 +1,21 @@
+// statement `guard`: success with nothing to bind. the rest of the scope runs only if the value
+// was there. no dummy, no name
+
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n;
+}
+
+function run(int32 $n) : void
+{
+    guard pick($n) else { return; }
+    echo $n;
+}
+
+run(7);
+run(-1);
+echo "done";

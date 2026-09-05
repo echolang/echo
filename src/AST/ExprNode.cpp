@@ -22,7 +22,7 @@ AST::ValueType AST::UnaryExprNode::result_type() const
     }
 
     if (expr == nullptr) {
-        return AST::ValueType::make_void();
+        return AST::ValueType::make_unknown();
     }
 
     // negation preserves the operand type
@@ -32,7 +32,7 @@ AST::ValueType AST::UnaryExprNode::result_type() const
 AST::ValueType AST::BinaryExprNode::result_type() const
 {
     if (lhs == nullptr || rhs == nullptr) {
-        return AST::ValueType::make_void();
+        return AST::ValueType::make_unknown();
     }
 
     auto raw_left = lhs->result_type();
@@ -123,13 +123,21 @@ AST::ValueType AST::BinaryExprNode::result_type() const
         return left;
     }
 
-    return AST::ValueType::make_void();
+    // not reconciled, which is "not yet" rather than the empty value. a mismatch the type
+    // checker already owns stays unknown so ranking cannot read it as a determined void
+    return AST::ValueType::make_unknown();
 }
 
 AST::ValueType AST::FunctionCallExprNode::result_type() const
 {
     if (decl == nullptr) {
-        return AST::ValueType::make_void();
+        // echo is a decl-less builtin that produces nothing. every other missing decl is
+        // "not yet" - unknown - so ranking cannot read an unresolved call as the empty value
+        if (token_function_name.type() == Token::Type::t_echo) {
+            return AST::ValueType::make_void();
+        }
+
+        return AST::ValueType::make_unknown();
     }
 
     return decl->get_return_type();
@@ -366,7 +374,7 @@ AST::ValueType AST::RetainExprNode::result_type() const
 AST::ValueType AST::ClosureExprNode::result_type() const
 {
     if (decl == nullptr) {
-        return ValueType::make_void();
+        return ValueType::make_unknown();
     }
 
     return decl->callable_type();
@@ -375,7 +383,7 @@ AST::ValueType AST::ClosureExprNode::result_type() const
 AST::ValueType AST::IndirectCallExprNode::callee_type() const
 {
     if (callee == nullptr) {
-        return ValueType::make_void();
+        return ValueType::make_unknown();
     }
 
     return value_type_of(callee->result_type());
@@ -383,13 +391,13 @@ AST::ValueType AST::IndirectCallExprNode::callee_type() const
 
 AST::ValueType AST::IndirectCallExprNode::result_type() const
 {
-    // void rather than an assert when the callee is not callable: the type checker owns that
+    // unknown rather than an assert when the callee is not callable: the type checker owns that
     // diagnostic, and result_type is asked while the tree is still half-resolved. the same contract a
     // FunctionCallExprNode with no decl answers under
     const ValueType type = callee_type();
 
     if (!type.has_signature()) {
-        return ValueType::make_void();
+        return ValueType::make_unknown();
     }
 
     return type.signature().return_type;

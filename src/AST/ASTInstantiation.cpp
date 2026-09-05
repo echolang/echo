@@ -38,9 +38,10 @@ namespace AST
             // then. `Box<T>` is deliberately not that case - it will be a Box whatever T becomes, so
             // its answer is already decided
             //
-            // unknown and void carry no information at all, and a program that got one of those here
-            // has already been told why - a constraint error on top would blame one typo twice
-            if (args[i].is_type_param() || args[i].is_unknown() || args[i].is_void()) {
+            // unknown carries no information at all, and a program that got one here has already been
+            // told why - a constraint error on top would blame one typo twice. void is a real type
+            // argument and is judged like any other
+            if (args[i].is_type_param() || args[i].is_unknown()) {
                 continue;
             }
 
@@ -431,7 +432,8 @@ namespace AST
         // names and defaults still sit on the call: apply_argument_binding runs after this, once
         // the instance exists. bind here so a named list and a hole that has a default infer T
         // against the parameter order, not the written order
-        const ArgumentBinding binding = bind_arguments(*tmpl, call.arguments, call.argument_names);
+        const ArgumentBinding binding = bind_arguments(
+            *tmpl, call.arguments, call.argument_names);
         if (binding.kind != ArgumentBindKind::t_ok) {
             return rejected(InstantiationBlame::t_argument_count);
         }

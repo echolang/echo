@@ -1,0 +1,5 @@
+// commit past room is a mistake in the caller, not a condition to recover from
+
+array<int32> $a;
+$a->fit(2);
+$a->commit(3);
