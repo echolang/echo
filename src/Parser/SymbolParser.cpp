@@ -1,6 +1,7 @@
 #include "Parser/SymbolParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/NamespaceParser.h"
+#include "Parser/OpaqueDeclParser.h"
 #include "Parser/TypeDeclParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExternParser.h"
@@ -30,6 +31,12 @@ void Parser::parse_type_names(Parser::Payload &payload)
     {
         // the type whose body this brace opened, null for a function, method, constructor or bare block
         AST::TypeDeclNode *type_body;
+
+        // this brace opened an `extern { }` - a `struct Name;` inside it is an incomplete type,
+        // not a struct waiting for a body. the visibility written ahead of the `extern` belongs
+        // to every declaration in the block, types included
+        bool extern_block = false;
+        std::optional<AST::Visibility> extern_visibility;
     };
 
     std::vector<OpenRegion> open_regions;
@@ -51,6 +58,9 @@ void Parser::parse_type_names(Parser::Payload &payload)
 
         // the visibility word just walked past, waiting for the declaration keyword it belongs to
         std::optional<AST::Visibility> visibility;
+
+        // `extern` was just walked, waiting for the `{` that opens a C surface block
+        bool extern_block = false;
     };
 
     Pending pending;
@@ -128,13 +138,57 @@ void Parser::parse_type_names(Parser::Payload &payload)
             continue;
         }
 
+        // `extern {` - remembered on pending until the `{` is pushed as a region, so a modifier
+        // written ahead of the `extern` still belongs to the declarations inside. `extern struct`
+        // and `extern function<...>` are the other two productions and do not take this arm
+        if (cursor.is_type(Token::Type::t_extern) && cursor.peek_is_type(1, Token::Type::t_open_brace)) {
+            pending.extern_block = true;
+            cursor.skip();
+            continue;
+        }
+
+        // an incomplete type: standalone `extern struct Name;` or `struct Name;` inside the
+        // extern-block region just opened. parse_opaque_typedecl consumes through the semicolon,
+        // so the next `{` cannot attach itself as a body the type does not have
+        const bool in_extern_block = !open_regions.empty()
+            && open_regions.back().extern_block
+            && open_regions.back().type_body == nullptr;
+        const bool standalone_opaque = starts_extern_typedecl(cursor);
+        const bool block_opaque = in_extern_block
+            && starts_typedecl(cursor)
+            && cursor.peek_is_type(1, Token::Type::t_identifier);
+
+        if (standalone_opaque || block_opaque) {
+            // a type written in an ordinary lexical block is published in pass 2, where the
+            // block's namespace exists. an extern-block region is not that: it is C surface at
+            // the namespace the `extern` was written in
+            if (!in_extern_block
+                && !open_regions.empty()
+                && open_regions.back().type_body == nullptr)
+            {
+                pending = Pending {};
+                cursor.skip();
+                continue;
+            }
+
+            std::optional<AST::Visibility> written = pending.visibility;
+            if (!written.has_value() && in_extern_block) {
+                written = open_regions.back().extern_visibility;
+            }
+
+            parse_opaque_typedecl(payload, AST::declaration_visibility(written));
+            pending = Pending {};
+            continue;
+        }
+
         if (!starts_typedecl(cursor) || !cursor.peek_is_type(1, Token::Type::t_identifier)) {
             // token by token rather than skipping bodies whole, which is also how parse_symbols
             // walks - so a `struct` written inside a function body is reached by both
             if (cursor.is_type(Token::Type::t_open_brace)) {
                 // every brace pushes a region, carrying the declaration that opened it or nothing.
                 // pushing only the type bodies is what made this two counters that had to agree
-                open_regions.push_back(OpenRegion { pending.body });
+                open_regions.push_back(OpenRegion {
+                    pending.body, pending.extern_block, pending.visibility });
             }
             else if (cursor.is_type(Token::Type::t_close_brace)) {
                 if (!open_regions.empty()) {
@@ -302,6 +356,9 @@ void Parser::parse_declaration_surface(
             // this pass is free to name a type from any file in its operand list - and a use site
             // written above this declaration already knows the symbol is an operator
             parse_operatordecl(payload);
+        }
+        else if (starts_extern_typedecl(cursor)) {
+            parse_opaque_typedecl(payload, visibility.value);
         }
         else if (starts_typedecl(cursor)) {
             // the name is already a symbol - parse_type_names pushed it, over every file, before

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  mix_refused.eco:10:12
+
+  Invalid type conversion: cannot implicitly convert 'ptr<Resource>' to 'ptr<Handle>'
+
+   9 | {
+  10 |     return c_read($r);
+     :            ^^^^^^
+  11 | }
+
+1 error, nothing was compiled.

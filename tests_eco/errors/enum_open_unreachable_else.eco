@@ -1,0 +1,9 @@
+enum Error : int32 { case invalidArgs = -2; case other; }
+
+$e = Error::from(-2);
+
+$n = match ($e) {
+    Error::invalidArgs => 1,
+    Error::other => 2,
+    else => 3,
+};

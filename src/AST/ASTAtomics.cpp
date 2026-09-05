@@ -1,5 +1,7 @@
 #include "AST/ASTAtomics.h"
 
+#include "AST/ASTCompleteness.h"
+
 #include <fmt/core.h>
 
 namespace AST
@@ -97,6 +99,12 @@ namespace AST
                 "cannot atomically operate on '{}' - an exchange would move the bits without "
                 "moving the count. Put it in a mutex, or mark the class '#[atomic]' and copy the "
                 "handle.",
+                type.get_type_desciption());
+        }
+
+        if (type_completeness(type) == TypeCompleteness::t_incomplete) {
+            return fmt::format(
+                "cannot atomically operate on incomplete type '{}' - it has no size.",
                 type.get_type_desciption());
         }
 

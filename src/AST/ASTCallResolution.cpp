@@ -16,6 +16,7 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
+#include "AST/ASTValueType.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/TypeNode.h"
@@ -764,6 +765,20 @@ namespace AST
             // retryable, deliberately: a member call's candidates come from its receiver's type,
             // which a later round may still make concrete. so this is not a terminal state
             if (candidates.empty()) {
+                // a leftover case is in the table and not in the overload set, so "no such function"
+                // is the wrong sentence. final either way: the case list is complete before any body
+                // is parsed, and a later round declares no leftover constructor
+                if (!call.static_owner.is_unknown()) {
+                    const std::string refusal =
+                        enum_case_construction_refusal(call.static_owner, call.lookup_name());
+
+                    if (!refusal.empty()) {
+                        _collector.collect_issue<Issue::GenericError>(at, refusal);
+                        call.settlement = CallSettlement::t_failed;
+                        return Result::t_failed;
+                    }
+                }
+
                 return Result::t_unknown_name;
             }
 

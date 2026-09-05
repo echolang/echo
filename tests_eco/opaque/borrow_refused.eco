@@ -1,0 +1,5 @@
+extern struct Handle;
+
+function take(Handle& $h) : void
+{
+}

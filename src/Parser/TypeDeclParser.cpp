@@ -6,6 +6,7 @@
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTDeclarationOrigin.h"
 #include "AST/ASTDetach.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
@@ -24,6 +25,7 @@
 
 #include <fmt/core.h>
 #include <unordered_set>
+#include <vector>
 
 // the node a previous pass already registered for this declaration site, with its arguments dropped,
 // or null when the running pass is the first to reach it
@@ -947,6 +949,15 @@ static void bind_unique_attribute(Parser::Payload &payload, AST::TypeDeclNode *s
 
     auto &complex = struct_node->complex_type();
 
+    // an incomplete type has no storage Echo accounts for, so there is nothing for one value to own
+    if (complex.is_opaque_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(unique_attr->attribute_tokens),
+            "'#[unique]' cannot be written on an incomplete type. An incomplete type has no "
+            "storage Echo accounts for, so there is nothing for one value to own.");
+        return;
+    }
+
     // a class is already exactly one object however many handles name it, and a copy of a handle is
     // one more reference rather than one more object - so there is nothing here for uniqueness to
     // add, and a refusal to copy would refuse the retain that makes classes work at all
@@ -984,6 +995,15 @@ static void bind_atomic_attribute(Parser::Payload &payload, AST::TypeDeclNode *s
 
     auto &complex = struct_node->complex_type();
 
+    // an incomplete type has no reference count - it is a name, not an object
+    if (complex.is_opaque_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(atomic_attr->attribute_tokens),
+            "'#[atomic]' cannot be written on an incomplete type. An incomplete type has no "
+            "reference count.");
+        return;
+    }
+
     // an interface declares requirements and has no layout, so there is no count to make atomic
     if (complex.is_interface_kind()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -1009,6 +1029,39 @@ static void bind_atomic_attribute(Parser::Payload &payload, AST::TypeDeclNode *s
     }
 
     complex.is_atomic = true;
+}
+
+bool Parser::refuse_type_in_generic_body(Payload &payload, const TokenReference &name_token)
+{
+    // a `struct` written inside a `{ }` block where a type parameter is visible is refused, the
+    // third case of the rule parse_funcdecl already applies to a nested `function` and
+    // parse_closure to a closure - same predicate, same reason: `T` resolves through the
+    // type-param scope stack and would make this declaration depend on a substitution nothing
+    // hands it. A type is the case where that would be *silent* rather than a link error,
+    // because there is nowhere for the substituted layout to come from:
+    // TypeRegistry::get_or_create_instantiation interns one ComplexType per (template, args)
+    // and this declaration is no template, so a monomorphizer clone that minted a second layout
+    // of its own would be one type wearing two - struct equality is ComplexType* identity
+    if (payload.context.current_namespace == nullptr
+        || !payload.context.current_namespace->is_lexical()
+        || !payload.context.has_visible_type_params()) {
+        return false;
+    }
+
+    payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.context.code_ref(name_token),
+        fmt::format(
+            "'{}' cannot be declared inside a generic function's body - it has no access to the "
+            "enclosing type parameters. Declare it at file scope instead.",
+            name_token.value()));
+    return true;
+}
+
+void Parser::bind_type_decl_attributes(Payload &payload, AST::TypeDeclNode &node)
+{
+    bind_core_type_attribute(payload, &node);
+    bind_unique_attribute(payload, &node);
+    bind_atomic_attribute(payload, &node);
 }
 
 AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
@@ -1067,31 +1120,12 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // not a member of the enclosing struct, which is what the lexical namespace below then scopes it to
     AST::TypeDeclNode *owner_node = payload.context.self_struct_ptr;
 
-    // a `struct` written inside a `{ }` block where a type parameter is visible is refused, the third
-    // case of the rule parse_funcdecl already applies to a nested `function` and parse_closure to a
-    // closure - same predicate, same reason: `T` resolves through the type-param scope stack and would
-    // make this declaration depend on a substitution nothing hands it. A type is the case where that
-    // would be *silent* rather than a link error, because there is nowhere for the substituted layout to
-    // come from: TypeRegistry::get_or_create_instantiation interns one ComplexType per (template, args)
-    // and this declaration is no template, so a monomorphizer clone that minted a second layout of
-    // its own would be one type wearing two - struct equality is ComplexType* identity. see
-    // all three are lifted together, once closures can be generic
-    //
     // asked here, before MemberTypeScope is opened and before the node is found or created, so the
     // refusal mutates nothing on the way out. it cannot double-report with the generic *owner* refusal
     // below: a member type's namespace comes from MemberTypeScope, which is a written namespace and so
-    // never lexical
-    if (payload.context.current_namespace != nullptr
-        && payload.context.current_namespace->is_lexical()
-        && payload.context.has_visible_type_params())
-    {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(name_token),
-            fmt::format(
-                "'{}' cannot be declared inside a generic function's body - it has no access to the "
-                "enclosing type parameters. Declare it at file scope instead.",
-                name_token.value()));
-
+    // never lexical. Parser::refuse_type_in_generic_body is the sentence, shared with an incomplete
+    // type written in the same place
+    if (Parser::refuse_type_in_generic_body(payload, name_token)) {
         // the attributes staged ahead of this declaration are still owed a drain - an undrained one
         // attaches itself to whatever declaration comes next, which is the bug the drain below records
         AST::AttributeList refused_attributes;
@@ -1181,9 +1215,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // half of the bug that would pick up a method's `#[implicit]`
     Parser::drain_attributes(payload, struct_node->attributes);
 
-    bind_core_type_attribute(payload, struct_node);
-    bind_unique_attribute(payload, struct_node);
-    bind_atomic_attribute(payload, struct_node);
+    Parser::bind_type_decl_attributes(payload, *struct_node);
 
     if (owner_node != nullptr) {
         // part of the nested type's identity - see ComplexType::owner_type. set here rather than at
@@ -1685,7 +1717,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // and the enum's own, in the same position and for the same reason: after the walk, so it is built
     // from the case list this walk just collected
     if (collect_members && is_enum_body) {
-        Parser::synthesize_backing_accessor(payload, struct_node, self_value_type);
+        Parser::finalize_enum(payload, struct_node, self_value_type);
     }
 
     if (!declarations_only) {

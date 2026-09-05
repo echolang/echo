@@ -3,13 +3,21 @@
 #include "AST/ASTConstructor.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionRegistry.h"
+#include "AST/ASTMemberLookup.h"
+#include "AST/ASTNullability.h"
+#include "AST/ASTOps.h"
 #include "AST/ASTStringLiteral.h"
 #include "AST/AssignNode.h"
+#include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/IfStatementNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/MatchExprNode.h"
+#include "AST/NullNode.h"
+#include "AST/OperatorNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
+#include "AST/TypeCastNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
@@ -18,6 +26,9 @@
 #include "Parser/TypeParser.h"
 
 #include <fmt/core.h>
+
+#include <map>
+#include <vector>
 
 namespace
 {
@@ -146,6 +157,33 @@ void build_enum_case_body(
 
     AST::close_constructor_body(payload.context.module, constructor, value);
 }
+
+AST::FunctionDeclNode &begin_synthesized_function(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const TokenReference &name_token,
+    AST::MemberKind kind,
+    const AST::ValueType &return_type
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+
+    auto &decl = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
+    decl.member_kind = kind;
+    decl.owner_type = &owner;
+    decl.ast_namespace = payload.context.current_namespace;
+    decl.is_implicitly_generated = true;
+
+    Parser::declare_type_parameters(payload, decl, {}, enum_node->type_parameters());
+
+    auto &return_node = payload.context.emplace_node<AST::TypeNode>(return_type);
+    decl.return_type = &return_node;
+
+    auto &body = payload.context.emplace_node<AST::ScopeNode>();
+    decl.body = &body;
+
+    return decl;
+}
 }
 
 std::string Parser::enum_backing_refusal(const AST::ValueType &backing, const AST::CoreTypes &core)
@@ -190,7 +228,6 @@ void Parser::parse_enum_case(
     auto &cursor = payload.cursor;
     AST::ComplexType &owner = enum_node->complex_type();
 
-    const TokenReference case_token = cursor.current();
     cursor.skip(); // `case`
 
     if (!payload.expect_token(Token::Type::t_identifier)) {
@@ -201,36 +238,30 @@ void Parser::parse_enum_case(
     const TokenReference name_token = cursor.current();
     cursor.skip();
 
-    // **the constructor is built first and the case table is filled from it**, rather than the two
-    // being read separately from the same tokens. a case's payload is a parameter list in every
-    // respect a signature cares about, so Parser::parse_parameter_list reads it - which is the same
-    // decision `constructor(...)` made, and for the same reason: two walks over one grammar drift
-    auto &constructor = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
-    constructor.member_kind = AST::MemberKind::t_static_method;
-    constructor.owner_type = &owner;
-    constructor.ast_namespace = payload.context.current_namespace;
-    constructor.is_implicitly_generated = true;
-
-    // a case of a generic enum is a static over that enum, so it carries the owner's parameters
-    // exactly as a written `static function` on one does - AST::static_owner_bindings is what binds
-    // them at a call site, the case having no receiver to read them off.
-    //
-    // **through declare_type_parameters rather than by assigning the vector**, which is the difference
-    // between inheriting them and merely holding them: that function also sets
-    // `inherited_type_param_count`, and without it a case of no arguments had nothing to infer `T`
-    // from and nothing saying the owner was allowed to supply it
-    Parser::declare_type_parameters(payload, constructor, {}, enum_node->type_parameters());
-
-    auto &return_type = payload.context.emplace_node<AST::TypeNode>(self_value_type);
-    constructor.return_type = &return_type;
-
-    auto &constructor_scope = payload.context.emplace_node<AST::ScopeNode>();
+    // a payload is a parameter list, so Parser::parse_parameter_list reads it - the same decision
+    // `constructor(...)` made. a payload-free case, `case other;` or `case other();`, does not mint
+    // a FunctionDeclNode: finalize_enum has to see the whole list before it knows whether this name
+    // is a constructor or the remainder, and a leftover must not become a static
+    AST::FunctionDeclNode *constructor = nullptr;
 
     if (cursor.is_type(Token::Type::t_open_paren)) {
-        cursor.skip();
+        if (cursor.peek_is_type(1, Token::Type::t_close_paren)) {
+            cursor.skip();
+            cursor.skip();
+        }
+        else {
+            constructor = &begin_synthesized_function(
+                payload,
+                enum_node,
+                name_token,
+                AST::MemberKind::t_static_method,
+                self_value_type);
 
-        if (!Parser::parse_parameter_list(payload, constructor, constructor_scope, name_token)) {
-            return;
+            cursor.skip();
+
+            if (!Parser::parse_parameter_list(payload, *constructor, *constructor->body, name_token)) {
+                return;
+            }
         }
     }
 
@@ -290,13 +321,17 @@ void Parser::parse_enum_case(
     AST::ComplexType::EnumCase entry;
     entry.ordinal = ordinal;
     entry.name = name_token.value();
+    entry.name_span = TokenSpan::of(name_token);
     entry.discriminant = static_cast<int64_t>(ordinal);
     entry.first_payload_property = enum_node->properties().size();
-    entry.payload_field_count = constructor.args.size();
+    entry.payload_field_count = constructor != nullptr ? constructor->args.size() : 0;
+    entry.has_explicit_discriminant = value_token.has_value();
 
-    for (const AST::VarDeclNode *field : constructor.args) {
-        entry.payload_field_names.push_back(field->name());
-        declare_payload_property(payload, enum_node, ordinal, field);
+    if (constructor != nullptr) {
+        for (const AST::VarDeclNode *field : constructor->args) {
+            entry.payload_field_names.push_back(field->name());
+            declare_payload_property(payload, enum_node, ordinal, field);
+        }
     }
 
     if (value_token.has_value()) {
@@ -319,17 +354,129 @@ void Parser::parse_enum_case(
         }
     }
 
+    if (entry.has_payload() && entry.has_explicit_discriminant) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            "A case cannot carry a payload and a backing value.");
+    }
+
     owner.add_enum_case(entry);
 
-    payload.collector.functions.register_static_function(
-        payload.collector, payload.context.code_ref(name_token), &constructor, owner);
+    // a payload case is never the leftover - a leftover cannot carry a payload - so its constructor
+    // can be registered now
+    if (constructor != nullptr) {
+        payload.collector.functions.register_static_function(
+            payload.collector, payload.context.code_ref(name_token), constructor, owner);
 
-    // the body is built after the case is recorded, because it writes `__tag` and the payload
-    // properties that recording is what created
-    build_enum_case_body(payload, enum_node, constructor, constructor_scope, owner.enum_cases().back());
+        build_enum_case_body(
+            payload, enum_node, *constructor, *constructor->body, owner.enum_cases().back());
+    }
 }
 
-void Parser::synthesize_backing_accessor(
+namespace
+{
+TokenReference token_for_case(
+    const AST::ComplexType::EnumCase &entry,
+    AST::TypeDeclNode *enum_node
+)
+{
+    if (entry.name_span.is_valid()) {
+        return entry.name_span.first();
+    }
+
+    return enum_node->name_token.value();
+}
+
+void classify_enum_remainder(Parser::Payload &payload, AST::TypeDeclNode *enum_node)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+    if (!owner.enum_backing.has_value()) {
+        return;
+    }
+
+    std::vector<size_t> implicit;
+    for (const AST::ComplexType::EnumCase &entry : owner.enum_cases()) {
+        if (!entry.has_explicit_discriminant) {
+            implicit.push_back(entry.ordinal);
+        }
+    }
+
+    const size_t n_explicit = owner.enum_cases().size() - implicit.size();
+    if (implicit.empty() || n_explicit == 0) {
+        return;
+    }
+
+    const bool integer = owner.enum_backing->is_integer_type();
+
+    if (!integer) {
+        for (size_t ordinal : implicit) {
+            const AST::ComplexType::EnumCase &entry = owner.enum_cases()[ordinal];
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(token_for_case(entry, enum_node)),
+                fmt::format(
+                    "A leftover case is an integer-backed enum's - '{}' is backed by `string`, which "
+                    "cannot hold an unknown spelling.",
+                    enum_node->type_name()));
+        }
+        return;
+    }
+
+    if (implicit.size() > 1) {
+        const AST::ComplexType::EnumCase &first = owner.enum_cases()[implicit[0]];
+        for (size_t i = 1; i < implicit.size(); i++) {
+            const AST::ComplexType::EnumCase &entry = owner.enum_cases()[implicit[i]];
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(token_for_case(entry, enum_node)),
+                fmt::format(
+                    "'{}' already has a leftover case '{}' - an open integer enum has one, and it is "
+                    "the case with no value.",
+                    enum_node->type_name(), first.name));
+        }
+        return;
+    }
+
+    const AST::ComplexType::EnumCase &entry = owner.enum_cases()[implicit[0]];
+    if (entry.has_payload()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(token_for_case(entry, enum_node)),
+            fmt::format(
+                "The leftover case '{}' cannot carry a payload - the leftover is the integer itself, "
+                "read with value().",
+                entry.name));
+        return;
+    }
+
+    owner.mark_open_remainder(entry.ordinal);
+}
+
+void refuse_duplicate_discriminants(Parser::Payload &payload, AST::TypeDeclNode *enum_node)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+    if (!owner.enum_backing.has_value() || !owner.enum_backing->is_integer_type()) {
+        return;
+    }
+
+    std::map<int64_t, std::string> seen;
+    for (const AST::ComplexType::EnumCase &entry : owner.enum_cases()) {
+        if (entry.is_open_remainder || !entry.has_explicit_discriminant) {
+            continue;
+        }
+
+        auto existing = seen.find(entry.discriminant);
+        if (existing != seen.end()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(token_for_case(entry, enum_node)),
+                fmt::format(
+                    "'{}' and '{}' are both {} - an enum's cases need distinct values.",
+                    existing->second, entry.name, entry.discriminant));
+            continue;
+        }
+
+        seen.emplace(entry.discriminant, entry.name);
+    }
+}
+
+void complete_payload_free_constructors(
     Parser::Payload &payload,
     AST::TypeDeclNode *enum_node,
     const AST::ValueType &self_value_type
@@ -337,41 +484,85 @@ void Parser::synthesize_backing_accessor(
 {
     AST::ComplexType &owner = enum_node->complex_type();
 
-    if (!owner.enum_backing.has_value() || owner.enum_cases().empty()) {
-        return;
+    for (const AST::ComplexType::EnumCase &entry : owner.enum_cases()) {
+        if (entry.has_payload() || entry.is_open_remainder || !entry.name_span.is_valid()) {
+            continue;
+        }
+
+        auto &decl = begin_synthesized_function(
+            payload,
+            enum_node,
+            entry.name_span.first(),
+            AST::MemberKind::t_static_method,
+            self_value_type);
+
+        payload.collector.functions.register_static_function(
+            payload.collector,
+            payload.context.code_ref(entry.name_span.first()),
+            &decl,
+            owner);
+
+        build_enum_case_body(payload, enum_node, decl, *decl.body, entry);
     }
+}
 
-    const AST::ValueType backing = owner.enum_backing.value();
-    const TokenReference at = enum_node->name_token.value();
-    auto name_token = payload.context.make_virtual_token("value", Token::Type::t_identifier, at);
-
-    // an ordinary `const function value() : T`, published through the ordinary member registration - so
-    // `$unit->value()` resolves, mangles, instantiates and emits with nothing here that codegen or the
-    // resolver had to learn. `const` because reading which case a value is holding writes nothing, which
-    // is also what lets it be called on a `const Unit&`
-    auto &decl = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
-    decl.member_kind = AST::MemberKind::t_method;
-    decl.owner_type = &owner;
-    decl.ast_namespace = payload.context.current_namespace;
-    decl.is_implicitly_generated = true;
-
-    // the owner's parameters, through the one owner of that shape - see parse_enum_case
-    Parser::declare_type_parameters(payload, decl, {}, enum_node->type_parameters());
-
-    auto &return_type = payload.context.emplace_node<AST::TypeNode>(backing);
-    decl.return_type = &return_type;
-
-    auto &body = payload.context.emplace_node<AST::ScopeNode>();
-    decl.body = &body;
-
-    // the receiver, as a **const** borrow - the whole of what `const function` means, per CLAUDE.md
+void push_const_receiver(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    const AST::ValueType &self_value_type,
+    const TokenReference &at
+)
+{
     auto &self_type = payload.context.emplace_node<AST::TypeNode>(
         AST::ValueType::make_pointer(AST::ValueType::make_const(self_value_type), false));
 
-    Parser::push_receiver_param(payload, decl, body, &self_type, at);
+    Parser::push_receiver_param(payload, decl, *decl.body, &self_type, at);
+}
 
-    // **the subject is a copy of `$this`**, and it costs nothing: a backed enum has no payload cases -
-    // the two are mutually exclusive at the declaration - so its whole value is the discriminant
+void synthesize_integer_value(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type,
+    const AST::ValueType &backing
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+    const TokenReference at = enum_node->name_token.value();
+    auto name_token = payload.context.make_virtual_token("value", Token::Type::t_identifier, at);
+
+    auto &decl = begin_synthesized_function(
+        payload, enum_node, name_token, AST::MemberKind::t_method, backing);
+
+    push_const_receiver(payload, decl, self_value_type, at);
+
+    // the integer *is* the discriminant, leftover included. a match that rebuilt the literals could
+    // not answer an unknown tag, and for a closed enum it was the same load
+    AST::ExprNode *tag = AST::make_member_place(
+        payload.context.module, *decl.args[0], AST::k_enum_tag_name, at);
+
+    decl.body->children.push_back(AST::make_ref(
+        payload.context.emplace_node<AST::ReturnNode>(tag, at)));
+
+    payload.collector.functions.register_member_function(
+        payload.collector, payload.context.code_ref(name_token), &decl, owner);
+}
+
+void synthesize_string_value(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type,
+    const AST::ValueType &backing
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+    const TokenReference at = enum_node->name_token.value();
+    auto name_token = payload.context.make_virtual_token("value", Token::Type::t_identifier, at);
+
+    auto &decl = begin_synthesized_function(
+        payload, enum_node, name_token, AST::MemberKind::t_method, backing);
+
+    push_const_receiver(payload, decl, self_value_type, at);
+
     auto subject_token = payload.context.make_virtual_token("$__match", Token::Type::t_varname, at);
 
     auto *this_var = payload.context.emplace_nodep<AST::VarNode>(decl.args[0]);
@@ -386,54 +577,226 @@ void Parser::synthesize_backing_accessor(
     for (const AST::ComplexType::EnumCase &entry : owner.enum_cases()) {
         AST::MatchExprNode::Arm arm { at };
         arm.case_name = entry.name;
-
-        // **decided here rather than left to AST::MatchResolution**, which is the difference between a
-        // match somebody wrote and this one: the case table is what both this loop and that pass read,
-        // and here it is being walked. so the arm knows its own ordinal, and the pass has nothing to
-        // work out - it will find `patterns_decided` already true and leave the node alone
         arm.case_ordinal = entry.ordinal;
         arm.scope = &payload.context.emplace_node<AST::ScopeNode>();
 
-        // the value the author wrote after the `=`, rebuilt as the literal it was. an integer backing
-        // hands back the discriminant, which for it *is* the written value - so both spellings come out
-        // of the case table and neither is stored twice
-        if (entry.backing_string.has_value()) {
-            auto value_token = payload.context.make_virtual_token(
-                entry.backing_string.value(), Token::Type::t_string_literal, at);
+        auto value_token = payload.context.make_virtual_token(
+            entry.backing_string.value_or(""), Token::Type::t_string_literal, at);
 
-            auto *literal = payload.context.emplace_nodep<AST::LiteralStringExprNode>(value_token);
+        auto *literal = payload.context.emplace_nodep<AST::LiteralStringExprNode>(value_token);
+        literal->decoded_value = entry.backing_string.value_or("");
 
-            // **the two things a string literal is not born with**, and AST::InterpolationLowering mints
-            // one the same way for the same reason. the bytes are already decoded - they came off the
-            // case's own token, quotes and escapes gone - and `core_string_type` is what makes
-            // `result_type()` answer `string` rather than the `ptr<const uint8>` fallback it keeps for a
-            // program with no standard library. missing, that fallback is a phi of two different LLVM
-            // types, which is an assertion inside LLVM rather than a diagnostic
-            literal->decoded_value = entry.backing_string.value();
-
-            if (payload.collector.core_types.has(AST::CoreTypeKind::t_string)) {
-                literal->core_string_type = payload.collector.core_types.string_type();
-            }
-
-            arm.value = literal;
-        }
-        else {
-            auto value_token = payload.context.make_virtual_token(
-                std::to_string(entry.discriminant), Token::Type::t_integer_literal, at);
-
-            arm.value = payload.context.emplace_nodep<AST::LiteralIntExprNode>(
-                value_token, backing.get_primitive_type());
+        if (payload.collector.core_types.has(AST::CoreTypeKind::t_string)) {
+            literal->core_string_type = payload.collector.core_types.string_type();
         }
 
+        arm.value = literal;
         match.arms.push_back(arm);
     }
 
     match.result = backing;
     match.patterns_decided = true;
 
-    body.children.push_back(AST::make_ref(
+    decl.body->children.push_back(AST::make_ref(
         payload.context.emplace_node<AST::ReturnNode>(&match, at)));
 
     payload.collector.functions.register_member_function(
         payload.collector, payload.context.code_ref(name_token), &decl, owner);
+}
+
+void synthesize_backing_accessor(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+
+    if (!owner.enum_backing.has_value() || owner.enum_cases().empty()) {
+        return;
+    }
+
+    if (!AST::find_member_functions(&owner, "value").empty()) {
+        return;
+    }
+
+    const AST::ValueType backing = owner.enum_backing.value();
+    if (backing.is_integer_type()) {
+        synthesize_integer_value(payload, enum_node, self_value_type, backing);
+    }
+    else {
+        synthesize_string_value(payload, enum_node, self_value_type, backing);
+    }
+}
+
+AST::FunctionCallExprNode &make_resolved_case_call(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode *callee,
+    const AST::ValueType &owner_type,
+    const TokenReference &at
+)
+{
+    auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(
+        callee->name_token.value_or(at), std::vector<AST::ExprNode *>{});
+
+    call.decl = callee;
+    call.settlement = AST::CallSettlement::t_uncoerced;
+    call.static_owner = owner_type;
+
+    return call;
+}
+
+void push_raw_param(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    const AST::ValueType &backing,
+    const TokenReference &at
+)
+{
+    auto &raw_type = payload.context.emplace_node<AST::TypeNode>(backing);
+    Parser::push_implicit_param(payload, decl, *decl.body, "$raw", &raw_type, at);
+}
+
+void synthesize_open_from(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type,
+    const AST::ValueType &backing
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+    const TokenReference at = enum_node->name_token.value();
+    auto name_token = payload.context.make_virtual_token("from", Token::Type::t_identifier, at);
+
+    auto &decl = begin_synthesized_function(
+        payload, enum_node, name_token, AST::MemberKind::t_static_method, self_value_type);
+
+    push_raw_param(payload, decl, backing, at);
+
+    AST::VarDeclNode &value = AST::declare_constructor_this(
+        payload.context.module, *decl.return_type, at);
+    decl.body->add_vardecl(value);
+
+    decl.body->children.push_back(AST::make_ref(
+        AST::seat_property_from_parameter(
+            payload.context.module,
+            value,
+            *enum_node->properties()[AST::k_enum_tag_index],
+            decl.args[0],
+            at)));
+
+    AST::close_constructor_body(payload.context.module, decl, value);
+
+    payload.collector.functions.register_static_function(
+        payload.collector, payload.context.code_ref(name_token), &decl, owner);
+}
+
+void synthesize_closed_from(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type,
+    const AST::ValueType &backing
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+    const TokenReference at = enum_node->name_token.value();
+    auto name_token = payload.context.make_virtual_token("from", Token::Type::t_identifier, at);
+
+    const AST::ValueType optional = payload.collector.type_registry.get_or_create_optional(self_value_type);
+
+    auto &decl = begin_synthesized_function(
+        payload, enum_node, name_token, AST::MemberKind::t_static_method, optional);
+
+    push_raw_param(payload, decl, backing, at);
+
+    const AST::Operator *equals = payload.collector.operators.get_operator("==");
+    assert(equals != nullptr && "the '==' operator is always predefined");
+
+    for (const AST::ComplexType::EnumCase &entry : owner.enum_cases()) {
+        if (entry.is_open_remainder) {
+            continue;
+        }
+
+        auto constructors = AST::find_static_functions(&owner, entry.name);
+        if (constructors.empty()) {
+            continue;
+        }
+
+        auto *raw_var = payload.context.emplace_nodep<AST::VarNode>(decl.args[0]);
+        auto *raw_read = payload.context.emplace_nodep<AST::VarRefNode>(raw_var);
+
+        auto literal_token = payload.context.make_virtual_token(
+            std::to_string(entry.discriminant), Token::Type::t_integer_literal, at);
+
+        auto *literal = payload.context.emplace_nodep<AST::LiteralIntExprNode>(
+            literal_token, backing.get_primitive_type());
+
+        auto &op_node = payload.context.emplace_node<AST::OperatorNode>(
+            payload.context.make_virtual_token("==", Token::Type::t_unknown, at), equals);
+
+        auto *condition = payload.context.emplace_nodep<AST::BinaryExprNode>(&op_node, raw_read, literal);
+
+        AST::FunctionCallExprNode &call = make_resolved_case_call(
+            payload, constructors[0], self_value_type, at);
+
+        auto *wrapped = payload.context.emplace_nodep<AST::TypeCastNode>(optional, &call, true);
+
+        auto &then_scope = payload.context.emplace_node<AST::ScopeNode>();
+        then_scope.children.push_back(AST::make_ref(
+            payload.context.emplace_node<AST::ReturnNode>(wrapped, at)));
+
+        auto *branch = payload.context.emplace_nodep<AST::IfStatementNode>(condition, &then_scope, nullptr);
+        decl.body->children.push_back(AST::make_ref(*branch));
+    }
+
+    auto *null_node = payload.context.emplace_nodep<AST::NullNode>(
+        payload.context.make_virtual_token("null", Token::Type::t_null, at));
+    AST::bind_null_to(null_node, optional);
+
+    decl.body->children.push_back(AST::make_ref(
+        payload.context.emplace_node<AST::ReturnNode>(null_node, at)));
+
+    payload.collector.functions.register_static_function(
+        payload.collector, payload.context.code_ref(name_token), &decl, owner);
+}
+
+void synthesize_from(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+
+    if (!owner.enum_backing.has_value()
+        || !owner.enum_backing->is_integer_type()
+        || owner.enum_cases().empty()) {
+        return;
+    }
+
+    if (!AST::find_static_functions(&owner, "from").empty()) {
+        return;
+    }
+
+    const AST::ValueType backing = owner.enum_backing.value();
+    if (owner.is_open_enum()) {
+        synthesize_open_from(payload, enum_node, self_value_type, backing);
+    }
+    else {
+        synthesize_closed_from(payload, enum_node, self_value_type, backing);
+    }
+}
+}
+
+void Parser::finalize_enum(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type
+)
+{
+    classify_enum_remainder(payload, enum_node);
+    refuse_duplicate_discriminants(payload, enum_node);
+    complete_payload_free_constructors(payload, enum_node, self_value_type);
+    synthesize_backing_accessor(payload, enum_node, self_value_type);
+    synthesize_from(payload, enum_node, self_value_type);
 }

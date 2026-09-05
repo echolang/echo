@@ -1,6 +1,7 @@
 #include "AST/ASTOperatorSemantics.h"
 
 #include "AST/ASTCollector.h"
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTNullability.h"
@@ -439,6 +440,23 @@ namespace AST
             }
 
             return std::nullopt;
+        }
+
+        // pointer arithmetic needs a stride. two pointers subtract, or one is offset by a count -
+        // either way the pointee's size has to be known. `$p:$ + 1` on an incomplete type is the
+        // case; indexing `$p:$[i]` asks the same question through AST::incomplete_stride_refusal
+        if (op->type == Token::Type::t_op_add || op->type == Token::Type::t_op_sub) {
+            if (lhs.is_pointer()) {
+                if (auto refusal = incomplete_stride_refusal(lhs)) {
+                    return refusal;
+                }
+            }
+
+            if (rhs.is_pointer()) {
+                if (auto refusal = incomplete_stride_refusal(rhs)) {
+                    return refusal;
+                }
+            }
         }
 
         // comparing an address against a non-address. codegen lowers a pointer comparison to an icmp

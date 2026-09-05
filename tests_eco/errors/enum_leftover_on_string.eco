@@ -1,0 +1,1 @@
+enum Unit : string { case meter = "m"; case other; }

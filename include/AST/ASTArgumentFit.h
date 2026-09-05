@@ -491,13 +491,13 @@ namespace AST
         // without consulting types at all. With two it was a hard "no overload accepts these
         // arguments", so adding an unrelated overload broke a call that had always compiled.
         //
-        // asked of AST::read_reaches_storage rather than of is_place_expression, so a **call**
-        // returning a borrow ranks here too - `f($a->at(0))` at an `int32` parameter. a call returning
-        // a `ptr<T>` does not: that predicate is non-nullable for calls, which is the line that keeps
+        // asked of AST::read_peels_pointer, so a **call** returning a borrow ranks here too -
+        // `f($a->at(0))` at an `int32` parameter. a call returning a `ptr<T>` does not: that
+        // predicate is non-nullable for calls, which is the line that keeps
         // `if (c_getenv($name) == null)` from becoming a comparison of `uint8`. a `ptr<T>` *place*
         // still ranks, because the slot is there - ranking it is how `f(T)` beats `f(T&)` for `$p`
-        if (from.is_pointer() && !to.is_pointer()
-            && expr != nullptr && read_reaches_storage(*expr, from)) {
+        // - unless the pointee is incomplete, in which case the pointer *is* the value
+        if (!to.is_pointer() && expr != nullptr && read_peels_pointer(*expr, from)) {
             if (ValueType::make_mutable(value_type_of(from)) == ValueType::make_mutable(to)) {
                 return ArgumentFit::t_read_through;
             }

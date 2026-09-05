@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] enum_payload_and_backing.eco:1:23
+
+  A case cannot carry a payload and a backing value.
+
+  1 | enum E : int32 { case a(int32 $x) = 1; }
+    :                       ^
+  2 | 
+
+1 error, nothing was compiled.

@@ -1,0 +1,3 @@
+enum Error : int32 { case invalidArgs = -2; case other; }
+
+Error $e = Error::other;

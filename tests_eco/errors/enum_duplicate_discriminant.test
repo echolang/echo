@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] enum_duplicate_discriminant.eco:1:39
+
+  'a' and 'b' are both 1 - an enum's cases need distinct values.
+
+  1 | enum Error : int32 { case a = 1; case b = 1; }
+    :                                       ^
+  2 | 
+
+1 error, nothing was compiled.

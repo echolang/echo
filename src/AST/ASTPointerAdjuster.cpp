@@ -91,16 +91,17 @@ ExprNode *PointerAdjuster::as_value(ExprNode *expr)
     expr->accept(*this);
 
     // a place holding a pointer needs the deref - and so does a **call returning a borrow**, whose
-    // value *is* an address into somebody else's storage. AST::read_reaches_storage is the one answer
-    // to which reads go through, and sharing it is what stops this from disagreeing with the type
-    // AST::value_result_type yields for the same expression.
+    // value *is* an address into somebody else's storage. AST::read_peels_pointer is the one answer
+    // to which reads load a pointee, and sharing it is what stops this from disagreeing with the
+    // type AST::value_result_type yields, the rank argument_fit scores, and the copy OwnershipPass
+    // owes. an incomplete pointee *is* the value (`ptr<Handle>` compares as the address).
     //
     // an AddrOfExprNode is a pointer too, but it is already the value it means - `&$x` yields an
     // address, it does not read through one - and a `ptr<T>` a *call* returned is deliberately not one
     // either: reading through an address that may be absent is something the program has to say
     const ValueType type = expr->result_type();
 
-    if (!type.is_pointer() || !read_reaches_storage(*expr, type)) {
+    if (!read_peels_pointer(*expr, type)) {
         return expr;
     }
 

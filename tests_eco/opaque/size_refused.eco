@@ -1,0 +1,3 @@
+extern struct Handle;
+
+echo mem::size<Handle>();

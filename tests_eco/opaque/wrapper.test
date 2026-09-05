@@ -1,0 +1,5 @@
+modules: opaque/lib_handles
+mode: build
+
+--- OUT --->
+9

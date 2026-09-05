@@ -1,0 +1,11 @@
+extern struct Handle;
+extern struct Resource;
+
+extern {
+    function c_read(ptr<Handle> $h) : int32;
+}
+
+function go(ptr<Resource> $r) : int32
+{
+    return c_read($r);
+}

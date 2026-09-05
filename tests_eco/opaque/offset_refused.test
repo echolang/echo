@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] offset_refused.eco:4:26
+
+  cannot offset a pointer to incomplete type 'Handle' - the element size is not known
+
+  3 | ptr<Handle> $h = null;
+  4 | ptr<Handle> $next = $h:$ + 1;
+    :                          ^
+  5 | echo ($next == null);
+
+1 error, nothing was compiled.

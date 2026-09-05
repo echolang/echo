@@ -1,5 +1,6 @@
 #include "AST/ASTCopy.h"
 
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/FunctionDeclNode.h"
 
@@ -115,6 +116,14 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
         case AST::CopyKind::t_elements:
             return AST::CopyKind::t_elements;
         }
+    }
+
+    // an incomplete type has no value, so it has no copy. TypeChecker refused the declaration
+    // that would have asked; this is the backstop so a slipped-through one is not a byte copy
+    // of a type with no size. AST::type_completeness is the owner, not is_opaque(): an array
+    // or tagged optional of an incomplete payload is incomplete too
+    if (AST::type_completeness(type) == AST::TypeCompleteness::t_incomplete) {
+        return AST::CopyKind::t_none;
     }
 
     if (!type.is_struct() && !type.is_enum()) {

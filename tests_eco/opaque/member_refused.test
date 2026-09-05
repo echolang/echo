@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] member_refused.eco:4:10
+
+  'Handle' is an incomplete type, so it has no members - a C handle is named only as 'ptr<Handle>'
+
+  3 | ptr<Handle> $h = null;
+  4 | echo $h->x;
+    :          ^
+  5 | 
+
+1 error, nothing was compiled.

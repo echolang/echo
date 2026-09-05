@@ -1,0 +1,7 @@
+extern struct Handle;
+
+ptr<Handle> $empty = null;
+echo ($empty == null);
+
+ptr<Handle> $set = null;
+echo ($set == null);

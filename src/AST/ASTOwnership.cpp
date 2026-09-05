@@ -2021,8 +2021,12 @@ ExprNode *OwnershipPass::arrive_value(
     // already been asked of the outer expression and the parameter's own type is not what arrives
     // under the cast
     if (TypeCastNode *cast = place_under_implicit_cast(*expr)) {
+        // AST::value_result_type is the peel, including the incomplete-pointee case where the
+        // pointer *is* the value. reconstructing it here from read_peels_pointer and value_type_of
+        // skipped make_mutable on that path, so a const ptr<Handle> arrived as a different type
+        // than every other copy in this function
         cast->expr = arrive_value(
-            cast->expr, ValueType::make_mutable(value_type_of(cast->expr->result_type())),
+            cast->expr, ValueType::make_mutable(value_result_type(*cast->expr)),
             nullptr, destination);
 
         return expr;

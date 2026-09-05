@@ -1,0 +1,9 @@
+// the JIT is not the only path: from of a leftover must round-trip on a native binary too
+enum Error : int32
+{
+    case invalidArgs = -2;
+    case other;
+}
+
+echo Error::from(-2) == Error::invalidArgs;
+echo Error::from(-999)->value();

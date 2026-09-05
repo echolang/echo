@@ -1,5 +1,6 @@
 #include "AST/ASTCFunction.h"
 
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTFunctionRegistry.h"
@@ -57,6 +58,14 @@ namespace
             return fmt::format(
                 "'{}' is a reference counted handle, and handing its address to C leaves nothing "
                 "holding a reference. Pass a 'ptr<...>' instead.",
+                type.get_type_desciption());
+        }
+
+        if (AST::type_completeness(type) == AST::TypeCompleteness::t_incomplete) {
+            return fmt::format(
+                "'{}' is an incomplete type, so it cannot cross a C function-pointer boundary by "
+                "value. Pass a 'ptr<{}>' instead.",
+                type.get_type_desciption(),
                 type.get_type_desciption());
         }
 

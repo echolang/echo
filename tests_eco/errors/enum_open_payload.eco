@@ -1,0 +1,1 @@
+enum Error : int32 { case a = 1; case other(int32 $code); }

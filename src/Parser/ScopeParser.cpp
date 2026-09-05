@@ -23,6 +23,7 @@
 #include "Parser/NamespaceParser.h"
 #include "Parser/UseParser.h"
 #include "Parser/AttributeParser.h"
+#include "Parser/OpaqueDeclParser.h"
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
@@ -187,6 +188,9 @@ AST::ScopeNode & Parser::parse_scope(
             // the body. the signature was registered by the declaration pass and the symbol a pass
             // before that, so by here everything about the operator is known except what it does
             parse_operatordecl(payload);
+        }
+        else if (starts_extern_typedecl(cursor)) {
+            parse_opaque_typedecl(payload, visibility.value);
         }
         else if (starts_typedecl(cursor)) {
             parse_typedecl(payload);

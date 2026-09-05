@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTNodeTypes.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ExprNode.h"
@@ -185,6 +186,30 @@ namespace AST
     inline bool read_reaches_storage(const ExprNode &expr)
     {
         return read_reaches_storage(expr, expr.result_type());
+    }
+
+    // **does a read of this expression load through a pointer to a value?**
+    //
+    // the four mirrors of auto-deref — the Deref PointerAdjuster writes, the type
+    // value_result_type yields, argument_fit's t_read_through, and the copy OwnershipPass
+    // owes — all ask this. a `ptr<Handle>` place still *has* storage (`read_reaches_storage`),
+    // but the pointee has no value to load, so a read yields the pointer. do not fold this
+    // into `read_reaches_storage`
+    //
+    // pending (`ptr<T>` in a template) still peels: the instantiation classifies again once T
+    // is bound. only `t_incomplete` is "never"
+    inline bool read_peels_pointer(const ExprNode &expr, const ValueType &result_type)
+    {
+        if (!result_type.is_pointer() || !read_reaches_storage(expr, result_type)) {
+            return false;
+        }
+
+        return type_completeness(result_type.pointee()) != TypeCompleteness::t_incomplete;
+    }
+
+    inline bool read_peels_pointer(const ExprNode &expr)
+    {
+        return read_peels_pointer(expr, expr.result_type());
     }
 
     // **the expression the author wrote, under whatever the compiler wrapped around it.** an implicit
@@ -401,7 +426,19 @@ namespace AST
     // the answer passes it rather than provoking it again. the place rule stays in one place
     inline ValueType value_result_type(const ExprNode &expr, const ValueType &result_type)
     {
-        return read_reaches_storage(expr, result_type) ? value_type_of(result_type) : result_type;
+        if (!read_reaches_storage(expr, result_type)) {
+            return result_type;
+        }
+
+        // an incomplete pointee has no value to read. the pointer *is* the value, so `$h` of
+        // type `ptr<Handle>` infers and copies as the address. peeling here made OwnershipPass
+        // try to copy the incomplete type itself. AST::read_peels_pointer is the shared
+        // question, the same one PointerAdjuster and argument_fit ask
+        if (result_type.is_pointer() && !read_peels_pointer(expr, result_type)) {
+            return result_type;
+        }
+
+        return value_type_of(result_type);
     }
 
     inline ValueType value_result_type(const ExprNode &expr)

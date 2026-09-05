@@ -105,6 +105,8 @@ namespace AST
         void visitTypeCast(TypeCastNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visitUnaryExpr(UnaryExprNode &node) override;
+        void visit_index_expr(IndexExprNode &node) override;
+        void visit_deref_expr(DerefExprNode &node) override;
         void visit_addr_of_expr(AddrOfExprNode &node) override;
         void visit_function_ref_expr(FunctionRefExprNode &node) override;
         void visitReturn(ReturnNode &node) override;
@@ -196,6 +198,15 @@ namespace AST
         // every `extern function<R(P...)>` that appears on a declaration, through the one
         // walk in AST::c_function_type_refusal
         void check_c_function_type(const ValueType &type, const TokenReference &at);
+
+        // every declaration whose type is an incomplete value, a borrow of one, or an array of
+        // one - AST::incomplete_use_refusal is the sentence
+        void check_incomplete_use(const ValueType &type, const TokenReference &at);
+
+        // `size_of` / `align_of` over an incomplete type. the type argument is the subject,
+        // same shape as check_atomic_operand. typed `mem::alloc<T>` reports through the
+        // size_of call its body makes once T is bound
+        void check_layout_query(FunctionCallExprNode &node);
 
         // what may arrive at one: a list written right here, holding primitives and addresses
         void check_variadic_argument(FunctionCallExprNode &node);

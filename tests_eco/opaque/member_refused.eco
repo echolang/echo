@@ -1,0 +1,4 @@
+extern struct Handle;
+
+ptr<Handle> $h = null;
+echo $h->x;

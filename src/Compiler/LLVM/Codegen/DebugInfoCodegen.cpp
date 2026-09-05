@@ -857,6 +857,13 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
     // names. deliberately the struct path rather than a DW_TAG_variant_part: what DWARF would gain is
     // a debugger showing only the live case, and what it costs is a second description of a layout
     // this one already gets right. tools/echo_lldb.py is where that presentation belongs
+    if (type.is_opaque()) {
+        // a name with no layout. lldb can still print the pointer; it cannot expand the pointee
+        llvm::DIType *result = unit->builder->createUnspecifiedType(type.get_type_desciption());
+        unit->types[type] = result;
+        return result;
+    }
+
     if (type.is_struct() || type.is_enum()) {
         return struct_type_of(type, cmp_unit);
     }

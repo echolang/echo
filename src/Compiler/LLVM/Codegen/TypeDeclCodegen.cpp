@@ -33,8 +33,9 @@ namespace Compiler::LLVM
 void TypeDeclCodegen::gen_type_decl(AST::TypeDeclNode &node)
 {
     // a generic struct template has type-parameter-typed properties and no concrete layout;
-    // only its instantiations are lowered (lazily, in get_llvm_type)
-    if (node.is_generic()) {
+    // only its instantiations are lowered (lazily, in get_llvm_type). an incomplete type has
+    // no layout at all
+    if (node.is_generic() || node.complex_type().is_opaque_kind()) {
         return;
     }
 

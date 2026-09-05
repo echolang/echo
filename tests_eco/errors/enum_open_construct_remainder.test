@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_open_construct_remainder.eco:3:19
+
+  The leftover case of 'Error' cannot be built by name - it is whatever integer is not one of the named cases. Use 'Error::from(...)'.
+
+  2 | 
+  3 | Error $e = Error::other;
+    :                   ^^^^^
+  4 | 
+
+1 error, nothing was compiled.

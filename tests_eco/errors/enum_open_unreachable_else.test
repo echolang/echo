@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_open_unreachable_else.eco:5:6
+
+  this 'match' already covers every case of 'Error', so its 'else' arm can never run.
+
+  4 | 
+  5 | $n = match ($e) {
+    :      ^^^^^
+  6 |     Error::invalidArgs => 1,
+
+1 error, nothing was compiled.

@@ -1,0 +1,5 @@
+#[module: "opaquehandles"]
+#[version: "0.1.0"]
+
+#[cc: sources "c/*.c"]
+#[sources: "src/*.eco"]

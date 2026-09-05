@@ -242,3 +242,117 @@ TEST_CASE("a generic enum instantiates, and its cases survive the instantiation"
     REQUIRE(empties.size() == 1);
     REQUIRE(empties[0]->is_generic());
 }
+
+// an integer-backed enum with a unique valueless case among valued ones is open: that case is the
+// leftover, it is not a constructor, and from/value fall out of the type
+TEST_CASE("an open integer enum records the leftover and synthesizes from", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Error : int32 {\n"
+        "    case invalidArgs = -2;\n"
+        "    case outOfMemory = -4;\n"
+        "    case other;\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    const ComplexType &error = type_named(m, "Error")->complex_type();
+
+    REQUIRE(error.is_open_enum());
+    REQUIRE(error.find_enum_case("invalidArgs")->has_explicit_discriminant);
+    REQUIRE(error.find_enum_case("invalidArgs")->discriminant == -2);
+    REQUIRE_FALSE(error.find_enum_case("other")->has_explicit_discriminant);
+    REQUIRE(error.find_enum_case("other")->is_open_remainder);
+    REQUIRE(error.open_remainder() == error.find_enum_case("other"));
+    REQUIRE(error.find_enum_case("other")->name_span.is_valid());
+    REQUIRE(error.find_enum_case("other")->name_span.first().value() == "other");
+
+    // the leftover is a case, not a static: Error::other as a value does not know which integer to store
+    REQUIRE(find_static_functions(&error, "other").empty());
+    REQUIRE(find_static_functions(&error, "invalidArgs").size() == 1);
+
+    // and it must not mint a FunctionDeclNode to throw away: of_type walks the whole arena
+    for (auto *fn : m.nodes.of_type<FunctionDeclNode>()) {
+        REQUIRE(fn->func_name() != "other");
+    }
+
+    auto froms = find_static_functions(&error, "from");
+    REQUIRE(froms.size() == 1);
+    REQUIRE(froms[0]->is_implicitly_generated);
+    REQUIRE(froms[0]->args.size() == 1);
+    REQUIRE_FALSE(froms[0]->get_return_type().is_nullable());
+
+    REQUIRE(find_member_functions(&error, "value").size() == 1);
+}
+
+TEST_CASE("an all-valueless integer-backed enum stays closed and auto-numbered", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum E : int32 { case a; case b; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "E")->complex_type();
+    REQUIRE_FALSE(type.is_open_enum());
+    REQUIRE(type.find_enum_case("a")->discriminant == 0);
+    REQUIRE(type.find_enum_case("b")->discriminant == 1);
+    REQUIRE(find_static_functions(&type, "a").size() == 1);
+    REQUIRE(find_static_functions(&type, "from").size() == 1);
+    REQUIRE(find_static_functions(&type, "from")[0]->get_return_type().is_nullable());
+}
+
+TEST_CASE("a closed integer-backed enum synthesizes from as T?", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Status : int32 { case ok = 200; case not_found = 404; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &status = type_named(bundle->modules.find_module("test"), "Status")->complex_type();
+    REQUIRE_FALSE(status.is_open_enum());
+
+    auto froms = find_static_functions(&status, "from");
+    REQUIRE(froms.size() == 1);
+    REQUIRE(froms[0]->get_return_type().is_nullable());
+}
+
+TEST_CASE("an author-written from suppresses the synthesized one", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum E : int32 {\n"
+        "    case a = 1;\n"
+        "    case other;\n"
+        "    static function from(int32 $n) : E { return E::a; }\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "E")->complex_type();
+    auto froms = find_static_functions(&type, "from");
+    REQUIRE(froms.size() == 1);
+    REQUIRE_FALSE(froms[0]->is_implicitly_generated);
+}
+
+TEST_CASE("open integer enum refusals", "[enum]")
+{
+    SECTION("two leftover cases") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "enum E : int32 { case a = 1; case other; case leftover; }\n");
+        REQUIRE(has_issue_containing(*bundle, "already has a leftover case"));
+    }
+
+    SECTION("leftover with a payload") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "enum E : int32 { case a = 1; case other(int32 $code); }\n");
+        REQUIRE(has_issue_containing(*bundle, "cannot carry a payload"));
+    }
+
+    SECTION("payload and a backing value") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "enum E : int32 { case a(int32 $x) = 1; }\n");
+        REQUIRE(has_issue_containing(*bundle, "cannot carry a payload and a backing value"));
+    }
+
+    SECTION("duplicate discriminants") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "enum E : int32 { case a = 1; case b = 1; }\n");
+        REQUIRE(has_issue_containing(*bundle, "need distinct values"));
+    }
+}

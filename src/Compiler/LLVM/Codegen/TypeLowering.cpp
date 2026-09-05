@@ -467,6 +467,12 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode 
         throw _ctx.error("Anonymous struct declarations are not yet supported.");
     }
 
+    if (node->complex_type().is_opaque_kind()) {
+        throw _ctx.error(fmt::format(
+            "incomplete type '{}' reached struct lowering - this is a compiler defect",
+            node->type_name()));
+    }
+
     // idempotent, because more than one thing lowers a declaration: build_struct_maps walks every
     // TypeDeclNode a unit holds up front, and the codegen visitor reaches the same node again when it
     // walks the file root
@@ -856,7 +862,8 @@ void TypeLowering::build_struct_maps()
         for (auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::TypeDeclNode>()) {
             // a generic struct template has type-parameter-typed properties and no concrete
             // layout; only its instantiations (Box<int>) are lowered, lazily in get_llvm_type.
-            if (struct_decl->is_generic()) {
+            // an incomplete type has no layout at all
+            if (struct_decl->is_generic() || struct_decl->complex_type().is_opaque_kind()) {
                 continue;
             }
             create_llvm_struct_decl(struct_decl, *cmp_unit);
@@ -1194,6 +1201,13 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     // an enum shares the arm because the *AST* shape is still ordinary properties, `__tag` first.
     // the LLVM type may overlay the payload slots - StructureLayout owns that - but the
     // structure table and these two entry points stay the one way a layout is found
+    else if (type.is_opaque()) {
+        // TypeChecker refused a by-value incomplete type. inventing an empty struct here is the
+        // lie this kind exists to prevent
+        throw _ctx.error(fmt::format(
+            "incomplete type '{}' reached lowering as a value - this is a compiler defect",
+            type.get_type_desciption()));
+    }
     else if (type.is_struct() || type.is_enum()) {
         auto *complex = type.get_complex_type();
         auto struct_id = cmp_unit.structure_table->get_structure_id(complex);

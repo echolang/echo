@@ -1,6 +1,8 @@
 #include "Parser/ExternParser.h"
 
 #include "Parser/FuncDeclParser.h"
+#include "Parser/OpaqueDeclParser.h"
+#include "Parser/TypeDeclParser.h"
 
 std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
     Parser::Payload &payload,
@@ -38,8 +40,13 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
             return declarations;
         }
 
-        // only function declarations live in here. anything else is reported and skipped rather
-        // than aborting the block, so one typo does not swallow the remaining declarations
+        // C surface: incomplete types and bodyless functions. anything else is reported and skipped
+        // rather than aborting the block, so one typo does not swallow the remaining declarations
+        if (starts_typedecl(cursor)) {
+            parse_opaque_typedecl(payload, visibility.value);
+            continue;
+        }
+
         if (!cursor.is_type(Token::Type::t_function)) {
             payload.collect_unexpected_token(Token::Type::t_function);
             cursor.skip();

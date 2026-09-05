@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] by_value_refused.eco:3:22
+
+  'Handle' is an incomplete type, so a value of it cannot exist - name it only as 'ptr<Handle>'.
+
+  2 | 
+  3 | function take(Handle $h) : void
+    :                      ^^
+  4 | {
+
+1 error, nothing was compiled.

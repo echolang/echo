@@ -1,0 +1,36 @@
+// C error codes: a known set of integers plus whatever a newer library version invented.
+// the leftover case makes from/value a round-trip, and match stays exhaustive if you handle other.
+enum Error : int32
+{
+    case invalidArgs = -2;
+    case invalidOperation = -3;
+    case outOfMemory = -4;
+    case other;
+}
+
+Error $known = Error::from(-2);
+Error $new = Error::from(-999);
+
+echo $known->value();
+echo $new->value();
+echo $known == Error::invalidArgs;
+echo $new == Error::from(-999);
+
+echo match ($known) {
+    Error::invalidArgs => "named",
+    Error::invalidOperation => "op",
+    Error::outOfMemory => "oom",
+    Error::other => "other",
+};
+
+echo match ($new) {
+    Error::invalidArgs => "named",
+    Error::invalidOperation => "op",
+    Error::outOfMemory => "oom",
+    Error::other => "leftover",
+};
+
+echo match ($new) {
+    Error::invalidArgs => "named",
+    else => "else covers other",
+};

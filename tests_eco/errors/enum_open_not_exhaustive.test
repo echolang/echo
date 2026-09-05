@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_open_not_exhaustive.eco:5:6
+
+  this 'match' does not cover every case of 'Error' - one is left out. Name other, or add an 'else' arm.
+
+  4 | 
+  5 | $n = match ($e) {
+    :      ^^^^^
+  6 |     Error::invalidArgs => 1,
+
+1 error, nothing was compiled.

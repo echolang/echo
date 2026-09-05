@@ -2036,29 +2036,41 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
 
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.done", function);
 
-    // **the default block is the `else` arm when there is one, and unreachable otherwise.** unreachable
-    // is not a shortcut: AST::MatchResolution refuses a match that does not cover every case, so a tag
-    // outside the set is a value the program cannot hold - and telling LLVM so is what lets the switch
-    // fold away when the subject's case is known
+    // **the default block is the leftover arm, the `else` arm, or unreachable.** unreachable is not
+    // a shortcut: AST::MatchResolution refuses a match that does not cover every case, so a tag
+    // outside the set is a value the program cannot hold - except on an open integer enum, where
+    // the leftover case *is* every tag the named cases did not claim. that arm must be the default
+    // of the switch, never an addCase: it has no discriminant
     llvm::BasicBlock *default_block = nullptr;
 
     std::vector<llvm::BasicBlock *> arm_blocks;
     arm_blocks.reserve(node.arms.size());
 
+    auto remainder_arm = [&](const AST::MatchExprNode::Arm &arm) {
+        if (arm.is_else() || !arm.case_ordinal.has_value()) {
+            return false;
+        }
+
+        return ct->enum_cases()[arm.case_ordinal.value()].is_open_remainder;
+    };
+
     for (const AST::MatchExprNode::Arm &arm : node.arms) {
         const bool is_else = arm.is_else();
+        const bool is_remainder = remainder_arm(arm);
 
         arm_blocks.push_back(llvm::BasicBlock::Create(
-            *_ctx.llvm_context, is_else ? "match.else" : "match.arm", function));
+            *_ctx.llvm_context,
+            is_else ? "match.else" : (is_remainder ? "match.other" : "match.arm"),
+            function));
 
-        if (is_else) {
+        if (is_else || is_remainder) {
             default_block = arm_blocks.back();
         }
     }
 
-    const bool has_else = default_block != nullptr;
+    const bool has_default = default_block != nullptr;
 
-    if (!has_else) {
+    if (!has_default) {
         default_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.unreachable", function);
     }
 
@@ -2068,7 +2080,7 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
     for (size_t i = 0; i < node.arms.size(); i++) {
         const AST::MatchExprNode::Arm &arm = node.arms[i];
 
-        if (arm.is_else()) {
+        if (arm.is_else() || remainder_arm(arm)) {
             continue;  // the default block, which takes no case of its own
         }
 
@@ -2148,7 +2160,7 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
         }
     }
 
-    if (!has_else) {
+    if (!has_default) {
         _ctx.set_insert_point(default_block);
         _ctx.builder->CreateUnreachable();
     }

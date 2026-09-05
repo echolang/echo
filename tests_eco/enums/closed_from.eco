@@ -1,0 +1,13 @@
+// a closed integer enum cannot hold an unknown code. from answers T?: the integer might not be one.
+enum Status : int32
+{
+    case ok = 200;
+    case not_found = 404;
+}
+
+echo Status::from(200) != null;
+echo Status::from(999) == null;
+
+Status $s = guard Status::from(200);
+echo $s->value();
+echo $s == Status::ok;

@@ -426,7 +426,8 @@ void AST::ensure_synthesized_constructor(
 )
 {
     if (type.kind() == AST::ComplexTypeKind::t_interface
-        || type.kind() == AST::ComplexTypeKind::t_enum) {
+        || type.kind() == AST::ComplexTypeKind::t_enum
+        || type.kind() == AST::ComplexTypeKind::t_opaque) {
         return;
     }
 
@@ -456,7 +457,8 @@ void AST::finalize_type_construction(
     const AST::ValueType &self_type
 )
 {
-    if (type.kind() == AST::ComplexTypeKind::t_interface) {
+    if (type.kind() == AST::ComplexTypeKind::t_interface
+        || type.kind() == AST::ComplexTypeKind::t_opaque) {
         return;
     }
 

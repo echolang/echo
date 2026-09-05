@@ -4,6 +4,7 @@
 #include "AST/ASTConstruction.h"
 #include "AST/ASTAtomics.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTVariadic.h"
 
 
@@ -218,6 +219,7 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
 
     if (node.name_token.has_value()) {
         check_c_function_type(node.get_return_type(), node.name_token.value());
+        check_incomplete_use(node.get_return_type(), node.name_token.value());
 
         // a generic template returns before the args are walked as VarDecls, so they
         // are asked here. a concrete body walks them through visitVarDecl instead -
@@ -226,6 +228,7 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
             for (VarDeclNode *arg : node.args) {
                 if (arg != nullptr && arg->has_type()) {
                     check_c_function_type(arg->type(), node.name_token.value());
+                    check_incomplete_use(arg->type(), node.name_token.value());
                 }
             }
         }
@@ -457,6 +460,15 @@ void TypeChecker::check_c_function_type(const ValueType &type, const TokenRefere
     }
 }
 
+void TypeChecker::check_incomplete_use(const ValueType &type, const TokenReference &at)
+{
+    if (auto refusal = incomplete_use_refusal(type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
+    }
+}
+
 void TypeChecker::check_variadic_args_position(FunctionDeclNode &node)
 {
     // **one sweep over every declaration, rather than a check wherever a type gets bound.** a
@@ -677,7 +689,10 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     // through it are the payload's own, so `$maybe->tag` must still be refused
     bool names_own_property = false;
 
-    if (base_type.has_complex_type()) {
+    // an incomplete type has a ComplexType - it is a name - and no properties. looking them up
+    // would report UnknownMember and then the is_opaque arm below would report again. the lookup
+    // is has_property_layout's question; is_opaque is the wording
+    if (base_type.has_complex_type() && !base_type.is_opaque()) {
         ComplexType *complex = base_type.get_complex_type();
         if (complex != nullptr) {
             // one lookup for both questions - whether the name denotes a property at all, and
@@ -756,6 +771,14 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
                 "'{}' may not be there, so '->' cannot reach through it - use '?->' to skip when it is "
                 "absent, '??' to supply a replacement, or 'guard' to bind it once and read it plainly",
                 base_type.get_type_desciption()));
+    }
+    else if (base_type.is_opaque()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.get_member_name()),
+            fmt::format(
+                "'{}' is an incomplete type, so it has no members - a C handle is named only as "
+                "'ptr<{}>'",
+                base_type.get_type_desciption(), base_type.get_type_desciption()));
     }
     else if (!is_undetermined_type(base_type) && !base_type.has_property_layout()
         && !base_type.is_interface()) {
@@ -1188,6 +1211,39 @@ void TypeChecker::check_atomic_operand(FunctionCallExprNode &node)
         code_ref_for(node.token_function_name), *refusal);
 }
 
+void TypeChecker::check_layout_query(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()) {
+        return;
+    }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    // size_of / align_of fold against the type argument. typed `mem::alloc<T>` is an Echo
+    // generic whose body calls size_of, so the size_of call is what this reports once T is bound.
+    // t_pending waits; t_incomplete is never. "the target is not in yet" is
+    // AST::builtin_foldability's t_needs_layout, not this enum
+    if (kind != BuiltinKind::t_size_of && kind != BuiltinKind::t_align_of) {
+        return;
+    }
+
+    if (node.decl->instantiation_args.size() != 1) {
+        return;
+    }
+
+    const ValueType &subject = node.decl->instantiation_args[0];
+
+    if (type_completeness(subject) != TypeCompleteness::t_incomplete) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.token_function_name),
+        fmt::format(
+            "'{}' cannot be answered for incomplete type '{}' - an incomplete type has no size",
+            node.decl->builtin.value(), subject.get_type_desciption()));
+}
+
 // **the only builtin that can be unavailable**, and the only reason this pass reads the compiler options
 // at all. `mem::live_allocations()` reads a counter the allocation seam maintains, and the seam only
 // maintains one when --track-allocations asked it to - so without the flag the load would answer 0.
@@ -1468,6 +1524,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         check_ref_count_argument(node);
         check_raw_storage_argument(node);
         check_atomic_operand(node);
+        check_layout_query(node);
         check_variadic_argument(node);
     }
 
@@ -1834,6 +1891,41 @@ void TypeChecker::visitUnaryExpr(UnaryExprNode &node)
     RecursiveVisitor::visitUnaryExpr(node);
 }
 
+void TypeChecker::visit_index_expr(IndexExprNode &node)
+{
+    // a pointer index needs a stride. a container's element_call does not - the container
+    // declared the operator. asked of the peeled base, which is AST::indexed_base_type's
+    if (node.element_call == nullptr && node.base != nullptr) {
+        if (auto refusal = incomplete_stride_refusal(node.indexed_base_type())) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_bracket), *refusal);
+        }
+    }
+
+    RecursiveVisitor::visit_index_expr(node);
+}
+
+void TypeChecker::visit_deref_expr(DerefExprNode &node)
+{
+    // PointerAdjuster does not insert a deref over an incomplete pointee. one that still
+    // reaches here is a compiler bug or a written form that has no spelling - either way
+    // the user gets a located sentence rather than a zero-size load
+    if (node.operand != nullptr) {
+        const ValueType type = node.operand->result_type();
+
+        if (type.is_pointer()
+            && type_completeness(type.pointee()) == TypeCompleteness::t_incomplete) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(location_of_expression(node.operand)),
+                fmt::format(
+                    "cannot read through '{}' - '{}' is an incomplete type and has no value",
+                    type.get_type_desciption(), type.pointee().get_type_desciption()));
+        }
+    }
+
+    RecursiveVisitor::visit_deref_expr(node);
+}
+
 // `const` is a promise about the storage an assignment reaches, and after the adjustment pass the
 // target's shape says which level that is: a deref means the write goes *through* a pointer, so the
 // pointee's const decides it, while any other place names the slot itself. the parser cannot make
@@ -2079,6 +2171,7 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
 {
     if (node.has_type()) {
         check_c_function_type(node.type(), node.token_varname);
+        check_incomplete_use(node.type(), node.token_varname);
     }
 
     if (node.has_type() && contains_type_param(node.type())) {

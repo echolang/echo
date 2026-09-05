@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] size_refused.eco:3:11
+
+  'size_of' cannot be answered for incomplete type 'Handle' - an incomplete type has no size
+
+  2 | 
+  3 | echo mem::size<Handle>();
+    :           ^^^^
+  4 | 
+
+1 error, nothing was compiled.

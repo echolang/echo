@@ -141,6 +141,9 @@ AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std
     case ComplexTypeKind::t_enum:
         value_kind = ValueTypeKind::t_enum;
         break;
+    case ComplexTypeKind::t_opaque:
+        value_kind = ValueTypeKind::t_opaque;
+        break;
     }
 
     return ValueType(value_kind, complex_type);
@@ -753,6 +756,9 @@ const char *AST::type_kind_keyword(AST::ComplexTypeKind kind)
         case ComplexTypeKind::t_class: return "class";
         case ComplexTypeKind::t_interface: return "interface";
         case ComplexTypeKind::t_enum: return "enum";
+        // the keyword the author wrote. diagnostics that need to distinguish say "incomplete type"
+        // from is_opaque(), not from a second keyword
+        case ComplexTypeKind::t_opaque: return "struct";
     }
 
     // no tail: every kind is above, and the switch is what makes a fifth one a compile error here
@@ -772,6 +778,48 @@ const AST::ComplexType::EnumCase *AST::ComplexType::find_enum_case(const std::st
     }
 
     return nullptr;
+}
+
+const AST::ComplexType::EnumCase *AST::ComplexType::open_remainder() const
+{
+    for (const EnumCase &entry : _enum_cases) {
+        if (entry.is_open_remainder) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+void AST::ComplexType::mark_open_remainder(size_t ordinal)
+{
+    assert(ordinal < _enum_cases.size());
+    _enum_cases[ordinal].is_open_remainder = true;
+}
+
+std::string AST::enum_case_construction_refusal(const ValueType &owner, const std::string &name)
+{
+    ValueType peeled = owner.is_pointer() ? owner.pointee() : owner;
+    peeled = ValueType::make_mutable(peeled);
+
+    if (!peeled.is_enum()) {
+        return "";
+    }
+
+    const ComplexType *ct = peeled.get_complex_type();
+    if (ct == nullptr) {
+        return "";
+    }
+
+    const ComplexType::EnumCase *entry = ct->find_enum_case(name);
+    if (entry == nullptr || !entry->is_open_remainder) {
+        return "";
+    }
+
+    return fmt::format(
+        "The leftover case of '{}' cannot be built by name - it is whatever integer is not one of "
+        "the named cases. Use '{}::from(...)'.",
+        peeled.get_type_desciption(), peeled.get_type_desciption());
 }
 
 std::string AST::enum_payload_property_name(size_t case_ordinal, const std::string &field_name)

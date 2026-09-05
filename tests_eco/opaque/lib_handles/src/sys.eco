@@ -1,0 +1,11 @@
+namespace handles;
+
+public extern struct Handle;
+public extern struct Resource;
+
+public extern {
+    function eco_handle_make as c_make(int32 $value) : ptr<Handle>;
+    function eco_handle_read as c_read(ptr<Handle> $h) : int32;
+    function eco_handle_free as c_free(ptr<Handle> $h) : void;
+    function eco_resource_start as c_start_resource(ptr<Resource> $r) : int32;
+}

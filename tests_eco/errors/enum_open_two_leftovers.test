@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] enum_open_two_leftovers.eco:1:51
+
+  'Error' already has a leftover case 'other' - an open integer enum has one, and it is the case with no value.
+
+  1 | enum Error : int32 { case a = 1; case other; case leftover; }
+    :                                                   ^^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

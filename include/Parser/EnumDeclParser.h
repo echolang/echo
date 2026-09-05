@@ -29,26 +29,19 @@ namespace Parser
     //
     // **parsed in both passes and recorded in one**, which is the rule the whole type body follows: the
     // two walks must agree about where a member ends, so the consuming half is unconditional and
-    // `collect_members` gates only what is kept. what is kept is three things that are one declaration -
-    // the AST::ComplexType::EnumCase, the payload's properties, and the static function that builds it
+    // `collect_members` gates only what is kept. what is kept is the EnumCase and, for a payload case,
+    // its constructor. a payload-free constructor waits for finalize_enum: a leftover case must not
+    // become a static, and parse_enum_case cannot yet know it is looking at one
     void parse_enum_case(
         Payload &payload,
         AST::TypeDeclNode *enum_node,
         const AST::ValueType &self_value_type,
         bool collect_members);
 
-    // **`$unit->value()` for a backed enum**, and nothing at all for one without a backing.
-    //
-    // a *function* rather than a property, and uniformly for both backings, which is the one place this
-    // deviates from CONCEPT.md's spelling. an integer backing could have been a property - the
-    // discriminant already is the value - but a `string` one cannot: a string per enum value would mean
-    // every `Unit` carried a refcounted handle, and `Unit::meter` would allocate. so what is stored is
-    // always the tag, and this is what recovers the spelling.
-    //
-    // its body is a `match` over `$this`, which is the feature reading itself: `case meter = "m"` and
-    // `Unit::meter => "m"` are the same statement said twice, and writing the second out of the first is
-    // what keeps the accessor honest when a case is added
-    void synthesize_backing_accessor(
+    // **after the case list is complete.** classifies the leftover, mints a constructor for every
+    // payload-free case that is not one, then synthesizes `value()` and `from()`. that order is
+    // load-bearing: `from` calls the case constructors, and a remainder has no constructor to call
+    void finalize_enum(
         Payload &payload,
         AST::TypeDeclNode *enum_node,
         const AST::ValueType &self_value_type);

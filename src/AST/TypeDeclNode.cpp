@@ -29,9 +29,16 @@ const std::string AST::TypeDeclNode::namespaced_type_name() const
 
 const std::string AST::TypeDeclNode::node_description()
 {
-    // the keyword the declaration was written with, so --print-ast says which of the four kinds this
+    // the keyword the declaration was written with, so --print-ast says which of the kinds this
     // is. printing an interface as `struct` would make the one dump that could show the
-    // difference say there was none - AST::type_kind_keyword is why a fourth kind cannot repeat it
+    // difference say there was none - AST::type_kind_keyword is why a fifth kind cannot repeat it
+    //
+    // an incomplete type has no body, so it must not print one: the dump would otherwise look
+    // like an empty struct, which is a different type with a layout of size zero
+    if (complex_type().is_opaque_kind()) {
+        return "extern struct " + namespaced_type_name() + ";";
+    }
+
     std::string result =
         std::string(AST::type_kind_keyword(complex_type().kind)) + " " + namespaced_type_name() + "\n{\n";
 

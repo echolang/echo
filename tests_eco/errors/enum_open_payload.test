@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] enum_open_payload.eco:1:39
+
+  The leftover case 'other' cannot carry a payload - the leftover is the integer itself, read with value().
+
+  1 | enum Error : int32 { case a = 1; case other(int32 $code); }
+    :                                       ^^^^^
+  2 | 
+
+1 error, nothing was compiled.

@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] enum_leftover_on_string.eco:1:45
+
+  A leftover case is an integer-backed enum's - 'Unit' is backed by `string`, which cannot hold an unknown spelling.
+
+  1 | enum Unit : string { case meter = "m"; case other; }
+    :                                             ^^^^^
+  2 | 
+
+1 error, nothing was compiled.

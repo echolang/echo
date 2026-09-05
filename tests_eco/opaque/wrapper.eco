@@ -1,0 +1,29 @@
+use handles::Handle;
+use handles::c_make;
+use handles::c_read;
+use handles::c_free;
+
+class Owned
+{
+    ptr<Handle> $raw;
+
+    constructor(ptr<Handle> $raw)
+    {
+        $this->raw = $raw;
+    }
+
+    destructor()
+    {
+        if ($this->raw != null) {
+            c_free($this->raw);
+        }
+    }
+
+    function value() : int32
+    {
+        return c_read($this->raw);
+    }
+}
+
+Owned $o = Owned(c_make(9));
+echo $o->value();

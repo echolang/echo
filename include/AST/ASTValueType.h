@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTVisibility.h"
+#include "Token.h"
 
 #include <type_traits>
 #include <string>
@@ -24,6 +25,7 @@ namespace AST
     class ComplexType;
     class TypeRegistry;
     class Namespace;
+    class ValueType;
 
     // everything this header does with a type parameter works on an incomplete type (store,
     // compare and hash a pointer, hold a vector of them), which is what keeps ASTValueType.h
@@ -63,6 +65,15 @@ namespace AST
         // `$e->__tag = 3` through and would synthesize a field-wise constructor seating a discriminant
         // by hand. as a kind each one refuses until an arm is added on purpose
         t_enum,
+        // a C incomplete type: `extern struct Handle`. named, namespaced and mangled like the four
+        // above, and that is the whole of what it is - a name, so `ptr<Handle>` is not `ptr<Resource>`.
+        //
+        // **a kind rather than a flag on t_struct**, enum's argument read once more. as a flag, every
+        // is_struct() site would go on answering yes: a field-wise constructor of no fields, a zero
+        // size, pointer arithmetic striding by nothing. as a kind each of those refuses until an arm
+        // is added on purpose. it has no properties and never a layout; AST::type_completeness is
+        // the one owner of that fact
+        t_opaque,
         t_generic,
         t_pointer,
         // a non-owning handle on a counted object: `weak<Foo>`. recursive like a pointer, holding the
@@ -136,7 +147,17 @@ namespace AST
     // places is a name that can differ in one
     std::string enum_payload_property_name(size_t case_ordinal, const std::string &field_name);
 
-    // which of the four storage classes a named type was declared as. the distinction is one tag and
+    // **may this name be constructed as `Owner::name`?** empty when it may, or when the owner is not
+    // an enum or the name is not the leftover case. the leftover exists for `match` and exhaustiveness;
+    // `from` is how a leftover integer arrives. CallResolver asks this of an empty static candidate
+    // set rather than reporting "no such function", which is the wrong sentence for a case that is
+    // sitting in the table
+    //
+    // peels a borrow and `const`, so `Error::other` and a shorthand whose destination named `const Error`
+    // share one wording
+    std::string enum_case_construction_refusal(const ValueType &owner, const std::string &name);
+
+    // which of the five storage classes a named type was declared as. the distinction is one tag and
     // nearly everything else about them is identical - one parser, one declaration node, one member
     // store - so it is a tag rather than separate types. carried on ComplexType, since that is the
     // only thing a generic instantiation has
@@ -150,12 +171,17 @@ namespace AST
     // generic and mangled identically, its methods and statics live in the same two lists, and what it
     // adds is a case table beside them plus a set of refusals at its declaration. what it does *not*
     // add is a second declaration parser or a second answer to any member-lookup question
+    //
+    // t_opaque is the fifth, and the incomplete half of t_interface's "no layout": `extern struct`
+    // is a name so two C handles stay two types. it has no members of any kind. AST::type_completeness
+    // is the one owner of "a value of this cannot exist"
     enum class ComplexTypeKind
     {
         t_struct,
         t_class,
         t_interface,
         t_enum,
+        t_opaque,
     };
 
     // **the keyword this kind was declared with** - "struct", "class", "interface", "enum".
@@ -245,6 +271,10 @@ namespace AST
 
     constexpr bool is_enum(ValueTypeKind kind) {
         return kind == ValueTypeKind::t_enum;
+    }
+
+    constexpr bool is_opaque(ValueTypeKind kind) {
+        return kind == ValueTypeKind::t_opaque;
     }
 
     std::string get_primitive_name(ValueTypePrimitive primitive);
@@ -603,6 +633,10 @@ namespace AST
             return kind == ValueTypeKind::t_enum;
         }
 
+        bool is_opaque() const {
+            return kind == ValueTypeKind::t_opaque;
+        }
+
         // a named user type of any storage class - exactly the kinds get_complex_type() answers
         // for. this is what a *member* question wants: `->x` resolves the same property table either
         // way, and the difference is only in how codegen reaches it. asking is_struct() where this
@@ -612,8 +646,12 @@ namespace AST
         // for free. so this is deliberately **not** the question "does this have a layout" - use
         // has_property_layout() below for that. the two were one predicate while there were only two
         // kinds, and every reader that meant the second one has to say so now
+        //
+        // an opaque type is one of these too: it is a name, so mangling, equality and `ptr<T>`
+        // identity all go through the ComplexType. it is not a layout - has_property_layout() is
+        // the allow-list, and t_opaque is not on it
         bool has_complex_type() const {
-            return is_struct() || is_class() || is_interface() || is_enum();
+            return is_struct() || is_class() || is_interface() || is_enum() || is_opaque();
         }
 
         // a named user type that has *properties* - a place a `->x` can be stored in and a thing
@@ -762,6 +800,7 @@ namespace AST
                 case ValueTypeKind::t_class:
                 case ValueTypeKind::t_interface:
                 case ValueTypeKind::t_enum:
+                case ValueTypeKind::t_opaque:
                     return _complex_type == other._complex_type;
 
                 // structural, like a pointer: a signature carries no identity of its own, so two
@@ -1002,10 +1041,18 @@ namespace AST
             return kind == ComplexTypeKind::t_enum;
         }
 
-        // has properties, and so a layout codegen can lower. false for an interface, which declares
-        // requirements and stores nothing - the mirror of ValueType::has_property_layout()
+        bool is_opaque_kind() const {
+            return kind == ComplexTypeKind::t_opaque;
+        }
+
+        // has properties, and so a layout codegen can lower. **an allow-list**, the mirror of
+        // ValueType::has_property_layout(): a kind added without an arm here is incomplete until
+        // someone opts it in. a deny-list (`!= t_interface`) would have claimed a layout for
+        // t_opaque the moment the kind existed
         bool has_property_layout() const {
-            return kind != ComplexTypeKind::t_interface;
+            return kind == ComplexTypeKind::t_struct
+                || kind == ComplexTypeKind::t_class
+                || kind == ComplexTypeKind::t_enum;
         }
 
         // the namespace the type was declared in, null when unknown or root. instantiations
@@ -1209,6 +1256,11 @@ namespace AST
             size_t ordinal;
             std::string name;
 
+            // the written name, so a diagnostic about this case points at it rather than at the
+            // enum. TokenSpan because TokenReference has no copy assignment and TypeRegistry
+            // copies this table onto every instantiation - the reason TokenSpan exists
+            TokenSpan name_span;
+
             // what `__tag` holds for this case. the ordinal, or the written value for an integer-backed
             // enum - which is why it is stored rather than derived: `case not_found = 404` is a case
             // whose ordinal is 1
@@ -1229,6 +1281,16 @@ namespace AST
             // this rather than against the constructor, a pattern not being a call
             std::vector<std::string> payload_field_names;
 
+            // the author wrote `= N` (or `= "s"`). classified after the case list is complete, because
+            // a leftover case is the unique valueless one among valued siblings - parse_enum_case
+            // cannot know it is looking at one until every sibling has been seen
+            bool has_explicit_discriminant = false;
+
+            // the leftover case of an open integer enum. not a constructor: `Error::other` as a value
+            // does not know which integer to store. `from` is the producer, `match` the classifier,
+            // `value()` the integer. codegen's switch default, never an addCase
+            bool is_open_remainder = false;
+
             bool has_payload() const {
                 return payload_field_count > 0;
             }
@@ -1246,6 +1308,19 @@ namespace AST
         // property's is, since a case list is short and a second index would be a second thing to carry
         // across an instantiation
         const EnumCase *find_enum_case(const std::string &name) const;
+
+        // **the leftover case of an open integer enum**, or null. the sole owner of "is this enum
+        // open" - a walk of `_enum_cases` for `is_open_remainder`, not a second flag that could
+        // disagree with the table. `is_open_enum` is the yes/no spelling
+        const EnumCase *open_remainder() const;
+
+        bool is_open_enum() const {
+            return open_remainder() != nullptr;
+        }
+
+        // Parser::finalize_enum's write, after the case list is complete. ordinal is
+        // EnumCase::ordinal, which is also the index in `_enum_cases`
+        void mark_open_remainder(size_t ordinal);
 
         // the type written after the `:` of a backed enum - an integer primitive or `string`. absent for
         // a plain enum and for one with payload cases, the two being mutually exclusive at the

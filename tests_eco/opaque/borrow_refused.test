@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] borrow_refused.eco:3:23
+
+  'Handle' is an incomplete type, so it cannot be borrowed - a borrow names storage Echo accounts for, and an incomplete type has none. Write 'ptr<Handle>' for a C handle.
+
+  2 | 
+  3 | function take(Handle& $h) : void
+    :                       ^^
+  4 | {
+
+1 error, nothing was compiled.

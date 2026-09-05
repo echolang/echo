@@ -1,0 +1,8 @@
+use handles::Handle;
+use handles::c_make;
+use handles::c_read;
+use handles::c_free;
+
+ptr<Handle> $h = c_make(7);
+echo c_read($h);
+c_free($h);
