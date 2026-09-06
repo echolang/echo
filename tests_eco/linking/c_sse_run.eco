@@ -1,0 +1,2 @@
+// the same objects under the JIT, which is the loadable-library path
+echo sse::add(2, 3);

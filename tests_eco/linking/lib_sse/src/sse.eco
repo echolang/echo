@@ -1,0 +1,10 @@
+namespace sse;
+
+extern {
+    function eco_sse_add(int32 $a, int32 $b) : int32;
+}
+
+public function add(int32 $a, int32 $b) : int32
+{
+    return eco_sse_add($a, $b);
+}

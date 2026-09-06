@@ -2,8 +2,11 @@
 
 #include <Compiler/CBuild.h>
 #include <Compiler/CompilerOptions.h>
+#include <Compiler/HostTool.h>
+#include <Compiler/TargetFacts.h>
 
 #include <filesystem>
+#include <vector>
 
 #include "subprocess.h"
 
@@ -96,6 +99,30 @@ void write_shim(const ScopedProject &project, const std::string &header_body)
     write_file(project.root() / "c" / "shim.c",
         "#include \"shim.h\"\n"
         "int eco_shim_answer(void) { return ANSWER; }\n");
+}
+
+std::vector<std::string> flag_values(const std::vector<std::string> &argv, const std::string &flag)
+{
+    std::vector<std::string> values;
+
+    for (size_t i = 0; i + 1 < argv.size(); i++) {
+        if (argv[i] == flag) {
+            values.push_back(argv[i + 1]);
+        }
+    }
+
+    return values;
+}
+
+bool argv_contains(const std::vector<std::string> &argv, const std::string &word)
+{
+    for (const std::string &arg : argv) {
+        if (arg == word) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 };
@@ -282,4 +309,55 @@ TEST_CASE("a module with no C sources builds nothing", "[cbuild]")
 
     REQUIRE(result.objects.empty());
     REQUIRE(explain.empty());
+}
+
+TEST_CASE("a sysroot emmintrin.h does not shadow clang's", "[cbuild]")
+{
+    // the Windows bundle copies MSVC's include tree wholesale, so emmintrin.h
+    // lands in sysroot/include/msvc. command-line `-isystem` of that tree used
+    // to sit ahead of clang's resource directory and `_mm_*` became linker
+    // symbols. this plants that colliding header; the resource include has to
+    // stay first, and the sysroot has to stay `-isystem` rather than
+    // `-isystem-after`, or a host VS beats the bundle
+    ScopedProject project("sysroot_emmintrin");
+
+    const fs::path sysroot = project.root() / "sysroot";
+    const fs::path msvc = sysroot / "include" / "msvc";
+    write_file(msvc / "emmintrin.h", "#error BUNDLED_EMMINTRIN\n");
+    write_file(project.root() / "probe.c",
+        "#include <emmintrin.h>\n"
+        "int eco_sse_probe(void) { return 0; }\n");
+
+    std::vector<std::string> argv = {
+        "clang",
+        "-c",
+        "-o",
+        (project.root() / "probe.o").string(),
+        (project.root() / "probe.c").string(),
+    };
+    Compiler::append_windows_sysroot_cc_args(argv, sysroot);
+
+    REQUIRE_FALSE(argv_contains(argv, "-isystem-after"));
+
+    const std::vector<std::string> isystem = flag_values(argv, "-isystem");
+    REQUIRE_FALSE(isystem.empty());
+    REQUIRE(fs::is_regular_file(fs::path(isystem.front()) / "emmintrin.h"));
+    REQUIRE(isystem.front() != msvc.string());
+
+    bool saw_msvc = false;
+    for (const std::string &dir : isystem) {
+        if (dir == msvc.string()) {
+            saw_msvc = true;
+            break;
+        }
+    }
+    REQUIRE(saw_msvc);
+
+    const Compiler::CapturedProcess compiled = Compiler::run_captured(argv);
+    INFO(compiled.output);
+    REQUIRE(compiled.output.find("BUNDLED_EMMINTRIN") == std::string::npos);
+
+    if (Compiler::TargetFacts::host().architecture == "x86_64") {
+        REQUIRE(compiled.exit_code == 0);
+    }
 }

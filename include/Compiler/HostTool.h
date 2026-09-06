@@ -53,11 +53,18 @@ namespace Compiler
     std::filesystem::path windows_sysroot();
 
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt
-    // Backend always links, then `-isystem` for every directory under
-    // sysroot/include. the CRT flag is independent of the bundle; the
-    // includes no-op when there is no sysroot, so a developer build still
-    // uses the VS that clang finds on its own
+    // Backend always links, then clang's resource include as `-isystem` so
+    // emmintrin.h and friends stay ahead of the bundled MSVC copies, then
+    // `-isystem` for every directory under sysroot/include so windows.h still
+    // beats a host VS. the CRT flag is independent of the bundle; the includes
+    // no-op when there is no sysroot, so a developer build still uses the VS
+    // that clang finds on its own
     void append_windows_sysroot_cc_args(std::vector<std::string> &argv);
+
+    // the include half of the above, over a sysroot the caller named. tests
+    // plant a colliding emmintrin.h here; production goes through the overload
+    // that reads windows_sysroot()
+    void append_windows_sysroot_cc_args(std::vector<std::string> &argv, const std::filesystem::path &sysroot);
 
     // `-fuse-ld=lld`, static CRT, and `-Lsysroot/lib` so the clang fallback
     // and a `#[cc:]` shared library hit the bundled linker and libcmt, not

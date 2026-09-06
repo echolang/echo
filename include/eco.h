@@ -84,6 +84,6 @@
 // keyed on unrelated inputs: a codegen change moves every Echo object and no C one, and a change to how
 // `#[cc:]` builds a translation unit - a flag added, the language inference changed - moves every C object
 // and no Echo one. Sharing a constant would rebuild the wrong half every time either moved
-#define ECO_C_BUILD_VERSION "3"
+#define ECO_C_BUILD_VERSION "4"
 
 #endif // ECO_H

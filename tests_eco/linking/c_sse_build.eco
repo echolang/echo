@@ -1,0 +1,3 @@
+// a module's C sources may use SSE2. the native-link half; `c_sse_run` is
+// the same objects under the JIT
+echo sse::add(2, 3);

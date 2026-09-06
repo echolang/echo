@@ -1,0 +1,12 @@
+/*
+ * SSE2 through a `#[cc:]` translation unit. The include-order pin for the
+ * Windows sysroot lives in tests/c_build.cpp; this is the integration that a
+ * module can ship that C at all.
+ */
+
+#[module: "linksse"]
+#[version: "0.1.0"]
+
+#[cc: sources "c/*.c"]
+
+#[sources: "src/*.eco"]

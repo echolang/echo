@@ -360,6 +360,68 @@ std::filesystem::path Compiler::windows_sysroot()
 #endif
 }
 
+namespace
+{
+    std::string trim_right(const std::string &text)
+    {
+        const size_t end = text.find_last_not_of(" \t\n\r");
+        if (end == std::string::npos) {
+            return {};
+        }
+
+        return text.substr(0, end + 1);
+    }
+
+    std::filesystem::path resource_include_beside(const std::filesystem::path &clang)
+    {
+        std::error_code ec;
+        const std::filesystem::path libclang = clang.parent_path().parent_path() / "lib" / "clang";
+        if (!std::filesystem::is_directory(libclang, ec)) {
+            return {};
+        }
+
+        std::filesystem::path found;
+        for (const auto &entry : std::filesystem::directory_iterator(libclang, ec)) {
+            if (!entry.is_directory(ec)) {
+                continue;
+            }
+
+            const std::filesystem::path include = entry.path() / "include";
+            if (std::filesystem::is_directory(include, ec)) {
+                found = include;
+            }
+        }
+
+        return found;
+    }
+
+    // the include directory of the clang `#[cc:]` actually invokes. cached:
+    // `clang -print-resource-dir` is one spawn per process, and a miss falls
+    // through to the `lib/clang/<ver>/include` next to that binary
+    std::filesystem::path clang_resource_include()
+    {
+        static const std::filesystem::path dir = [] {
+            const Compiler::CapturedProcess printed =
+                Compiler::run_captured({ "clang", "-print-resource-dir" });
+
+            if (printed.exit_code == 0) {
+                const std::string root = trim_right(printed.output);
+                if (!root.empty()) {
+                    std::error_code ec;
+                    const std::filesystem::path include = std::filesystem::path(root) / "include";
+                    if (std::filesystem::is_directory(include, ec)) {
+                        return include;
+                    }
+                }
+            }
+
+            return resource_include_beside(Compiler::host_clang());
+        }();
+
+        return dir;
+    }
+};
+
 void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv)
 {
 #if !defined(_WIN32)
@@ -371,8 +433,12 @@ void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv)
     // and duplicate-symbol'd malloc. asked even when there is no sysroot,
     // because the CRT choice is the linker's, not the bundle's
     argv.push_back("-fms-runtime-lib=static");
+    append_windows_sysroot_cc_args(argv, windows_sysroot());
+#endif
+}
 
-    const std::filesystem::path sysroot = windows_sysroot();
+void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv, const std::filesystem::path &sysroot)
+{
     if (sysroot.empty()) {
         return;
     }
@@ -390,12 +456,24 @@ void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv)
         }
     }
 
+    // **clang's builtins first.** Command-line `-isystem` is searched ahead of
+    // the resource directory, so a bundled MSVC emmintrin.h would win and
+    // `_mm_*` would become linker symbols GNU-driver clang does not
+    // implement. putting the resource include on the command line first keeps
+    // the builtins ahead while the sysroot stays `-isystem`, so windows.h
+    // still beats a host VS. `-isystem-after` would also save the builtins,
+    // and would let that host VS beat the bundle
+    const std::filesystem::path builtins = clang_resource_include();
+    if (!builtins.empty()) {
+        argv.push_back("-isystem");
+        argv.push_back(builtins.string());
+    }
+
     std::sort(dirs.begin(), dirs.end());
     for (const std::filesystem::path &dir : dirs) {
         argv.push_back("-isystem");
         argv.push_back(dir.string());
     }
-#endif
 }
 
 void Compiler::append_windows_sysroot_link_args(std::vector<std::string> &argv)
