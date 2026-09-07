@@ -1,0 +1,24 @@
+// a weak handle is the same one-address DIType as the class. grouping it with the pointer arm
+// and peeling with value_type_of recurses on the same type until the stack dies, and only `-g`
+// reaches that function, which is why this case exists as a `mode: build` / `flags: -g` golden
+// rather than as another `classes/weak_*` run.
+//
+// `$parent` is the recursive-field path: class_type_of walks it while the box is still an opaque
+// stand-in, the same way a `Node $next` field does. `$w` is the local that was the original crash
+
+class Node
+{
+    int32 $value;
+    weak<Node> $parent;
+}
+
+function take(Node $n) : int32
+{
+    weak<Node> $w = &$n;
+    Node $live = guard $w else { return 0; }
+    return $live->value;
+}
+
+Node $n = Node(1, null);
+$n->parent = &$n;
+echo take($n);

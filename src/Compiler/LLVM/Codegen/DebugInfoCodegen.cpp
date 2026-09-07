@@ -782,7 +782,7 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
             wrapper);
     }
 
-    if (type.is_pointer() || type.is_weak()) {
+    if (type.is_pointer()) {
         // **a pointer does drag its pointee in here, where get_llvm_type deliberately does not.** That
         // one answers a bare `ptr` so a borrow parameter never forces a layout into a unit that has not
         // declared it; a DIDerivedType costs nothing at that level, and pointing at nothing is the
@@ -797,6 +797,20 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
 
     if (type.is_class()) {
         return class_type_of(type, cmp_unit);
+    }
+
+    if (type.is_weak()) {
+        // **the class handle, not a pointer to one.** t_weak is its own kind, so value_type_of peels
+        // nothing - pointee() is pointer-only on purpose, and weak_target() is the peel this arm
+        // needs. grouping this with the pointer arm and then calling value_type_of recurses on the
+        // same type until the stack dies, and only -g reaches this function. TypeLowering already
+        // answers one address for both; wrapping the handle in createPointerType would describe
+        // weak<Node> as Node**.
+        //
+        // **not interned under the weak key.** class_type_of plants an opaque stand-in for a
+        // recursive field, then overwrites the *class* cache with the real handle. intern this and
+        // a later `weak<Node>` local keeps the stand-in forever. the class cache is the cycle break
+        return type_of(type.weak_target(), cmp_unit);
     }
 
     if (type.is_c_function()) {
