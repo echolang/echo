@@ -469,6 +469,51 @@ TEST_CASE("the gaps that are gone report nothing", "[sema]")
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
+TEST_CASE("interface arity mismatch plus a struct that gained a field reports, not SIGSEGV", "[sema][interface]")
+{
+    // the combination that took echoc down with exit 139 and nothing printed: an implementor whose
+    // method still has the old arity, and a struct that grew a field, constructed with the old
+    // argument count inside that method. a deliberate arity mismatch against an interface already
+    // reports; this is the two mistakes together
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface DeviceProtocol {\n"
+        "    function uploadTexture(TextureDesc $d, int32 $n) : void;\n"
+        "}\n"
+        "struct TextureDesc {\n"
+        "    int32 $w;\n"
+        "    int32 $h;\n"
+        "    int32 $format;\n"
+        "}\n"
+        "struct MetalDevice : DeviceProtocol {\n"
+        "    function uploadTexture(TextureDesc $d) : void {\n"
+        "        TextureDesc $copy = TextureDesc($d->w, $d->h);\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "DeviceProtocol"));
+}
+
+TEST_CASE("the same combination with an owning extra field still reports", "[sema][interface]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface DeviceProtocol {\n"
+        "    function uploadTexture(TextureDesc $d, int32 $n) : void;\n"
+        "}\n"
+        "struct TextureDesc {\n"
+        "    int32 $w;\n"
+        "    string $name;\n"
+        "}\n"
+        "struct MetalDevice : DeviceProtocol {\n"
+        "    function uploadTexture(TextureDesc $d) : void {\n"
+        "        TextureDesc $copy = TextureDesc($d->w);\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "DeviceProtocol"));
+}
+
 TEST_CASE("live_allocations is refused when nothing is counting", "[sema][memory]")
 {
     // the only builtin whose *availability* is a question, and the only reason AST::TypeChecker reads the

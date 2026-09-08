@@ -361,3 +361,53 @@ TEST_CASE("a sysroot emmintrin.h does not shadow clang's", "[cbuild]")
         REQUIRE(compiled.exit_code == 0);
     }
 }
+
+TEST_CASE("the Darwin SDK is asked for rather than assumed", "[cbuild][host]")
+{
+    // Homebrew clang cannot find libSystem without it; Apple clang often can.
+    // both paths have to carry the SDK, because `echoc run` of a `#[cc:]`
+    // module goes through clang -shared, not the ld fast path
+    std::vector<std::string> argv = { "clang", "-shared", "-o", "libx.dylib" };
+    Compiler::append_darwin_sdk_args(argv);
+
+#if defined(__APPLE__)
+    const fs::path sdk = Compiler::darwin_sdk_root();
+    REQUIRE_FALSE(sdk.empty());
+    REQUIRE(fs::is_directory(sdk));
+    REQUIRE(flag_values(argv, "-isysroot") == std::vector<std::string>{ sdk.string() });
+#else
+    REQUIRE(Compiler::darwin_sdk_root().empty());
+    REQUIRE(argv == std::vector<std::string>{ "clang", "-shared", "-o", "libx.dylib" });
+#endif
+}
+
+TEST_CASE("a C shared library links against the host libc", "[cbuild]")
+{
+    // the loadable-library path `echoc run` uses. executable linking already
+    // passed Darwin's SDK to `ld`; this is the clang -shared twin, and it
+    // is what failed with `library 'System' not found` on Homebrew clang
+    ScopedProject project("shared_libc");
+    write_file(project.root() / "c" / "answer.c",
+        "int eco_shim_answer(void) { return 42; }\n");
+
+    Compiler::CBuildSpec spec;
+    spec.module_name = "answer";
+    spec.sources = { project.root() / "c" / "answer.c" };
+
+    std::vector<std::string> explain;
+    const Compiler::CBuildResult compiled = built(spec, project, explain);
+
+    fs::path library;
+    std::string error;
+    REQUIRE(Compiler::build_c_shared_library(
+        spec,
+        compiled,
+        {},
+        project.build_dir(),
+        project.root() / "scratch",
+        library,
+        error));
+    INFO(error);
+    REQUIRE(error.empty());
+    REQUIRE(fs::is_regular_file(library));
+}

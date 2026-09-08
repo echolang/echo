@@ -48,6 +48,14 @@ namespace AST
 
     // appends `codepoint` to `out` as UTF-8. false when it is not a legal scalar value
     bool utf8_encode(uint32_t codepoint, std::string &out);
+
+    // **does this `"` string's raw spelling look like a hole that is not one?**
+    //
+    // a hole opens only on `{$`. `{twice($n)}` and `{LIMIT}` are text, and that is the rule that
+    // keeps `"a { brace"` unescaped - but it is also the spelling that silently printed source
+    // instead of a value. asked of the raw token interior (quotes already off, escapes still
+    // written), so `\{twice` is not a hit. the snippet is the `{...}` that looked like a hole
+    std::optional<std::string> interpolation_lookalike(const std::string &raw);
 };
 
 #endif

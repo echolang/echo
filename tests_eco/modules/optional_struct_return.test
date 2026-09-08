@@ -1,0 +1,8 @@
+# A user struct from another module, returned as T?. `mode: run` verifies the main
+# module before the merge - that is the reported failure. Keep optional_payload_across_units
+# beside this: that one pins the named-lookup regression on `string?`.
+modules: modules/lib_viewport
+
+--- OUT --->
+1920
+-1

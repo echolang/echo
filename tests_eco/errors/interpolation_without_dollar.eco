@@ -1,0 +1,12 @@
+const int32 LIMIT = 4;
+
+function twice(int32 $n) : int32
+{
+    return $n * 2;
+}
+
+int32 $n = 3;
+
+echo "call: {twice($n)}";
+echo "const: {LIMIT}";
+echo "var: {$n}";

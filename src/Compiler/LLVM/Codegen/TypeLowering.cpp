@@ -484,12 +484,23 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode 
         return cmp_unit.structure_table->get_structure(existing).llvm_struct;
     }
 
+    const AST::ComplexType *complex = &node->complex_type();
+
+    // the instance path may already have interned this ComplexType into this unit, without
+    // mapping the TypeDeclNode. bind rather than create - a second llvm::StructType is
+    // `%Viewport.63` against an optional that still holds `%Viewport.31`
+    if (auto existing = cmp_unit.structure_table->get_structure_id(complex); existing != 0) {
+        cmp_unit.structure_table->bind_declaration(node, existing);
+        return cmp_unit.structure_table->get_structure(existing).llvm_struct;
+    }
+
     auto type_name = node->type_name();
 
     // opaque first, then the body: a packed enum has to measure its payload field types before it
     // can name the storage array, and a self-referential struct has to find itself in the table
-    // while those fields are being lowered
-    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, type_name);
+    // while those fields are being lowered. interned in the context so every unit shares one
+    // llvm::StructType for this ComplexType
+    llvm::StructType *llvm_struct_type = intern_struct_type(complex, type_name);
     auto struct_id = cmp_unit.structure_table->push_structure(node, llvm_struct_type);
 
     fill_structure_body(
@@ -514,11 +525,16 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode 
 
 llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit)
 {
+    if (auto existing = cmp_unit.structure_table->get_structure_id(type); existing != 0) {
+        return cmp_unit.structure_table->get_structure(existing).llvm_struct;
+    }
+
     std::string type_name = type->name.value_or("anon");
 
-    // create the struct opaque first and register it, so a self-referential instantiation
-    // (a property that mentions the same instantiation) resolves to this in-progress type
-    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, type_name);
+    // intern first and register it, so a self-referential instantiation (a property that
+    // mentions the same instantiation) resolves to this in-progress type - and so a later
+    // unit reuses the llvm::StructType the first unit filled
+    llvm::StructType *llvm_struct_type = intern_struct_type(type, type_name);
     auto struct_id = cmp_unit.structure_table->push_structure(type, llvm_struct_type);
 
     fill_structure_body(
@@ -726,6 +742,22 @@ llvm::Constant *TypeLowering::build_conformance_table(
         type.mangled_token() + ".conformances",
         [&] { return llvm::ConstantArray::get(table_type, identities); },
         cmp_unit);
+}
+
+void TypeLowering::forget_interned_structs()
+{
+    _context_structs.clear();
+}
+
+llvm::StructType *TypeLowering::intern_struct_type(const AST::ComplexType *type, const std::string &name)
+{
+    if (auto it = _context_structs.find(type); it != _context_structs.end()) {
+        return it->second;
+    }
+
+    llvm::StructType *minted = llvm::StructType::create(*_ctx.llvm_context, name);
+    _context_structs[type] = minted;
+    return minted;
 }
 
 llvm::GlobalVariable *TypeLowering::get_or_create_odr_constant(
@@ -954,14 +986,9 @@ llvm::StructType *TypeLowering::optional_llvm_type(
     }
 
     // the mangled name of the *payload*, so `int32?` and `float64?` are two shapes and two names.
-    //
-    // **and minted per unit, exactly like every other struct.** This used to look the name up in the
-    // context first, so two units shared one `eco.optional.*` - which the `linkonce_odr` deinit and copy
-    // constructor were held to need, `verify_odr_consistency` having compared the two copies as *text*
-    // and a renamed `%eco.optional.X.1` reading as a divergence. That check compares layouts now
-    // (Compiler::LLVM::first_odr_difference), so the sharing bought nothing and cost the one thing a
-    // shared type cannot survive: the layout was built in whichever unit reached it first and holds
-    // *that* unit's `%string`, while the values the next unit inserts into it are its own `%string.1`.
+    // interned by ComplexType identity, not by that name: looking the name up in the context shared
+    // the wrapper while each unit still had its own payload, which is insertvalue of `%string.1`
+    // into a pair whose field is the first unit's `%string`. intern_struct_type shares both.
     //
     // `eco.callable`, `eco.iface` and `eco.classheader` keep their by-name lookup, and the difference is
     // the whole rule: their members are context-primitives, so they have no payload to split
@@ -970,7 +997,7 @@ llvm::StructType *TypeLowering::optional_llvm_type(
 
     // opaque first and registered before the payload is lowered, exactly as create_llvm_struct_for_instance
     // does and for its reason: a payload that mentions this same optional resolves to the in-progress type
-    llvm::StructType *minted = llvm::StructType::create(*_ctx.llvm_context, name);
+    llvm::StructType *minted = intern_struct_type(layout, name);
     cmp_unit.structure_table->push_structure(layout, minted);
 
     std::vector<llvm::Type *> members(2);
@@ -978,7 +1005,9 @@ llvm::StructType *TypeLowering::optional_llvm_type(
     members[AST::k_optional_value_index] = get_llvm_type(payload, cmp_unit);
 
     // by slot index rather than in written order, the rule every shape in Codegen/ClassLayout.h follows
-    minted->setBody(members);
+    if (minted->isOpaque()) {
+        minted->setBody(members);
+    }
 
     return minted;
 }
@@ -1227,8 +1256,8 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         //    never seen. allocating a user struct on the heap is a headline use of mem::, so this
         //    is the common case rather than a corner
         //
-        // both are keyed on the ComplexType, so identity survives even though each unit ends up
-        // with its own llvm::StructType for the same Echo type
+        // both are keyed on the ComplexType: intern_struct_type gives one llvm::StructType per
+        // ComplexType in the context, and the unit table only holds the row and the offset table
         if (!struct_id && complex) {
             create_llvm_struct_for_instance(complex, cmp_unit);
             struct_id = cmp_unit.structure_table->get_structure_id(complex);
@@ -1396,7 +1425,8 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
             const AST::ValueType target_payload = AST::ValueType::make_non_nullable(target);
 
             llvm::Value *payload = coerce_value(value, source, target_payload, cmp_unit);
-            llvm::Value *wrapped = llvm::UndefValue::get(optional_llvm_type(target, cmp_unit));
+            llvm::StructType *opt_ty = optional_llvm_type(target, cmp_unit);
+            llvm::Value *wrapped = llvm::UndefValue::get(opt_ty);
 
             wrapped = _ctx.builder->CreateInsertValue(
                 wrapped,

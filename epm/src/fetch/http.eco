@@ -75,7 +75,8 @@ public function remote_tags_from(const string& $body) : result<array<RemoteTag>,
 function fetch_body(const string& $url, const string& $accept) : result<string, string>
 {
     curl::Request $req = .get($url);
-    $req->userAgent("epm/{cli::VERSION}");
+    string $ver = cli::VERSION;
+    $req->userAgent("epm/{$ver}");
     $req->timeout(30000);
 
     if (!$accept->empty()) {

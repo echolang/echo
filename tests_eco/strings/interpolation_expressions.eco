@@ -27,9 +27,9 @@ echo "quoted {$name->equals('Ronon')}";
 // two holes with nothing between them
 echo "{$p->x}{$p->y}";
 
-// **a hole opens on `{$` and on nothing else**, so a free call has to start from a value:
-// `{twice($p->x)}` is text, and `{$p->x}` fed to one is not
-echo "not a hole: {twice($p->x)}";
+// **a hole opens on `{$` and on nothing else**, so a free call has to start from a value.
+// `{twice($p->x)}` is refused as a lookalike; `\{` keeps the braces as text
+echo "not a hole: \{twice($p->x)}";
 echo "so write it as {$xs[0]} or bind it first";
 
 int32 $doubled = twice($p->x);

@@ -17,11 +17,21 @@ TEST_CASE("as is postfix like instanceof", "[Integration][Expr][OpOrder][cast]")
         "binexp<int64>(cast<int64>(literal<int64>(7)) + literal<int64>(1))"
     );
 
-    // the yard treats parentheses as operators, so postfix is applied after the
-    // sum is rebuilt - that is what attaches `as` to `(7 + 1)`
+    // grouping is an operand, so postfix applies to the finished group
     REQUIRE_NODE_DESC_EXPR(
         "(7 + 1) as int64;",
         "cast<int64>(binexp<int32>(literal<int32>(7) + literal<int32>(1)))"
+    );
+
+    // wrapping a cast whose operand is itself grouped used to stop the yard at `as`
+    REQUIRE_NODE_DESC_EXPR(
+        "((7 + 1) as int64);",
+        "cast<int64>(binexp<int32>(literal<int32>(7) + literal<int32>(1)))"
+    );
+
+    REQUIRE_NODE_DESC_EXPR(
+        "1.0 / ((7 + 1) as float64);",
+        "binexp<float64>(literal<float64>(1.0) / cast<float64>(binexp<int32>(literal<int32>(7) + literal<int32>(1))))"
     );
 
     // postfix binds to the last operand, not to the finished binary expression

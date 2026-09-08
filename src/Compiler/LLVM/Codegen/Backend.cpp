@@ -348,50 +348,6 @@ void Backend::init_target()
 namespace
 {
 
-// the linker to invoke, as an argv. `std::nullopt` means "we do not know how to spell this platform" and
-// the caller falls back to the clang driver.
-//
-// **the fallback is the point.** Going straight to `ld` saves ~33ms of clang driver startup on every
-// single build, which matters because linking is otherwise a constant this compiler cannot optimize away -
-// but a platform whose flags are not written here must still build, and clang is what knows them
-#if defined(__APPLE__)
-// the SDK holds libSystem, and its path is not fixed - it moves with every Xcode update, so it has to be
-// asked for rather than assumed.
-//
-// **asked once.** `xcrun` costs ~6 ms warm, which is a fifth of what going straight to `ld` saves in the
-// first place, and the answer cannot change during a compile. $SDKROOT first, because that is the variable
-// xcrun itself honours and a caller who set it is telling us not to guess
-const std::string &host_sdk_root()
-{
-    static const std::string answer = [] {
-        if (const char *from_env = std::getenv("SDKROOT"); from_env != nullptr && *from_env != '\0') {
-            return std::string(from_env);
-        }
-
-        std::string out;
-
-        if (FILE *pipe = popen("xcrun --show-sdk-path 2>/dev/null", "r")) {
-            char buffer[1024];
-            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-                out += buffer;
-            }
-
-            if (pclose(pipe) != 0) {
-                return std::string();
-            }
-        }
-
-        while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
-            out.pop_back();
-        }
-
-        return out;
-    }();
-
-    return answer;
-}
-#endif
-
 void append_objects(
     std::vector<std::string> &argv, const std::vector<std::filesystem::path> &objects)
 {
@@ -400,6 +356,12 @@ void append_objects(
     }
 }
 
+// the linker to invoke, as an argv. `std::nullopt` means "we do not know how to spell this platform" and
+// the caller falls back to the clang driver.
+//
+// **the fallback is the point.** Going straight to `ld` saves ~33ms of clang driver startup on every
+// single build, which matters because linking is otherwise a constant this compiler cannot optimize away -
+// but a platform whose flags are not written here must still build, and clang is what knows them
 std::optional<std::vector<std::string>> host_linker_command(
     const std::string &executable_name,
     const std::vector<std::filesystem::path> &objects,
@@ -408,7 +370,7 @@ std::optional<std::vector<std::string>> host_linker_command(
 )
 {
 #if defined(__APPLE__)
-    const std::string &sdk_root = host_sdk_root();
+    const std::filesystem::path sdk_root = Compiler::darwin_sdk_root();
 
     if (sdk_root.empty()) {
         return std::nullopt;
@@ -432,7 +394,7 @@ std::optional<std::vector<std::string>> host_linker_command(
 
     command.push_back("-lSystem");
     command.push_back("-syslibroot");
-    command.push_back(sdk_root);
+    command.push_back(sdk_root.string());
     command.push_back("-arch");
     command.push_back(arch);
 
@@ -622,6 +584,7 @@ bool Backend::link_executable(
 
     std::vector<std::string> fallback = { "clang", "-o", output };
     Compiler::append_windows_sysroot_link_args(fallback);
+    Compiler::append_darwin_sdk_args(fallback);
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     for (const std::string &word : link_words) {

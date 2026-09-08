@@ -1,0 +1,15 @@
+// wrapping a foreign struct into T? used to mint two llvm::StructTypes for one Echo
+// type and fail IR verification: insertvalue of `%Viewport.63` into a pair whose
+// payload slot was `%Viewport.31`. intern_struct_type shares both
+function current() : gfx::Viewport?
+{
+    return gfx::make();
+}
+
+function absent() : gfx::Viewport?
+{
+    return null;
+}
+
+echo current()?->width() ?? 0;
+echo absent()?->width() ?? -1;

@@ -65,6 +65,12 @@ namespace Compiler::LLVM
         // TypeDeclNode of its own (the layout lives on the ComplexType)
         structure_id_t push_structure(const AST::ComplexType *type, llvm::StructType *structtype);
 
+        // the instance path lowered this ComplexType first, and a TypeDeclNode of the same type
+        // has now reached create_llvm_struct_decl. map the node onto the existing row rather than
+        // minting a second llvm::StructType - that overwrite is how one unit held `%Viewport.31`
+        // in an optional and `%Viewport.63` on a call result
+        void bind_declaration(const AST::TypeDeclNode *structdecl, structure_id_t id);
+
         Structure &get_structure(structure_id_t id) {
             assert(id < _structures.size());
             return _structures[id];

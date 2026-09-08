@@ -253,3 +253,41 @@ std::optional<AST::StringLiteralError> AST::decode_string_chunk(const std::strin
     // no quotes to strip - the lexer already cut this out from between two holes
     return decode_escapes(raw, 0, raw.size(), out_bytes);
 }
+
+std::optional<std::string> AST::interpolation_lookalike(const std::string &raw)
+{
+    auto is_ident_start = [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+    };
+
+    for (size_t i = 0; i < raw.size(); i++) {
+        // `\{` is the escape that writes a literal brace, so it is not a lookalike
+        if (raw[i] == '\\') {
+            if (i + 1 < raw.size()) {
+                i++;
+            }
+            continue;
+        }
+
+        if (raw[i] != '{' || i + 1 >= raw.size() || !is_ident_start(raw[i + 1])) {
+            continue;
+        }
+
+        size_t end = i + 1;
+        int depth = 1;
+
+        while (end < raw.size() && depth > 0) {
+            if (raw[end] == '{') {
+                depth++;
+            }
+            else if (raw[end] == '}') {
+                depth--;
+            }
+            end++;
+        }
+
+        return raw.substr(i, end - i);
+    }
+
+    return std::nullopt;
+}

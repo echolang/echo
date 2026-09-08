@@ -102,6 +102,22 @@ ISSUE_MESSAGE_FNC(UnknownConstant)
         constant_name, constant_name, constant_name);
 }
 
+ISSUE_MESSAGE_FNC(InterpolationWithoutDollar)
+{
+    return fmt::format(
+        "'{}' is not a hole - a hole starts with '{{$'. Bind the value first, or write '\\{{' for a "
+        "literal brace",
+        snippet);
+}
+
+std::vector<AST::IssueNote> AST::Issue::InterpolationWithoutDollar::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "write the call or the constant into a variable and interpolate that: "
+        "`int32 $t = twice($n);` then `\"{$t}\"`. a constant is not a variable, so `{LIMIT}` cannot "
+        "be written `{$LIMIT}`" } };
+}
+
 ISSUE_MESSAGE_FNC(UnknownUse)
 {
     return _message;

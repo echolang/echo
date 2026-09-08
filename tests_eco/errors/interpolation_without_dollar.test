@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+[error] InterpolationWithoutDollar  interpolation_without_dollar.eco:10:6
+
+  '{twice($n)}' is not a hole - a hole starts with '{$'. Bind the value first, or write '\{' for a literal brace
+
+   9 | 
+  10 | echo "call: {twice($n)}";
+     :      ^^^^^^^^^^^^^^^^^^^
+  11 | echo "const: {LIMIT}";
+
+  help: write the call or the constant into a variable and interpolate that: `int32 $t = twice($n);` then `"{$t}"`. a constant is not a variable, so `{LIMIT}` cannot be written `{$LIMIT}`
+
+[error] InterpolationWithoutDollar  interpolation_without_dollar.eco:11:6
+
+  '{LIMIT}' is not a hole - a hole starts with '{$'. Bind the value first, or write '\{' for a literal brace
+
+  10 | echo "call: {twice($n)}";
+  11 | echo "const: {LIMIT}";
+     :      ^^^^^^^^^^^^^^^^
+  12 | echo "var: {$n}";
+
+  help: write the call or the constant into a variable and interpolate that: `int32 $t = twice($n);` then `"{$t}"`. a constant is not a variable, so `{LIMIT}` cannot be written `{$LIMIT}`
+
+2 errors, nothing was compiled.

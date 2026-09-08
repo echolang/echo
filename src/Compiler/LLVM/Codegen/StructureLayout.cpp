@@ -130,7 +130,9 @@ void fill_structure_body(
         // zero-sized field lives at. skipping the table here made gep_property CreateStructGEP
         // a missing LLVM field
         if (max_size == 0) {
-            packed.llvm_struct->setBody(std::vector<llvm::Type *>{ tag_ty });
+            if (packed.llvm_struct->isOpaque()) {
+                packed.llvm_struct->setBody(std::vector<llvm::Type *>{ tag_ty });
+            }
 
             const uint64_t payload_start = layout.getTypeAllocSize(packed.llvm_struct);
             for (size_t i = 1; i < type.property_count(); i++) {
@@ -144,7 +146,9 @@ void fill_structure_body(
         const uint64_t units = storage_size / max_align;
         llvm::Type *storage_ty = llvm::ArrayType::get(alignment_unit_type(context, max_align), units);
 
-        packed.llvm_struct->setBody({ tag_ty, storage_ty });
+        if (packed.llvm_struct->isOpaque()) {
+            packed.llvm_struct->setBody({ tag_ty, storage_ty });
+        }
 
         const uint64_t payload_start = layout.getStructLayout(packed.llvm_struct)->getElementOffset(1);
         for (size_t i = 1; i < type.property_count(); i++) {
@@ -162,7 +166,9 @@ void fill_structure_body(
     }
 
     Structure &body = body_of();
-    body.llvm_struct->setBody(member_types);
+    if (body.llvm_struct->isOpaque()) {
+        body.llvm_struct->setBody(member_types);
+    }
     body.packed_payload = false;
     body.property_byte_offset.assign(type.property_count(), 0);
 

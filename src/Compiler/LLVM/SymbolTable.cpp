@@ -36,3 +36,8 @@ Compiler::LLVM::structure_id_t Compiler::LLVM::StructureTable::push_structure(co
 
     return handle;
 }
+
+void Compiler::LLVM::StructureTable::bind_declaration(const AST::TypeDeclNode *structdecl, structure_id_t id)
+{
+    _struct_ast_map[structdecl] = id;
+}

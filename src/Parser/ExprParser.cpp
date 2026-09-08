@@ -124,6 +124,11 @@ AST::StringInterpolationExprNode *parse_string_interpolation(Parser::Payload &pa
                 payload.context.code_ref(token), error->message);
         }
 
+        if (auto snippet = AST::interpolation_lookalike(token.value())) {
+            payload.collector.collect_issue<AST::Issue::InterpolationWithoutDollar>(
+                payload.context.code_ref(token), *snippet);
+        }
+
         node.chunks.push_back(std::move(bytes));
     };
 
@@ -1133,8 +1138,9 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
     return &node;
 }
 
-// **postfix on a node that has not already been through the chain.** a parenthesised group
-// and a prefix unary do not call parse_postfix_chain themselves. wrapping twice is a no-op
+// **postfix on a node that has not already been through the chain.** grouping and prefix
+// unary apply postfix after the operand is finished. a second wrap is a no-op when the
+// chain already consumed the suffix
 const AST::NodeReference with_postfix(Parser::Payload &payload, AST::NodeReference node)
 {
     if (!node.has() || !node.is_expression_node()) {
@@ -1745,6 +1751,16 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
                 payload.context.code_ref(token), error->message);
         }
 
+        // a `'` string is verbatim and is not scanned. a `"` string with no `{$` is one token, so
+        // `{twice($n)}` and `{LIMIT}` would otherwise print as source with no diagnostic
+        const std::string &spelling = token.value();
+        if (spelling.size() >= 2 && spelling.front() == '"') {
+            if (auto snippet = AST::interpolation_lookalike(spelling.substr(1, spelling.size() - 2))) {
+                payload.collector.collect_issue<AST::Issue::InterpolationWithoutDollar>(
+                    payload.context.code_ref(token), *snippet);
+            }
+        }
+
         // the type the literal *is*. stamped rather than looked up later, because result_type() has no
         // way to reach the collector - see the field's comment
         if (payload.collector.core_types.has(AST::CoreTypeKind::t_string)) {
@@ -2259,13 +2275,19 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
         return with_postfix(payload, AST::make_ref(unary));
     }
 
-    // a parenthesized subexpression, e.g. -(a + b)
+    // a grouped subexpression. postfix (`as`, `instanceof`, `->`) is applied after the
+    // close paren, so `((STEPS - 1) as float32)` is a cast of a group, not a second
+    // operand the yard never collected. grouping is an operand, not a shunting-yard
+    // operator: putting `(` on the operator stack stopped the collection loop at `as`
+    // (which is deliberately not an `is_expr_token`) while the outer `(` was still open
     if (cursor.is_type(Token::Type::t_open_paren)) {
         cursor.skip();
         auto inner = Parser::parse_expr_ref(payload, expected_type);
-        if (cursor.is_type(Token::Type::t_close_paren)) {
-            cursor.skip();
+        if (!cursor.is_type(Token::Type::t_close_paren)) {
+            payload.collect_unexpected_token(Token::Type::t_close_paren);
+            return inner.has() ? with_postfix(payload, inner) : AST::make_void_ref();
         }
+        cursor.skip();
         return with_postfix(payload, inner);
     }
 
@@ -2296,24 +2318,10 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
         if (part.opnode == nullptr) {
             output.push_back(part);
         }
-        else if (part.opnode->op->type == Token::Type::t_open_paren) {
-            operator_stack.push(part.opnode);
-        }
-        else if (part.opnode->op->type == Token::Type::t_close_paren) {
-            while (!operator_stack.empty() && operator_stack.top()->op->type != Token::Type::t_open_paren) {
-                output.push_back({AST::make_void_ref(), operator_stack.top()});
-                operator_stack.pop();
-            }
-
-            // ensure we have the opening "(", otherwise something is off
-            assert(operator_stack.top()->op->type == Token::Type::t_open_paren);
-            operator_stack.pop();
-        }
         else {
+            // grouping is an operand, so a leaked paren is reported at rebuild
             while (
                 !operator_stack.empty() &&
-                // O2Prec.assoc != AST::OpAssociativity::left &&
-                operator_stack.top()->op->type != Token::Type::t_open_paren &&
                 (
                     O2Prec.sequence < O1Prec.sequence ||
                     (
@@ -2363,15 +2371,12 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
 
     std::vector<ExprPart> expr_parts;
 
-    int depth = 0;
-
     auto token = cursor.here();
-    auto tvalue = token.value();
 
     while (is_expr_token(payload, cursor)) {
-        // if we have a closing parenthesis and the depth is 0, we can break the loop
-        // because we have reached the end of the expression
-        if (cursor.is_type(Token::Type::t_close_paren) && depth == 0) {
+        // grouping is an operand, so a close paren always ends this expression - the
+        // matching open was consumed by parse_prefix_unary, which is waiting for this token
+        if (cursor.is_type(Token::Type::t_close_paren)) {
             break;
         }
 
@@ -2384,17 +2389,20 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         // a '-' or '+' in operand position is a prefix unary operator, not a
         // binary one. detect it and parse the operand it applies to, otherwise
         // the shunting yard would hand parse_binary_expr a null lhs and crash
-        bool expects_operand = expr_parts.empty() ||
-            (expr_parts.back().opnode != nullptr &&
-             expr_parts.back().opnode->op->type != Token::Type::t_close_paren);
+        // a grouped `(...)` is one operand, so a close paren never sits in `expr_parts`.
+        // after a group the last part is the inner expression and the next token is infix
+        bool expects_operand = expr_parts.empty() || expr_parts.back().opnode != nullptr;
 
         // ...and the same is true of any symbol declared in *prefix* position. without this arm a word
         // operator in operand position - the plain call `avg(1.0, 2.0)`, where `avg` is also declared
         // infix - would be read as an operator with nothing on its left
         if (op != nullptr && expects_operand &&
             (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add
+                || op->type == Token::Type::t_open_paren
                 || op->is_prefix_only() || op->has_fixity(AST::OpFixity::t_prefix)))
         {
+            // `(` is grouping, parsed by parse_prefix_unary, not a yard operator. without
+            // this arm it fell through to parse_operand, which never opens a group
             auto node = parse_prefix_unary(payload, expected_type);
             if (!node.has()) {
                 return AST::make_void_ref();
@@ -2420,7 +2428,13 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         // the one built-in exception is `!`, which has no infix meaning to be the language's - it is
         // asked here only after the prefix arm above declined, so what is left is `$a ! $b`, and
         // falling through reports it as two expressions with nothing between them
-        const bool usable_here = op != nullptr && !op->is_prefix_only()
+        // grouping parens are operands, parsed by parse_prefix_unary, not infix operators
+        // the yard used to collect. `as` is not an `is_expr_token`, so a nested
+        // `((e) as T)` stopped the loop at `as` with the outer `(` still on the stack
+        const bool grouping_paren = op != nullptr
+            && (op->type == Token::Type::t_open_paren || op->type == Token::Type::t_close_paren);
+
+        const bool usable_here = op != nullptr && !op->is_prefix_only() && !grouping_paren
             && (!op->is_custom() || (op->has_fixity(AST::OpFixity::t_infix) && !expects_operand));
 
         if (usable_here) {
@@ -2428,13 +2442,6 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
 
             cursor.skip(match.token_count);
             expr_parts.push_back({AST::make_void_ref(), &opnode});
-
-            // if the operator is a open parenthesis, we increase the depth
-            if (op->type == Token::Type::t_open_paren) {
-                depth++;
-            } else if (op->type == Token::Type::t_close_paren) {
-                depth--;
-            }
 
             continue;
         }
@@ -2546,10 +2553,9 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         return AST::make_void_ref();
     }
 
-    // the yard treats `(` `)` as operators, so `(7 + 1) as T` is collected as those
-    // parts and `as` is still in the stream. postfix after the rebuilt expression is
-    // what attaches it. a wrap on a single part is not this: that operand already ran
-    // parse_operand
+    // grouping is an operand, so `(7 + 1) as T` already ran postfix inside
+    // parse_prefix_unary. this wrap is for a rebuilt binary that postfix did not
+    // see, and is a no-op on a node the chain already consumed
     return with_postfix(payload, node_stack.top());
 }
 

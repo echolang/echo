@@ -1,0 +1,19 @@
+interface DeviceProtocol
+{
+    function uploadTexture(TextureDesc $d, int32 $n) : void;
+}
+
+struct TextureDesc
+{
+    int32 $w;
+    int32 $h;
+    int32 $format;
+}
+
+struct MetalDevice : DeviceProtocol
+{
+    function uploadTexture(TextureDesc $d) : void
+    {
+        TextureDesc $copy = TextureDesc($d->w, $d->h);
+    }
+}

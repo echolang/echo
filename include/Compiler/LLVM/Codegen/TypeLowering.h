@@ -58,6 +58,12 @@ namespace Compiler::LLVM
         void build_function_maps();
         void build_struct_maps();
 
+        // interned StructTypes belong to the LLVMContext they were minted in. compile_bundle
+        // replaces that context and reconstructs TbaaTree; this map has to go with it or a
+        // second compile looks up destroyed ComplexType* keys and returns types from the
+        // previous context
+        void forget_interned_structs();
+
         llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // **what the type system knows and the IR did not say.** every declaration went to LLVM with no
@@ -171,10 +177,10 @@ namespace Compiler::LLVM
         // interface or callable. over a pointer, a class handle or a weak handle there is no wrapper at
         // all and `T?` lowers to `T`, because a null address already *is* the empty case
         //
-        // named `eco.optional.<mangled>` and looked up by name first, exactly as class_header_llvm_type is,
-        // so every unit that mentions `int32?` agrees on one llvm::Type. the mangled name is what keeps
-        // `int32?` and `float64?` apart - a literal StructType would work too, but the name is what makes
-        // the IR readable when a wrapped optional turns up in a dump
+        // interned by the optional's ComplexType, the same map every other struct uses, so the
+        // wrapper and its payload are one llvm::Type in every unit. looking the name up in the
+        // context used to share the wrapper while each unit had its own payload, which is
+        // `insertvalue` of `%Viewport.63` into a pair whose field is `%Viewport.31`
         llvm::StructType *optional_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
 
         // the **header** every class block starts with, `{ i64 strong, ptr typeinfo }`, with no payload.
@@ -275,7 +281,16 @@ namespace Compiler::LLVM
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
 
+        // one llvm::StructType per Echo ComplexType per LLVMContext. first unit to lower a type
+        // creates it opaque; every later unit reuses the pointer and still registers its own
+        // StructureTable row. sharing the wrapper without sharing the payload was the optional
+        // insertvalue failure; sharing neither left two `%Viewport`s in one unit. compile_bundle
+        // forgets the map when it replaces the context
+        llvm::StructType *intern_struct_type(const AST::ComplexType *type, const std::string &name);
+
         CodegenContext &_ctx;
+
+        std::unordered_map<const AST::ComplexType *, llvm::StructType *> _context_structs;
     };
 };
 

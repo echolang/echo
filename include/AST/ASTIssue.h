@@ -196,6 +196,12 @@ namespace AST
         // offer the other: a value carries a `$`, so a missing one lands here rather than at UnknownVariable
         MAKE_ISSUE_DEF1(UnknownConstant, IssueSeverity::Error, const std::string, constant_name);
 
+        // `{twice($n)}` or `{LIMIT}` in a `"` string. a hole opens only on `{$`, so these used to
+        // print as source text with no diagnostic - which is how every sampler hashed the same key.
+        // the snippet is the `{...}` that looked like a hole; the help is the bind, never `{$LIMIT}`
+        MAKE_ISSUE_DEF1(InterpolationWithoutDollar, IssueSeverity::Error, const std::string, snippet,
+            std::vector<IssueNote> notes() const override;);
+
         MAKE_ISSUE_DEF1(UnknownUse, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(DuplicateUse, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousUse, IssueSeverity::Error, const std::string, _message);

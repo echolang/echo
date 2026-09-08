@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] MissingArgument  interface_arity_and_extra_field.eco:17:29
+
+  The parameter '$format' of 'TextureDesc' has no argument, and no default.
+
+  16 |     {
+  17 |         TextureDesc $copy = TextureDesc($d->w, $d->h);
+     :                             ^^^^^^^^^^^
+  18 |     }
+
+[error] UnmetInterfaceRequirement  interface_arity_and_extra_field.eco:13:8
+
+  'MetalDevice' says it conforms to 'DeviceProtocol' but does not satisfy 'uploadTexture(TextureDesc, int32) : void' - the closest it declares is 'MetalDevice::uploadTexture(TextureDesc)'.
+
+  12 | 
+  13 | struct MetalDevice : DeviceProtocol
+     :        ^^^^^^^^^^^
+  14 | {
+
+2 errors, nothing was compiled.

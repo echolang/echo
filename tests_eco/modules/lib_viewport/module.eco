@@ -1,0 +1,10 @@
+/*
+ * A library struct returned as T? from another module. The payload is a named user
+ * struct lowered in more than one unit - the shape that produced two `%Viewport`
+ * llvm types and failed insertvalue on the wrap.
+ */
+
+#[module: "gfx"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

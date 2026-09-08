@@ -173,6 +173,10 @@ void AccessPass::check_read_escape(FunctionCallExprNode &node, size_t index)
     // **the parameter first, the argument second.** these three are pointer and enum comparisons and
     // they reject nearly every argument in a program; the walk below is the expensive half, so asking
     // it first would pay for it on each of them
+    if (index >= node.decl->args.size()) {
+        return;
+    }
+
     const VarDeclNode *param = node.decl->args[index];
     if (param == nullptr || !param->has_type()) {
         return;

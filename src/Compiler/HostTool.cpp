@@ -422,6 +422,49 @@ namespace
     }
 };
 
+std::filesystem::path Compiler::darwin_sdk_root()
+{
+#if !defined(__APPLE__)
+    return {};
+#else
+    static const std::filesystem::path root = [] {
+        if (const char *from_env = std::getenv("SDKROOT"); from_env != nullptr && *from_env != '\0') {
+            return std::filesystem::path(from_env);
+        }
+
+        // argv, not a shell: HostTool's contract, and the path can contain a space
+        const CapturedProcess shown = run_captured({ "xcrun", "--show-sdk-path" });
+        if (shown.exit_code != 0) {
+            return std::filesystem::path();
+        }
+
+        const std::string path = trim_right(shown.output);
+        if (path.empty()) {
+            return std::filesystem::path();
+        }
+
+        return std::filesystem::path(path);
+    }();
+
+    return root;
+#endif
+}
+
+void Compiler::append_darwin_sdk_args(std::vector<std::string> &argv)
+{
+#if !defined(__APPLE__)
+    (void)argv;
+#else
+    const std::filesystem::path sdk = darwin_sdk_root();
+    if (sdk.empty()) {
+        return;
+    }
+
+    argv.push_back("-isysroot");
+    argv.push_back(sdk.string());
+#endif
+}
+
 void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv)
 {
 #if !defined(_WIN32)

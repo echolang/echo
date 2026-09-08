@@ -19,7 +19,7 @@ CHECK: store %string { %view { ptr @str, i64 3 }, ptr null }
 # show(string::view) - the conversion is a call to the `#[implicit]` method the type declared, taking
 # the address of the place. the view is a two-word aggregate so it comes back through sret, then
 # travels into `show` as a first-class argument
-CHECK: call void @_M6string_viewZZMRBMLC6string(ptr noalias sret(%view.0)
+CHECK: call void @_M6string_viewZZMRBMLC6string(ptr noalias sret(%view)
 CHECK: call void @_showZZMLCN6string4viewE
 
 # ...and no reference count moved to get there. this is the claim that would silently regress if the
@@ -39,8 +39,8 @@ CHECK-NOT: strong.inc
 #
 # **the `sret` is checked on the *call* and not only on the definition**, which is the bug this spelling
 # exists to catch: LLVM will fall back to the callee's attributes when a call site omits it, right up
-# until a merge leaves the two units naming two `%string`s - and then the hidden pointer travels in the
-# wrong register and every argument shifts one along
+# until a merge disagrees about the FunctionType. intern_struct_type now shares one `%view` across
+# units, so the fallback would happen to work again - the attribute on the call is still the contract
 CHECK: call void @_stringZZMRBCLC6string(ptr noalias sret(%string) align 8 %call.sret
 CHECK: call void @_whichZZMLC6string
 

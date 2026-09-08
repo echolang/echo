@@ -1,0 +1,18 @@
+// grouping is an operand, so a cast of a grouped expression can itself be grouped.
+// `((STEPS - 1) as float32)` used to stop the shunting yard at `as` with the outer
+// `(` still open, and `1.0f / ((STEPS - 1) as float32)` then blamed the `/`
+const int32 STEPS = 5;
+int32 $my = 4;
+
+float32 $a = (STEPS - 1) as float32;
+float32 $b = ((STEPS - 1) as float32);
+float32 $c = (($my) as float32);
+float32 $d = 1.0f / ((STEPS - 1) as float32);
+
+echo $a;
+echo $b;
+echo $c;
+echo $d;
+
+echo (7 + 1) as int64;
+echo 1 + 2 as int64;

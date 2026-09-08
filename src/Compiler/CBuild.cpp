@@ -125,6 +125,7 @@ bool c_spec_digest(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), digest);
 
     digest = Compiler::fnv1a64(Compiler::windows_sysroot().string(), digest);
+    digest = Compiler::fnv1a64(Compiler::darwin_sdk_root().string(), digest);
 
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
@@ -527,6 +528,7 @@ bool Compiler::build_c_sources(
         }
 
         Compiler::append_windows_sysroot_cc_args(argv);
+        Compiler::append_darwin_sdk_args(argv);
 
         argv.push_back("-o");
         argv.push_back(object.string());
@@ -609,6 +611,7 @@ bool Compiler::build_c_shared_library(
     // fast path exists to speed up - it runs once per module per change, not once per build
     std::vector<std::string> argv = { "clang", "-shared", "-o", out_library.string() };
     Compiler::append_windows_sysroot_link_args(argv);
+    Compiler::append_darwin_sdk_args(argv);
 
     for (const std::filesystem::path &object : objects) {
         argv.push_back(object.string());

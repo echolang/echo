@@ -419,6 +419,9 @@ namespace AST
         // "what type does this parameter have", so a caller comparing one parameter does not have
         // to materialize the whole vector to get the same answer
         inline ValueType parameter_type(size_t index) const {
+            if (index >= args.size() || args[index] == nullptr) {
+                return ValueType::make_unknown();
+            }
             return args[index]->has_type() ? args[index]->type() : ValueType::make_unknown();
         }
 

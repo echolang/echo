@@ -1,0 +1,6 @@
+function current() : gfx::Viewport?
+{
+    return gfx::make();
+}
+
+echo current()?->width() ?? 0;

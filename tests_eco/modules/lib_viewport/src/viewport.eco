@@ -1,0 +1,19 @@
+namespace gfx;
+
+public struct Viewport
+{
+    int32 $w;
+    int32 $h;
+    int32 $x;
+    int32 $y;
+
+    public const function width() : int32
+    {
+        return $this->w;
+    }
+}
+
+public function make() : Viewport
+{
+    return Viewport(1920, 1080, 0, 0);
+}

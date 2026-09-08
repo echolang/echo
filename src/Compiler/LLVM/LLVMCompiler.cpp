@@ -205,6 +205,10 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     _ctx.tbaa = std::make_unique<Compiler::LLVM::TbaaTree>(*_ctx.llvm_context);
     _ctx.builder = std::make_unique<llvm::IRBuilder<>>(*_ctx.llvm_context);
 
+    // interned StructTypes belong to the previous context, the same class of stale pointer
+    // TbaaTree is reconstructed above to avoid
+    _types.forget_interned_structs();
+
     // which declared type is `string`, published before anything is lowered: gen_literal_string builds a
     // constant of it, so it has to be answerable from the first expression onward
     _ctx.core_types_ptr = &bundle.collector.core_types;
