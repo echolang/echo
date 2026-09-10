@@ -1,0 +1,289 @@
+/**
+ * One renderer, two faces. `report()` has the numbers. `report_stable()` replaces
+ * every duration with `---` so a golden can pin structure.
+ *
+ * No total row: an indented site is inside the one above it.
+ */
+
+namespace std::profile;
+
+private function site_depth(int32 $site) : usize
+{
+    usize $depth = 0;
+    int32 $at = $site;
+
+    while ($at != ROOT_PARENT) {
+        if ($depth >= SHADOW_DEPTH) {
+            return $depth;
+        }
+
+        $at = site_at( $at as usize)->parent;
+        $depth = $depth + 1;
+    }
+
+    if ($depth == 0) {
+        return 0;
+    }
+
+    return $depth - 1;
+}
+
+private function indented_name(int32 $site) : string
+{
+    usize $depth = site_depth($site);
+    string $out = '';
+    usize $i = 0;
+
+    while ($i < $depth) {
+        $out->append('  ');
+        $i = $i + 1;
+    }
+
+    $out->append(site_at( $site as usize)->name);
+
+    return $out;
+}
+
+private function name_column_width() : usize
+{
+    usize $width = 4;
+    usize $i = 0;
+
+    while ($i < SITE_COUNT) {
+        if (site_at( $i)->used) {
+            string $n = indented_name($i as int32);
+
+            if ($n->size() > $width) {
+                $width = $n->size();
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    return $width;
+}
+
+private function pad_right(const string& $text, usize $width) : string
+{
+    return str::from($text, str::concat('>', str::from($width as uint64)));
+}
+
+private function pad_left(const string& $text, usize $width) : string
+{
+    return str::from($text, str::concat('<', str::from($width as uint64)));
+}
+
+private function fmt_duration(uint64 $ns, bool $stable, usize $width) : string
+{
+    if ($stable) {
+        return pad_right('---', $width);
+    }
+
+    float64 $ms = ($ns as float64) / 1000000.0;
+
+    return pad_right(str::from($ms, '.2f'), $width);
+}
+
+private function fmt_avg_us(uint64 $total_ns, uint64 $calls, bool $stable, usize $width) : string
+{
+    if ($stable) {
+        return pad_right('---', $width);
+    }
+
+    if ($calls == 0) {
+        return pad_right(str::from(0.0, '.1f'), $width);
+    }
+
+    float64 $us = (($total_ns as float64) / ($calls as float64)) / 1000.0;
+
+    return pad_right(str::from($us, '.1f'), $width);
+}
+
+private function dropped_enters() : uint64
+{
+    uint64 $n = 0;
+    usize $i = 0;
+
+    while ($i < SLOT_COUNT) {
+        $n = $n + slot_at( $i)->dropped_enters;
+        $i = $i + 1;
+    }
+
+    return $n;
+}
+
+private function dropped_exits() : uint64
+{
+    uint64 $n = 0;
+    usize $i = 0;
+
+    while ($i < SLOT_COUNT) {
+        $n = $n + slot_at( $i)->dropped_exits;
+        $i = $i + 1;
+    }
+
+    return $n;
+}
+
+private function append_site_row(string& $out, int32 $site, usize $name_width, bool $stable) : void
+{
+    site_row& $row = site_at( $site as usize);
+    $out->append('  ');
+    $out->append(pad_left(indented_name($site), $name_width));
+    $out->append('  ');
+    $out->append(pad_right(str::from($row->calls), 8));
+    $out->append('  ');
+    $out->append(fmt_duration($row->total_ns, $stable, 12));
+    $out->append('  ');
+    $out->append(fmt_duration($row->self_ns, $stable, 12));
+    $out->append('  ');
+    $out->append(fmt_avg_us($row->total_ns, $row->calls, $stable, 12));
+    $out->append('\n');
+}
+
+private function append_children(string& $out, int32 $parent, usize $name_width, bool $stable) : void
+{
+    usize $i = 0;
+
+    while ($i < SITE_COUNT) {
+        if (site_at( $i)->used) {
+            if (site_at( $i)->parent == $parent) {
+                append_site_row($out, $i as int32, $name_width, $stable);
+                append_children($out, $i as int32, $name_width, $stable);
+            }
+        }
+
+        $i = $i + 1;
+    }
+}
+
+private function sort_frame_durations(fixed_array<uint64, 120>& $xs, usize $n) : void
+{
+    usize $i = 1;
+
+    while ($i < $n) {
+        uint64 $key = $xs[$i];
+        usize $j = $i;
+
+        while ($j > 0) {
+            if ($xs[$j - 1] <= $key) {
+                break;
+            }
+
+            $xs[$j] = $xs[$j - 1];
+            $j = $j - 1;
+        }
+
+        $xs[$j] = $key;
+        $i = $i + 1;
+    }
+}
+
+private function percentile(const fixed_array<uint64, 120>& $xs, usize $n, usize $pct) : uint64
+{
+    if ($n == 0) {
+        return 0;
+    }
+
+    usize $i = ($pct * $n) / 100;
+
+    if ($i >= $n) {
+        $i = $n - 1;
+    }
+
+    return $xs[$i];
+}
+
+private function format_report(bool $stable) : string
+{
+    if (!engine::$running) {
+        if (engine::$frame_count == 0) {
+            usize $i = 0;
+            bool $any = false;
+
+            while ($i < SITE_COUNT) {
+                if (site_at( $i)->used) {
+                    $any = true;
+                    break;
+                }
+
+                $i = $i + 1;
+            }
+
+            if (!$any) {
+                return '';
+            }
+        }
+    }
+
+    usize $name_width = name_column_width();
+    string $out = '[profile]\n';
+    $out->append('  frames');
+    $out->append(pad_right(str::from(engine::$frame_count as uint64), 20));
+    $out->append('\n');
+    $out->append('  frame ms       avg   ');
+
+    if ($stable) {
+        $out->append('---    p50   ---    p99  ---\n');
+    } else {
+        usize $n = engine::$frame_count;
+        fixed_array<uint64, 120> $xs = fixed_array<uint64, 120>();
+        uint64 $sum = 0;
+        usize $i = 0;
+
+        while ($i < $n) {
+            $xs[$i] = frame_at( $i)->duration_ns;
+            $sum = $sum + $xs[$i];
+            $i = $i + 1;
+        }
+
+        sort_frame_durations($xs, $n);
+        uint64 $avg = 0;
+
+        if ($n > 0) {
+            $avg = $sum / ($n as uint64);
+        }
+
+        $out->append(str::from(($avg as float64) / 1000000.0, '.2f'));
+        $out->append('    p50   ');
+        $out->append(str::from((percentile($xs, $n, 50) as float64) / 1000000.0, '.2f'));
+        $out->append('    p99  ');
+        $out->append(str::from((percentile($xs, $n, 99) as float64) / 1000000.0, '.2f'));
+        $out->append('\n');
+    }
+
+    $out->append('  ');
+    $out->append(pad_left('site', $name_width));
+    $out->append('  ');
+    $out->append(pad_right('calls', 8));
+    $out->append('  ');
+    $out->append(pad_right('total ms', 12));
+    $out->append('  ');
+    $out->append(pad_right('self ms', 12));
+    $out->append('  ');
+    $out->append(pad_right('avg us', 12));
+    $out->append('\n');
+
+    append_children($out, ROOT_PARENT, $name_width, $stable);
+
+    $out->append('  dropped ');
+    $out->append(str::from(dropped_enters()));
+    $out->append(' enters, ');
+    $out->append(str::from(dropped_exits()));
+    $out->append(' exits, ');
+    $out->append(str::from(engine::$dropped_events));
+    $out->append(' events\n');
+
+    return $out;
+}
+
+public function report() : string
+{
+    return format_report(false);
+}
+
+public function report_stable() : string
+{
+    return format_report(true);
+}

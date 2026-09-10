@@ -1,0 +1,27 @@
+/**
+ * A named region of a frame. Unique so a copy cannot close twice.
+ */
+
+namespace std::profile;
+
+/**
+ * RAII marker around a name. The constructor pushes; the destructor pops.
+ * Without `start()`, both are a flag check.
+ */
+#[unique]
+public struct zone
+{
+    private bool $open;
+
+    public constructor(const string& $name)
+    {
+        $this->open = enter($name);
+    }
+
+    destructor()
+    {
+        if ($this->open) {
+            exit();
+        }
+    }
+}

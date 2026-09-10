@@ -1,0 +1,17 @@
+// the ring keeps 120 closed frames; the 130th drops the oldest
+use std::profile;
+
+test frame_ring_rotates {
+    profile::start();
+    int32 $i = 0;
+
+    while ($i < 130) {
+        profile::frame();
+        {
+            profile::zone $z = profile::zone('tick');
+        }
+        $i = $i + 1;
+    }
+
+    assert(profile::frames()->count() == 120);
+}

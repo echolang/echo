@@ -1,0 +1,17 @@
+// counts, not times: two nested zones, inner indented under outer
+use std::profile;
+
+test nested_zones {
+    profile::start();
+    {
+        profile::zone $outer = profile::zone('outer');
+        {
+            profile::zone $inner = profile::zone('inner');
+        }
+    }
+
+    string $r = profile::report_stable();
+    assert($r->contains('outer'));
+    assert($r->contains('  inner'));
+    assert($r->contains('---'));
+}

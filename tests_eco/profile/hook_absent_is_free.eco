@@ -1,0 +1,10 @@
+// without start(), a zone is a flag check. it must not allocate
+use std::profile;
+
+test hook_absent_is_free {
+    usize $before = mem::live_allocations();
+    {
+        profile::zone $z = profile::zone('unused');
+    }
+    assert(mem::live_allocations() == $before);
+}

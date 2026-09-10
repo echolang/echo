@@ -1,0 +1,62 @@
+/**
+ * The 120-frame ring a game overlay reads.
+ *
+ * `start()` opens frame 0. `frame()` commits the open one into the ring and
+ * opens the next. Oldest drops off when the ring is full.
+ */
+
+namespace std::profile;
+
+public struct frame
+{
+    public uint64 $start_ns;
+    public uint64 $duration_ns;
+}
+
+public function frame() : void
+{
+    if (!engine::$running) {
+        return;
+    }
+
+    uint64 $now = now_ns();
+
+    if (engine::$frame_open) {
+        uint64 $start = engine::$frame_open_ns;
+        uint64 $dur = 0;
+
+        if ($now > $start) {
+            $dur = $now - $start;
+        }
+
+        if (engine::$frame_count < FRAME_RING) {
+            usize $at = engine::$frame_count;
+            frame& $dst = frame_at( $at);
+            $dst->start_ns = $start;
+            $dst->duration_ns = $dur;
+            engine::$frame_count = $at + 1;
+        } else {
+            usize $i = 0;
+
+            while ($i + 1 < FRAME_RING) {
+                frame& $dst = frame_at( $i);
+                frame& $src = frame_at( $i + 1);
+                $dst->start_ns = $src->start_ns;
+                $dst->duration_ns = $src->duration_ns;
+                $i = $i + 1;
+            }
+
+            frame& $last = frame_at( FRAME_RING - 1);
+            $last->start_ns = $start;
+            $last->duration_ns = $dur;
+        }
+    }
+
+    engine::$frame_open = true;
+    engine::$frame_open_ns = $now;
+}
+
+public function frames() : slice<frame>
+{
+    return frames_window(engine::$frame_count);
+}

@@ -1,0 +1,5 @@
+mode: test
+
+--- OUT --->
+ok   1/1  main/nested_zones.eco::nested_zones
+1 test passed

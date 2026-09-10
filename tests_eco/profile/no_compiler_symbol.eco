@@ -1,0 +1,8 @@
+// this PR is pure Echo. no compiler thunk, so no __eco_profile in the IR
+use std::profile;
+
+profile::start();
+{
+    profile::zone $z = profile::zone('simulate');
+}
+echo 1;

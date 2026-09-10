@@ -1,0 +1,84 @@
+/**
+ * Chrome Trace Event JSON. Complete events (`ph:"X"`), one object per closed zone.
+ * The path is required, never defaulted.
+ */
+
+namespace std::profile;
+
+private function json_escape(const string& $s) : string
+{
+    string $out = '';
+    usize $i = 0;
+
+    while ($i < $s->size()) {
+        uint8 $b = $s->byte($i);
+
+        if ($b == 34) {
+            $out->append('\\"');
+        } else {
+            if ($b == 92) {
+                $out->append('\\\\');
+            } else {
+                $out->append($s->sub($i, 1));
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+public function write_trace(string $path) : void
+{
+    if (!engine::$running) {
+        if (engine::$event_next == 0) {
+            return;
+        }
+    }
+
+    usize $n = engine::$event_next;
+
+    if ($n > TRACE_CAP) {
+        $n = TRACE_CAP;
+    }
+
+    string $body = '{"traceEvents":[';
+    usize $i = 0;
+
+    while ($i < $n) {
+        if ($i > 0) {
+            $body->append(',');
+        }
+
+        trace_event $e = get_event($i);
+        string $name = '';
+
+        if ($e->site >= 0) {
+            usize $at = $e->site as usize;
+
+            if ($at < SITE_COUNT) {
+                if (site_at($at)->used) {
+                    $name = site_at($at)->name;
+                }
+            }
+        }
+
+        $body->append('{"name":"');
+        $body->append(json_escape($name));
+        $body->append('","cat":"cpu","ph":"X","ts":');
+        $body->append(str::from($e->ts_us));
+        $body->append(',"dur":');
+        $body->append(str::from($e->dur_us));
+        $body->append(',"pid":1,"tid":');
+        $body->append(str::from($e->tid as uint64));
+        $body->append('}');
+        $i = $i + 1;
+    }
+
+    $body->append(']}');
+
+    usize $ignored = guard std::io::writefile($path, $body) else ($err) {
+        die('profile::write_trace could not write the file');
+    }
+}

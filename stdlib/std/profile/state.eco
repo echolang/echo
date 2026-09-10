@@ -1,0 +1,450 @@
+/**
+ * Per-thread shadow stacks and the process-wide site table behind `std::profile`.
+ *
+ * Tables live in one class box, allocated by `start()`. The hook never allocates
+ * after that. A later compiler hook calls the same `enter` / `exit` a `zone` does.
+ */
+
+namespace std::profile;
+
+internal const usize SLOT_COUNT = 64;
+internal const usize SHADOW_DEPTH = 128;
+internal const usize SITE_COUNT = 256;
+internal const usize FRAME_RING = 120;
+internal const usize TRACE_CAP = 4096;
+internal const int32 ROOT_PARENT = -1;
+
+internal struct shadow_entry
+{
+    int32 $site;
+    uint64 $entered_ns;
+    uint64 $child_ns;
+}
+
+internal struct slot
+{
+    usize $owner;
+    usize $top;
+    uint64 $dropped_enters;
+    uint64 $dropped_exits;
+}
+
+internal struct site_row
+{
+    string $name;
+    int32 $parent;
+    uint64 $calls;
+    uint64 $total_ns;
+    uint64 $self_ns;
+    uint64 $max_ns;
+    bool $used;
+}
+
+internal struct trace_event
+{
+    usize $tid;
+    int32 $site;
+    uint64 $ts_us;
+    uint64 $dur_us;
+}
+
+internal class store
+{
+    slot[64] $slots;
+    site_row[256] $sites;
+    frame[120] $frames;
+    ptr<shadow_entry> $shadow;
+    ptr<trace_event> $events;
+
+    constructor()
+    {
+        slot[64] $zero_slots;
+        $this->slots = mv $zero_slots;
+        site_row[256] $zero_sites;
+        $this->sites = mv $zero_sites;
+        frame[120] $zero_frames;
+        $this->frames = mv $zero_frames;
+        $this->shadow:$ = mem::alloc<shadow_entry>(SLOT_COUNT * SHADOW_DEPTH);
+        $this->events:$ = mem::alloc<trace_event>(TRACE_CAP);
+
+        if ($this->shadow:$ == null) {
+            die('profile::start could not allocate');
+        }
+
+        if ($this->events:$ == null) {
+            die('profile::start could not allocate');
+        }
+    }
+
+    function slot_at(usize $i) : slot&
+    {
+        return &$this->slots[$i];
+    }
+
+    function site_at(usize $i) : site_row&
+    {
+        return &$this->sites[$i];
+    }
+
+    function frame_at(usize $i) : frame&
+    {
+        return &$this->frames[$i];
+    }
+
+    function get_event(usize $i) : trace_event
+    {
+        return $this->events:$[$i];
+    }
+
+    function set_event(usize $i, trace_event $e) : void
+    {
+        mem::init<trace_event>($this->events:$[$i], $e);
+    }
+
+    function get_shadow(usize $slot, usize $depth) : shadow_entry
+    {
+        return $this->shadow:$[$slot * SHADOW_DEPTH + $depth];
+    }
+
+    function set_shadow(usize $slot, usize $depth, shadow_entry $e) : void
+    {
+        mem::init<shadow_entry>($this->shadow:$[$slot * SHADOW_DEPTH + $depth], $e);
+    }
+}
+
+internal struct engine
+{
+    int32 $pad;
+
+    static bool $running = false;
+    static int64 $origin_secs = 0;
+    static int64 $origin_nanos = 0;
+    static store? $heap = null;
+
+    static usize $frame_count = 0;
+    static bool $frame_open = false;
+    static uint64 $frame_open_ns = 0;
+    static usize $event_next = 0;
+    static uint64 $dropped_events = 0;
+}
+
+internal function now_ns() : uint64
+{
+    std::time::instant $n = std::time::instant::now();
+    std::time::instant $origin = std::time::instant(
+        std::time::duration(engine::$origin_secs, engine::$origin_nanos)
+    );
+    int64 $ns = ($n - $origin)->as_nanos();
+
+    if ($ns < 0) {
+        return 0;
+    }
+
+    return $ns as uint64;
+}
+
+private function heap() : store
+{
+    store $h = guard engine::$heap else {
+        die('profile is not started');
+    }
+
+    return $h;
+}
+
+internal function slot_at(usize $i) : slot&
+{
+    store $h = heap();
+    return $h->slot_at($i);
+}
+
+internal function site_at(usize $i) : site_row&
+{
+    store $h = heap();
+    return $h->site_at($i);
+}
+
+internal function frame_at(usize $i) : frame&
+{
+    store $h = heap();
+    return $h->frame_at($i);
+}
+
+internal function get_event(usize $i) : trace_event
+{
+    store $h = heap();
+    return $h->get_event($i);
+}
+
+internal function set_event(usize $i, trace_event $e) : void
+{
+    store $h = heap();
+    $h->set_event($i, $e);
+}
+
+internal function get_shadow(usize $slot, usize $depth) : shadow_entry
+{
+    store $h = heap();
+    return $h->get_shadow($slot, $depth);
+}
+
+internal function set_shadow(usize $slot, usize $depth, shadow_entry $e) : void
+{
+    store $h = heap();
+    $h->set_shadow($slot, $depth, $e);
+}
+
+internal function frames_window(usize $count) : slice<frame>
+{
+    if ($count == 0) {
+        return slice<frame>(ptr<frame>(null), 0);
+    }
+
+    frame& $first = frame_at(0);
+
+    return slice<frame>(ptr<frame>($first:$), $count);
+}
+
+private function reset_tables() : void
+{
+    if (engine::$heap == null) {
+        engine::$heap = store();
+    }
+
+    usize $i = 0;
+
+    while ($i < SLOT_COUNT) {
+        slot& $s = slot_at($i);
+        $s->owner = 0;
+        $s->top = 0;
+        $s->dropped_enters = 0;
+        $s->dropped_exits = 0;
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < SITE_COUNT) {
+        site_row& $row = site_at($i);
+        $row->name = '';
+        $row->parent = ROOT_PARENT;
+        $row->calls = 0;
+        $row->total_ns = 0;
+        $row->self_ns = 0;
+        $row->max_ns = 0;
+        $row->used = false;
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < FRAME_RING) {
+        frame& $f = frame_at($i);
+        $f->start_ns = 0;
+        $f->duration_ns = 0;
+        $i = $i + 1;
+    }
+
+    engine::$frame_count = 0;
+    engine::$frame_open = false;
+    engine::$frame_open_ns = 0;
+    engine::$event_next = 0;
+    engine::$dropped_events = 0;
+}
+
+/**
+ * Open-addressed on `hash::of($tid)`. Above 64 live threads two threads share a slot:
+ * a bounded lie rather than a crash.
+ */
+internal function find_slot() : usize
+{
+    usize $tid = std::thread::current()->raw;
+    usize $start = (hash::of($tid) as usize) & (SLOT_COUNT - 1);
+    usize $n = 0;
+
+    while ($n < SLOT_COUNT) {
+        usize $i = ($start + $n) & (SLOT_COUNT - 1);
+        slot& $s = slot_at($i);
+        usize $owner = mem::atomic::load<usize>($s->owner);
+
+        if ($owner == $tid) {
+            return $i;
+        }
+
+        if ($owner == 0) {
+            if (mem::atomic::compare_exchange<usize>($s->owner, 0, $tid)) {
+                return $i;
+            }
+
+            if (mem::atomic::load<usize>($s->owner) == $tid) {
+                return $i;
+            }
+        }
+
+        $n = $n + 1;
+    }
+
+    return $start;
+}
+
+private function find_or_insert_site(int32 $parent, const string& $name) : int32
+{
+    int32 $free = -1;
+    usize $i = 0;
+
+    while ($i < SITE_COUNT) {
+        site_row& $row = site_at($i);
+
+        if ($row->used) {
+            if ($row->parent == $parent) {
+                if ($row->name->equals($name)) {
+                    return $i as int32;
+                }
+            }
+        } else {
+            if ($free < 0) {
+                $free = $i as int32;
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($free < 0) {
+        return -1;
+    }
+
+    site_row& $at = site_at($free as usize);
+    $at->name = $name;
+    $at->parent = $parent;
+    $at->calls = 0;
+    $at->total_ns = 0;
+    $at->self_ns = 0;
+    $at->max_ns = 0;
+    $at->used = true;
+
+    return $free;
+}
+
+private function record_event(usize $tid, int32 $site, uint64 $entered_ns, uint64 $elapsed_ns) : void
+{
+    usize $i = mem::atomic::add<usize>(engine::$event_next, 1);
+
+    if ($i >= TRACE_CAP) {
+        engine::$dropped_events = engine::$dropped_events + 1;
+        return;
+    }
+
+    set_event($i, trace_event($tid, $site, $entered_ns / 1000, $elapsed_ns / 1000));
+}
+
+/**
+ * Push `$name` onto this thread's shadow stack. False when the profiler is off
+ * or a table overflowed; the matching `exit` must not run.
+ *
+ * Store the stack slot, then `$top`. A sampler loads `$top` then the slot.
+ */
+internal function enter(const string& $name) : bool
+{
+    if (!engine::$running) {
+        return false;
+    }
+
+    usize $si = find_slot();
+    slot& $s = slot_at($si);
+    usize $top = mem::atomic::load<usize>($s->top);
+    int32 $parent = ROOT_PARENT;
+
+    if ($top > 0) {
+        $parent = get_shadow($si, $top - 1)->site;
+    }
+
+    int32 $site = find_or_insert_site($parent, $name);
+
+    if ($site < 0) {
+        $s->dropped_enters = $s->dropped_enters + 1;
+        return false;
+    }
+
+    if ($top >= SHADOW_DEPTH) {
+        $s->dropped_enters = $s->dropped_enters + 1;
+        return false;
+    }
+
+    set_shadow($si, $top, shadow_entry($site, now_ns(), 0));
+    mem::atomic::store<usize>($s->top, $top + 1);
+
+    return true;
+}
+
+internal function exit() : void
+{
+    if (!engine::$running) {
+        return;
+    }
+
+    usize $si = find_slot();
+    slot& $s = slot_at($si);
+    usize $top = mem::atomic::load<usize>($s->top);
+
+    if ($top == 0) {
+        $s->dropped_exits = $s->dropped_exits + 1;
+        return;
+    }
+
+    usize $d = $top - 1;
+    shadow_entry $top_ent = get_shadow($si, $d);
+    int32 $site = $top_ent->site;
+    uint64 $entered = $top_ent->entered_ns;
+    uint64 $child = $top_ent->child_ns;
+    uint64 $now = now_ns();
+    uint64 $elapsed = 0;
+
+    if ($now > $entered) {
+        $elapsed = $now - $entered;
+    }
+
+    uint64 $self = 0;
+
+    if ($elapsed > $child) {
+        $self = $elapsed - $child;
+    }
+
+    site_row& $row = site_at($site as usize);
+    $row->calls = $row->calls + 1;
+    $row->total_ns = $row->total_ns + $elapsed;
+    $row->self_ns = $row->self_ns + $self;
+
+    if ($elapsed > $row->max_ns) {
+        $row->max_ns = $elapsed;
+    }
+
+    if ($d > 0) {
+        shadow_entry $parent_ent = get_shadow($si, $d - 1);
+        $parent_ent->child_ns = $parent_ent->child_ns + $elapsed;
+        set_shadow($si, $d - 1, $parent_ent);
+    }
+
+    record_event($s->owner, $site, $entered, $elapsed);
+    mem::atomic::store<usize>($s->top, $d);
+}
+
+public function start() : void
+{
+    if (engine::$running) {
+        return;
+    }
+
+    reset_tables();
+    std::time::instant $n = std::time::instant::now();
+    engine::$origin_secs = $n->raw->secs;
+    engine::$origin_nanos = $n->raw->nanos;
+    engine::$running = true;
+    engine::$frame_open = true;
+    engine::$frame_open_ns = 0;
+}
+
+public function stop() : void
+{
+    engine::$running = false;
+}

@@ -1,0 +1,12 @@
+// durations replaced by --- so the table is golden-safe
+use std::profile;
+
+profile::start();
+{
+    profile::zone $outer = profile::zone('outer');
+    {
+        profile::zone $inner = profile::zone('inner');
+    }
+}
+profile::frame();
+echo profile::report_stable();

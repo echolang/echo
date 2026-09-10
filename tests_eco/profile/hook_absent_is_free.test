@@ -1,0 +1,5 @@
+mode: test
+
+--- OUT --->
+ok   1/1  main/hook_absent_is_free.eco::hook_absent_is_free
+1 test passed

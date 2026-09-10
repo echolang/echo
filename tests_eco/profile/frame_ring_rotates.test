@@ -1,0 +1,5 @@
+mode: test
+
+--- OUT --->
+ok   1/1  main/frame_ring_rotates.eco::frame_ring_rotates
+1 test passed

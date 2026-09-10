@@ -1,0 +1,5 @@
+--- IR --->
+CHECK: define i32 @main(
+CHECK-NOT: __eco_profile
+--- OUT --->
+1

@@ -1,0 +1,9 @@
+--- OUT --->
+[profile]
+  frames                   1
+  frame ms       avg   ---    p50   ---    p99  ---
+  site        calls      total ms       self ms        avg us
+  outer           1           ---           ---           ---
+    inner         1           ---           ---           ---
+  dropped 0 enters, 0 exits, 0 events
+
