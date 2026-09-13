@@ -43,6 +43,7 @@ bool Compiler::resolve_driver_options(
 
     out.target_os = cli.value(Opt::t_target_os);
     out.target_arch = cli.value(Opt::t_target_arch);
+    out.ios_device = cli.flag(Opt::t_ios_device);
     out.build_dir = cli.value(Opt::t_build_dir);
     out.package_dir = cli.value(Opt::t_package_dir);
     out.output = cli.value(Opt::t_output);

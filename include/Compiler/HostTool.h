@@ -55,8 +55,14 @@ namespace Compiler
     // the macOS SDK `ld` and Homebrew clang both need to find libSystem. empty
     // off Darwin, and empty when neither $SDKROOT nor `xcrun --show-sdk-path`
     // answered. asked once: xcrun is a fifth of what going straight to `ld`
-    // saves, and the path cannot change during a compile
+    // saves, and the path cannot change during a compile. `apple_sdk_root("")`
+    // is this
     std::filesystem::path darwin_sdk_root();
+
+    // `xcrun --sdk <name> --show-sdk-path`. empty `sdk` is darwin_sdk_root().
+    // empty off Darwin or when xcrun does not know the name. asked once per
+    // name: xcrun is the same cost darwin_sdk_root already paid once for macosx
+    std::filesystem::path apple_sdk_root(const std::string &sdk);
 
     // `-isysroot` for the clang driver, compile or link. no-op when
     // darwin_sdk_root() is empty, so Linux and a Darwin machine without

@@ -66,6 +66,7 @@ namespace Compiler
         t_emit_stdlib_header,
         t_target_os,
         t_target_arch,
+        t_ios_device,
         t_define,
         t_target_cpu,
         t_target_features,

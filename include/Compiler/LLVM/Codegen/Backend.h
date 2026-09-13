@@ -32,7 +32,7 @@ namespace Compiler::LLVM
         Backend(CodegenContext &ctx);
         ~Backend();
 
-        // resolves the host target and publishes its data layout on the context, so every
+        // resolves this invocation's target and publishes its data layout on the context, so every
         // llvm::Module can be created with a layout already attached. must run before
         // create_cmp_units
         //

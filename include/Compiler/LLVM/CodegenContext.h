@@ -156,7 +156,7 @@ namespace Compiler::LLVM
             return *type_registry_ptr;
         }
 
-        // the host target's data layout and triple, published by Backend::init_target before any
+        // this invocation's data layout and triple, published by Backend::init_target before any
         // module is created so that every module carries them from the start. this is what makes
         // a compile-time `size_of<T>()` answer the same number the running program will see -
         // asking a layout-less module gives LLVM's defaults, which match no real target

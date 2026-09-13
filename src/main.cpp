@@ -14,6 +14,7 @@
 #include "Parser/ModuleParser.h"
 #include "Compiler/BuildLayout.h"
 #include "Compiler/CBuild.h"
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/CommandLine.h"
 #include "Compiler/CommandLineHelp.h"
 #include "Compiler/CommandLineOption.h"
@@ -193,6 +194,7 @@ struct Program
 struct Invocation
 {
     Compiler::TargetFacts target_facts;
+    Compiler::CodegenTarget codegen;
 
     // **every manifest this project reaches**, in dependency order - which, since a `#[target: ...] { }`
     // scope may declare a `#[depends:]`, is no longer the same set as the modules a given program
@@ -1120,6 +1122,23 @@ static bool resolve_invocation(
         return false;
     }
 
+    // `build` is the only subcommand that emits objects, so it is the only one that fills a row.
+    // `run` / `test` keep the default-empty CodegenTarget (the host), which is what keeps
+    // `--target-os ios` a facts-only look at another platform's branch
+    if (driver.subcommand == Compiler::Subcommand::t_build) {
+        std::string error;
+
+        if (!Compiler::resolve_codegen_target(
+                out.target_facts,
+                driver.ios_device,
+                driver.target_arch,
+                out.codegen,
+                error)) {
+            diagnostics.render_untyped("Invalid Target", error);
+            return false;
+        }
+    }
+
     // **the subtarget, checked here and used much later.** it changes nothing the parse can see, so it
     // has no reason to be before it - except that a mistyped `--target-cpu` is a command line mistake,
     // and every other one of those is reported by the driver rather than by whatever stage first trips
@@ -1130,7 +1149,7 @@ static bool resolve_invocation(
         std::string error;
 
         if (!Compiler::resolve_subtarget(
-                llvm::sys::getDefaultTargetTriple(),
+                out.codegen.effective_triple(),
                 driver.options.target_cpu,
                 driver.options.target_features,
                 subtarget,
@@ -1206,6 +1225,7 @@ static bool run_front_end(
     // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
     // passes, and that is the whole of what it owes
     out.options = driver.options;
+    out.options.codegen = invocation.codegen;
 
     {
         Compiler::ScopedPhase phase("semantic passes");

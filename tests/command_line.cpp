@@ -524,6 +524,13 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "unknown --target-os 'macos'"));
     REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "ios"));
     REQUIRE(contains(refusal({ "run", "--target-arch", "x86", "a.eco" }), "unknown --target-arch 'x86'"));
+
+    REQUIRE(refusal({ "run", "--ios-device", "a.eco" }) == "'run' does not take '--ios-device'.");
+    REQUIRE(refusal({ "test", "--ios-device", "a.eco" }) == "'test' does not take '--ios-device'.");
+    REQUIRE(refusal({ "clean", "--ios-device" }) == "'clean' does not take '--ios-device'.");
+    REQUIRE(refusal({ "lsp", "--ios-device" }) == "'lsp' does not take '--ios-device'.");
+    REQUIRE(refusal({ "build", "--ios-device", "-o", "out", "a.eco" }) == "<accepted>");
+    REQUIRE(resolved({ "build", "--ios-device", "-o", "out", "a.eco" }).ios_device);
 }
 
 // **a flag a subcommand accepts and silently ignores is worse than one it rejects, and a *value* is no

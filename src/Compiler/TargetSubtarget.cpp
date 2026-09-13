@@ -35,8 +35,9 @@ namespace
     std::string baseline_cpu_of(const llvm::Triple &triple)
     {
         // every Apple Silicon Mac is an M1 or later - the triple *is* the guarantee here, because
-        // aarch64 Darwin has no earlier hardware to be compatible with
-        if (triple.isOSDarwin() && triple.isAArch64()) {
+        // aarch64 macOS has no earlier hardware to be compatible with. isMacOSX, not isOSDarwin:
+        // iOS is Darwin to LLVM, and an iPhone is not an M1. unlisted platforms stay generic
+        if (triple.isMacOSX() && triple.isAArch64()) {
             return "apple-m1";
         }
 
@@ -80,6 +81,21 @@ void ensure_native_target_registered()
         llvm::InitializeNativeTarget();
         llvm::InitializeNativeTargetAsmPrinter();
         llvm::InitializeNativeTargetAsmParser();
+#if defined(__APPLE__)
+        // iOS rows are AArch64 (device) or the host arch (simulator). native is one of those;
+        // the other has to be in the registry too or lookupTarget refuses a triple
+        // CodegenTarget can name. initializing the native one twice is a no-op
+        LLVMInitializeAArch64TargetInfo();
+        LLVMInitializeAArch64Target();
+        LLVMInitializeAArch64TargetMC();
+        LLVMInitializeAArch64AsmPrinter();
+        LLVMInitializeAArch64AsmParser();
+        LLVMInitializeX86TargetInfo();
+        LLVMInitializeX86Target();
+        LLVMInitializeX86TargetMC();
+        LLVMInitializeX86AsmPrinter();
+        LLVMInitializeX86AsmParser();
+#endif
         return true;
     }();
 

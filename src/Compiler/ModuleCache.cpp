@@ -4,7 +4,6 @@
 #include "eco.h"
 
 #include <llvm/Config/llvm-config.h>
-#include <llvm/TargetParser/Host.h>
 
 #include <fmt/core.h>
 
@@ -64,7 +63,7 @@ bool Compiler::fold_target_environment(
 {
     // once, into a local: normalizing a triple parses and reallocates, and both folds below want the same
     // string
-    const std::string triple = llvm::sys::getDefaultTargetTriple();
+    const std::string triple = options.codegen.effective_triple();
 
     digest = fnv1a64(triple, digest);
 

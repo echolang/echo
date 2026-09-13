@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "Compiler/CodegenTarget.h"
+
 #include <string>
 
 namespace Compiler
@@ -80,6 +82,13 @@ namespace Compiler
         // invocation with no flag, which is the shape of gap that reads right until a golden moves
         std::string target_cpu;
         std::string target_features;
+
+        // **what this invocation emits**, settled by Compiler::resolve_codegen_target.
+        // empty is the host. stored rather than re-derived because Backend and the C
+        // build both read it, so a C object and an Echo object cannot disagree about
+        // the triple or the SDK. the CPU *inside* the triple stays a request above,
+        // resolved twice
+        CodegenTarget codegen;
 
         // one predicate, because more than one emitter asks it - the `assert` builtin and the
         // `ptr<T>` -> `T&` narrowing today, whatever check comes next tomorrow. never compare the

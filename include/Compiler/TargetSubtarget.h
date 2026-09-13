@@ -16,9 +16,10 @@ namespace Compiler
     // a subtarget nobody is running on is a vectorizer answering for a machine that does not exist.
     //
     // deliberately **not** on Compiler::TargetFacts, close as the two read. That one answers what a
-    // `#[if: ...]` condition can see and says in its own comment that it does not cross-compile; this
-    // one changes what is emitted. Folding them would make `--target-os` - which exists so a test can
-    // assert what another platform's branch does - start choosing instruction sets.
+    // `#[if: ...]` condition can see and does not cross-compile; Compiler::CodegenTarget is the
+    // triple and sysroot, this is the CPU inside that triple. Folding either into TargetFacts
+    // would make `--target-os` - which exists so a test can assert what another platform's
+    // branch does - start choosing instruction sets.
     struct Subtarget
     {
         // never empty: the resolver's floor is "generic", which is what LLVM itself means by "the
@@ -31,10 +32,11 @@ namespace Compiler
         std::string features;
     };
 
-    // **LLVM's native target, registered.** Idempotent, and here rather than left implicit in
-    // Backend::init_target because nothing may be *asked* about a target before it is in the registry -
-    // and the CPU a person wrote has to be checked at the command line, which is long before the
-    // backend exists. One owner, so the two cannot register different sets
+    // **LLVM targets this compile may name, registered.** Native always; on Darwin also AArch64 and
+    // X86, because CodegenTarget can name `arm64-apple-ios` on an Intel Mac and
+    // `x86_64-apple-ios-simulator` on Apple Silicon. Idempotent, and here rather than left implicit
+    // in Backend::init_target because the CPU a person wrote has to be checked at the command line,
+    // which is long before the backend exists. One owner, so the two cannot register different sets
     void ensure_native_target_registered();
 
     // **the platform baseline for a triple** - the default, and neither `generic` nor the host.

@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -446,6 +447,36 @@ std::filesystem::path Compiler::darwin_sdk_root()
         return std::filesystem::path(path);
     }();
 
+    return root;
+#endif
+}
+
+std::filesystem::path Compiler::apple_sdk_root(const std::string &sdk)
+{
+#if !defined(__APPLE__)
+    (void)sdk;
+    return {};
+#else
+    if (sdk.empty()) {
+        return darwin_sdk_root();
+    }
+
+    static std::map<std::string, std::filesystem::path> cache;
+    const auto found = cache.find(sdk);
+    if (found != cache.end()) {
+        return found->second;
+    }
+
+    const CapturedProcess shown = run_captured({ "xcrun", "--sdk", sdk, "--show-sdk-path" });
+    std::filesystem::path root;
+    if (shown.exit_code == 0) {
+        const std::string path = trim_right(shown.output);
+        if (!path.empty()) {
+            root = std::filesystem::path(path);
+        }
+    }
+
+    cache.emplace(sdk, root);
     return root;
 #endif
 }

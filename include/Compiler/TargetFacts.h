@@ -17,11 +17,11 @@ namespace Compiler
     // - a second source of truth about what platform this is would let two files disagree about it
     // inside one compile.
     //
-    // deliberately **not** on CodegenContext, where `target_triple` lives. That one is published by
-    // Backend::init_target(), which runs inside compile_bundle - long after the three parse passes, and
-    // therefore long after the filter has already had to decide what to keep. These read
-    // llvm::sys::getDefaultTargetTriple() directly, which is free to call at any point and which
-    // Compiler::compute_module_keys already calls for the same reason.
+    // deliberately **not** the LLVM triple objects are emitted for - that is Compiler::CodegenTarget,
+    // and folding them is what would make `--target-os` start choosing instruction sets. These read
+    // llvm::sys::getDefaultTargetTriple() only to map the host onto the closed vocabularies.
+    // Backend::init_target publishes `target_triple` long after the filter has already had to decide
+    // what to keep.
     //
     // an Echo `const` can never reach here, and that is architectural rather than an omission: the filter
     // runs before pass 1, so no Echo declaration exists yet to read.
