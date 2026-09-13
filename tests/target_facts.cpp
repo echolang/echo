@@ -68,10 +68,11 @@ TEST_CASE("from_triple maps Android before Linux and iOS before Darwin", "[targe
     REQUIRE(macos.operating_system == "darwin");
     REQUIRE(macos.family() == "darwin");
 
-    const Compiler::TargetFacts linux = Compiler::TargetFacts::from_triple("x86_64-unknown-linux-gnu");
-    REQUIRE(linux.operating_system == "linux");
-    REQUIRE(linux.family() == "linux");
-    REQUIRE(linux.architecture == "x86_64");
+    // `linux` is a GNU predefined macro (the integer 1), so the identifier cannot be that
+    const Compiler::TargetFacts linux_gnu = Compiler::TargetFacts::from_triple("x86_64-unknown-linux-gnu");
+    REQUIRE(linux_gnu.operating_system == "linux");
+    REQUIRE(linux_gnu.family() == "linux");
+    REQUIRE(linux_gnu.architecture == "x86_64");
 
     const Compiler::TargetFacts windows = Compiler::TargetFacts::from_triple("x86_64-pc-windows-msvc");
     REQUIRE(windows.operating_system == "windows");
