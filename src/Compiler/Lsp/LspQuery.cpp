@@ -1,6 +1,5 @@
 #include "Compiler/Lsp/LspQuery.h"
 
-#include "AST/ASTAccess.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTConstantExpander.h"
 #include "AST/ASTFile.h"
@@ -25,8 +24,10 @@
 #include "Token.h"
 
 #include <cctype>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace
 {
@@ -553,30 +554,6 @@ namespace
         }
     }
 
-    std::string parameter_label(const AST::VarDeclNode &arg)
-    {
-        std::string label;
-        const AST::AccessEffect effect = AST::declared_access_effect(arg);
-        if (effect != AST::AccessEffect::t_none) {
-            label += AST::access_effect_spelling(effect);
-            label += " ";
-        }
-
-        if (arg.has_type()) {
-            label += arg.type().get_type_desciption();
-        }
-
-        if (!arg.name_full().empty()) {
-            if (!label.empty()) {
-                label += " ";
-            }
-
-            label += arg.name_full();
-        }
-
-        return label;
-    }
-
     Compiler::Lsp::SignatureHelp signature_help_of(const AST::FunctionDeclNode &decl)
     {
         Compiler::Lsp::SignatureHelp help;
@@ -586,16 +563,24 @@ namespace
             prefix = prefix.substr(0, paren);
         }
 
-        help.parameters.reserve(decl.args.size());
+        const std::vector<std::string> params = decl.written_parameter_spellings();
+        const size_t implicit = decl.implicit_arg_count();
+        help.parameters.reserve(params.size());
         std::string inside;
-        for (size_t i = decl.implicit_arg_count(); i < decl.args.size(); i++) {
-            const std::string label = parameter_label(*decl.args[i]);
-            if (!inside.empty()) {
-                inside += ", ";
+        for (size_t i = 0; i < params.size(); i++) {
+            std::string label = params[i];
+            const AST::VarDeclNode *arg
+                = (implicit + i < decl.args.size()) ? decl.args[implicit + i] : nullptr;
+            // signature_description omits an unlabelled `$name` so overload goldens stay
+            // `foo(int32)`. signature help is the other question: the editor is naming the
+            // argument the cursor is in
+            if (arg != nullptr && label.find('$') == std::string::npos && !arg->name_full().empty()) {
+                label += " ";
+                label += arg->name_full();
             }
 
-            inside += label;
             help.parameters.push_back(label);
+            inside += (i > 0 ? ", " : "") + label;
         }
 
         help.label = prefix + "(" + inside + ")";

@@ -5,7 +5,7 @@ expect: fail
 --- OUT --->
 [error] InvalidAttributeValue  module.eco:10:9
 
-  'framework "OpenGL"' is a Darwin framework and this build targets linux. Gate it with '#[if: os == darwin]' and name the platform's own library in the other arm.
+  'framework "OpenGL"' is an Apple framework and this build targets linux. Gate it with '#[if: family == darwin]' and name the platform's own library in the other arm.
 
    9 | 
   10 | #[link: framework "OpenGL"]

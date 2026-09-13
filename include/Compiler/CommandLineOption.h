@@ -249,9 +249,11 @@ namespace Compiler
         // `check` is for a vocabulary somebody else already owns, so listing those values here as well
         // would be the second list this whole type exists to abolish. Their help says them in prose.
         //
-        // neither, for free text: -o, --build-dir, --module, --define, --target-*, --link. `--link`
-        // deliberately has no checker - Compiler::parse_link_requirement needs a working directory and a
-        // TargetFacts, neither of which exists this early, so its refusal stays where the facts are
+        // neither, for free text: -o, --build-dir, --module, --define, --target-cpu, --target-features,
+        // --link. `--link` deliberately has no checker - Compiler::parse_link_requirement needs a
+        // working directory and a TargetFacts, neither of which exists this early, so its refusal
+        // stays where the facts are. `--target-os` and `--target-arch` are the other case: the
+        // vocabulary is TargetFacts', so they carry a `check` rather than a `values` list
         std::vector<OptionValue> values;
         OptionCheck check;
     };

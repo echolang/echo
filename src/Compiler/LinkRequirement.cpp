@@ -104,13 +104,15 @@ bool settle_link_requirement(
         return true;
 
     case Compiler::LinkScheme::t_framework:
-        // **refused rather than ignored.** A framework means nothing off Darwin, and quietly dropping it
-        // would leave a linux build failing on the symbols it was supposed to provide with nothing saying
-        // the declaration was never applied. Gating it is one line the author writes once
-        if (facts.operating_system != "darwin") {
+        // **refused rather than ignored.** A framework means nothing off Darwin-family, and quietly
+        // dropping it would leave a linux build failing on the symbols it was supposed to provide with
+        // nothing saying the declaration was never applied. Gating it is one line the author writes once.
+        // family, not os: ios is a second os that still links `-framework`, and a third Apple os added
+        // later inherits this without another OR
+        if (facts.family() != "darwin") {
             out_error = fmt::format(
-                "'{}' is a Darwin framework and this build targets {}. Gate it with "
-                "'#[if: os == darwin]' and name the platform's own library in the other arm.",
+                "'{}' is an Apple framework and this build targets {}. Gate it with "
+                "'#[if: family == darwin]' and name the platform's own library in the other arm.",
                 Compiler::link_requirement_spelling(out), facts.operating_system);
             return false;
         }
@@ -153,13 +155,16 @@ bool settle_link_requirement(
 // directories the host loader already searches. `search:` is consulted first and is not in this
 // list - that is a declared path, not a platform default. Windows resolves against PATH via the
 // bare name, so it contributes nothing here
+//
+// family, not os: android is linux-family and ios is darwin-family, so an Android host still
+// searches /lib rather than falling through now that its os name is distinct
 std::vector<std::filesystem::path> host_library_directories()
 {
-    const std::string &os = Compiler::TargetFacts::host().operating_system;
+    const std::string family = Compiler::TargetFacts::host().family();
 
     std::vector<std::filesystem::path> directories;
 
-    if (os == "linux") {
+    if (family == "linux") {
         directories = {
             "/lib",
             "/usr/lib",
@@ -171,7 +176,7 @@ std::vector<std::filesystem::path> host_library_directories()
             "/usr/lib/aarch64-linux-gnu",
         };
     }
-    else if (os == "darwin") {
+    else if (family == "darwin") {
         directories = { "/usr/lib", "/usr/local/lib", "/opt/homebrew/lib" };
     }
 

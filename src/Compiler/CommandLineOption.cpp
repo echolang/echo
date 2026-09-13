@@ -1,7 +1,11 @@
 #include "Compiler/CommandLineOption.h"
 
+#include "Compiler/TargetFacts.h"
 #include "Compiler/TerminalCapabilities.h"
 #include "Compiler/TestSelection.h"
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <cassert>
 #include <cstddef>
@@ -10,9 +14,9 @@
 
 namespace
 {
-    // the two flag parsers that already own their own vocabularies, adapted to OptionCheck. They report
-    // their own "Expected one of: ..." out of their own tables, which is why those values are not listed
-    // a second time in the rows below
+    // vocabularies somebody else already owns, adapted to OptionCheck. They report their own
+    // "Expected one of: ..." out of their own tables, which is why those values are not listed a
+    // second time in the rows below
     bool check_color(const std::string &value, std::string &out_error)
     {
         Compiler::ColorChoice choice = Compiler::ColorChoice::t_auto;
@@ -32,6 +36,30 @@ namespace
     {
         Compiler::TestFilter filter;
         return Compiler::parse_test_filter(value, filter, out_error);
+    }
+
+    bool check_target_os(const std::string &value, std::string &out_error)
+    {
+        if (Compiler::TargetFacts::is_known_operating_system(value)) {
+            return true;
+        }
+
+        out_error = fmt::format(
+            "unknown --target-os '{}', expected one of: {}",
+            value, fmt::join(Compiler::TargetFacts::known_operating_systems(), ", "));
+        return false;
+    }
+
+    bool check_target_arch(const std::string &value, std::string &out_error)
+    {
+        if (Compiler::TargetFacts::is_known_architecture(value)) {
+            return true;
+        }
+
+        out_error = fmt::format(
+            "unknown --target-arch '{}', expected one of: {}",
+            value, fmt::join(Compiler::TargetFacts::known_architectures(), ", "));
+        return false;
     }
 
     bool check_timeout(const std::string &value, std::string &out_error)
@@ -461,16 +489,16 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "evaluated against the name you give here, so the other platform's regions are the ones that "
             "get parsed:\n"
             "  echoc build --target-os linux -o app main.eco\n"
-            "One of 'darwin', 'linux' or 'windows'. A name outside that list is an error rather than a "
-            "condition that is quietly false, because '#[if: os == darwn]' should not be a region that "
-            "vanishes in silence.\n"
+            "One of 'darwin', 'linux', 'windows', 'ios' or 'android'. A name outside that list is an "
+            "error rather than a condition that is quietly false, because '#[if: os == darwn]' should "
+            "not be a region that vanishes in silence.\n"
             "It does not cross-compile. The code is still compiled for this machine, so a foreign OS "
             "will usually fail at link. What you get is a check on another platform's branch without "
             "owning that platform, which is the only way an '#[if: os == linux]' region is ever looked "
             "at on a Mac.\n"
             "'clean' takes it too, because a manifest may hide its '#[depends:]' behind a condition: "
             "without the same flag, the graph 'clean' walks is not the graph your build produced.",
-            {}, nullptr
+            {}, check_target_os
         },
         {
             Opt::t_target_arch, "target-arch", nullptr, '\0',
@@ -478,11 +506,12 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<name>", "",
             "the same for the architecture",
-            "The same thing for '#[if: arch == ...]', with 'arm64' or 'x86_64' as the vocabulary:\n"
+            "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
+            "admits:\n"
             "  echoc build --target-arch x86_64 -o app main.eco\n"
             "Same rules as --target-os, including the part where it does not cross-compile and an "
             "unknown name is an error.",
-            {}, nullptr
+            {}, check_target_arch
         },
         {
             Opt::t_define, "define", nullptr, '\0',

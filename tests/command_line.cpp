@@ -198,7 +198,7 @@ TEST_CASE("a flag carries no value machinery and a valued one carries exactly on
     // valued option with no acceptance rule fails here rather than accepting anything forever
     const std::set<Opt> free_text = {
         Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_package_dir, Opt::t_link, Opt::t_define,
-        Opt::t_target_os, Opt::t_target_arch, Opt::t_target_cpu, Opt::t_target_features
+        Opt::t_target_cpu, Opt::t_target_features
     };
 
     for (const CommandLineOption &option : Compiler::command_line_options()) {
@@ -520,6 +520,10 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
 
     // the vocabulary another owner holds still reports through that owner's own table
     REQUIRE(contains(refusal({ "run", "--color", "alwyas", "a.eco" }), "Unknown '--color' value"));
+
+    REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "unknown --target-os 'macos'"));
+    REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "ios"));
+    REQUIRE(contains(refusal({ "run", "--target-arch", "x86", "a.eco" }), "unknown --target-arch 'x86'"));
 }
 
 // **a flag a subcommand accepts and silently ignores is worse than one it rejects, and a *value* is no

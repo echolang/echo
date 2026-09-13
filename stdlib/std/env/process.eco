@@ -181,7 +181,7 @@ public function argv() : array<string>
  */
 public function exe() : string
 {
-#[if: os == darwin]
+#[if: family == darwin]
     // `_NSGetExecutablePath` reports the size it needs through the same parameter it reads, so the retry is
     // exact: ask with nothing, be told how much, ask again. A first call sized 0 is the documented way to
     // query, and the second cannot fail for space
@@ -203,7 +203,7 @@ public function exe() : string
     mem::free($raw);
 
     return $path;
-#[elif: os == linux]
+#[elif: family == linux]
     // `readlink` does not terminate what it writes and will not say how much it needed, so the buffer is
     // grown until the answer stops filling it - a result shorter than the buffer is the proof it fit
     usize $capacity = 256;

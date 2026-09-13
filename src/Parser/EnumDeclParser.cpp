@@ -259,9 +259,13 @@ void Parser::parse_enum_case(
 
             cursor.skip();
 
-            if (!Parser::parse_parameter_list(payload, *constructor, *constructor->body, name_token)) {
+            std::vector<AST::VarDeclNode *> rebuilt;
+            if (!Parser::parse_parameter_list(payload, rebuilt, *constructor->body, name_token)) {
+                constructor->replace_args(std::move(rebuilt));
                 return;
             }
+
+            constructor->replace_args(std::move(rebuilt));
         }
     }
 
@@ -516,7 +520,9 @@ void push_const_receiver(
     auto &self_type = payload.context.emplace_node<AST::TypeNode>(
         AST::ValueType::make_pointer(AST::ValueType::make_const(self_value_type), false));
 
-    Parser::push_receiver_param(payload, decl, *decl.body, &self_type, at);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_receiver_param(payload, rebuilt, *decl.body, &self_type, at);
+    decl.replace_args(std::move(rebuilt));
 }
 
 void synthesize_integer_value(
@@ -654,7 +660,9 @@ void push_raw_param(
 )
 {
     auto &raw_type = payload.context.emplace_node<AST::TypeNode>(backing);
-    Parser::push_implicit_param(payload, decl, *decl.body, "$raw", &raw_type, at);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_implicit_param(payload, rebuilt, *decl.body, "$raw", &raw_type, at);
+    decl.replace_args(std::move(rebuilt));
 }
 
 void synthesize_open_from(

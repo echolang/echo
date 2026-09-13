@@ -27,8 +27,9 @@
 #include <unordered_set>
 #include <vector>
 
-// the node a previous pass already registered for this declaration site, with its arguments dropped,
-// or null when the running pass is the first to reach it
+// the node a previous pass already registered for this declaration site, or null when the running
+// pass is the first to reach it. arguments are rebuilt into a local vector and assigned as a unit
+// - see FunctionDeclNode::replace_args - so ranking never sees a cleared list
 //
 // a module is parsed in several passes over identical token indices, so the declaration *site* is
 // exact - and unlike the name, which every overload of a set shares, it identifies one declaration
@@ -37,10 +38,6 @@
 static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, const TokenReference &site_token)
 {
     AST::FunctionDeclNode *decl = payload.collector.functions.find_by_declaration_site(site_token);
-
-    if (decl != nullptr) {
-        decl->args.clear();
-    }
 
     return decl;
 }
@@ -589,9 +586,13 @@ static void parse_constructor(
     // ctor argument + body scope
     auto &ctor_scope = payload.context.emplace_node<AST::ScopeNode>();
 
-    if (!parse_parameter_list(payload, *ctor_decl, ctor_scope, name_token)) {
+    std::vector<AST::VarDeclNode *> rebuilt;
+    if (!parse_parameter_list(payload, rebuilt, ctor_scope, name_token)) {
+        ctor_decl->replace_args(std::move(rebuilt));
         return;
     }
+
+    ctor_decl->replace_args(std::move(rebuilt));
 
     // the signature is complete, so this is the earliest point the declaration can join its overload
     // set. registering in both passes is intentional and cheap: the declaration pass makes the
@@ -718,26 +719,32 @@ static void parse_destructor(
     // receiver + body scope
     auto &dtor_scope = payload.context.emplace_node<AST::ScopeNode>();
 
-    Parser::push_receiver_param(payload, *dtor_decl, dtor_scope, self_type_node, dtor_token);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_receiver_param(payload, rebuilt, dtor_scope, self_type_node, dtor_token);
 
     // parsed rather than required-empty so a parameter list gets a located error naming what is
     // wrong, instead of "unexpected token" at whatever the first parameter happens to start with
-    // the receiver is already in `args`, so anything beyond it is the user's
-    if (!parse_parameter_list(payload, *dtor_decl, dtor_scope, dtor_token)) {
+    // the receiver is already in `rebuilt`, so anything beyond it is the user's
+    if (!parse_parameter_list(payload, rebuilt, dtor_scope, dtor_token)) {
+        dtor_decl->replace_args(std::move(rebuilt));
         return;
     }
 
-    if (dtor_decl->args.size() > dtor_decl->implicit_arg_count()) {
+    const size_t implicit = dtor_decl->implicit_arg_count();
+
+    if (rebuilt.size() > implicit) {
         payload.collector.collect_issue<AST::Issue::DestructorHasParameters>(
             payload.context.code_ref(dtor_token),
             fmt::format("A destructor takes no parameters - '{}' declares {}.",
                 struct_node->type_name(),
-                dtor_decl->args.size() - dtor_decl->implicit_arg_count()));
+                rebuilt.size() - implicit));
 
         // the extra parameters are dropped rather than carried: nothing ever passes an argument to a
         // destructor, so a signature that declares one would fail at the drop site instead of here
-        dtor_decl->args.resize(dtor_decl->implicit_arg_count());
+        rebuilt.resize(implicit);
     }
+
+    dtor_decl->replace_args(std::move(rebuilt));
 
     // a declared return type is rejected outright rather than checked against void. `destructor() :
     // void` reads as though the colon were meaningful, and it never is
@@ -854,7 +861,9 @@ static void parse_init(
     }
 
     auto &init_scope = payload.context.emplace_node<AST::ScopeNode>();
-    Parser::push_receiver_param(payload, *init_decl, init_scope, self_type_node, init_token);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_receiver_param(payload, rebuilt, init_scope, self_type_node, init_token);
+    init_decl->replace_args(std::move(rebuilt));
 
     AST::FunctionDeclNode *existing = struct_node->complex_type().type_init();
 

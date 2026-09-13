@@ -10,6 +10,8 @@
 #include "Parser/ParserPayload.h"
 #include "Parser/VisibilityParser.h"
 
+#include <vector>
+
 namespace AST
 {
     class ClosureExprNode;
@@ -163,7 +165,10 @@ namespace Parser
     bool starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &effect);
 
     // reads a parameter list up to and *including* its closing token, appending each parameter to
-    // `decl` and declaring it in `into`. the cursor must already be past the opening one
+    // `args` and declaring it in `into`. the cursor must already be past the opening one
+    //
+    // writes the destination vector, never `decl.args` - the live declaration is only replaced once
+    // the rebuilt list is complete, so ranking never sees `has_receiver() && args.empty()`
     //
     // shared with the struct parser's `constructor(...)`, which is an ordinary declaration in every
     // respect the signature is concerned with. a copy in each parser would drift in how they recover
@@ -177,12 +182,12 @@ namespace Parser
     // what a call resolves against
     bool parse_parameter_list(
         Payload &payload,
-        AST::FunctionDeclNode &decl,
+        std::vector<AST::VarDeclNode *> &args,
         AST::ScopeNode &into,
         const TokenReference &report_at,
         Token::Type closing = Token::Type::t_close_paren);
 
-    // prepends an implicit parameter - one the caller never writes - to `decl`, named `name` and typed
+    // prepends an implicit parameter - one the caller never writes - to `args`, named `name` and typed
     // `type_node`, and declares it in `into` so it resolves exactly as any other parameter does
     //
     // a *parameter* rather than something codegen conjures, which is what makes a method and a closure
@@ -191,7 +196,7 @@ namespace Parser
     // back out by the same `implicit_arg_count()`, so they are pushed by the same code
     void push_implicit_param(
         Payload &payload,
-        AST::FunctionDeclNode &decl,
+        std::vector<AST::VarDeclNode *> &args,
         AST::ScopeNode &into,
         const std::string &name,
         AST::TypeNode *type_node,
@@ -243,13 +248,13 @@ namespace Parser
     // thing, and a destructor that borrowed differently would mutate a copy and free nothing
     inline void push_receiver_param(
         Payload &payload,
-        AST::FunctionDeclNode &decl,
+        std::vector<AST::VarDeclNode *> &args,
         AST::ScopeNode &into,
         AST::TypeNode *self_type,
         const TokenReference &at
     )
     {
-        push_implicit_param(payload, decl, into, "$this", self_type, at);
+        push_implicit_param(payload, args, into, "$this", self_type, at);
     }
 };
 

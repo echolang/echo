@@ -14,7 +14,7 @@
 
 namespace std::io;
 
-#[if: os != windows]
+#[if: family != windows]
 internal extern {
     // the raw, unbuffered writes and reads. deliberately **not** `fwrite`/`fread`: a `string` need
     // not be NUL-terminated, its length is always known, and a second layer of buffering under one
@@ -150,11 +150,11 @@ internal function c_read(int32 $fd, ptr<uint8> $buf, usize $count) : isize
 
 // errno is a thread-local behind a function, and the function's name is the platform. read the
 // int it points at immediately - nothing else in the caller may touch libc first
-#[if: os == darwin]
+#[if: family == darwin]
 internal extern {
     function __error as c_errno_location() : ptr<int32>;
 }
-#[elif: os == linux]
+#[elif: family == linux]
 internal extern {
     function __errno_location as c_errno_location() : ptr<int32>;
 }
@@ -163,7 +163,7 @@ internal extern {
 // `O_*` values are not the same number on Darwin, Linux and Windows. the rest of this module names
 // these constants and never the literals, so a flag used on the wrong host is a missing-symbol
 // problem at compile time rather than a silent wrong open
-#[if: os == darwin]
+#[if: family == darwin]
 internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
 internal const int32 O_RDWR = 2;
@@ -172,7 +172,7 @@ internal const int32 O_CREAT = 512;
 internal const int32 O_TRUNC = 1024;
 internal const int32 O_CLOEXEC = 16777216;
 internal const int32 O_BINARY = 0;
-#[elif: os == linux]
+#[elif: family == linux]
 internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
 internal const int32 O_RDWR = 2;
@@ -228,7 +228,7 @@ internal const usize IO_BUF = 8192;
 internal const uint8 LINE_FEED = 10;
 internal const uint8 CARRIAGE_RETURN = 13;
 
-#[if: os != windows]
+#[if: family != windows]
 internal struct winsize
 {
     uint16 $row;
@@ -238,27 +238,27 @@ internal struct winsize
 }
 #[end]
 
-#[if: os == darwin]
+#[if: family == darwin]
 internal const usize TIOCGWINSZ = 1074295912;
-#[elif: os == linux]
+#[elif: family == linux]
 internal const usize TIOCGWINSZ = 21523;
 #[end]
 
 // `struct dirent` is a FAM; Echo has no fixed-size array, so listing copies
 // `d_name` at a platform offset rather than declaring the type. ABI-stable
 // on every libc this compiler targets, and the listing tests pin the name.
-#[if: os == darwin]
+#[if: family == darwin]
 internal const usize DIRENT_TYPE_OFF = 20;
 internal const usize DIRENT_NAME_OFF = 21;
-#[elif: os == linux]
+#[elif: family == linux]
 internal const usize DIRENT_TYPE_OFF = 18;
 internal const usize DIRENT_NAME_OFF = 19;
-#[elif: os != windows]
+#[elif: family != windows]
 internal const usize DIRENT_TYPE_OFF = 18;
 internal const usize DIRENT_NAME_OFF = 19;
 #[end]
 
-#[if: os != windows]
+#[if: family != windows]
 internal const uint8 DT_UNKNOWN = 0;
 internal const uint8 DT_DIR = 4;
 internal const uint8 DT_REG = 8;

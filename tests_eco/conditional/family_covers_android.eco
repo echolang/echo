@@ -1,0 +1,13 @@
+// android is a distinct os (Bionic, not glibc) and still Linux-family for libc.
+// `--target-os android` must take the family arm, not fall through as "other".
+#[if: family == darwin]
+function platform() : string { return 'darwin-family'; }
+#[elif: family == linux]
+function platform() : string { return 'linux-family'; }
+#[elif: family == windows]
+function platform() : string { return 'windows-family'; }
+#[else]
+function platform() : string { return 'other'; }
+#[end]
+
+echo platform();

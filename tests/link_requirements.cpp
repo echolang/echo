@@ -204,12 +204,20 @@ TEST_CASE("a scheme with no value is refused", "[link]")
     REQUIRE(refusal_of("lib:", fs::current_path()).find("and no value") != std::string::npos);
 }
 
-TEST_CASE("a framework is refused off darwin, and says how to gate it", "[link]")
+TEST_CASE("a framework is refused off Apple platforms and says how to gate it", "[link]")
 {
     const std::string refusal = refusal_of("framework:OpenGL", fs::current_path(), "linux");
 
-    REQUIRE(refusal.find("Darwin framework") != std::string::npos);
-    REQUIRE(refusal.find("#[if: os == darwin]") != std::string::npos);
+    REQUIRE(refusal.find("Apple framework") != std::string::npos);
+    REQUIRE(refusal.find("#[if: family == darwin]") != std::string::npos);
+}
+
+TEST_CASE("a framework is accepted on ios", "[link]")
+{
+    const Compiler::LinkRequirement requirement = parsed("framework:UIKit", fs::current_path(), "ios");
+
+    REQUIRE(requirement.scheme == Compiler::LinkScheme::t_framework);
+    REQUIRE(requirement.value == "UIKit");
 }
 
 TEST_CASE("a path resolves against the base, never the working directory", "[link]")

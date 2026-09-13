@@ -12,7 +12,7 @@
 
 namespace std::thread;
 
-#[if: os != windows]
+#[if: family != windows]
 internal extern {
     function pthread_create as c_pthread_create(
         ptr<usize> $thread,
@@ -207,11 +207,11 @@ internal function c_sysconf(int32 $name) : int64
 internal const int32 ENOMEM = 12;
 internal const int32 EBUSY = 16;
 
-#[if: os == darwin]
+#[if: family == darwin]
 internal const int32 EAGAIN = 35;
 internal const int32 EDEADLK = 11;
 internal const int32 SC_NPROCESSORS_ONLN = 58;
-#[elif: os == linux]
+#[elif: family == linux]
 internal const int32 EAGAIN = 11;
 internal const int32 EDEADLK = 35;
 internal const int32 SC_NPROCESSORS_ONLN = 84;
