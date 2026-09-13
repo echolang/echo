@@ -367,7 +367,8 @@ TEST_CASE("apple target args with an empty codegen target are the Darwin SDK", "
 {
     std::vector<std::string> via_target = { "clang", "-shared", "-o", "libx.dylib" };
     std::vector<std::string> via_darwin = via_target;
-    Compiler::append_apple_target_args(via_target, Compiler::CodegenTarget{});
+    std::string error;
+    REQUIRE(Compiler::append_apple_target_args(via_target, Compiler::CodegenTarget{}, error));
     Compiler::append_darwin_sdk_args(via_darwin);
     REQUIRE(via_target == via_darwin);
 }
@@ -375,21 +376,24 @@ TEST_CASE("apple target args with an empty codegen target are the Darwin SDK", "
 TEST_CASE("apple target args for an iOS codegen target name the SDK and triple", "[cbuild][host]")
 {
     Compiler::CodegenTarget target;
-    target.triple = "arm64-apple-ios-simulator";
+    target.triple = "arm64-apple-ios15.0-simulator";
     target.apple_sdk = "iphonesimulator";
-    target.min_version_flag = "-mios-simulator-version-min=15.0";
 
     std::vector<std::string> argv = { "clang", "-c" };
-    Compiler::append_apple_target_args(argv, target);
+    std::string error;
 
 #if defined(__APPLE__)
-    REQUIRE(flag_values(argv, "-target") == std::vector<std::string>{ target.triple });
-    REQUIRE(argv_contains(argv, target.min_version_flag));
     const fs::path sdk = Compiler::apple_sdk_root("iphonesimulator");
-    if (!sdk.empty()) {
+    if (sdk.empty()) {
+        REQUIRE_FALSE(Compiler::append_apple_target_args(argv, target, error));
+        REQUIRE(error.find("iphonesimulator") != std::string::npos);
+    } else {
+        REQUIRE(Compiler::append_apple_target_args(argv, target, error));
+        REQUIRE(flag_values(argv, "-target") == std::vector<std::string>{ target.triple });
         REQUIRE(flag_values(argv, "-isysroot") == std::vector<std::string>{ sdk.string() });
     }
 #else
+    REQUIRE(Compiler::append_apple_target_args(argv, target, error));
     REQUIRE(argv == std::vector<std::string>{ "clang", "-c" });
 #endif
 }

@@ -588,7 +588,11 @@ bool Backend::link_executable(
 
     std::vector<std::string> fallback = { "clang", "-o", output };
     Compiler::append_windows_sysroot_link_args(fallback);
-    Compiler::append_apple_target_args(fallback, _ctx.options.codegen);
+    std::string apple_error;
+    if (!Compiler::append_apple_target_args(fallback, _ctx.options.codegen, apple_error)) {
+        llvm::errs() << apple_error << '\n';
+        return false;
+    }
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     for (const std::string &word : link_words) {

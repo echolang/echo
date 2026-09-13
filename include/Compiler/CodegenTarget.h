@@ -4,7 +4,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 namespace Compiler
 {
@@ -22,7 +21,9 @@ namespace Compiler
     // disagree about the triple or the SDK.
     //
     // a **row**, not a bool: tvOS or the Android NDK is another row in resolve_codegen_target
-    // rather than another flag recovered from a triple string later
+    // rather than another flag recovered from a triple string later. the min version lives
+    // in the triple (`arm64-apple-ios15.0`), so LLVM's object and clang's `-target` cannot
+    // pin different iOS versions
     struct CodegenTarget
     {
         // LLVM triple objects are emitted for. empty means the host
@@ -31,9 +32,6 @@ namespace Compiler
         // `xcrun --sdk` name. empty means the Mac SDK (`darwin_sdk_root`) or none.
         // `iphonesimulator` / `iphoneos` are the two iOS rows
         std::string apple_sdk;
-
-        // clang min-version flag, empty when the host SDK has no such pin
-        std::string min_version_flag;
 
         bool is_cross() const {
             return !triple.empty();
@@ -45,9 +43,10 @@ namespace Compiler
         std::string effective_triple() const;
     };
 
-    // `-isysroot` / `-target` / min-version for this row. empty apple_sdk is
-    // append_darwin_sdk_args
-    void append_apple_target_args(std::vector<std::string> &argv, const CodegenTarget &target);
+    // `--target-arch` as TargetFacts::resolve should see it. `--ios-device` with
+    // no arch override is arm64, so a condition cannot still see the Intel host
+    // while the row emits a phone
+    std::string facts_architecture(bool ios_device, const std::string &arch_override);
 
     // what this invocation emits objects for, given the facts a condition can see
     // and the `--ios-device` request. asked only by `build`: `run` / `test` / `clean`

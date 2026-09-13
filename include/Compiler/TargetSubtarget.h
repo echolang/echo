@@ -33,8 +33,8 @@ namespace Compiler
     };
 
     // **LLVM targets this compile may name, registered.** Native always; on Darwin also AArch64 and
-    // X86, because CodegenTarget can name `arm64-apple-ios` on an Intel Mac and
-    // `x86_64-apple-ios-simulator` on Apple Silicon. Idempotent, and here rather than left implicit
+    // X86, because CodegenTarget can name `arm64-apple-ios15.0` on an Intel Mac and
+    // `x86_64-apple-ios15.0-simulator` on Apple Silicon. Idempotent, and here rather than left implicit
     // in Backend::init_target because the CPU a person wrote has to be checked at the command line,
     // which is long before the backend exists. One owner, so the two cannot register different sets
     void ensure_native_target_registered();

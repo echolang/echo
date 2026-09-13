@@ -83,9 +83,11 @@ namespace Compiler
         std::string target_os;
         std::string target_arch;
 
-        // with `--target-os ios` on `build`: the iPhoneOS SDK and `arm64-apple-ios`,
+        // with `--target-os ios` on `build`: the iPhoneOS SDK and `arm64-apple-ios15.0`,
         // not the simulator. false is the default and the simulator. not a fact a
-        // condition can see - Compiler::CodegenTarget is the emission half
+        // condition can see - Compiler::CodegenTarget is the emission half. it does
+        // imply arm64 for facts when `--target-arch` was not stated, via
+        // Compiler::facts_architecture, so a condition cannot still see the host arch
         bool ios_device = false;
 
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order

@@ -114,7 +114,7 @@ static bool resolve_target_facts(
 
     if (!Compiler::TargetFacts::resolve(
             driver.target_os,
-            driver.target_arch,
+            Compiler::facts_architecture(driver.ios_device, driver.target_arch),
             driver.defines,
             out,
             error)) {

@@ -10,6 +10,8 @@
 
 namespace Compiler
 {
+    struct CodegenTarget;
+
     // **the sole way echoc runs another program**, and the whole of what one costs a caller.
     //
     // **as an argv, with no shell in between.** An SDK path, an output name or a vendored source directory
@@ -68,6 +70,16 @@ namespace Compiler
     // darwin_sdk_root() is empty, so Linux and a Darwin machine without
     // Xcode still run; Homebrew clang without this cannot find libSystem
     void append_darwin_sdk_args(std::vector<std::string> &argv);
+
+    // `-isysroot` / `-target` for this row. empty apple_sdk is
+    // append_darwin_sdk_args. the min version is in the triple, so clang
+    // does not get a second flag. false with a sentence when a named SDK
+    // is not on this machine
+    bool append_apple_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
 
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt
     // Backend always links, then clang's resource include as `-isystem` so

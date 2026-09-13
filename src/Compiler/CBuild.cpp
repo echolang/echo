@@ -533,7 +533,9 @@ bool Compiler::build_c_sources(
         }
 
         Compiler::append_windows_sysroot_cc_args(argv);
-        Compiler::append_apple_target_args(argv, options.codegen);
+        if (!Compiler::append_apple_target_args(argv, options.codegen, out_error)) {
+            return false;
+        }
 
         argv.push_back("-o");
         argv.push_back(object.string());

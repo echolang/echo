@@ -1,5 +1,6 @@
 #include "Compiler/HostTool.h"
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/ProgressReporter.h"
 
 #include <llvm/Support/FileSystem.h>
@@ -493,6 +494,37 @@ void Compiler::append_darwin_sdk_args(std::vector<std::string> &argv)
 
     argv.push_back("-isysroot");
     argv.push_back(sdk.string());
+#endif
+}
+
+bool Compiler::append_apple_target_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    std::string &out_error
+)
+{
+#if !defined(__APPLE__)
+    (void)target;
+    (void)out_error;
+    append_darwin_sdk_args(argv);
+    return true;
+#else
+    if (target.apple_sdk.empty()) {
+        append_darwin_sdk_args(argv);
+        return true;
+    }
+
+    const std::filesystem::path sdk = apple_sdk_root(target.apple_sdk);
+    if (sdk.empty()) {
+        out_error = "the '" + target.apple_sdk + "' SDK was not found. install Xcode's iOS platform support";
+        return false;
+    }
+
+    argv.push_back("-isysroot");
+    argv.push_back(sdk.string());
+    argv.push_back("-target");
+    argv.push_back(target.effective_triple());
+    return true;
 #endif
 }
 

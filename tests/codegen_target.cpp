@@ -46,9 +46,8 @@ TEST_CASE("ios build on Darwin is the simulator on this arch", "[target]")
 
 #if defined(__APPLE__)
     REQUIRE(target.is_cross());
-    REQUIRE(target.triple == facts.architecture + "-apple-ios-simulator");
+    REQUIRE(target.triple == facts.architecture + "-apple-ios15.0-simulator");
     REQUIRE(target.apple_sdk == "iphonesimulator");
-    REQUIRE(target.min_version_flag == "-mios-simulator-version-min=15.0");
 #else
     REQUIRE_FALSE(target.is_cross());
     REQUIRE(target.triple.empty());
@@ -66,9 +65,8 @@ TEST_CASE("ios-device on Darwin is iphoneos arm64", "[target]")
 
 #if defined(__APPLE__)
     REQUIRE(resolved);
-    REQUIRE(target.triple == "arm64-apple-ios");
+    REQUIRE(target.triple == "arm64-apple-ios15.0");
     REQUIRE(target.apple_sdk == "iphoneos");
-    REQUIRE(target.min_version_flag == "-miphoneos-version-min=15.0");
     REQUIRE(target.effective_triple() == target.triple);
 #else
     REQUIRE_FALSE(resolved);
@@ -89,6 +87,32 @@ TEST_CASE("ios-device with a non-arm64 arch override is refused", "[target]")
     REQUIRE_FALSE(resolved);
     REQUIRE(error.find("arm64") != std::string::npos);
     REQUIRE(error.find("x86_64") != std::string::npos);
+#else
+    REQUIRE_FALSE(resolved);
+#endif
+}
+
+TEST_CASE("ios-device with no arch override is arm64 for facts too", "[target]")
+{
+    REQUIRE(Compiler::facts_architecture(true, "") == "arm64");
+    REQUIRE(Compiler::facts_architecture(true, "arm64") == "arm64");
+    REQUIRE(Compiler::facts_architecture(true, "x86_64") == "x86_64");
+    REQUIRE(Compiler::facts_architecture(false, "").empty());
+    REQUIRE(Compiler::facts_architecture(false, "x86_64") == "x86_64");
+
+    Compiler::TargetFacts facts;
+    std::string error;
+
+    REQUIRE(Compiler::TargetFacts::resolve(
+        "ios", Compiler::facts_architecture(true, ""), {}, facts, error));
+    REQUIRE(facts.architecture == "arm64");
+
+    Compiler::CodegenTarget target;
+    const bool resolved = Compiler::resolve_codegen_target(facts, true, "", target, error);
+
+#if defined(__APPLE__)
+    REQUIRE(resolved);
+    REQUIRE(target.triple == "arm64-apple-ios15.0");
 #else
     REQUIRE_FALSE(resolved);
 #endif
