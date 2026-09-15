@@ -32,6 +32,12 @@ message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
 find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+if(LLVM_VERSION VERSION_LESS 20)
+    message(FATAL_ERROR
+        "LLVM >= 20 is required, found LLVM ${LLVM_VERSION}"
+    )
+endif()
+
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
