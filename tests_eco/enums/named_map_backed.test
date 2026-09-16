@@ -1,0 +1,12 @@
+flags: --optimize none
+
+--- OUT --->
+1
+2
+1
+1
+--- IR --->
+CHECK: .lut.fwd
+CHECK: .lut.ord
+CHECK: .lut.rev
+CHECK: icmp ult

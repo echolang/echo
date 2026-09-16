@@ -2,6 +2,7 @@
 
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTConstruction.h"
+#include "AST/ASTEnumMap.h"
 #include "AST/ASTAtomics.h"
 #include "AST/ASTCFunction.h"
 #include "AST/ASTCompleteness.h"
@@ -205,6 +206,7 @@ void TypeChecker::run()
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
         accept_semantic_roots(*module_ptr, *this, _current_file);
+        AST::check_enum_maps(_collector, *module_ptr);
     }
 }
 

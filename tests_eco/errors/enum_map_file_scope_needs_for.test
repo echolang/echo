@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_file_scope_needs_for.eco:6:1
+
+  A map at file scope has to name the enum: `map glfw : int32 for KeyCode { ... }`.
+
+  5 | 
+  6 | map glfw : int32
+    : ^^^
+  7 | {
+
+1 error, nothing was compiled.

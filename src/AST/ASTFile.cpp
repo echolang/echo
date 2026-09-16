@@ -1,10 +1,17 @@
 #include "AST/ASTFile.h"
+#include "AST/ASTEnumMapType.h"
 
 #include <fmt/core.h>
 
 #include <iostream>
 #include <fstream>
 #include <sstream>
+
+AST::File::File(const std::filesystem::path &path) :
+    _path(path)
+{}
+
+AST::File::~File() = default;
 
 void AST::File::set_content(const std::string &content)
 {

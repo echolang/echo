@@ -12,6 +12,7 @@
 #include "Parser/TestDeclParser.h"
 #include "Parser/UseParser.h"
 #include "Parser/VisibilityParser.h"
+#include "Parser/EnumMapParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -415,6 +416,9 @@ void Parser::parse_declaration_surface(
         }
         else if (cursor.is_type(Token::Type::t_use)) {
             parse_usedecl(payload, !block_token.has_value());
+        }
+        else if (starts_enum_map(cursor)) {
+            parse_file_scope_enum_map(payload, block_token, visibility);
         }
         else if (starts_constdecl(payload)) {
             // a compile-time constant, name *and* initializer, in this pass - the same standing a struct

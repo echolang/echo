@@ -1,0 +1,19 @@
+enum Color
+{
+    case red;
+    case green;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+
+    map color : Color
+    {
+        .ok    = .green;
+        .warn  = .green;
+        .error = .red;
+    }
+}

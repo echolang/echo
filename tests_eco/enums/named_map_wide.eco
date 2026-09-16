@@ -1,0 +1,16 @@
+// discriminant span too wide to tabulate: forward keeps the match, reverse still LUTs
+enum Far : int32
+{
+    case near = 0;
+    case far  = 100000;
+
+    map wire : int32
+    {
+        .near = 1;
+        .far  = 2;
+    }
+}
+
+echo Far::far->wire();
+echo Far::from(wire: 2) != null;
+echo Far::from(wire: 9) == null;

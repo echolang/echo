@@ -1,0 +1,12 @@
+enum KeyCode
+{
+    case a;
+}
+
+function f() : void
+{
+    map glfw : int32 for KeyCode
+    {
+        .a = 1;
+    }
+}

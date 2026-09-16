@@ -34,17 +34,6 @@ namespace
         llvm_unreachable("ABI alignment is a power of two in 1..16");
     }
 
-    bool enum_has_payload(const AST::ComplexType &type)
-    {
-        for (const AST::ComplexType::EnumCase &entry : type.enum_cases()) {
-            if (entry.has_payload()) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     llvm::Type *require_lowered(
         const std::function<llvm::Type *(const AST::ValueType &)> &lower,
         const AST::ValueType &type,
@@ -85,7 +74,7 @@ void fill_structure_body(
     // a payload enum overlays its cases in one storage region. the AST properties stay one field
     // per payload slot - that is what classify_copy and the per-case drop still fold over - and
     // only this LLVM type is packed. a `[N x i8]` *property* would fold to t_bytes
-    if (type.is_enum_kind() && enum_has_payload(type)) {
+    if (type.is_enum_kind() && type.has_payload_case()) {
         llvm::Type *tag_ty = require_lowered(
             lower, type.get_property_type(AST::k_enum_tag_index), type, AST::k_enum_tag_index, ctx);
 

@@ -272,26 +272,13 @@ namespace AST
         // an author who wants an equality can write the one they mean - and where, until they do, the
         // ordinary "not supported on these operands" refusal points them at `match`
         if (lhs.type.is_enum() || rhs.type.is_enum()) {
-            const auto payload_free = [](const ValueType &type) {
-                if (!type.is_enum()) {
-                    return false;
-                }
-
-                for (const auto &entry : type.get_complex_type()->enum_cases()) {
-                    if (entry.has_payload()) {
-                        return false;
-                    }
-                }
-
-                return true;
-            };
-
             // **compared with the `const` stripped**, which is what makes `$this == Side::left` inside a
             // `const function` work: a const receiver reads as `const Side` and the case it names as
             // `Side`, and whether a value may be written has nothing to say about which case it holds
             return op->is_identity_comparison()
                 && ValueType::make_mutable(lhs.type) == ValueType::make_mutable(rhs.type)
-                && payload_free(lhs.type);
+                && lhs.type.is_enum()
+                && !lhs.type.get_complex_type()->has_payload_case();
         }
 
         // **a value that may be absent has no arithmetic**, and this is the one arm here that fixes a

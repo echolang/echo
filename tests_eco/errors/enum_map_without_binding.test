@@ -1,0 +1,13 @@
+modules: enums/lib_keycode
+expect: fail
+
+--- OUT --->
+[error] UnknownMember  enum_map_without_binding.eco:1:22
+
+  The type 'KeyCode' has no member named 'glfw'
+
+  1 | echo KeyCode::space->glfw();
+    :                      ^^^^
+  2 | 
+
+1 error, nothing was compiled.

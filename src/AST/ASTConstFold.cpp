@@ -377,6 +377,11 @@ namespace
                 return ConstFoldResult::pending();
             }
 
+            const ConstFoldResult as_case = AST::fold_payload_free_enum_case(call);
+            if (as_case.is_folded()) {
+                return as_case;
+            }
+
             return ConstFoldResult::refused(fmt::format(
                 "'{}' is an ordinary function, so its result is only known when it runs.",
                 call.decl->func_name()));
@@ -433,6 +438,54 @@ namespace
                     "'{}' is not a fact about a type.", call.decl->builtin.value()));
         }
     }
+}
+
+AST::ConstFoldResult AST::fold_payload_free_enum_case(
+    const FunctionCallExprNode &call,
+    const ValueType *range
+)
+{
+    if (!call.arguments.empty()) {
+        return range != nullptr ? ConstFoldResult::pending() : ConstFoldResult::refused("");
+    }
+
+    const FunctionDeclNode *decl = call.decl;
+    if (decl != nullptr) {
+        if (decl->is_implicitly_generated
+            && decl->is_static_method()
+            && decl->owner_type != nullptr
+            && decl->args.empty()) {
+            const ComplexType *owner = decl->owner_type->template_or_self();
+            if (owner->is_enum_kind()) {
+                const ComplexType::EnumCase *entry = owner->find_enum_case(decl->func_name());
+                if (entry != nullptr && !entry->has_payload() && !entry->is_open_remainder) {
+                    return ConstFoldResult::folded(
+                        decl->get_return_type(), static_cast<uint64_t>(entry->discriminant));
+                }
+            }
+        }
+
+        if (range == nullptr) {
+            return ConstFoldResult::refused("");
+        }
+    }
+
+    ValueType owner = call.static_owner;
+    if (is_undetermined_type(owner) && range != nullptr) {
+        owner = *range;
+    }
+
+    if (!owner.is_enum() || owner.get_complex_type() == nullptr) {
+        return ConstFoldResult::pending();
+    }
+
+    const ComplexType::EnumCase *entry =
+        owner.get_complex_type()->find_enum_case(call.lookup_name());
+    if (entry == nullptr || entry->has_payload() || entry->is_open_remainder) {
+        return ConstFoldResult::pending();
+    }
+
+    return ConstFoldResult::folded(owner, static_cast<uint64_t>(entry->discriminant));
 }
 
 AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)

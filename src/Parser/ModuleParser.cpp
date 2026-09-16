@@ -5,6 +5,7 @@
 
 #include "eco.h"
 #include "Parser/ConditionalFilter.h"
+#include "Parser/EnumMapParser.h"
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 
@@ -159,6 +160,17 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
     // at the `use`, not at every call
     for (auto &[file, tfile] : file_payloads) {
         AST::finalize_file_imports(*file, collector);
+    }
+
+    // named maps mint here, after every file's cases and every file's maps exist, so a call in
+    // an earlier file can resolve against a map written in a later one. planting the bodies into
+    // the origin file's root waits for pass 3, which is when that root is built
+    {
+    Compiler::ScopedPhase phase("enum maps");
+    for (auto &[file, tfile] : file_payloads) {
+        auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_declarations);
+        Parser::mint_file_enum_maps(parser_payload);
+    }
     }
 
     // dump symbols

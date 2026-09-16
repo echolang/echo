@@ -2,6 +2,7 @@
 
 #include "AST/ASTConstructor.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTDeclarationOrigin.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
@@ -27,6 +28,7 @@
 
 #include <fmt/core.h>
 
+#include <cassert>
 #include <map>
 #include <vector>
 
@@ -157,24 +159,24 @@ void build_enum_case_body(
 
     AST::close_constructor_body(payload.context.module, constructor, value);
 }
+}
 
-AST::FunctionDeclNode &begin_synthesized_function(
-    Parser::Payload &payload,
-    AST::TypeDeclNode *enum_node,
+AST::FunctionDeclNode &Parser::begin_synthesized_enum_function(
+    Payload &payload,
+    AST::ComplexType &owner,
     const TokenReference &name_token,
     AST::MemberKind kind,
     const AST::ValueType &return_type
 )
 {
-    AST::ComplexType &owner = enum_node->complex_type();
-
     auto &decl = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
     decl.member_kind = kind;
     decl.owner_type = &owner;
     decl.ast_namespace = payload.context.current_namespace;
     decl.is_implicitly_generated = true;
+    decl.declared_in = AST::origin_at(payload.context);
 
-    Parser::declare_type_parameters(payload, decl, {}, enum_node->type_parameters());
+    Parser::declare_type_parameters(payload, decl, {}, owner.type_parameters);
 
     auto &return_node = payload.context.emplace_node<AST::TypeNode>(return_type);
     decl.return_type = &return_node;
@@ -184,6 +186,86 @@ AST::FunctionDeclNode &begin_synthesized_function(
 
     return decl;
 }
+
+void Parser::push_enum_const_receiver(
+    Payload &payload,
+    AST::FunctionDeclNode &decl,
+    const AST::ValueType &self_value_type,
+    const TokenReference &at
+)
+{
+    auto &self_type = payload.context.emplace_node<AST::TypeNode>(
+        AST::ValueType::make_pointer(AST::ValueType::make_const(self_value_type), false));
+
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_receiver_param(payload, rebuilt, *decl.body, &self_type, at);
+    decl.replace_args(std::move(rebuilt));
+}
+
+void Parser::push_enum_raw_param(
+    Payload &payload,
+    AST::FunctionDeclNode &decl,
+    const AST::ValueType &backing,
+    const TokenReference &at
+)
+{
+    auto &raw_type = payload.context.emplace_node<AST::TypeNode>(backing);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_implicit_param(payload, rebuilt, *decl.body, "$raw", &raw_type, at);
+    decl.replace_args(std::move(rebuilt));
+}
+
+void Parser::plant_enum_from_equality_arm(
+    Payload &payload,
+    AST::FunctionDeclNode &decl,
+    AST::FunctionDeclNode *constructor,
+    const AST::ValueType &self_value_type,
+    const AST::ValueType &optional,
+    AST::ExprNode *rhs,
+    const TokenReference &at
+)
+{
+    const AST::Operator *equals = payload.collector.operators.get_operator("==");
+    assert(equals != nullptr && "the '==' operator is always predefined");
+
+    auto *raw_var = payload.context.emplace_nodep<AST::VarNode>(decl.args[0]);
+    auto *raw_read = payload.context.emplace_nodep<AST::VarRefNode>(raw_var);
+
+    auto &op_node = payload.context.emplace_node<AST::OperatorNode>(
+        payload.context.make_virtual_token("==", Token::Type::t_unknown, at), equals);
+
+    auto *condition = payload.context.emplace_nodep<AST::BinaryExprNode>(&op_node, raw_read, rhs);
+
+    auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(
+        constructor->name_token.value_or(at), std::vector<AST::ExprNode *>{});
+
+    call.decl = constructor;
+    call.settlement = AST::CallSettlement::t_uncoerced;
+    call.static_owner = self_value_type;
+
+    auto *wrapped = payload.context.emplace_nodep<AST::TypeCastNode>(optional, &call, true);
+
+    auto &then_scope = payload.context.emplace_node<AST::ScopeNode>();
+    then_scope.children.push_back(AST::make_ref(
+        payload.context.emplace_node<AST::ReturnNode>(wrapped, at)));
+
+    auto *branch = payload.context.emplace_nodep<AST::IfStatementNode>(condition, &then_scope, nullptr);
+    decl.body->children.push_back(AST::make_ref(*branch));
+}
+
+void Parser::plant_enum_from_null_return(
+    Payload &payload,
+    AST::FunctionDeclNode &decl,
+    const AST::ValueType &optional,
+    const TokenReference &at
+)
+{
+    auto *null_node = payload.context.emplace_nodep<AST::NullNode>(
+        payload.context.make_virtual_token("null", Token::Type::t_null, at));
+    AST::bind_null_to(null_node, optional);
+
+    decl.body->children.push_back(AST::make_ref(
+        payload.context.emplace_node<AST::ReturnNode>(null_node, at)));
 }
 
 std::string Parser::enum_backing_refusal(const AST::ValueType &backing, const AST::CoreTypes &core)
@@ -250,9 +332,9 @@ void Parser::parse_enum_case(
             cursor.skip();
         }
         else {
-            constructor = &begin_synthesized_function(
+            constructor = &Parser::begin_synthesized_enum_function(
                 payload,
-                enum_node,
+                owner,
                 name_token,
                 AST::MemberKind::t_static_method,
                 self_value_type);
@@ -493,9 +575,9 @@ void complete_payload_free_constructors(
             continue;
         }
 
-        auto &decl = begin_synthesized_function(
+        auto &decl = Parser::begin_synthesized_enum_function(
             payload,
-            enum_node,
+            owner,
             entry.name_span.first(),
             AST::MemberKind::t_static_method,
             self_value_type);
@@ -510,21 +592,6 @@ void complete_payload_free_constructors(
     }
 }
 
-void push_const_receiver(
-    Parser::Payload &payload,
-    AST::FunctionDeclNode &decl,
-    const AST::ValueType &self_value_type,
-    const TokenReference &at
-)
-{
-    auto &self_type = payload.context.emplace_node<AST::TypeNode>(
-        AST::ValueType::make_pointer(AST::ValueType::make_const(self_value_type), false));
-
-    std::vector<AST::VarDeclNode *> rebuilt;
-    Parser::push_receiver_param(payload, rebuilt, *decl.body, &self_type, at);
-    decl.replace_args(std::move(rebuilt));
-}
-
 void synthesize_integer_value(
     Parser::Payload &payload,
     AST::TypeDeclNode *enum_node,
@@ -536,10 +603,10 @@ void synthesize_integer_value(
     const TokenReference at = enum_node->name_token.value();
     auto name_token = payload.context.make_virtual_token("value", Token::Type::t_identifier, at);
 
-    auto &decl = begin_synthesized_function(
-        payload, enum_node, name_token, AST::MemberKind::t_method, backing);
+    auto &decl = Parser::begin_synthesized_enum_function(
+        payload, owner, name_token, AST::MemberKind::t_method, backing);
 
-    push_const_receiver(payload, decl, self_value_type, at);
+    Parser::push_enum_const_receiver(payload, decl, self_value_type, at);
 
     // the integer *is* the discriminant, leftover included. a match that rebuilt the literals could
     // not answer an unknown tag, and for a closed enum it was the same load
@@ -564,10 +631,10 @@ void synthesize_string_value(
     const TokenReference at = enum_node->name_token.value();
     auto name_token = payload.context.make_virtual_token("value", Token::Type::t_identifier, at);
 
-    auto &decl = begin_synthesized_function(
-        payload, enum_node, name_token, AST::MemberKind::t_method, backing);
+    auto &decl = Parser::begin_synthesized_enum_function(
+        payload, owner, name_token, AST::MemberKind::t_method, backing);
 
-    push_const_receiver(payload, decl, self_value_type, at);
+    Parser::push_enum_const_receiver(payload, decl, self_value_type, at);
 
     auto subject_token = payload.context.make_virtual_token("$__match", Token::Type::t_varname, at);
 
@@ -635,36 +702,6 @@ void synthesize_backing_accessor(
     }
 }
 
-AST::FunctionCallExprNode &make_resolved_case_call(
-    Parser::Payload &payload,
-    AST::FunctionDeclNode *callee,
-    const AST::ValueType &owner_type,
-    const TokenReference &at
-)
-{
-    auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(
-        callee->name_token.value_or(at), std::vector<AST::ExprNode *>{});
-
-    call.decl = callee;
-    call.settlement = AST::CallSettlement::t_uncoerced;
-    call.static_owner = owner_type;
-
-    return call;
-}
-
-void push_raw_param(
-    Parser::Payload &payload,
-    AST::FunctionDeclNode &decl,
-    const AST::ValueType &backing,
-    const TokenReference &at
-)
-{
-    auto &raw_type = payload.context.emplace_node<AST::TypeNode>(backing);
-    std::vector<AST::VarDeclNode *> rebuilt;
-    Parser::push_implicit_param(payload, rebuilt, *decl.body, "$raw", &raw_type, at);
-    decl.replace_args(std::move(rebuilt));
-}
-
 void synthesize_open_from(
     Parser::Payload &payload,
     AST::TypeDeclNode *enum_node,
@@ -676,10 +713,10 @@ void synthesize_open_from(
     const TokenReference at = enum_node->name_token.value();
     auto name_token = payload.context.make_virtual_token("from", Token::Type::t_identifier, at);
 
-    auto &decl = begin_synthesized_function(
-        payload, enum_node, name_token, AST::MemberKind::t_static_method, self_value_type);
+    auto &decl = Parser::begin_synthesized_enum_function(
+        payload, owner, name_token, AST::MemberKind::t_static_method, self_value_type);
 
-    push_raw_param(payload, decl, backing, at);
+    Parser::push_enum_raw_param(payload, decl, backing, at);
 
     AST::VarDeclNode &value = AST::declare_constructor_this(
         payload.context.module, *decl.return_type, at);
@@ -712,13 +749,10 @@ void synthesize_closed_from(
 
     const AST::ValueType optional = payload.collector.type_registry.get_or_create_optional(self_value_type);
 
-    auto &decl = begin_synthesized_function(
-        payload, enum_node, name_token, AST::MemberKind::t_static_method, optional);
+    auto &decl = Parser::begin_synthesized_enum_function(
+        payload, owner, name_token, AST::MemberKind::t_static_method, optional);
 
-    push_raw_param(payload, decl, backing, at);
-
-    const AST::Operator *equals = payload.collector.operators.get_operator("==");
-    assert(equals != nullptr && "the '==' operator is always predefined");
+    Parser::push_enum_raw_param(payload, decl, backing, at);
 
     for (const AST::ComplexType::EnumCase &entry : owner.enum_cases()) {
         if (entry.is_open_remainder) {
@@ -730,42 +764,22 @@ void synthesize_closed_from(
             continue;
         }
 
-        auto *raw_var = payload.context.emplace_nodep<AST::VarNode>(decl.args[0]);
-        auto *raw_read = payload.context.emplace_nodep<AST::VarRefNode>(raw_var);
-
         auto literal_token = payload.context.make_virtual_token(
             std::to_string(entry.discriminant), Token::Type::t_integer_literal, at);
 
         auto *literal = payload.context.emplace_nodep<AST::LiteralIntExprNode>(
             literal_token, backing.get_primitive_type());
 
-        auto &op_node = payload.context.emplace_node<AST::OperatorNode>(
-            payload.context.make_virtual_token("==", Token::Type::t_unknown, at), equals);
-
-        auto *condition = payload.context.emplace_nodep<AST::BinaryExprNode>(&op_node, raw_read, literal);
-
-        AST::FunctionCallExprNode &call = make_resolved_case_call(
-            payload, constructors[0], self_value_type, at);
-
-        auto *wrapped = payload.context.emplace_nodep<AST::TypeCastNode>(optional, &call, true);
-
-        auto &then_scope = payload.context.emplace_node<AST::ScopeNode>();
-        then_scope.children.push_back(AST::make_ref(
-            payload.context.emplace_node<AST::ReturnNode>(wrapped, at)));
-
-        auto *branch = payload.context.emplace_nodep<AST::IfStatementNode>(condition, &then_scope, nullptr);
-        decl.body->children.push_back(AST::make_ref(*branch));
+        Parser::plant_enum_from_equality_arm(
+            payload, decl, constructors[0], self_value_type, optional, literal, at);
     }
 
-    auto *null_node = payload.context.emplace_nodep<AST::NullNode>(
-        payload.context.make_virtual_token("null", Token::Type::t_null, at));
-    AST::bind_null_to(null_node, optional);
-
-    decl.body->children.push_back(AST::make_ref(
-        payload.context.emplace_node<AST::ReturnNode>(null_node, at)));
+    Parser::plant_enum_from_null_return(payload, decl, optional, at);
 
     payload.collector.functions.register_static_function(
         payload.collector, payload.context.code_ref(name_token), &decl, owner);
+
+    owner.enum_closed_from = &decl;
 }
 
 void synthesize_from(
@@ -794,6 +808,7 @@ void synthesize_from(
         synthesize_closed_from(payload, enum_node, self_value_type, backing);
     }
 }
+
 }
 
 void Parser::finalize_enum(

@@ -5,6 +5,7 @@
 #include "Parser/TestDeclParser.h"
 #include "Parser/TypeDeclParser.h"
 #include "Parser/TypeParser.h"
+#include "Parser/EnumMapParser.h"
 
 #include "AST/ASTIssue.h"
 #include "AST/TypeDeclNode.h"
@@ -98,7 +99,8 @@ Parser::VisibilityPrefix Parser::consume_declaration_visibility(
             "A 'use' is a file-local alias, not a declaration - there is nobody for a modifier to describe.");
     }
     else if (!starts_funcdecl(payload.cursor) && !starts_typedecl(payload.cursor)
-        && !starts_constdecl(payload) && !payload.cursor.is_type(Token::Type::t_extern)) {
+        && !starts_constdecl(payload) && !payload.cursor.is_type(Token::Type::t_extern)
+        && !starts_enum_map(payload.cursor)) {
         refuse_visibility_prefix(
             payload,
             prefix,

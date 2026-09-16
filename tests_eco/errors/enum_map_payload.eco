@@ -1,0 +1,11 @@
+enum Event
+{
+    case none;
+    case click(int32 $x);
+
+    map glfw : int32
+    {
+        .none  = 0;
+        .click = 1;
+    }
+}

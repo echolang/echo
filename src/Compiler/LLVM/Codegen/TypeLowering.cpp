@@ -27,6 +27,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
 #include <llvm/TargetParser/Triple.h>
@@ -103,6 +104,8 @@ void TypeLowering::create_cmp_units(
     // that mentions it. Built here because a ComplexType has no back-pointer to its TypeDeclNode
     _ctx.type_site_map.clear();
 
+    // file-root children first: a named map plants in the file that wrote it, and that
+    // file must win over the owner's TypeDecl, which a dependency module walks first
     for (auto &module : bundle.modules) {
         for (auto &file : module->files()) {
             if (file.root == nullptr) {
@@ -111,7 +114,8 @@ void TypeLowering::create_cmp_units(
 
             for (auto &child : file.root->children) {
                 if (child.has_type<AST::FunctionDeclNode>()) {
-                    _ctx.function_file_map[child.get_ptr<AST::FunctionDeclNode>()] = &file;
+                    _ctx.function_file_map.try_emplace(
+                        child.get_ptr<AST::FunctionDeclNode>(), &file);
                 }
                 else if (child.has_type<AST::TypeDeclNode>()) {
                     AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
@@ -119,10 +123,28 @@ void TypeLowering::create_cmp_units(
 
                     _ctx.type_site_map[&type_decl->complex_type()] = CodegenContext::TypeSite{
                         &file, at != nullptr ? at->line() : 0 };
+                }
+            }
+        }
+    }
 
-                    for (AST::FunctionDeclNode *method : type_decl->methods()) {
-                        _ctx.function_file_map[method] = &file;
-                    }
+    for (auto &module : bundle.modules) {
+        for (auto &file : module->files()) {
+            if (file.root == nullptr) {
+                continue;
+            }
+
+            for (auto &child : file.root->children) {
+                if (!child.has_type<AST::TypeDeclNode>()) {
+                    continue;
+                }
+
+                AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
+                for (AST::FunctionDeclNode *method : type_decl->methods()) {
+                    _ctx.function_file_map.try_emplace(method, &file);
+                }
+                for (AST::FunctionDeclNode *method : type_decl->complex_type().static_methods()) {
+                    _ctx.function_file_map.try_emplace(method, &file);
                 }
             }
         }
@@ -139,7 +161,7 @@ void TypeLowering::create_cmp_units(
             auto found = _ctx.function_file_map.find(decl->template_ref);
 
             if (found != _ctx.function_file_map.end()) {
-                _ctx.function_file_map[decl] = found->second;
+                _ctx.function_file_map.try_emplace(decl, found->second);
             }
         }
     }
@@ -211,6 +233,45 @@ ReturnAbi TypeLowering::return_abi_of(
     }
 
     return return_abi_for(get_llvm_type(node->get_return_type(), cmp_unit));
+}
+
+void TypeLowering::store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type)
+{
+    if (auto *structure = llvm::dyn_cast<llvm::StructType>(type)) {
+        for (unsigned i = 0; i < structure->getNumElements(); i++) {
+            store_aggregate_fieldwise(
+                _ctx.builder->CreateExtractValue(value, i),
+                _ctx.builder->CreateStructGEP(structure, slot, i),
+                structure->getElementType(i));
+        }
+
+        return;
+    }
+
+    if (auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) {
+        for (uint64_t i = 0; i < array->getNumElements(); i++) {
+            store_aggregate_fieldwise(
+                _ctx.builder->CreateExtractValue(value, static_cast<unsigned>(i)),
+                _ctx.builder->CreateConstInBoundsGEP2_64(array, slot, 0, i),
+                array->getElementType());
+        }
+
+        return;
+    }
+
+    // a leaf. no `!tbaa`: this is the caller's return storage, which nothing else names yet
+    _ctx.builder->CreateStore(value, slot);
+}
+
+void TypeLowering::emit_returned_value(llvm::Value *value)
+{
+    if (_ctx.sret_pointer != nullptr) {
+        store_aggregate_fieldwise(value, _ctx.sret_pointer, _ctx.sret_type);
+        _ctx.builder->CreateRetVoid();
+        return;
+    }
+
+    _ctx.builder->CreateRet(value);
 }
 
 void TypeLowering::apply_function_attributes(

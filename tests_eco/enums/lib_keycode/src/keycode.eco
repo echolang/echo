@@ -1,0 +1,6 @@
+public enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+}

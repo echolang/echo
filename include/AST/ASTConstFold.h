@@ -12,6 +12,7 @@ namespace AST
 {
     class ConstIfNode;
     class ExprNode;
+    class FunctionCallExprNode;
     class ScopeNode;
 
     // **the sole answer to "what does this expression fold to before codegen".**
@@ -84,6 +85,17 @@ namespace AST
     // side-effect free and independent of any pass's state, which is what lets codegen and a fixpoint
     // round ask the same question and rely on the same answer
     ConstFoldResult const_fold(const ExprNode *expr);
+
+    // **a payload-free case constructor is a discriminant**, not a function that runs.
+    // Color::green (and the shorthand `.green`) seats `__tag` and returns; folding it to
+    // those bits is the same fact enum `==` already lowers.
+    //
+    // `range` is the owner when CallResolver never saw the call — a named-map RHS whose
+    // forward was skipped because the author already wrote glfw(). then `static_owner` is
+    // used if it names an enum, otherwise `range`
+    ConstFoldResult fold_payload_free_enum_case(
+        const FunctionCallExprNode &call,
+        const ValueType *range = nullptr);
 
     // the arm a folded bool condition selects. null for a false condition with no else. ConstFolding
     // and live_calls both ask; clone uses the same pick so the discarded arm is never in the instance

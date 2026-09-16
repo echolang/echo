@@ -1,0 +1,8 @@
+struct Point
+{
+    int32 $x;
+}
+
+map glfw : int32 for Point
+{
+}

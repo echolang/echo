@@ -3,8 +3,10 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTEnumMapType.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTImport.h"
+#include "AST/ASTModule.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTRegion.h"
 #include "AST/ASTSymbol.h"
@@ -13,6 +15,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/ASTValueType.h"
 
 #include <fmt/core.h>
 
@@ -119,6 +122,13 @@ void ConstantExpander::run()
         _current_module = module_ptr.get();
         accept_semantic_roots(*module_ptr, *this, _current_file);
     }
+
+    // named-map RHS live on the table, not only in the planted bodies. a user-written accessor
+    // means there is no forward match to expand, and uniqueness still has to fold these
+    for (auto &module_ptr : _bundle.modules) {
+        _current_module = module_ptr.get();
+        expand_enum_map_values(*module_ptr);
+    }
 }
 
 void ConstantExpander::expand_initializer(ConstDeclNode &decl)
@@ -157,6 +167,28 @@ void ConstantExpander::expand_initializer(ConstDeclNode &decl)
 
     _current_self = previous_self;
     decl.expansion = ConstExpansion::t_expanded;
+}
+
+void ConstantExpander::expand_enum_map_values(Module &module)
+{
+    for (File &file : module.files()) {
+        _current_file = &file;
+
+        for (auto &map : file.enum_maps) {
+            if (map == nullptr) {
+                continue;
+            }
+
+            ComplexType *previous_self = _current_self;
+            _current_self = map->owner;
+
+            for (EnumMap::Association &assoc : map->associations) {
+                assoc.value = rewrite_value_edge(assoc.value);
+            }
+
+            _current_self = previous_self;
+        }
+    }
 }
 
 ConstDeclNode *ConstantExpander::resolve(ConstRefExprNode &ref)

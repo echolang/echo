@@ -11,6 +11,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
 
 #include <functional>
 #include <set>
@@ -90,6 +91,16 @@ namespace Compiler::LLVM
         // four times
         ReturnAbi return_abi_of(
             const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
+
+        // **write an aggregate into storage one leaf field at a time, never as a whole-struct store.**
+        // the granularity is the point: a `store %Foo %v, ptr %slot` of an already-assembled value is
+        // something SROA folds back into the insertvalue chain it came from, restoring the first-class
+        // aggregate this ABI exists to remove
+        void store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type);
+
+        // **hand this function's answer back**, sret or first-class. one owner so a LUT body and
+        // gen_return do not each re-derive the store. the value is already coerced
+        void emit_returned_value(llvm::Value *value);
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property

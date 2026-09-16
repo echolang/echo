@@ -1,0 +1,16 @@
+// KeyCode lives in a library. the GLFW view is this module's, and `public` is what
+// makes `$key->glfw()` callable from a consumer - the default would keep it here
+public map glfw : int32 for KeyCode
+{
+    .unknown = -1;
+    .space   = 32;
+    .escape  = 256;
+}
+
+echo KeyCode::space->glfw();
+echo KeyCode::from(glfw: 32) != null;
+echo KeyCode::from(glfw: 999) == null;
+
+KeyCode $key = KeyCode::from(glfw: -1) ?? .escape;
+echo $key == KeyCode::unknown;
+echo $key->glfw();

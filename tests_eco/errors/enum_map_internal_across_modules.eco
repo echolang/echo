@@ -1,0 +1,1 @@
+echo KeyCode::space->glfw();

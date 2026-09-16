@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_duplicate_rhs.eco:10:10
+
+  '.unknown' and '.space' both map to the same 'glfw' - the reverse would not be a function.
+
+   9 |         .unknown = 32;
+  10 |         .space   = 32;
+     :          ^^^^^
+  11 |         .escape  = 256;
+
+1 error, nothing was compiled.

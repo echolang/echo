@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_duplicate_foreign.eco:11:5
+
+  'KeyCode' already declares a map named 'glfw'.
+
+  10 | 
+  11 | map glfw : int32 for KeyCode
+     :     ^^^^
+  12 | {
+
+1 error, nothing was compiled.
