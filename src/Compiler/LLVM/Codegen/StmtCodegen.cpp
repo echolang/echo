@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
+#include "Compiler/LLVM/Codegen/EnumMapCodegen.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
@@ -352,7 +353,12 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     // a synthesized constructor arrives here like any other function - the struct parser builds its
     // body out of the same nodes a user would write, which is what keeps one implementation of the
     // member write and of the pointer re-seat
-    node.body->accept(*_ctx.visitor);
+    //
+    // a named map (and closed `from`) is the one body this compiler writes as a table rather than
+    // as the match / if-chain the parser planted for the semantic passes. independent of O2
+    if (!try_gen_enum_lut(_ctx, node)) {
+        node.body->accept(*_ctx.visitor);
+    }
 
     // the synthesized terminator belongs to the function rather than to any statement, so it takes the
     // subprogram's line - left where the last statement stood, an epilogue reports a line control
@@ -379,38 +385,6 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
 
     _ctx.current_function = prev_function;
     _ctx.current_file = prev_file;
-}
-
-void StmtCodegen::store_aggregate_fieldwise(
-    llvm::Value *value,
-    llvm::Value *slot,
-    llvm::Type *type
-)
-{
-    if (auto *structure = llvm::dyn_cast<llvm::StructType>(type)) {
-        for (unsigned i = 0; i < structure->getNumElements(); i++) {
-            store_aggregate_fieldwise(
-                _ctx.builder->CreateExtractValue(value, i),
-                _ctx.builder->CreateStructGEP(structure, slot, i),
-                structure->getElementType(i));
-        }
-
-        return;
-    }
-
-    if (auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) {
-        for (uint64_t i = 0; i < array->getNumElements(); i++) {
-            store_aggregate_fieldwise(
-                _ctx.builder->CreateExtractValue(value, static_cast<unsigned>(i)),
-                _ctx.builder->CreateConstInBoundsGEP2_64(array, slot, 0, i),
-                array->getElementType());
-        }
-
-        return;
-    }
-
-    // a leaf. no `!tbaa`: this is the caller's return storage, which nothing else names yet
-    _ctx.builder->CreateStore(value, slot);
 }
 
 void StmtCodegen::gen_return(AST::ReturnNode &node)
@@ -470,18 +444,7 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     // ReturnNode::unwind: `return $c->x` over an owning `$c` reads the block and then gives it back
     emit_unwind();
 
-    // **an aggregate the caller made room for is written there and the function returns nothing.** the
-    // store is field by field rather than one whole-struct store, and that granularity is the point: a
-    // `store %Foo %v` of an assembled value is something SROA folds straight back into the insertvalue
-    // chain it came from, which puts the first-class aggregate - and the phi over it that LLVM will not
-    // if-convert - right back where taking it out of the signature was supposed to remove it
-    if (_ctx.sret_pointer != nullptr) {
-        store_aggregate_fieldwise(ret, _ctx.sret_pointer, _ctx.sret_type);
-        _ctx.builder->CreateRetVoid();
-        return;
-    }
-
-    _ctx.builder->CreateRet(ret);
+    _ctx.types->emit_returned_value(ret);
 }
 
 void StmtCodegen::gen_guard(AST::GuardNode &node)

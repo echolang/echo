@@ -1,0 +1,18 @@
+// unsigned map values: reverse index is a zext, not a sext of a high bit
+enum Key
+{
+    case a;
+    case b;
+    case c;
+
+    map code : uint32
+    {
+        .a = 0;
+        .b = 32;
+        .c = 256;
+    }
+}
+
+echo Key::b->code();
+echo Key::from(code: 32) != null;
+echo Key::from(code: 99) == null;

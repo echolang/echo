@@ -31,6 +31,7 @@
 #include "Parser/OperatorDeclParser.h"
 #include "Parser/TestDeclParser.h"
 #include "Parser/VisibilityParser.h"
+#include "Parser/EnumMapParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
 {
@@ -126,6 +127,12 @@ AST::ScopeNode & Parser::parse_scope(
     // whatever namespace is current when the call is parsed, so a namespace that appeared halfway
     // through the block would leave the earlier call unable to see the later declaration
     AST::LexicalScope lexical_scope(context, payload.collector.namespaces, block_token);
+
+    // the file root is when map functions can land: pass 2 already minted them, and this
+    // scope is the origin file's children codegen will walk
+    if (!block_token.has_value()) {
+        Parser::plant_file_enum_maps(payload);
+    }
 
     while (!cursor.is_done()) {
         // **the visibility modifier, read here and at the same point the declaration pass reads it** -
@@ -297,6 +304,9 @@ AST::ScopeNode & Parser::parse_scope(
             parse_attribute(payload);
         }
 
+        else if (starts_enum_map(cursor)) {
+            parse_file_scope_enum_map(payload, block_token, visibility);
+        }
         // a compile-time constant, which the *declaration* pass has already read in full - name, value and
         // symbol. skipped here rather than parsed again, and silently: that pass is the one owner of every
         // diagnostic about one, including the refusal of a constant written inside a body, which this arm is

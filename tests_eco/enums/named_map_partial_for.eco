@@ -1,0 +1,17 @@
+// file-scope, same holes: escape has no glfw code
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+}
+
+map glfw : int32 for KeyCode
+{
+    .unknown = -1;
+    .space   = 32;
+}
+
+echo KeyCode::space->glfw() != null;
+echo KeyCode::escape->glfw() == null;
+echo KeyCode::from(glfw: 32) != null;

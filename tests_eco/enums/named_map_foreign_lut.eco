@@ -1,0 +1,10 @@
+public map glfw : int32 for KeyCode
+{
+    .unknown = -1;
+    .space   = 32;
+    .escape  = 256;
+}
+
+echo KeyCode::from(glfw: 32) != null;
+echo KeyCode::from(glfw: 999) == null;
+echo KeyCode::space->glfw();

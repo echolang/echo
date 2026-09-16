@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_for_inside_body.eco:5:22
+
+  A map inside the enum already names it - `for` belongs on a map written outside.
+
+  4 | 
+  5 |     map glfw : int32 for KeyCode
+    :                      ^^^
+  6 |     {
+
+1 error, nothing was compiled.

@@ -1,4 +1,5 @@
 #include "AST/ASTValueType.h"
+#include "AST/ASTEnumMapType.h"
 
 #include "eco.h"
 
@@ -637,6 +638,7 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // as non-exhaustive against a set of nothing
     instantiated->_enum_cases = tmpl->_enum_cases;
     instantiated->enum_backing = tmpl->enum_backing;
+    instantiated->enum_closed_from = tmpl->enum_closed_from;
 
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = normalized;
@@ -795,6 +797,50 @@ void AST::ComplexType::mark_open_remainder(size_t ordinal)
 {
     assert(ordinal < _enum_cases.size());
     _enum_cases[ordinal].is_open_remainder = true;
+}
+
+void AST::ComplexType::add_enum_map(EnumMap *map)
+{
+    if (map != nullptr) {
+        _enum_maps.push_back(map);
+    }
+}
+
+AST::EnumMap *AST::ComplexType::find_enum_map(const std::string &name)
+{
+    for (EnumMap *map : _enum_maps) {
+        if (map != nullptr && map->name == name) {
+            return map;
+        }
+    }
+
+    return nullptr;
+}
+
+const AST::EnumMap *AST::ComplexType::find_enum_map(const std::string &name) const
+{
+    for (const EnumMap *map : _enum_maps) {
+        if (map != nullptr && map->name == name) {
+            return map;
+        }
+    }
+
+    return nullptr;
+}
+
+bool AST::ComplexType::is_enum_map_function(const FunctionDeclNode *decl) const
+{
+    if (decl == nullptr) {
+        return false;
+    }
+
+    for (const EnumMap *map : _enum_maps) {
+        if (map != nullptr && (decl == map->forward || decl == map->reverse)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::string AST::enum_case_construction_refusal(const ValueType &owner, const std::string &name)

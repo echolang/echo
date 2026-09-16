@@ -46,13 +46,6 @@ namespace Compiler::LLVM
 
         void gen_function_decl(AST::FunctionDeclNode &node);
         void gen_return(AST::ReturnNode &node);
-
-        // **write an aggregate into storage one leaf field at a time, never as a whole-struct store.**
-        // the granularity is the point: a `store %Foo %v, ptr %slot` of an already-assembled value is
-        // something SROA folds back into the insertvalue chain it came from, restoring the first-class
-        // aggregate this ABI exists to remove. recursive, since a nested aggregate has the same problem
-        // one level in - an enum whose payload is an enum lowers to `{ i8, { i8 } }`
-        void store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type);
         void gen_if_statement(AST::IfStatementNode &node);
 
         // `guard T $x = <nullable> else { ... }`. evaluate the nullable **once**, test it, and either

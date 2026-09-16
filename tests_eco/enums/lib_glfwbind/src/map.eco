@@ -1,0 +1,8 @@
+// nothing written, so glfw() is this module's. a consumer that depends on us
+// still cannot name it - that is the default, not a special case for maps
+map glfw : int32 for KeyCode
+{
+    .unknown = -1;
+    .space   = 32;
+    .escape  = 256;
+}

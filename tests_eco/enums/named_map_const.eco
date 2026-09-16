@@ -1,0 +1,22 @@
+// RHS values are ordinary constants, cloned by the expander like any other use site
+const KEY_UNKNOWN = -1;
+const KEY_SPACE = 32;
+const KEY_ESCAPE = 256;
+
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+
+    map glfw : int32
+    {
+        .unknown = KEY_UNKNOWN;
+        .space   = KEY_SPACE;
+        .escape  = KEY_ESCAPE;
+    }
+}
+
+echo KeyCode::space->glfw();
+echo KeyCode::from(glfw: KEY_SPACE) != null;
+echo KeyCode::from(glfw: 999) == null;

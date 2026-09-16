@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_target_payload.eco:11:5
+
+  A map cannot target 'Color' - a map is a relation over payload-free cases.
+
+  10 | 
+  11 |     map color : Color
+     :     ^^^
+  12 |     {
+
+1 error, nothing was compiled.

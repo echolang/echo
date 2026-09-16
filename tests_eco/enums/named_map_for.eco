@@ -1,0 +1,22 @@
+// the same relation as named_map.eco, written next to the enum rather than inside it
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+}
+
+map glfw : int32 for KeyCode
+{
+    .unknown = -1;
+    .space   = 32;
+    .escape  = 256;
+}
+
+echo KeyCode::space->glfw();
+echo KeyCode::from(glfw: 32) != null;
+echo KeyCode::from(glfw: 999) == null;
+
+KeyCode $key = KeyCode::from(glfw: 256) ?? .unknown;
+echo $key == KeyCode::escape;
+echo $key->glfw();

@@ -1,0 +1,28 @@
+// the same relation as named_map_to_enum.eco, written next to the enum rather than inside it
+enum Color
+{
+    case red;
+    case green;
+    case blue;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+}
+
+map color : Color for Status
+{
+    .ok    = .green;
+    .warn  = .blue;
+    .error = .red;
+}
+
+echo Status::ok->color() == Color::green;
+echo Status::from(color: Color::green) != null;
+
+Status $ok = Status::from(color: Color::blue) ?? .error;
+echo $ok == Status::warn;
+echo $ok->color() == Color::blue;

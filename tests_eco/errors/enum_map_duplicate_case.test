@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_duplicate_case.eco:10:10
+
+  '.space' already appears in 'glfw' - every case appears once.
+
+   9 |         .space   = 32;
+  10 |         .space   = 32;
+     :          ^^^^^
+  11 |     }
+
+1 error, nothing was compiled.

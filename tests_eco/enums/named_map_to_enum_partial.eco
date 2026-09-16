@@ -1,0 +1,30 @@
+// many statuses have a colour; error does not. the forward is Color?
+enum Color
+{
+    case red;
+    case green;
+    case blue;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+
+    map color : Color
+    {
+        .ok   = .green;
+        .warn = .blue;
+    }
+}
+
+echo Status::ok->color() != null;
+echo Status::warn->color() != null;
+echo Status::error->color() == null;
+
+Color $c = guard Status::ok->color();
+echo $c == Color::green;
+
+Color $fallback = Status::error->color() ?? .red;
+echo $fallback == Color::red;

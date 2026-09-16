@@ -1,0 +1,18 @@
+modules: enums/lib_glfwbind
+expect: fail
+
+--- OUT --->
+[error] InaccessibleDeclaration  enum_map_internal_across_modules.eco:1:22
+
+  'const KeyCode::glfw()' is internal to the module 'glfwbind', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'glfwbind' offers.
+
+  1 | echo KeyCode::space->glfw();
+    :                      ^^^^
+  2 | 
+
+  2 | // still cannot name it - that is the default, not a special case for maps
+  3 | map glfw : int32 for KeyCode
+    :     ---- declared here
+  4 | {
+
+1 error, nothing was compiled.

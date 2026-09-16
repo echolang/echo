@@ -1,6 +1,7 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ConstDeclParser.h"
 #include "Parser/EnumDeclParser.h"
+#include "Parser/EnumMapParser.h"
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
@@ -1436,6 +1437,22 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             parse_enum_case(payload, struct_node, self_value_type, collect_members);
         }
+        else if (starts_enum_map(cursor)) {
+            // contextual `map name : type { }`, recognised by the three-token shape so `map<K, V>`
+            // as a property type is still starts_vardecl. an enum is the only body that keeps one
+            if (!is_enum_body) {
+                refuse_braced_member("a map");
+                continue;
+            }
+
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "A map is as reachable as the enum it belongs to - the methods it mints are named "
+                "through that enum, so there is no call site for a modifier to narrow.");
+
+            parse_enum_map(payload, struct_node, collect_members, visibility);
+        }
         else if (starts_typedecl(cursor)) {
             // a nested type. recursed into rather than skipped, so one function owns "what does a
             // struct body contain" - and the recursion needs nothing passed to it: the SelfScope
@@ -1768,9 +1785,16 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         if (is_enum_body) {
             const auto publish_synthesized = [&](const std::vector<AST::FunctionDeclNode *> &members) {
                 for (AST::FunctionDeclNode *member : members) {
-                    if (member != nullptr && member->is_implicitly_generated && member->body != nullptr) {
-                        payload.context.declaration_scope().add_funcdecl(*member);
+                    if (member == nullptr || !member->is_implicitly_generated || member->body == nullptr) {
+                        continue;
                     }
+
+                    // named maps plant in the file that wrote them, from plant_file_enum_maps
+                    if (struct_node->complex_type().is_enum_map_function(member)) {
+                        continue;
+                    }
+
+                    payload.context.declaration_scope().add_funcdecl(*member);
                 }
             };
 

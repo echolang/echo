@@ -1,0 +1,19 @@
+// INT64_MIN and INT64_MAX: a signed span that wraps if computed as uint64(max)-uint64(min)+1.
+// reverse must not tabulate; the if-chain the parser planted still answers
+enum Key
+{
+    case a;
+    case b;
+
+    map wire : int64
+    {
+        .a = -9223372036854775808;
+        .b = 9223372036854775807;
+    }
+}
+
+echo Key::from(wire: -9223372036854775808) != null;
+echo Key::from(wire: 9223372036854775807) != null;
+echo Key::from(wire: 0) == null;
+echo Key::a->wire() == -9223372036854775808;
+echo Key::b->wire() == 9223372036854775807;

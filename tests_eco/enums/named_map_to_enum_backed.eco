@@ -1,0 +1,30 @@
+// the target is integer-backed: tags are discriminants, not ordinals. reverse must index by
+// 10 / 20, not 0 / 1, or from(color:) answers the wrong case.
+enum Color : int32
+{
+    case red = 10;
+    case green = 20;
+    case blue = 30;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+
+    map color : Color
+    {
+        .ok    = .green;
+        .warn  = .blue;
+        .error = .red;
+    }
+}
+
+echo Status::ok->color() == Color::green;
+echo Status::from(color: Color::green) != null;
+
+Status $ok = guard Status::from(color: Color::green);
+echo $ok == Status::ok;
+echo $ok->color() == Color::green;
+echo Color::green->value() == 20;

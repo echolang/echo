@@ -1,0 +1,14 @@
+enum KeyCode
+{
+    case a;
+
+    map glfw : int32
+    {
+        .a = 1;
+    }
+}
+
+map glfw : int32 for KeyCode
+{
+    .a = 2;
+}

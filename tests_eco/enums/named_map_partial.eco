@@ -1,0 +1,22 @@
+// omit a source case and the forward is int32? — that case answers null
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+
+    map glfw : int32
+    {
+        .unknown = -1;
+        .space   = 32;
+    }
+}
+
+echo KeyCode::space->glfw() != null;
+echo KeyCode::escape->glfw() == null;
+
+int32 $code = guard KeyCode::space->glfw();
+echo $code;
+
+int32 $miss = KeyCode::escape->glfw() ?? 0;
+echo $miss;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_duplicate_rhs_existing_forward.eco:14:10
+
+  '.a' and '.b' both map to the same 'glfw' - the reverse would not be a function.
+
+  13 |         .a = 1;
+  14 |         .b = 1;
+     :          ^
+  15 |     }
+
+1 error, nothing was compiled.

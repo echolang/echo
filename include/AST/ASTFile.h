@@ -9,11 +9,14 @@
 #include "AST/ScopeNode.h"
 
 #include <filesystem>
-#include <string>
+#include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace AST
 {
+    struct EnumMap;
     class Module;
     class File;
 
@@ -66,16 +69,18 @@ namespace AST
         // time, the table is filled in pass 1 on that same object
         mutable std::vector<ImportBinding> imports;
 
+        // named maps this file wrote. **mutable** for `imports`' reason. the owner enum may live
+        // in another module, so mint_file_enum_maps cannot find these by walking this module's
+        // TypeDeclNodes. unique_ptr so ComplexType can hold a stable EnumMap* for lookup
+        mutable std::vector<std::unique_ptr<EnumMap>> enum_maps;
+
         // the plain text content of the file
         std::optional<std::string> content;
 
 
-        File(
-            const std::filesystem::path &path
-        ) :
-            _path(path)
-        {};
-        ~File() {};
+        // out of line: `enum_maps` holds unique_ptr to EnumMap, complete only in ASTFile.cpp
+        File(const std::filesystem::path &path);
+        ~File();
 
         const std::filesystem::path &get_path() const {
             return _path;
