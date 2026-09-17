@@ -1,0 +1,2 @@
+// the named manifest path-depends on a library whose #[requires:] is not in vendor/
+echo 1;

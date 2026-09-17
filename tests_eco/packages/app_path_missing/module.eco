@@ -1,0 +1,6 @@
+#[module: "pathapp"]
+#[version: "0.1.0"]
+
+#[depends: "../lib_path_require"]
+
+#[sources: "src/*.eco"]

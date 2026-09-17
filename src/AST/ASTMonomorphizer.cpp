@@ -32,10 +32,11 @@ namespace AST
 {
     namespace
     {
-        // runaway guards: real programs stay far below these; hitting them means a
-        // pathological (e.g. recursively growing) instantiation, which we stop rather than
-        // spin on forever
-        constexpr size_t MAX_INSTANCES = 4096;
+        // two questions, two guards: depth is a recursively growing type; instance
+        // count is an OOM backstop. a program may instantiate array for every type
+        // it names. MAX_ROUNDS is the fixpoint itself not converging
+        constexpr size_t MAX_TYPE_DEPTH = 32;
+        constexpr size_t MAX_INSTANCES = 50'000;
         constexpr size_t MAX_ROUNDS = 256;
 
     }
@@ -155,7 +156,11 @@ namespace AST
         return inst.type_arguments;
     }
 
-    FunctionDeclNode *Monomorphizer::get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args)
+    FunctionDeclNode *Monomorphizer::get_or_create_function_instance(
+        FunctionDeclNode *tmpl,
+        const std::vector<ValueType> &args,
+        const TokenReference *call_at
+    )
     {
         InstanceKey key = std::make_tuple(static_cast<const FunctionDeclNode *>(tmpl), args);
         if (auto it = _func_instances.find(key); it != _func_instances.end()) {
@@ -171,16 +176,49 @@ namespace AST
         }
         Module *home = module_it->second;
 
-        // runaway guard: hitting the instance cap means instantiation is not converging (e.g. a
-        // generic recursing on an ever-growing type). report it once, located at the template, so
-        // it surfaces as a diagnostic instead of a silent stall
+        const auto report_at = [&]() -> std::optional<CodeRef> {
+            if (call_at != nullptr) {
+                return code_ref_for(*home, *call_at);
+            }
+            if (tmpl->name_token.has_value()) {
+                return code_ref_for(*home, tmpl->name_token.value());
+            }
+            return std::nullopt;
+        };
+
+        // growing type first, and before the clone: wrapping one more Box is a depth, not a
+        // count of functions. located at the call that asked, so a recursive wrap names wrap
+        // rather than whatever stdlib method the clone would have reached for next
+        size_t depth = 0;
+        for (const auto &arg : args) {
+            depth = std::max(depth, generic_application_depth(arg));
+        }
+
+        if (depth > MAX_TYPE_DEPTH) {
+            if (!_depth_cap_reported) {
+                if (auto at = report_at()) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        *at,
+                        "generic '" + tmpl->func_name() + "' instantiated at type depth "
+                            + std::to_string(depth)
+                            + ", which is likely a recursively growing type");
+                    _depth_cap_reported = true;
+                }
+            }
+            return nullptr;
+        }
+
+        // OOM backstop, not a termination proof
         if (++_instance_count > MAX_INSTANCES) {
-            if (!_instance_cap_reported && tmpl->name_token.has_value()) {
-                _collector.collect_issue<Issue::GenericError>(
-                    code_ref_for(*home, tmpl->name_token.value()),
-                    "instantiation limit (" + std::to_string(MAX_INSTANCES) + ") hit resolving generic '"
-                        + tmpl->func_name() + "': likely non-terminating generic instantiation");
-                _instance_cap_reported = true;
+            if (!_instance_cap_reported) {
+                if (auto at = report_at()) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        *at,
+                        "generic instantiation safety limit (" + std::to_string(MAX_INSTANCES)
+                            + ") exceeded while resolving '" + tmpl->func_name()
+                            + "' - this cap is an OOM guard, not a sign instantiation is looping");
+                    _instance_cap_reported = true;
+                }
             }
             return nullptr;
         }
@@ -262,7 +300,8 @@ namespace AST
                           << "' with <" << arg_desc << ">" << std::endl;
             }
 
-            FunctionDeclNode *instance = get_or_create_function_instance(call->decl, *args);
+            FunctionDeclNode *instance = get_or_create_function_instance(
+                call->decl, *args, &call->token_function_name);
             if (instance) {
                 call->decl = instance;
                 progressed = true;
@@ -937,7 +976,9 @@ namespace AST
         };
 
         std::string result = "Monomorphization instances\n{\n";
-        result += DD::tabbify(section("Instances created:", instance_lines), 2);
+        result += DD::tabbify(
+            section("Instances created (" + std::to_string(instance_lines.size()) + "):", instance_lines),
+            2);
         result += DD::tabbify(section("Rewired call sites:", call_lines), 2);
         result += DD::tabbify(section("Struct instantiations:", struct_lines), 2);
         result += "}\n";

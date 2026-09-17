@@ -131,6 +131,31 @@ TEST_CASE("substitute_type leaves primitives and concrete types unchanged", "[ty
     REQUIRE(substitute_type(point_type, subst, reg) == point_type);
 }
 
+TEST_CASE("generic_application_depth counts interned applications and wrappers", "[types][generics]")
+{
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    TypeParamDecl *t = declare_param(params, box, "T");
+    box.add_property("value", ValueType::make_type_param(t));
+
+    REQUIRE(generic_application_depth(prim(ValueTypePrimitive::t_int32)) == 0);
+
+    ComplexType *box_i = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
+    REQUIRE(generic_application_depth(ValueType::make_struct(box_i)) == 1);
+
+    ComplexType *box_box = reg.get_or_create_instantiation(&box, { ValueType::make_struct(box_i) });
+    REQUIRE(generic_application_depth(ValueType::make_struct(box_box)) == 2);
+
+    // a pointer is an intern key, so dump<T> → dump<ptr<T>> is a depth
+    ValueType ptr = ValueType::make_pointer(ValueType::make_struct(box_box), true);
+    REQUIRE(generic_application_depth(ptr) == 3);
+
+    ValueType ptr_i = ValueType::make_pointer(prim(ValueTypePrimitive::t_int32), true);
+    REQUIRE(generic_application_depth(ptr_i) == 1);
+    REQUIRE(generic_application_depth(ValueType::make_pointer(ptr_i, true)) == 2);
+}
+
 TEST_CASE("TypeRegistry interns instantiations by (template, args) identity", "[types][generics]")
 {
     TypeRegistry reg;

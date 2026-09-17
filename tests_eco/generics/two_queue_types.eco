@@ -1,0 +1,143 @@
+// two Queue<T> on one class, the shape visu trips the old 4096 instance cap on. a
+// 90-line bus is not enough by itself to hit a count ceiling; this pins that two
+// distinct T on one type is ordinary instantiation, not a resolution loop
+
+public enum Flow
+{
+    case proceed;
+    case stop;
+}
+
+public class Handler<T>
+{
+    public int32 $id;
+    public function<Flow(const T&)> $fn;
+
+    public constructor(int32 $id, function<Flow(const T&)> $fn)
+    {
+        $this->id = $id;
+        $this->fn = $fn;
+    }
+}
+
+public class Bucket<T>
+{
+    public array<Handler<T>> $handlers;
+
+    public constructor()
+    {
+        $this->handlers = array<Handler<T>>();
+    }
+
+    public function insert(Handler<T> $handler) : void
+    {
+        $this->handlers->push($handler);
+    }
+}
+
+public class Queue<T>
+{
+    public int32 $id;
+    private array<T> $items;
+
+    public constructor(int32 $id)
+    {
+        $this->id = $id;
+        $this->items = array<T>();
+    }
+
+    public function push(const T& $signal) : void
+    {
+        $this->items->push($signal);
+    }
+
+    public const function size() : usize
+    {
+        return $this->items->count();
+    }
+}
+
+public class Bus
+{
+    private map<type_id, erased> $buckets;
+    private int32 $nextId;
+
+    public constructor()
+    {
+        $this->buckets = map<type_id, erased>();
+        $this->nextId = 0;
+    }
+
+    public function queue<T>() : Queue<T>
+    {
+        int32 $id = $this->nextId;
+        $this->nextId = $this->nextId + 1;
+        Queue<T> $queue = Queue<T>($id);
+        Bucket<T> $bucket = $this->bucket<T>();
+        $bucket->insert(Handler<T>($id, function(const T& $signal) : Flow {
+            $queue->push($signal);
+            return .proceed;
+        }));
+        return $queue;
+    }
+
+    private function bucket<T>() : Bucket<T>
+    {
+        type_id $id = type_id<T>();
+        if (!$this->buckets->has($id)) {
+            Bucket<T> $created = Bucket<T>();
+            $this->buckets[$id] = erased::from($created);
+            return $created;
+        }
+
+        erased $held = $this->buckets->get($id);
+        unsafe {
+            return assume<Bucket<T>>($held);
+        }
+    }
+}
+
+public struct Alpha
+{
+    public int32 $n;
+}
+
+public struct Beta
+{
+    public int32 $n;
+}
+
+public class TwoQueues
+{
+    private Bus $bus;
+    private Queue<Alpha>? $a;
+    private Queue<Beta>? $b;
+
+    public constructor()
+    {
+        $this->bus = Bus();
+        $this->a = null;
+        $this->b = null;
+    }
+
+    public function start() : void
+    {
+        $this->a = $this->bus->queue<Alpha>();
+        $this->b = $this->bus->queue<Beta>();
+    }
+
+    public function sizes() : usize
+    {
+        Queue<Alpha> $a = guard $this->a else {
+            return 0;
+        }
+        Queue<Beta> $b = guard $this->b else {
+            return 0;
+        }
+        return $a->size() + $b->size();
+    }
+}
+
+TwoQueues $h = TwoQueues();
+$h->start();
+echo $h->sizes();

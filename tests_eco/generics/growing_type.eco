@@ -1,0 +1,16 @@
+// a generic that instantiates itself at a larger type. T is inferred from the
+// argument, so explode<int32> calls explode<Nest<int32>>, then Nest<Nest<int32>>,
+// and so on. the depth guard cuts this; the instance-count backstop is not this
+// program's question
+
+struct Nest<T>
+{
+    T $inner;
+}
+
+function explode<T>(T $x) : void
+{
+    explode(Nest<T>($x));
+}
+
+explode(1);

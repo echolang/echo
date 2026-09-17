@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] growing_type.eco:13:5
+
+  generic 'explode' instantiated at type depth 33, which is likely a recursively growing type
+
+  12 | {
+  13 |     explode(Nest<T>($x));
+     :     ^^^^^^^
+  14 | }
+
+1 error, nothing was compiled.

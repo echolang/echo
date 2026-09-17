@@ -255,6 +255,7 @@ bool Compiler::resolve_front_end_manifests(
     }
 
     if (!out_roots.empty()) {
+        scratch.entry_directory = Compiler::canonical_or_absolute(out_roots.front().parent_path());
         scratch.package_dir = Parser::resolve_package_dir(
             out_roots.front().parent_path(), package_dir_override);
     }

@@ -143,3 +143,158 @@ test echoc_bin_is_not_empty
 {
     assert(!manifest::echoc_bin()->empty());
 }
+
+test depend_module_resolves_a_directory
+{
+    string $lib = scratch::dir('dep-mod-lib');
+    string $lib_mod = scratch::file($lib, 'module.eco', "#[module: \"lib\"]\n#[sources: \"src/*.eco\"]\n");
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    string $app = scratch::dir('dep-mod-app');
+    string $app_mod = scratch::file($app, 'module.eco', "#[module: \"app\"]\n");
+    string $got = guard manifest::depend_module($app_mod, $lib);
+    assert($got == $lib_mod);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test depend_module_resolves_the_file
+{
+    string $lib = scratch::dir('dep-file-lib');
+    string $lib_mod = scratch::file($lib, 'module.eco', "#[module: \"lib\"]\n#[sources: \"src/*.eco\"]\n");
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    string $app = scratch::dir('dep-file-app');
+    string $app_mod = scratch::file($app, 'module.eco', "#[module: \"app\"]\n");
+    string $got = guard manifest::depend_module($app_mod, $lib_mod);
+    assert($got == $lib_mod);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test depend_module_misses
+{
+    string $app = scratch::dir('dep-miss-app');
+    string $app_mod = scratch::file($app, 'module.eco', "#[module: \"app\"]\n");
+    assert(manifest::depend_module($app_mod, './nope')->failed());
+    scratch::gone($app);
+}
+
+test reachable_requires_collects_a_path_dep
+{
+    string $lib = scratch::dir('reach-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"visu\"]\n#[version: \"0.1.0\"]\n#[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    string $app = scratch::dir('reach-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 1);
+    assert($need[0]->name == 'leaf');
+    assert($need[0]->version == '^1.0');
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_is_empty_without_requires
+{
+    string $lib = scratch::dir('reach-empty-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"empty\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    string $app = scratch::dir('reach-empty-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 0);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_survives_a_cycle
+{
+    string $root = scratch::dir('reach-cycle');
+    string $a = sys::join($root, 'a');
+    string $b = sys::join($root, 'b');
+    assert(sys::mkdir_p($a));
+    assert(sys::mkdir_p($b));
+    scratch::file($a, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($b, 'src/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $a,
+        'module.eco',
+        "#[module: \"ca\"]\n#[version: \"0.1.0\"]\n#[depends: \"../b\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file(
+        $b,
+        'module.eco',
+        "#[module: \"cb\"]\n#[version: \"0.1.0\"]\n#[depends: \"../a\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load(sys::join($a, 'module.eco'));
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 0);
+    scratch::gone($root);
+}
+
+test load_keeps_target_depends_apart
+{
+    string $lib = scratch::dir('load-tdep-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($lib, 'module.eco', "#[module: \"tdep\"]\n#[sources: \"src/*.eco\"]\n");
+    string $dir = scratch::dir('load-tdep');
+    scratch::file($dir, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($dir, 'tests/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$lib}\"]\n}\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    assert($m->depends->count() == 0);
+    assert($m->scoped_depends->count() == 1);
+    assert($m->scoped_depends[0]->path == $lib);
+    assert($m->scoped_depends[0]->target == 'tests');
+    scratch::gone($lib);
+    scratch::gone($dir);
+}
+
+test reachable_requires_collects_a_target_depend
+{
+    string $lib = scratch::dir('reach-tdep-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"tdep\"]\n#[version: \"0.1.0\"]\n#[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    string $app = scratch::dir('reach-tdep-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($app, 'tests/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$lib}\"]\n}\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 1);
+    assert($need[0]->name == 'leaf');
+    assert($need[0]->version == '^1.0');
+    scratch::gone($lib);
+    scratch::gone($app);
+}

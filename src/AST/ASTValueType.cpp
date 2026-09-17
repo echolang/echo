@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <cassert>
 std::string AST::get_primitive_name(ValueTypePrimitive primitive)
 {
@@ -1052,6 +1053,53 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
     }
 
     return false;
+}
+
+size_t AST::generic_application_depth(const ValueType &type)
+{
+    // wrappers are intern keys, same as a generic application: dump<ptr<T>> grows
+    // through a pointer, not through Box
+    if (type.is_pointer()) {
+        return generic_application_depth(type.pointee()) + 1;
+    }
+
+    if (type.is_weak()) {
+        return generic_application_depth(type.weak_target()) + 1;
+    }
+
+    if (type.is_inline_array()) {
+        return std::max(
+            generic_application_depth(type.array_element()),
+            generic_application_depth(type.array_length())) + 1;
+    }
+
+    if (type.has_signature()) {
+        size_t depth = generic_application_depth(type.signature().return_type);
+
+        for (const auto &parameter_type : type.signature().parameter_types) {
+            depth = std::max(depth, generic_application_depth(parameter_type));
+        }
+
+        return depth + 1;
+    }
+
+    if (type.is_wrapped_optional()) {
+        return generic_application_depth(type.optional_payload()) + 1;
+    }
+
+    if (type.has_complex_type()) {
+        ComplexType *ct = type.get_complex_type();
+        if (ct != nullptr && ct->is_instantiated()) {
+            size_t inner = 0;
+            for (const auto &arg : ct->instantiation_args) {
+                inner = std::max(inner, generic_application_depth(arg));
+            }
+
+            return inner + 1;
+        }
+    }
+
+    return 0;
 }
 
 // flags live on the ValueType, not on the interned layout. every rebuild arm mints a bare type

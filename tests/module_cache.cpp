@@ -747,6 +747,11 @@ TEST_CASE("`--package-dir` overrides the vendor search", "[cache][packages]")
     REQUIRE(missing.exit_code != 0);
     REQUIRE(missing.output.find("not in 'vendor/'") != std::string::npos);
 
+    const ProcessResult missing_override = project.echoc("run --package-dir missing_pkgs");
+    REQUIRE(missing_override.exit_code != 0);
+    REQUIRE(missing_override.output.find("not in 'vendor/'") != std::string::npos);
+    REQUIRE(missing_override.output.find("path dependency") == std::string::npos);
+
     const ProcessResult found = project.echoc("run --package-dir pkgs");
     INFO(found.output);
     REQUIRE(found.exit_code == 0);

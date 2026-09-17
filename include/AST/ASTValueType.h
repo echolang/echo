@@ -1807,6 +1807,13 @@ namespace AST
     // operand mentions, because nothing at a use site could ever bind it
     bool contains_type_param(const ValueType &type, const TypeParamDecl *param);
 
+    // how many intern-key distinctions sit in this type: `int32` is 0, `Box<int32>` is 1,
+    // `ptr<Box<int32>>` is 2. a pointer, a weak, a tagged optional, a signature and an
+    // inline array each count, because the monomorphizer intern-keys them and a recursive
+    // `dump<ptr<T>>` grows through those wrappers. the growing-type guard asks this of
+    // every type argument
+    size_t generic_application_depth(const ValueType &type);
+
     // true when nothing has answered what this type is yet: unknown, or still mentioning a
     // type parameter that a substitution has not bound
     //

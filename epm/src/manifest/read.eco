@@ -35,6 +35,18 @@ public struct ScopedRequirement
     }
 }
 
+public struct ScopedDepend
+{
+    string $target;
+    string $path;
+
+    constructor(string $target, string $path)
+    {
+        $this->target = $target;
+        $this->path = $path;
+    }
+}
+
 public struct Manifest
 {
     string $name;
@@ -43,6 +55,7 @@ public struct Manifest
     array<Requirement> $requires;
     array<ScopedRequirement> $scoped;
     array<string> $depends;
+    array<ScopedDepend> $scoped_depends;
 
     constructor(string $name, string $version, string $path)
     {
@@ -52,6 +65,7 @@ public struct Manifest
         $this->requires = array<Requirement>();
         $this->scoped = array<ScopedRequirement>();
         $this->depends = array<string>();
+        $this->scoped_depends = array<ScopedDepend>();
     }
 }
 
@@ -73,6 +87,138 @@ public function all_requires(const Manifest& $m) : array<Requirement>
     }
 
     return $out;
+}
+
+/**
+ * The module.eco a `#[depends:]` names, relative to the manifest that wrote it.
+ * A directory or the file itself, matching echoc.
+ */
+public function depend_module(const string& $from_manifest, const string& $spelled) : result<string, string>
+{
+    string $probe = $spelled;
+
+    if (!sys::is_absolute($probe)) {
+        $probe = sys::join(sys::dirname($from_manifest), $spelled);
+    }
+
+    if (sys::is_file($probe) && sys::basename($probe) == 'module.eco') {
+        return .ok($probe);
+    }
+
+    string $mod = sys::join($probe, 'module.eco');
+
+    if (sys::is_file($mod)) {
+        return .ok($mod);
+    }
+
+    return .error("cannot load path dependency '{$spelled}' from {$from_manifest}");
+}
+
+public function name_seen(const array<string>& $seen, const string& $name) : bool
+{
+    usize $i = 0;
+
+    while ($i < $seen->count()) {
+        if ($seen[$i] == $name) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+function append_requires(const Manifest& $m, array<Requirement>& $into) : void
+{
+    array<Requirement> $more = all_requires($m);
+    usize $i = 0;
+
+    while ($i < $more->count()) {
+        $into[] = $more[$i];
+        $i = $i + 1;
+    }
+}
+
+function walk_depend_path(
+    const Manifest& $from,
+    const string& $spelled,
+    array<string>& $seen,
+    array<Requirement>& $into,
+    int32 $depth
+) : result<bool, string>
+{
+    string $path = guard depend_module($from->path, $spelled) else ($e) {
+        return .error($e);
+    }
+
+    Manifest $dep = guard load($path) else ($e) {
+        return .error($e);
+    }
+
+    if (name_seen($seen, $dep->name)) {
+        return .ok(true);
+    }
+
+    $seen[] = $dep->name;
+    append_requires($dep, $into);
+    bool $ok = guard walk_depends($dep, $seen, $into, $depth + 1) else ($e) {
+        return .error($e);
+    }
+
+    return .ok(true);
+}
+
+function walk_depends(
+    const Manifest& $man,
+    array<string>& $seen,
+    array<Requirement>& $into,
+    int32 $depth
+) : result<bool, string>
+{
+    if ($depth > 32) {
+        return .error('path dependency walk is too deep');
+    }
+
+    usize $i = 0;
+
+    while ($i < $man->depends->count()) {
+        bool $ok = guard walk_depend_path($man, $man->depends[$i], $seen, $into, $depth) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < $man->scoped_depends->count()) {
+        bool $ok = guard walk_depend_path(
+            $man, $man->scoped_depends[$i]->path, $seen, $into, $depth
+        ) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
+    }
+
+    return .ok(true);
+}
+
+/**
+ * Root requires, plus every `#[requires:]` on a reachable `#[depends:]` module.
+ * Path modules stay out of vendor/; only their git requires are solve roots.
+ */
+public function reachable_requires(const Manifest& $root) : result<array<Requirement>, string>
+{
+    array<Requirement> $out = all_requires($root);
+    array<string> $seen = array<string>();
+    $seen[] = $root->name;
+    bool $ok = guard walk_depends($root, $seen, $out, 0) else ($e) {
+        return .error($e);
+    }
+
+    return .ok($out);
 }
 
 public function find_module(const string& $start) : string?
@@ -176,6 +322,19 @@ public function load(const string& $path) : result<Manifest, string>
         while ($si < $scoped->count()) {
             $m->scoped[] = ScopedRequirement($tname, $scoped[$si]);
             $si = $si + 1;
+        }
+
+        array<json::Value> $tdeps = $targets[$ti]['depends']->asArray() ?? array<json::Value>();
+        usize $tdi = 0;
+
+        while ($tdi < $tdeps->count()) {
+            string $td = $tdeps[$tdi]->asStr() ?? '';
+
+            if (!$td->empty()) {
+                $m->scoped_depends[] = ScopedDepend($tname, $td);
+            }
+
+            $tdi = $tdi + 1;
         }
 
         $ti = $ti + 1;

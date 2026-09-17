@@ -270,6 +270,11 @@ namespace Parser
         // settles it, once per invocation, from the first user root
         std::filesystem::path package_dir;
 
+        // the program's directory, the first user root's parent. `requirement_is_on_path_dep`
+        // compares against this rather than `package_dir.parent()`, because `--package-dir`
+        // can point anywhere
+        std::filesystem::path entry_directory;
+
         explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
 
         AST::Module &fresh_module()

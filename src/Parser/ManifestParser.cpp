@@ -45,18 +45,18 @@ TokenReference pin_manifest(AST::Module &module, AST::File *file, uint32_t line)
     return module.tokens[module.tokens.push_minted("", Token::Type::t_unknown, line, 1, file)];
 }
 
-template <typename Issue>
+template <typename Issue, typename... Args>
 void report_manifest(
     AST::Collector &collector,
     AST::Module &module,
     AST::File *file,
     uint32_t line,
-    std::string message
+    Args... args
 )
 {
     collector.collect_issue<Issue>(
         AST::CodeRef{ &module, pin_manifest(module, file, line).make_slice() },
-        std::move(message));
+        args...);
 }
 
 // true when a path component carries a glob metacharacter
@@ -176,23 +176,23 @@ struct ManifestReport
     AST::File *file;
 };
 
-template <typename Issue>
-void report_at(const ManifestReport &into, uint32_t line, std::string message)
+template <typename Issue, typename... Args>
+void report_at(const ManifestReport &into, uint32_t line, Args... args)
 {
-    report_manifest<Issue>(into.collector, into.module, into.file, line == 0 ? 1 : line, std::move(message));
+    report_manifest<Issue>(into.collector, into.module, into.file, line == 0 ? 1 : line, args...);
 }
 
-template <typename Issue>
-void report_span(const ManifestReport &into, const TokenSpan &span, std::string message)
+template <typename Issue, typename... Args>
+void report_span(const ManifestReport &into, const TokenSpan &span, Args... args)
 {
     if (!span.is_valid()) {
-        report_at<Issue>(into, 1, std::move(message));
+        report_at<Issue>(into, 1, args...);
         return;
     }
 
     into.collector.collect_issue<Issue>(
         AST::CodeRef { &into.module, span.slice() },
-        std::move(message));
+        args...);
 }
 
 // the attribute values, straight off the nodes the declaration pass collected. `sources` and `depends` come
@@ -797,12 +797,46 @@ bool resolve_manifest_depend_paths(
     return true;
 }
 
+// true when this module is neither the program nor a package already under vendor/:
+// its #[requires:] still resolve against the program's package dir, and epm install
+// at the program is what fills it. the entry is the invocation's, not vendor.parent,
+// because --package-dir can point anywhere
+bool requirement_is_on_path_dep(
+    const std::filesystem::path &module_dir,
+    const std::filesystem::path &package_dir,
+    const std::filesystem::path &entry_directory)
+{
+    if (module_dir.empty() || entry_directory.empty()) {
+        return false;
+    }
+
+    const auto here = Compiler::canonical_or_absolute(module_dir);
+    const auto entry = Compiler::canonical_or_absolute(entry_directory);
+
+    if (here == entry) {
+        return false;
+    }
+
+    if (!package_dir.empty()) {
+        const auto vendor = Compiler::canonical_or_absolute(package_dir);
+        const auto rel = here.lexically_relative(vendor);
+
+        if (!rel.empty() && rel != "." && *rel.begin() != "..") {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // each requirement's name against the invocation's package directory, appended to the same
 // `depends` vector path dependencies already fill - so the DFS, the cycle report and the cache
 // key never learn that a requirement was not a path
 bool resolve_manifest_require_paths(
     const std::vector<Parser::ModuleRequirement> &requirements,
     const std::filesystem::path &package_dir,
+    const std::filesystem::path &module_dir,
+    const std::filesystem::path &entry_directory,
     std::vector<std::filesystem::path> &into,
     const ManifestReport &report
 )
@@ -812,8 +846,12 @@ bool resolve_manifest_require_paths(
             Parser::manifest_for_requirement(requirement, package_dir);
 
         if (!resolved.has_value()) {
-            report_span<AST::Issue::PackageNotVendored>(report, requirement.span, fmt::format(
-                "the package \"{}\" is not in 'vendor/'.", requirement.name));
+            const bool on_path = requirement_is_on_path_dep(
+                module_dir, package_dir, entry_directory);
+            report_span<AST::Issue::PackageNotVendored>(
+                report, requirement.span,
+                fmt::format("the package \"{}\" is not in 'vendor/'.", requirement.name),
+                on_path);
             return false;
         }
 
@@ -886,12 +924,13 @@ bool resolve_manifest_targets(
     const std::vector<WrittenTarget> &written,
     Parser::ModuleManifest &out,
     const std::filesystem::path &package_dir,
+    const std::filesystem::path &entry_directory,
     const ManifestReport &into
 )
 {
     // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
     // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
-    const auto expand_scope = [&out, &into, &package_dir](
+    const auto expand_scope = [&out, &into, &package_dir, &entry_directory](
         const WrittenTarget &target, Parser::ModuleTarget &settled) {
         if (!target.scoped_sources.empty()
             && !expand_manifest_patterns(
@@ -904,7 +943,8 @@ bool resolve_manifest_targets(
         }
 
         if (!resolve_manifest_require_paths(
-                target.scoped_requirements, package_dir, settled.depends, into)) {
+                target.scoped_requirements, package_dir, out.directory, entry_directory,
+                settled.depends, into)) {
             return false;
         }
 
@@ -1123,11 +1163,13 @@ bool read_manifest_with(
     // targets after the sources they name, and before everything else - an entry has to be checked
     // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
     return expand_manifest_sources(sources_written, out, into)
-        && resolve_manifest_targets(targets_written, out, scratch.package_dir, into)
+        && resolve_manifest_targets(
+            targets_written, out, scratch.package_dir, scratch.entry_directory, into)
         && expand_cc_sources(out.cc, out, "this module", into)
         && resolve_manifest_depend_paths(depends_written, out, out.depends, into)
         && resolve_manifest_require_paths(
-            out.requirements, scratch.package_dir, out.depends, into);
+            out.requirements, scratch.package_dir, out.directory, scratch.entry_directory,
+            out.depends, into);
 }
 
 };

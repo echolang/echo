@@ -4,6 +4,8 @@
 #include <AST/ExprNode.h>
 #include <AST/TypeDeclNode.h>
 
+#include <string>
+
 #include "helpers.h"
 
 using namespace AST;
@@ -400,6 +402,63 @@ TEST_CASE("a generic call in a taken const if arm is instantiated", "[generics]"
 
     auto &m = bundle->modules.find_module("test");
     REQUIRE(has_instance_named(m, "keep"));
+}
+
+TEST_CASE("a recursively growing type is cut by depth, not by instance count", "[generics]")
+{
+    // explode<T> calls explode<Nest<T>>. T is inferred from the argument, not a
+    // destination - a `: T` return would pin the inner call to the same T and
+    // terminate as fac does. without a depth guard this used to run until the
+    // 4096 instance cap and blame whichever stdlib method was being cloned.
+    // Nest is local, so the bundle needs no stdlib
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Nest<T> { T $inner; }\n"
+        "function explode<T>(T $x) : void {\n"
+        "    explode(Nest<T>($x));\n"
+        "}\n"
+        "explode(1);\n");
+
+    REQUIRE(has_issue_containing(*bundle, "type depth"));
+    REQUIRE(has_issue_containing(*bundle, "explode"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "safety limit"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "instantiation limit"));
+}
+
+TEST_CASE("a recursively growing pointer is cut by depth, not by rounds", "[generics]")
+{
+    // dump<ptr<T>> names the intern key; dump(&$x) against T decays and
+    // does not grow
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function dump<T>(T $x) : void {\n"
+        "    dump<ptr<T>>(&$x);\n"
+        "}\n"
+        "dump(1);\n");
+
+    REQUIRE(has_issue_containing(*bundle, "type depth"));
+    REQUIRE(has_issue_containing(*bundle, "dump"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "did not converge"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "safety limit"));
+}
+
+TEST_CASE("many distinct instantiations of one generic do not hit the instance cap", "[generics]")
+{
+    std::string src =
+        "struct Box<T> { T $v; }\n"
+        "function hold<T>(T $v) : int32 {\n"
+        "    Box<T> $b = Box<T>($v);\n"
+        "    return 1;\n"
+        "}\n";
+
+    for (int i = 0; i < 80; i++) {
+        const std::string n = std::to_string(i);
+        src += "struct T" + n + " { public int32 $n; }\n";
+        src += "hold(T" + n + "(" + n + "));\n";
+    }
+
+    auto bundle = EchoTests::tests_make_parsed_bundle(src);
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    REQUIRE_FALSE(has_issue_containing(*bundle, "safety limit"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "type depth"));
 }
 
 TEST_CASE("a generic call in a pending const if condition is instantiated", "[generics]")

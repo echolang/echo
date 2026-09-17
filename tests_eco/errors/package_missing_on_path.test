@@ -1,0 +1,16 @@
+modules: packages/app_path_missing
+expect: fail
+
+--- OUT --->
+[error] PackageNotVendored  module.eco:4:13
+
+  the package "libhello" is not in 'vendor/'.
+
+  3 | 
+  4 | #[requires: "libhello" { version: "^1", source: git "https://x" }]
+    :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 | 
+
+  note: run `epm install`
+  note: this #[requires:] is on a path dependency; `epm install` at the program vendors it
+

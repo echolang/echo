@@ -551,7 +551,14 @@ ISSUE_MESSAGE_FNC(PackageNotVendored) { return _message; }
 
 std::vector<AST::IssueNote> AST::Issue::PackageNotVendored::notes() const
 {
-    return { IssueNote { NoteKind::t_note, "run `epm install`" } };
+    std::vector<IssueNote> out = { IssueNote { NoteKind::t_note, "run `epm install`" } };
+
+    if (on_path_dependency) {
+        out.push_back(IssueNote { NoteKind::t_note,
+            "this #[requires:] is on a path dependency; `epm install` at the program vendors it" });
+    }
+
+    return out;
 }
 
 ISSUE_MESSAGE_FNC(DuplicateModuleName) { return _message; }
