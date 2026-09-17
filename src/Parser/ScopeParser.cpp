@@ -395,29 +395,51 @@ AST::ScopeNode & Parser::parse_scope(
         // a call used as a statement. ordered after the vardecl branch above so that
         // `a::b::Foo $foo` still reads as a declaration rather than a qualified call
         else if (starts_call_statement(payload)) {
-            // consume a namespace prefix if there is one, so `mem::free($p);` resolves against
-            // `mem` rather than the enclosing namespace
-            const AST::Namespace *call_namespace = nullptr;
-            if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
-                if (auto *ns_node = parse_namespace(payload)) {
-                    call_namespace = ns_node->ast_namespace;
-                }
-            }
+            // **a static call first**, the same order parse_expr uses and for the same reason:
+            // parse_namespace mints what it does not find, so `Marker::activate();` consumed as a
+            // namespaced free call looks up `activate` in a namespace called Marker and reports
+            // UnknownFunction for a method that is sitting on the type. a `$` after the `::` is a
+            // different shape and has starts_static_property_statement; a call is the same tokens
+            // as `mem::free($p)` and can only be told apart by resolving the owner
+            const auto before_call = cursor.snapshot();
+            auto *call = Parser::try_parse_static_call(payload);
 
-            if (auto *funccall_node = parse_funccall(payload, call_namespace)) {
-                // **and whatever hangs off it**, which is the same shape the `$var ->` branch above
-                // routes into parse_varexpr: a chain rooted in a call rather than in a name. without
-                // this the statement forms lagged the expression form - `echo first(&$o)->x;` read
-                // fine while `first(&$o)->bump(1);` was `Unexpected '->'`
-                const AST::NodeReference target_ref =
-                    Parser::parse_postfix_chain(payload, AST::make_ref(*funccall_node));
-
-                if (!target_ref.has()) {
+            if (call == nullptr) {
+                // committed (`Type::missing()`), already reported, cursor past the call -
+                // falling through would re-parse the leftover as a free call
+                if (cursor.snapshot().index != before_call.index) {
+                    cursor.try_skip_to_next_statement();
                     continue;
                 }
 
-                finish_place_statement(payload, scope_node, target_ref.unsafe_ptr<AST::ExprNode>());
+                // consume a namespace prefix if there is one, so `mem::free($p);` resolves against
+                // `mem` rather than the enclosing namespace
+                const AST::Namespace *call_namespace = nullptr;
+                if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+                    if (auto *ns_node = parse_namespace(payload)) {
+                        call_namespace = ns_node->ast_namespace;
+                    }
+                }
+
+                call = parse_funccall(payload, call_namespace);
             }
+
+            if (call == nullptr) {
+                continue;
+            }
+
+            // **and whatever hangs off it**, which is the same shape the `$var ->` branch above
+            // routes into parse_varexpr: a chain rooted in a call rather than in a name. without
+            // this the statement forms lagged the expression form - `echo first(&$o)->x;` read
+            // fine while `first(&$o)->bump(1);` was `Unexpected '->'`
+            const AST::NodeReference target_ref =
+                Parser::parse_postfix_chain(payload, AST::make_ref(*call));
+
+            if (!target_ref.has()) {
+                continue;
+            }
+
+            finish_place_statement(payload, scope_node, target_ref.unsafe_ptr<AST::ExprNode>());
         }
 
         else {

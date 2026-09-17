@@ -1,0 +1,10 @@
+// a name the type does not declare, written as a whole statement. committed as a static call
+// once Marker is known to be a type, so this is UnknownStaticFunction, not UnknownFunction
+public struct Marker
+{
+    public static function activate() : void
+    {
+    }
+}
+
+Marker::missing();
