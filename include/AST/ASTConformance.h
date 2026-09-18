@@ -278,6 +278,11 @@ namespace AST
     // the message is a whole sentence, phrased for the author of the *widening* - they are the one who has
     // to change something, and the reason is never obvious from the types alone
     std::string interface_erasure_refusal(const ValueType &from, const ValueType &interface);
+
+    // **why this interface cannot be a stored value**, regardless of what is being erased.
+    // associated types and operator requirements. the dest half of interface_erasure_refusal,
+    // asked on its own by a recast whose source is already an interface
+    std::string interface_storage_refusal(const ValueType &interface);
 };
 
 #endif

@@ -9,6 +9,7 @@
 #include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 
+#include "AST/ASTCast.h"
 #include "AST/ASTControlFlow.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "AST/ASTNullability.h"
@@ -82,6 +83,16 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     // it heap-allocates the pointee
     const AST::ValueType from = node.expr->result_type();
     const AST::ValueType to = node.result_type();
+
+    // a recast is a runtime scan, not a conversion table entry: coerce_value would also
+    // fire for an implicit `I $h = $s`, which must stay refused
+    const AST::CastLookup recast = AST::cast_plan_for(*node.expr, to);
+    if (recast.result == AST::CastLookup::Result::t_ok
+        && recast.plan.kind == AST::CastKind::t_interface_recast) {
+        _ctx.value_stack.push(_ctx.classes->gen_iface_recast(
+            value, from, to, to.is_wrapped_optional(), AST::location_of_expression(&node)));
+        return;
+    }
 
     // narrowing a nullable pointer to a borrow asserts the thing a borrow promises. under
     // opaque pointers the reinterpretation itself is free, so the check is all there is to emit

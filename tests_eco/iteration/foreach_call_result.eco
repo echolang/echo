@@ -1,0 +1,19 @@
+// a call-result array has to live for the loop. `$__it = names()->iterate()` used to
+// drop the array at the end of that statement, and the cursor read freed strings
+
+function names() : array<string>
+{
+    array<string> $n = [];
+    $n[] = "alpha";
+    $n[] = "beta";
+    return $n;
+}
+
+foreach (names() as $n) {
+    echo $n;
+}
+
+array<string> $held = names();
+foreach ($held as $n) {
+    echo $n;
+}

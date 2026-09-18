@@ -747,6 +747,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     for (auto &arg : c->args) arg = cc.child(arg);
     c->return_type = cc.child(c->return_type);
     c->body = cc.child(c->body);
+    c->enclosing_function = cc.rebind(c->enclosing_function);
     return c;
 }
 

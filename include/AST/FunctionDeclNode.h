@@ -231,6 +231,11 @@ namespace AST
         // set, no name reaches it, and its `args[0]` is the environment its captures live in
         bool is_closure = false;
 
+        // the function this closure literal was written in. AST::enclosing_type_of walks
+        // it for the type whose privates (and `self::`) the body may name. not `owner_type`:
+        // a closure is not a method. null for a named function, and for a closure at file scope
+        FunctionDeclNode *enclosing_function = nullptr;
+
         // how many leading `args` entries the caller did not write: a method's receiver, or a closure's
         // environment. never both, since a closure is not a member - spelled as a count rather than a
         // bool because every consumer wants to offset an index by it

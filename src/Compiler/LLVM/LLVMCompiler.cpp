@@ -265,6 +265,8 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
 
         // build the function maps
         _types.build_function_maps();
+
+        _types.fill_conformance_vtables();
     }
 
     // always declare printf @TODO make this a bit more dynamic..

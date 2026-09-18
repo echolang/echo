@@ -1,0 +1,49 @@
+expect: fail
+
+--- OUT --->
+[error] if_on_nullable.eco:5:1
+
+  an 'if' condition has to be a 'bool', and this one is a 'int32?'. unwrap it with guard, or compare it against null, rather than branching on the value itself.
+
+  4 | int32? $n = 1;
+  5 | if ($n) {
+    : ^^
+  6 |     echo 1;
+
+[error] if_on_nullable.eco:11:1
+
+  an 'if' condition has to be a 'bool', and this one is a 'ptr<int32>'. unwrap it with guard, or compare it against null, rather than branching on the value itself.
+
+  10 | ptr<int32> $p = &$i;
+  11 | if ($p:$) {
+     : ^^
+  12 |     echo 2;
+
+[error] if_on_nullable.eco:15:1
+
+  an 'if' condition has to be a 'bool', and this one is a 'int32'. compare it against something rather than branching on the value itself.
+
+  14 | 
+  15 | if ($i) {
+     : ^^
+  16 |     echo 3;
+
+[error] if_on_nullable.eco:19:1
+
+  a 'while' condition has to be a 'bool', and this one is a 'int32'. compare it against something rather than branching on the value itself.
+
+  18 | 
+  19 | while ($i) {
+     : ^^^^^
+  20 |     echo 4;
+
+[error] if_on_nullable.eco:23:1
+
+  a 'for' condition has to be a 'bool', and this one is a 'int32'. compare it against something rather than branching on the value itself.
+
+  22 | 
+  23 | for (int32 $k = 0; $k; $k = $k + 1) {
+     : ^^^
+  24 |     echo 5;
+
+5 errors, nothing was compiled.

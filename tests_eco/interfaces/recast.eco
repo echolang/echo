@@ -1,0 +1,54 @@
+// a stored interface forgets the class, so `$s as Other` scans the object's
+// conformance table and seats the other vtable. widening `$t as A` is still
+// static when the class is known
+
+interface A
+{
+    function a() : int32;
+}
+
+interface B
+{
+    function b() : int32;
+}
+
+class Both : A, B
+{
+    function a() : int32 { return 1; }
+    function b() : int32 { return 2; }
+}
+
+class OnlyA : A
+{
+    function a() : int32 { return 3; }
+}
+
+function take<T : A>(T $x) : int32
+{
+    if ($x instanceof B) {
+        B $b = $x as B;
+        return $b->b();
+    }
+
+    return $x->a();
+}
+
+Both $both = Both();
+A $asA = $both;
+B $asB = $asA as B;
+echo $asB->b();
+
+Both $back = $asA as Both;
+echo $back->b();
+
+A $only = OnlyA();
+echo $only instanceof B;
+
+B? $maybe = $only as B?;
+echo $maybe == null;
+
+B? $hit = $asA as B?;
+echo ($hit ?? $asB)->b();
+
+echo take($both);
+echo take(OnlyA());

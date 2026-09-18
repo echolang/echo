@@ -26,7 +26,11 @@
 #include "AST/TypeDeclNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/GuardNode.h"
+#include "AST/IfStatementNode.h"
+#include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 #include "AST/ReturnNode.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTConformance.h"
@@ -631,6 +635,65 @@ void TypeChecker::visitReturn(ReturnNode &node)
     RecursiveVisitor::visitReturn(node);
 }
 
+void TypeChecker::check_bool_condition(ExprNode *condition, const char *kind, const TokenReference &at)
+{
+    if (condition == nullptr) {
+        return;
+    }
+
+    const ValueType type = condition->result_type();
+
+    if (is_undetermined_type(type) || type.is_boolean_type()) {
+        return;
+    }
+
+    // a T? and a ptr<T> are the two that used to reach CreateCondBr and fail the
+    // verifier. the advice is the spelling that actually tests presence; an integer
+    // is the comparison the language requires instead of truthiness
+    const char *advice = (type.is_nullable() || type.is_pointer())
+        ? "unwrap it with guard, or compare it against null, rather than branching on the value itself"
+        : "compare it against something rather than branching on the value itself";
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(at),
+        fmt::format(
+            "{} condition has to be a 'bool', and this one is a '{}'. {}.",
+            kind, type.get_type_desciption(), advice));
+}
+
+void TypeChecker::visitIfStatement(IfStatementNode &node)
+{
+    if (node.condition != nullptr) {
+        const TokenReference &at = node.token_if.has_value()
+            ? node.token_if.value()
+            : location_of_expression(node.condition);
+        check_bool_condition(node.condition, "an 'if'", at);
+    }
+
+    RecursiveVisitor::visitIfStatement(node);
+}
+
+void TypeChecker::visitWhileStatement(WhileStatementNode &node)
+{
+    if (node.condition != nullptr) {
+        const TokenReference &at = node.token_while.has_value()
+            ? node.token_while.value()
+            : location_of_expression(node.condition);
+        check_bool_condition(node.condition, "a 'while'", at);
+    }
+
+    RecursiveVisitor::visitWhileStatement(node);
+}
+
+void TypeChecker::visit_for_statement(ForStatementNode &node)
+{
+    if (node.condition != nullptr) {
+        check_bool_condition(node.condition, "a 'for'", node.token_for);
+    }
+
+    RecursiveVisitor::visit_for_statement(node);
+}
+
 void TypeChecker::visit_type_decl(TypeDeclNode &node)
 {
     // **ahead of the generic early-return below, deliberately.** a conformance is checked on the
@@ -975,8 +1038,11 @@ void TypeChecker::visit_null_coalesce(NullCoalesceExprNode &node)
     check_optional_operand(OptionalForm::t_null_coalesce, node.lhs, node.token);
 
     if (node.lhs != nullptr && node.rhs != nullptr && !expression_never_returns(*node.rhs)) {
-        const ValueType wanted = ValueType::make_non_nullable(node.lhs->result_type());
-        check_destination_fits(Destination::t_declaration, wanted, *node.rhs, node.token);
+        // the join, not the left's payload: `$a ?? $b` over two `string?`s is still
+        // absent, and NullCoalesceExprNode::result_type already says so. requiring the
+        // unwrapped left made a chain of two optionals a conversion of `string?` to
+        // `string`
+        check_destination_fits(Destination::t_declaration, node.result_type(), *node.rhs, node.token);
     }
 
     RecursiveVisitor::visit_null_coalesce(node);

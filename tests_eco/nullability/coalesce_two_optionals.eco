@@ -1,0 +1,20 @@
+// `$a ?? $b` over two optionals of the same payload is still absent, so it
+// can chain into another `??`. TypeChecker used to require the unwrapped
+// left and refuse the right as converting `string?` to `string`
+
+function missing() : string?
+{
+    return null;
+}
+
+function present() : string?
+{
+    return "hi";
+}
+
+echo missing() ?? present() ?? "no";
+echo present() ?? missing() ?? "no";
+
+string? $a = null;
+string? $b = "x";
+echo $a ?? $b ?? "no";

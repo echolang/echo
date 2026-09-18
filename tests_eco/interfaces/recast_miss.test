@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: 'A' cannot be read as a 'B' - the object does not conform
+  at recast_miss.eco:19

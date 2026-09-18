@@ -1,0 +1,35 @@
+// a tagged optional of a struct as a class field and as a struct field.
+// visu historically ICE'd on `SsaoQuality?` as a class field; GpuPass? and
+// Vec2? already exist there. this is the one-file pin
+
+struct Quality
+{
+    int32 $n;
+}
+
+class Renderer
+{
+    Quality? $ssao;
+
+    constructor()
+    {
+        $this->ssao = null;
+    }
+}
+
+struct Options
+{
+    Quality? $ssao;
+}
+
+Renderer $r = Renderer();
+echo $r->ssao == null;
+
+$r->ssao = Quality(7);
+echo ($r->ssao ?? Quality(0))->n;
+
+Options $o = Options(null);
+echo $o->ssao == null;
+
+$o->ssao = Quality(3);
+echo ($o->ssao ?? Quality(0))->n;

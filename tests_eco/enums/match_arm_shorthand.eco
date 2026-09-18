@@ -1,0 +1,67 @@
+// a match arm's leading-dot shorthand takes the destination the match is going
+// to: a typed declaration, or the enclosing return type. `$x as PixelDump`
+// outside a match already did; an arm used to parse with no destination
+
+enum View
+{
+    case color;
+    case normal;
+}
+
+enum Dump
+{
+    case color;
+    case normal;
+}
+
+function from_decl(View $v) : int32
+{
+    Dump $dump = match ($v) {
+        View::normal => .normal,
+        else => .color,
+    };
+
+    return match ($dump) {
+        Dump::normal => 1,
+        Dump::color => 0,
+    };
+}
+
+function from_return(View $v) : Dump
+{
+    return match ($v) {
+        View::normal => .normal,
+        else => .color,
+    };
+}
+
+function from_later_arm(View $v) : int32
+{
+    Dump $dump = match ($v) {
+        View::normal => Dump::normal,
+        else => .color,
+    };
+
+    return match ($dump) {
+        Dump::normal => 1,
+        Dump::color => 0,
+    };
+}
+
+echo from_decl(.normal);
+echo from_decl(.color);
+
+Dump $a = from_return(.normal);
+Dump $b = from_return(.color);
+
+echo match ($a) {
+    Dump::normal => 1,
+    Dump::color => 0,
+};
+echo match ($b) {
+    Dump::normal => 1,
+    Dump::color => 0,
+};
+
+echo from_later_arm(.normal);
+echo from_later_arm(.color);

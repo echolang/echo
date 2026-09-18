@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTBundle.h>
+#include <AST/ASTConstness.h>
 #include <AST/ASTCopy.h>
 #include <AST/ASTDestruction.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/ReleaseNode.h>
 #include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
@@ -208,6 +210,34 @@ TEST_CASE("two closure literals get different symbols", "[callable]")
 
     REQUIRE(closures.size() == 2);
     REQUIRE(closures[0]->decorated_func_name() != closures[1]->decorated_func_name());
+}
+
+TEST_CASE("enclosing_type_of walks a closure to the method it was written in", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Host {\n"
+        "    function after() : function<void()> {\n"
+        "        return function() : void { };\n"
+        "    }\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *host = EchoTests::type_named(m, "Host");
+    REQUIRE(host != nullptr);
+
+    FunctionDeclNode *closure = nullptr;
+    for (auto *decl : m.nodes.of_type<FunctionDeclNode>()) {
+        if (decl->is_closure) {
+            closure = decl;
+            break;
+        }
+    }
+
+    REQUIRE(closure != nullptr);
+    REQUIRE(closure->enclosing_function != nullptr);
+    REQUIRE(enclosing_type_of(*closure) == &host->complex_type());
+    REQUIRE(enclosing_type_of(*closure->enclosing_function) == &host->complex_type());
 }
 
 TEST_CASE("a closure can be written where a type parameter is visible", "[callable]")

@@ -374,6 +374,9 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     if (AST::FunctionDeclNode *enclosing = payload.context.current_function_ptr) {
         closure_decl->type_parameters = enclosing->type_parameters;
         closure_decl->inherited_type_param_count = closure_decl->type_parameters.size();
+        // the method (or outer closure) this was written in. AST::enclosing_type_of
+        // walks it; a closure is not a method, so owner_type stays null
+        closure_decl->enclosing_function = enclosing;
     }
 
     auto &closure_scope = payload.context.emplace_node<AST::ScopeNode>();

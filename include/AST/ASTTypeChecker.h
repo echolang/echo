@@ -110,6 +110,9 @@ namespace AST
         void visit_addr_of_expr(AddrOfExprNode &node) override;
         void visit_function_ref_expr(FunctionRefExprNode &node) override;
         void visitReturn(ReturnNode &node) override;
+        void visitIfStatement(IfStatementNode &node) override;
+        void visitWhileStatement(WhileStatementNode &node) override;
+        void visit_for_statement(ForStatementNode &node) override;
         void visit_temporary_bind(TemporaryBindExprNode &node) override;
 
         // **the consumption seam.** a settled void call is refused here, once, rather than from a
@@ -302,6 +305,11 @@ namespace AST
         // and where they point, so the rule is written once
         void check_optional_operand(
             OptionalForm form, const ExprNode *operand, const TokenReference &at);
+
+        // an `if` / `while` / `for` condition has to be a bool. CreateCondBr of a T? or a ptr
+        // is a failed IR verification, and an integer is the truthiness the language does not have.
+        // `kind` is the keyword, so the sentence names the statement that asked
+        void check_bool_condition(ExprNode *condition, const char *kind, const TokenReference &at);
 
         // rejects an assignment that reaches const storage. split out of visit_assign because it
         // asks a different question than the conversion check next to it: not "does the value

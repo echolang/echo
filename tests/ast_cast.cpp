@@ -8,11 +8,14 @@
 #include <AST/LiteralValueNode.h>
 #include <AST/TemporaryBindExprNode.h>
 #include <AST/TypeCastNode.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/TypeNode.h>
+
+#include <vector>
 
 #include "helpers.h"
 
-#include <vector>
+using EchoTests::type_named;
 
 // AST::cast_plan_for - the sole answer to "what does this written `$x as T` mean"
 
@@ -207,4 +210,36 @@ TEST_CASE("unrelated primitives still convert", "[cast]")
     const CastLookup lookup = cast_plan_for(lit, prim(ValueTypePrimitive::t_bool));
     REQUIRE(lookup.result == CastLookup::Result::t_ok);
     REQUIRE(lookup.plan.kind == CastKind::t_numeric);
+}
+
+TEST_CASE("cast_plan_for recasts a stored interface, and widens a class that conforms", "[cast]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface A { function a() : int32; }\n"
+        "interface B { function b() : int32; }\n"
+        "class Both : A, B {\n"
+        "    function a() : int32 { return 1; }\n"
+        "    function b() : int32 { return 2; }\n"
+        "}\n"
+        "class OnlyA : A {\n"
+        "    function a() : int32 { return 3; }\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    const ValueType a = type_named(m, "A")->value_type();
+    const ValueType b = type_named(m, "B")->value_type();
+    const ValueType both = type_named(m, "Both")->value_type();
+    const ValueType only = type_named(m, "OnlyA")->value_type();
+    auto &lit = m.nodes.emplace_back<LiteralIntExprNode>(m.tokens[0]);
+
+    REQUIRE(cast_plan_for(typed(m, a, &lit), b).plan.kind == CastKind::t_interface_recast);
+    REQUIRE(cast_plan_for(typed(m, a, &lit), both).plan.kind == CastKind::t_interface_recast);
+    REQUIRE(cast_plan_for(typed(m, both, &lit), a).plan.kind == CastKind::t_interface);
+    REQUIRE(cast_plan_for(typed(m, only, &lit), b).plan.kind == CastKind::t_interface_recast);
+
+    const ValueType b_opt = bundle->collector.type_registry.get_or_create_optional(b);
+    REQUIRE(cast_plan_for(typed(m, both, &lit), b_opt).plan.kind == CastKind::t_optional_wrap);
+    REQUIRE(cast_plan_for(typed(m, only, &lit), b_opt).plan.kind == CastKind::t_interface_recast);
+    REQUIRE(cast_plan_for(typed(m, a, &lit), b_opt).plan.kind == CastKind::t_interface_recast);
 }

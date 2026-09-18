@@ -31,8 +31,14 @@ namespace AST
         // T -> T?, including when T converts to the payload. AST::arrival_wraps_optional
         t_optional_wrap,
 
-        // class handle to a storable interface. AST::interface_erasure_refusal accepted it
+        // class handle to a storable interface. AST::interface_erasure_refusal accepted it,
+        // and the class conforms, so the vtable is resolved at the widening
         t_interface,
+
+        // one stored interface (or a class that does not statically conform) to another, or
+        // an interface down to a class. the object's typeinfo is scanned at runtime. `$x as I?`
+        // is the same kind with a wrapped-optional destination: miss is absence, not an abort
+        t_interface_recast,
 
         // an #[implicit] conversion. plan.decl is the method; AST::emit_declared_conversion
         // is what turns the TypeCastNode into a call

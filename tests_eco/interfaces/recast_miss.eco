@@ -1,0 +1,20 @@
+// `$s as B` aborts when the object does not conform. the fallible twin is `$s as B?`
+
+interface A
+{
+    function a() : int32;
+}
+
+interface B
+{
+    function b() : int32;
+}
+
+class OnlyA : A
+{
+    function a() : int32 { return 1; }
+}
+
+A $s = OnlyA();
+B $h = $s as B;
+echo $h->b();

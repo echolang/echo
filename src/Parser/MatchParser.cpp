@@ -68,7 +68,7 @@ bool parse_pattern_name(Parser::Payload &payload, PatternName &out)
 }
 }
 
-AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload)
+AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
 
@@ -238,7 +238,10 @@ AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload)
             }
 
             payload.context.push_scope(arm_scope);
-            arm.value = Parser::parse_expr(payload);
+            // the match's destination, so `.ok($v)` and `.meter` bind here the way they
+            // do at a return or a typed declaration. without it a match arm is parsed as
+            // a context-free operand and the shorthand has no owner
+            arm.value = Parser::parse_expr(payload, expected_type);
             payload.context.pop_scope();
 
             arm.scope = &arm_scope;

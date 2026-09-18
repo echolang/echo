@@ -1,0 +1,37 @@
+// a closure written in a method may name that type's private members. capture is
+// still by value; `Game $g = $this` retains the handle. the hole was privacy:
+// enclosing_type_of(closure) was null because a closure is not a method
+
+class Host
+{
+    private int32 $hits;
+
+    constructor()
+    {
+        $this->hits = 0;
+    }
+
+    public function bump() : void
+    {
+        $this->hits = $this->hits + 1;
+    }
+
+    public function afterPresent() : function<void()>
+    {
+        Host $host = $this;
+        return function() : void {
+            $host->bump();
+            $host->hits = $host->hits + 1;
+        };
+    }
+
+    public function hits() : int32
+    {
+        return $this->hits;
+    }
+}
+
+Host $h = Host();
+function<void()> $f = $h->afterPresent();
+$f();
+echo $h->hits();

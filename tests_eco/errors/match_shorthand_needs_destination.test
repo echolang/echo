@@ -1,0 +1,35 @@
+expect: fail
+
+--- OUT --->
+[error] match_shorthand_needs_destination.eco:13:9
+
+  this arm's value has no settled type.
+
+  12 |     echo match (Dump::color) {
+  13 |         Dump::normal => .normal,
+     :         ^^^^
+  14 |         else => .color,
+
+[error] UnboundShorthandCall  match_shorthand_needs_destination.eco:13:25
+
+  '.normal(...)' takes its type from where its value goes, and nothing here says what that is
+
+  12 |     echo match (Dump::color) {
+  13 |         Dump::normal => .normal,
+     :                         ^
+  14 |         else => .color,
+
+  help: name the type - 'SomeType::normal(...)' - or give the destination a declared type. a shorthand reads its owner from a return type, a declared variable's type, or the parameter it is passed to
+
+[error] UnboundShorthandCall  match_shorthand_needs_destination.eco:14:17
+
+  '.color(...)' takes its type from where its value goes, and nothing here says what that is
+
+  13 |         Dump::normal => .normal,
+  14 |         else => .color,
+     :                 ^
+  15 |     };
+
+  help: name the type - 'SomeType::color(...)' - or give the destination a declared type. a shorthand reads its owner from a return type, a declared variable's type, or the parameter it is passed to
+
+3 errors, nothing was compiled.
