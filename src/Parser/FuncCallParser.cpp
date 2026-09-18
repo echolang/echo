@@ -135,6 +135,17 @@ static bool parse_explicit_type_args(
                 return false;
             }
 
+            if (auto refusal = AST::bare_generic_type_refusal(type_node->type)) {
+                // keep the list and the node. returning false here is "this `<` was not a
+                // type-argument list", which in an expression restores the snapshot and reads
+                // `map < string` as a comparison - a crash in visibility_refusal, not a diagnostic.
+                // report even when speculative: `map<string, AssetRef>()` is an assignment RHS
+                const TokenReference &at = type_node->type_token.value_or(at_token);
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(at),
+                    std::move(refusal.value()));
+            }
+
             type_args.push_back(type_node);
         }
 

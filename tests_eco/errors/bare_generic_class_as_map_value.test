@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] bare_generic_class_as_map_value.eco:10:17
+
+  'AssetRef' is generic, so it needs its type arguments - write 'AssetRef<...>'.
+
+   9 | {
+  10 |     map<string, AssetRef> $refs;
+     :                 ^^^^^^^^
+  11 | }
+
+1 error, nothing was compiled.

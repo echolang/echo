@@ -1,0 +1,8 @@
+// same refusal as the class: a generic struct named without type arguments is the template
+struct Box<T>
+{
+    T $v;
+}
+
+Box $b;
+echo 1;

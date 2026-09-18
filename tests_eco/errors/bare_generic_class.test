@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] bare_generic_class.eco:8:1
+
+  'Box' is generic, so it needs its type arguments - write 'Box<...>'.
+
+  7 | 
+  8 | Box $b;
+    : ^^^
+  9 | echo 1;
+
+1 error, nothing was compiled.

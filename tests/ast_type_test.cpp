@@ -44,6 +44,34 @@ TEST_CASE("void is not a value type", "[types]")
     REQUIRE_FALSE(void_as_value_refusal(prim(ValueTypePrimitive::t_int32)).has_value());
 }
 
+TEST_CASE("a generic template is not a value type", "[types][generics]")
+{
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    declare_param(params, box, "T");
+
+    ValueType tmpl = ValueType::make_struct(&box);
+    REQUIRE(bare_generic_type_refusal(tmpl).has_value());
+    REQUIRE(*bare_generic_type_refusal(tmpl)
+        == "'Box' is generic, so it needs its type arguments - write 'Box<...>'.");
+
+    ComplexType *inst = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
+    REQUIRE_FALSE(bare_generic_type_refusal(ValueType::make_struct(inst)).has_value());
+
+    // map<int32, Box> names the template as an argument: refuse Box, not the map
+    ComplexType pair("Pair");
+    declare_param(params, pair, "K");
+    declare_param(params, pair, "V");
+    ComplexType *applied = reg.get_or_create_instantiation(
+        &pair, { prim(ValueTypePrimitive::t_int32), tmpl });
+    auto nested = bare_generic_type_refusal(ValueType::make_struct(applied));
+    REQUIRE(nested.has_value());
+    REQUIRE(*nested == "'Box' is generic, so it needs its type arguments - write 'Box<...>'.");
+
+    REQUIRE_FALSE(bare_generic_type_refusal(prim(ValueTypePrimitive::t_int32)).has_value());
+}
+
 TEST_CASE("substitute_type resolves a bare type parameter", "[types][generics]")
 {
     TypeRegistry reg;

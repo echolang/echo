@@ -151,6 +151,14 @@ namespace AST
                 is_error = true;
                 return std::nullopt;
             }
+
+            if (auto refusal = bare_generic_type_refusal(arg)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(mod, call->token_function_name),
+                    std::move(refusal.value()));
+                is_error = true;
+                return std::nullopt;
+            }
         }
 
         return inst.type_arguments;

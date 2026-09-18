@@ -1841,6 +1841,20 @@ namespace AST
     // optional payloads, array elements, pointees and callable parameters still may not
     std::optional<std::string> nested_void_as_value_refusal(const ValueType &type);
 
+    // **why may this type not sit where a value lives, for being a generic template?**
+    // nullopt when it may. a template (`struct Box<T>`, `class AssetRef<T>`) is not a
+    // value type: instantiations are, and they are distinct. `Box $b` and
+    // `map<string, AssetRef>` name the template, so codegen would try to lower `T`.
+    //
+    // not `contains_type_param` / `is_undetermined_type`: those are "not yet". a
+    // template is a determined wrong type. ranking one as undetermined would infer
+    // from it.
+    //
+    // names the template, not the wrapper, the way void_as_value_refusal names void
+    // inside `result<void, E>`. asked by TypeChecker of every declaration, and by
+    // the type grammar of every type argument
+    std::optional<std::string> bare_generic_type_refusal(const ValueType &type);
+
     // the type a value-position read of `type` yields: the pointee for a pointer, the type itself
     // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`
     //

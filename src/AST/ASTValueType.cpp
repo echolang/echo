@@ -1324,3 +1324,57 @@ std::optional<std::string> AST::nested_void_as_value_refusal(const ValueType &ty
 
     return std::nullopt;
 }
+
+std::optional<std::string> AST::bare_generic_type_refusal(const ValueType &type)
+{
+    // a template is the ComplexType with type_parameters and no template_ref.
+    // instantiations clear the list, so is_generic() is exactly "this is the template"
+    const ValueType bare = ValueType::make_mutable(type);
+
+    if (bare.has_complex_type()) {
+        const ComplexType *ct = bare.get_complex_type();
+        if (ct != nullptr && ct->is_generic()) {
+            const std::string spelling = ct->namespaced_name();
+            return fmt::format(
+                "'{}' is generic, so it needs its type arguments - write '{}<...>'.",
+                spelling, spelling);
+        }
+
+        if (ct != nullptr) {
+            for (const ValueType &arg : ct->instantiation_args) {
+                if (auto refusal = bare_generic_type_refusal(arg)) {
+                    return refusal;
+                }
+            }
+        }
+    }
+
+    if (bare.is_pointer()) {
+        return bare_generic_type_refusal(bare.pointee());
+    }
+
+    if (bare.is_weak()) {
+        return bare_generic_type_refusal(bare.weak_target());
+    }
+
+    if (bare.is_wrapped_optional()) {
+        return bare_generic_type_refusal(bare.optional_payload());
+    }
+
+    if (bare.is_inline_array()) {
+        return bare_generic_type_refusal(bare.array_element());
+    }
+
+    if (bare.has_signature()) {
+        const CallableSignature &sig = bare.signature();
+        for (const ValueType &param : sig.parameter_types) {
+            if (auto refusal = bare_generic_type_refusal(param)) {
+                return refusal;
+            }
+        }
+
+        return bare_generic_type_refusal(sig.return_type);
+    }
+
+    return std::nullopt;
+}

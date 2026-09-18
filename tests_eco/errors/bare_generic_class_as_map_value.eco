@@ -1,0 +1,13 @@
+// the visu shape: one map of mixed AssetRef<T> is not a type. the template as a map
+// value used to ICE inside map::clear lowering T
+class AssetRef<T : class>
+{
+    T? $ready;
+}
+
+class Bank
+{
+    map<string, AssetRef> $refs;
+}
+
+echo 1;

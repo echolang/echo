@@ -223,6 +223,11 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
         check_c_function_type(node.get_return_type(), node.name_token.value());
         check_incomplete_use(node.get_return_type(), node.name_token.value());
         check_void_nested(node.get_return_type(), node.name_token.value());
+        // an interned constructor's name token is the template's, in whoever wrote it.
+        // a `map<string, AssetRef>` that slipped through would otherwise blame map.eco
+        if (!node.is_implicitly_generated) {
+            check_bare_generic_type(node.get_return_type(), node.name_token.value());
+        }
 
         // a generic template returns before the args are walked as VarDecls, so they
         // are asked here. a concrete body walks them through visitVarDecl instead -
@@ -234,6 +239,13 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
                     check_c_function_type(arg->type(), node.name_token.value());
                     check_incomplete_use(arg->type(), node.name_token.value());
                     check_void_as_value(arg->type(), node.name_token.value());
+                    // a generic type's constructor is named after the type, so the name
+                    // token is `Box` in `struct Box<T>`. `constructor(Box& $other)` already
+                    // has its own sentence (write `Box<T>&`); reporting here would point
+                    // at the type declaration and duplicate it
+                    if (!node.is_constructor()) {
+                        check_bare_generic_type(arg->type(), node.name_token.value());
+                    }
                 }
             }
         }
@@ -483,6 +495,15 @@ void TypeChecker::check_void_as_value(const ValueType &type, const TokenReferenc
     }
 }
 
+void TypeChecker::check_bare_generic_type(const ValueType &type, const TokenReference &at)
+{
+    if (auto refusal = bare_generic_type_refusal(type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
+    }
+}
+
 void TypeChecker::check_void_type_args(FunctionCallExprNode &node)
 {
     if (node.decl == nullptr) {
@@ -491,6 +512,7 @@ void TypeChecker::check_void_type_args(FunctionCallExprNode &node)
 
     for (const ValueType &arg : node.decl->instantiation_args) {
         check_void_as_value(arg, node.token_function_name);
+        check_bare_generic_type(arg, node.token_function_name);
     }
 }
 
@@ -2249,12 +2271,19 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
     if (node.has_type()) {
         check_c_function_type(node.type(), node.token_varname);
         check_incomplete_use(node.type(), node.token_varname);
+        // the type name, when the author wrote one: `Box $b` should point at Box, not at $b.
+        // a minted type node has no token, so the variable is the fallback, matching void
+        const TokenReference &type_at =
+            node.type_node()->type_token.has_value()
+                ? node.type_node()->type_token.value()
+                : node.token_varname;
         // an implicit constructor's parameters are the fields; the property already said so.
         // minted tokens would not collapse a second sentence
         if (!(_current_function != nullptr
                 && _current_function->is_implicitly_generated
                 && _current_function->is_constructor())) {
             check_void_as_value(node.type(), node.token_varname);
+            check_bare_generic_type(node.type(), type_at);
         }
     }
 

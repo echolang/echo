@@ -208,6 +208,11 @@ namespace AST
         void check_void_as_value(const ValueType &type, const TokenReference &at);
         void check_void_nested(const ValueType &type, const TokenReference &at);
 
+        // every declaration whose type is a generic template used as a value -
+        // AST::bare_generic_type_refusal. a return of the template is refused too
+        // (`: void` is not this)
+        void check_bare_generic_type(const ValueType &type, const TokenReference &at);
+
         // bound type arguments on a call's instance. parse already refused a written `f<void>()`;
         // this is the inferred leftover, and the same sentence. asked of every instantiation arg
         // so a `dprint` of void is not a second rule
