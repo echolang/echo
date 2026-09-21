@@ -1,0 +1,7 @@
+// the way a bare return at file scope is usually reached: a guard that leaves
+int32? $n = null;
+guard $n else {
+    echo 'gone';
+    return;
+}
+echo 'here';

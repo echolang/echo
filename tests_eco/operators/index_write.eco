@@ -100,7 +100,7 @@ operator (const slots& $s)[usize $i] : const string&
     $s[0] = $a;
 
     assert(mem::live_allocations() == 3, "the buffer and one written string");
-    assert(mem::refs<str::buf>($a->owner) == 2, "the local and the slot");
+    assert(mem::refs($a->owner) == 2, "the local and the slot");
 
     // **the read goes through the bracket**, which a container that inserts could not do before
     echo $s[0];
@@ -114,8 +114,8 @@ operator (const slots& $s)[usize $i] : const string&
     $s[0] = $b;
 
     assert(mem::live_allocations() == 5, "$a's string is still live, held by $a alone");
-    assert(mem::refs<str::buf>($a->owner) == 1, "the slot gave its reference back");
-    assert(mem::refs<str::buf>($b->owner) == 2, "and the new value has it");
+    assert(mem::refs($a->owner) == 1, "the slot gave its reference back");
+    assert(mem::refs($b->owner) == 2, "and the new value has it");
 
     echo $s->get(0);
 

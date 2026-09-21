@@ -1,0 +1,3 @@
+// a bare return at file scope is the 0 falling off the end already produces
+echo 'hi';
+return;

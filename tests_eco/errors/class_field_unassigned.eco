@@ -1,0 +1,31 @@
+// a non-nullable class field left unset is a null handle. the first `->` through it
+// used to segfault, in debug and in release, far from the constructor that forgot it
+class Inner
+{
+    public int32 $value;
+
+    public constructor()
+    {
+        $this->value = 42;
+    }
+}
+
+class Outer
+{
+    private Inner $inner;
+    private int32 $tag;
+
+    public constructor()
+    {
+        $this->tag = 7;
+    }
+
+    public function read() : int32
+    {
+        return $this->inner->value;
+    }
+}
+
+Outer $o = Outer();
+echo 'constructed';
+echo $o->read();

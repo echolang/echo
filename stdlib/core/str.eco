@@ -76,6 +76,23 @@ public class buf
     /**
      * Copies `$count` bytes onto the end and re-terminates.
      */
+    // `$used = $n` from `string`, whose owner is optional. a field write needs a
+    // receiver, and returning the handle to do it would retain the buffer
+    #[inline]
+    internal function set_used(usize $n) : void
+    {
+        $this->used = $n;
+    }
+
+    // the byte pointer, as a call. `?->` onto the `$bytes` field itself is a pointer
+    // read, and a pointer read in a value position is a deref - the chain's result
+    // was typed as the pointer before that deref existed
+    #[inline]
+    internal function data() : ptr<uint8>
+    {
+        return $this->bytes;
+    }
+
     #[inline]
     internal function append(ptr<const uint8> $src, usize $count) : void
     {

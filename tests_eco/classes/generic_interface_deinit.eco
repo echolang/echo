@@ -1,0 +1,38 @@
+// a generic class is lowered on first use, after function maps, so its conformance table is
+// written with vtables already. slot 0 of that vtable is the release thunk, which declares the
+// class's $deinit, and the typeinfo slot then asks for the same function. that second declare
+// has to be the function the thunk already calls - a renamed copy leaves the link, and the JIT,
+// pointing at a bodyless declaration
+
+interface Show
+{
+    function show() : int32;
+}
+
+class Payload
+{
+    int32 $n;
+
+    constructor(int32 $n) {
+        $this->n = $n;
+    }
+}
+
+class Box<T> : Show
+{
+    T $held;
+    string $label;
+
+    constructor(T $held, string $label) {
+        $this->held = $held;
+        $this->label = $label;
+    }
+
+    function show() : int32 {
+        return $this->held->n;
+    }
+}
+
+Box<Payload> $box = Box<Payload>(Payload(7), 'box');
+Show $shown = $box;
+echo $shown->show();

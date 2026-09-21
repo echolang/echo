@@ -4,6 +4,7 @@
 #include "AST/ASTConstructor.h"
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTSourceToken.h"
@@ -39,7 +40,14 @@ namespace
     {
         FieldSet fallthrough;
         bool falls_through = true;
+        // a `return` happened on some path. `die` does not set this: a helper whose
+        // body is `die` does not come back to its caller
+        bool did_return = false;
         std::vector<FieldSet> completed;
+        // assignments at a `die`. used only when no path returns or falls through,
+        // so a failure branch that dies before the fields are seated does not erase
+        // the path that continues and seats them
+        std::vector<FieldSet> died_with;
         FieldSet assigned_any;
     };
 
@@ -141,7 +149,9 @@ namespace
     void join_from(PathResult &into, const PathResult &from)
     {
         join_completed(into, from);
+        into.died_with.insert(into.died_with.end(), from.died_with.begin(), from.died_with.end());
         into.assigned_any.insert(from.assigned_any.begin(), from.assigned_any.end());
+        into.did_return = into.did_return || from.did_return;
     }
 
     FieldSet all_paths_of(const PathResult &walked)
@@ -150,6 +160,14 @@ namespace
 
         if (walked.falls_through) {
             completing.push_back(walked.fallthrough);
+        }
+
+        // no path hands the object back. a constructor that only `die`s still assigned
+        // whatever it seated before the `die` — `$this->h = Handle($v); die(...)` is
+        // not a blank field. a constructor that never reaches a `die` either, and
+        // does not return, assigned nothing
+        if (completing.empty()) {
+            completing = walked.died_with;
         }
 
         if (completing.empty()) {
@@ -217,7 +235,7 @@ namespace
             std::vector<Read> *reads,
             WalkEnv &env
         ) :
-            result { std::move(incoming), true, {}, {} },
+            result { std::move(incoming), true, false, {}, {}, {} },
             self(self),
             reads(reads),
             env(env)
@@ -273,6 +291,7 @@ namespace
             collect_value(node.expr);
             result.completed.push_back(result.fallthrough);
             result.falls_through = false;
+            result.did_return = true;
         }
 
         void visit_loop_control(AST::LoopControlNode &) override
@@ -286,7 +305,14 @@ namespace
 
             absorb_this_method(node);
 
+            // `die` ends this path and does not hand the object back. the seats so
+            // far are remembered on `died_with`, and `all_paths_of` consults them
+            // only when every path died — a `die` on the failure branch of an `if`
+            // must not erase the fields the continuing branch seats afterwards.
+            // it is not a return, so a helper whose whole body is `die` still does
+            // not come back
             if (as_statement && AST::expression_never_returns(node)) {
+                result.died_with.push_back(result.fallthrough);
                 result.falls_through = false;
             }
         }
@@ -504,7 +530,7 @@ namespace
         MethodSummary summary;
         summary.assigned_all = all_paths_of(walked);
         summary.assigned_any = walked.assigned_any;
-        summary.never_completes = !walked.falls_through && walked.completed.empty();
+        summary.never_completes = !walked.falls_through && !walked.did_return;
         return env.summaries.emplace(&decl, std::move(summary)).first->second;
     }
 
@@ -541,7 +567,7 @@ namespace
             result.assigned_any.insert(
                 inner.result.assigned_any.begin(), inner.result.assigned_any.end());
 
-            if (as_statement && !inner.result.falls_through && inner.result.completed.empty()) {
+            if (as_statement && !inner.result.falls_through && !inner.result.did_return) {
                 result.falls_through = false;
             }
 
@@ -556,6 +582,9 @@ namespace
         // `expression_never_returns` only answers for builtins (`die`), so a user method that
         // always dies has to come from this walk or the constructor is treated as continuing
         if (as_statement && summary.never_completes) {
+            // the call does not come back, so the statements after it are dead.
+            // what was seated before it is how far this path got; visitScope stops
+            result.died_with.push_back(result.fallthrough);
             result.falls_through = false;
         }
     }
@@ -700,11 +729,13 @@ void AST::check_construction(AST::TypeDeclNode &type, AST::Collector &collector,
                 continue;
             }
 
-            // a class handle, a pointer, a weak or a C function pointer is valid at zero: the
-            // constructor's `$this` slot is zero-filled, and that word *is* null. requiring an
-            // assignment would force `$this->owner = null` on a non-nullable `str::buf`, which
-            // the type refuses. a struct, an enum and a primitive have no such empty word
-            if (prop->has_type() && prop->type().has_null_representation()) {
+            // zero is a legal value only when the type admits null. `$this` is filled with
+            // zeroes, and that word is what `null` means for a `ptr`, a `weak` and a `T?`.
+            // AST::destination_admits_null is that question. a non-nullable class has the same
+            // bits and no such value: leaving `Inner $inner` blank is a null handle the type
+            // forbids, and the first `->` through it is a segfault. `string`'s absent buffer is
+            // a `str::buf?`, which this admits, rather than a non-nullable `str::buf` left at zero
+            if (prop->has_type() && AST::destination_admits_null(prop->type())) {
                 continue;
             }
 

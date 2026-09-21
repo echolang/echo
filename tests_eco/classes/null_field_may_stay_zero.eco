@@ -1,0 +1,22 @@
+// a field whose type admits null may stay at the zero word. that word is null, and
+// writing null there is already legal. a non-nullable class is the case that is not
+class Node
+{
+    int32 $tag;
+    Node? $next;
+    weak<Node> $prev;
+    ptr<int32> $raw;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+
+    function tag() : int32
+    {
+        return $this->tag;
+    }
+}
+
+Node $n = Node(1);
+echo $n->tag();

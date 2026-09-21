@@ -10,4 +10,13 @@ expect: fail
      :     ^^^^^^^^^^^
   17 |     {
 
-1 error, nothing was compiled.
+[error] ConstructionLeavesFieldUnassigned  ctor_helper_nested_call.eco:16:5
+
+  '$child' is not assigned on all paths of this constructor.
+
+  15 | 
+  16 |     constructor()
+     :     ^^^^^^^^^^^
+  17 |     {
+
+2 errors, nothing was compiled.

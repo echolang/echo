@@ -1,0 +1,5 @@
+// a file-scope return is coerced to int32, the type of main, rather than ret'd
+// in the width it was written
+uint8 $b = 7;
+echo $b;
+return $b;

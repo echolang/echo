@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  file_scope_return_type.eco:2:1
+
+  Invalid type conversion: cannot return 'string' from a function declared 'int32'
+
+  1 | // a file root returns the status main returns. a string is not that status
+  2 | return 'hi';
+    : ^^^^^^
+  3 | 
+
+1 error, nothing was compiled.

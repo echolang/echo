@@ -399,9 +399,18 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
         }
     };
 
-    // handle returns without an actual extression
+    // a bare `return;` with no enclosing function is file scope, and file scope is `i32 main`.
+    // the 0 is the value falling off the end already returns. a `: void` function is the other
+    // null expression, and it really does return nothing. TypeChecker::visitReturn is the reader
+    // that accepts the first and refuses a bare return from a function that returns a value
     if (node.expr == nullptr) {
         emit_unwind();
+
+        if (_ctx.current_function == nullptr) {
+            _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+            return;
+        }
+
         _ctx.builder->CreateRetVoid();
         return;
     }
@@ -411,6 +420,12 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     // check if we actually got a value on the stack
     if (_ctx.value_stack.empty()) {
         emit_unwind();
+
+        if (_ctx.current_function == nullptr) {
+            _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+            return;
+        }
+
         _ctx.builder->CreateRetVoid();
         return;
     }
@@ -425,20 +440,22 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     // because a literal is typed where it is written and nothing there knows the return type
     //
     // result_type() may answer unknown (a binary expression whose operands differ does), which
-    // coerce_value takes as "read the signedness off the value itself". a file-scope return has
-    // no signature to answer to. a `: void` function still `CreateRetVoid` - the LLVM ABI for
-    // a function that produces no value
+    // coerce_value takes as "read the signedness off the value itself". a `: void` function
+    // still `CreateRetVoid` - the LLVM ABI for a function that produces no value. a file-scope
+    // return has no Echo signature; it answers to `i32 main`, so the value is coerced to int32
+    // rather than handed to CreateRet in whatever width it was written
     if (_ctx.current_function != nullptr && _ctx.current_function->get_return_type().is_void()) {
         emit_unwind();
         _ctx.builder->CreateRetVoid();
         return;
     }
 
-    if (_ctx.current_function != nullptr) {
-        ret = _ctx.types->coerce_value(
-            ret, node.expr->result_type(), _ctx.current_function->get_return_type(),
-            *_ctx.current_cmp_unit);
-    }
+    const AST::ValueType destination = _ctx.current_function != nullptr
+        ? _ctx.current_function->get_return_type()
+        : AST::ValueType(AST::ValueTypePrimitive::t_int32);
+
+    ret = _ctx.types->coerce_value(
+        ret, node.expr->result_type(), destination, *_ctx.current_cmp_unit);
 
     // after the value is computed and coerced, before the ret. this ordering is the point of
     // ReturnNode::unwind: `return $c->x` over an owning `$c` reads the block and then gives it back

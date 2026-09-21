@@ -1,0 +1,8 @@
+// a bare return is how a void function leaves. a function that returns a value
+// has to name it, or codegen emits ret void into an int32 function
+function f() : int32
+{
+    return;
+}
+
+echo f();

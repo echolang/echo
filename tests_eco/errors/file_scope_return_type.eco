@@ -1,0 +1,2 @@
+// a file root returns the status main returns. a string is not that status
+return 'hi';

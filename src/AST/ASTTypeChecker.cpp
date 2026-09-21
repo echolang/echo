@@ -581,8 +581,53 @@ void TypeChecker::check_has_implementation(FunctionDeclNode &node)
 
 void TypeChecker::visitReturn(ReturnNode &node)
 {
-    // a return at file scope has no signature to answer to, and a synthesized return (the one
-    // the struct parser builds for a constructor) has no token to report against
+    // a file root is the body of `i32 main`. a bare `return;` is that 0, the same value falling
+    // off the end produces, which is what makes `guard ... else { return; }` at file scope a
+    // program rather than `ret void` into an `i32` function. a written value still has to fit
+    // int32. codegen is the other reader of this, in StmtCodegen::gen_return
+    if (_current_function == nullptr) {
+        if (node.expr != nullptr && node.token_return.has_value()) {
+            const ValueType entry(ValueTypePrimitive::t_int32);
+
+            check_destination_fits(
+                Destination::t_return, entry, *node.expr, node.token_return.value());
+
+            if (is_written_null(node.expr)) {
+                if (const char *reason = null_rejection_reason(entry)) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(node.token_return.value()),
+                        fmt::format("cannot return null as '{}' - {}",
+                            entry.get_type_desciption(), reason));
+                }
+            }
+        }
+
+        RecursiveVisitor::visitReturn(node);
+        return;
+    }
+
+    // a bare `return;` in a function that returns a value. a `: void` function is the case it
+    // is for, and a constructor's was rewritten to `return $this` at parse. a synthesized return
+    // has no token to report against
+    // an expression that was already refused is dropped before this pass, and the
+    // return then looks bare. that program already has its diagnostic; a second one
+    // about a 'return;' the author did not write is noise
+    if (node.expr == nullptr && node.token_return.has_value() && !_current_function->is_constructor()
+        && !_collector.has_critical_issues()) {
+        const ValueType declared = _current_function->get_return_type();
+
+        if (!is_undetermined_type(declared) && !declared.is_void()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_return.value()),
+                fmt::format(
+                    "'{}' returns a '{}', so name the value - a bare 'return;' hands back nothing.",
+                    _current_function->func_name(),
+                    declared.get_type_desciption()));
+        }
+    }
+
+    // a synthesized return (the one the struct parser builds for a constructor) has no token
+    // to report against
     if (_current_function != nullptr && node.expr != nullptr && node.token_return.has_value()) {
         const ValueType declared = _current_function->get_return_type();
         const ValueType actual = node.expr->result_type();

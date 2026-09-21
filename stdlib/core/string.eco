@@ -27,6 +27,8 @@
  * **by property name** (`AST::resolve_core_string_layout`): `$window` and `$owner` here, `$bytes`
  * and `$size` on the view. So the fields may be reordered but not renamed, `$window` has to *be*
  * the view type, and `$owner` has to stay a class - a class is what carries a reference count.
+ * It is `str::buf?` because a missing buffer is a real state: inline text and a literal both
+ * have a null owner, and a non-nullable class left at zero is a null handle the type forbids.
  *
  */
 
@@ -38,7 +40,8 @@
  * moment the value moved, and a return in Echo is a move. `view()` rebuilds the address
  * from this value. There is still **no destructor** - `$owner` is a class, so its release
  * runs as the property's own teardown, and an inline or literal owner is null. The
- * synthesized copy copies the private words and retains a heap owner.
+ * synthesized copy copies the private words and retains a heap owner. The field is
+ * `str::buf?` so that null is a value of the type, not a zero word the constructor forgot.
  */
 #[core: string]
 public struct string
@@ -316,9 +319,11 @@ public struct string
     }
 
     // the live bytes when they live elsewhere - a literal, a buffer. null
-    // `$bytes` is the inline tag: the text is in `$sso_*` and `view()` names it
+    // `$bytes` is the inline tag: the text is in `$sso_*` and `view()` names it.
+    // `$owner` is absent for that case and for a literal, so it is optional: the
+    // zero word is null, and a non-nullable class may not be left there
     string::view $window;
-    str::buf $owner;
+    str::buf? $owner;
 
     /**
      * How many text bytes sit in the value before it becomes a `str::buf`.
@@ -405,7 +410,7 @@ public struct string
         if ($this->is_inline()) {
             return $this->sso_bytes();
         }
-        return $this->owner->bytes;
+        return $this->owner?->data() ?? die('string has no buffer');
     }
 
     #[inline]
@@ -414,7 +419,7 @@ public struct string
         if ($this->is_inline()) {
             return self::INLINE;
         }
-        return $this->owner->capacity;
+        return $this->owner?->capacity ?? die('string has no buffer');
     }
 
     private function finish(usize $n) : void
@@ -427,7 +432,11 @@ public struct string
             return;
         }
 
-        $this->owner->used = $n;
+        if ($this->owner == null) {
+            die('string has no buffer');
+        }
+
+        $this->owner?->set_used($n);
         $this->window = string::view($p, $n);
     }
 
@@ -442,7 +451,7 @@ public struct string
             return false;
         }
 
-        return $this->window->size == $this->owner->used;
+        return $this->window->size == ($this->owner?->used ?? 0);
     }
 
     constructor(string::view $window)
@@ -452,7 +461,7 @@ public struct string
         $this->sso_hi = 0;
     }
 
-    constructor(string::view $window, str::buf $owner)
+    constructor(string::view $window, str::buf? $owner)
     {
         $this->window = $window;
         $this->owner = $owner;
@@ -739,7 +748,9 @@ public struct string
             return;
         }
 
-        $this->window = string::view($this->owner->bytes, $this->owner->used);
+        $this->window = string::view(
+            $this->owner?->data() ?? die('string has no buffer'),
+            $this->owner?->used ?? die('string has no buffer'));
     }
 
     /**
@@ -762,7 +773,11 @@ public struct string
             return;
         }
 
-        $this->owner->reserve($capacity);
+        if ($this->owner == null) {
+            die('string has no buffer');
+        }
+
+        $this->owner?->reserve($capacity);
         $this->reseat();
     }
 
@@ -782,7 +797,7 @@ public struct string
             return $this->window->size;
         }
 
-        return $this->owner->capacity;
+        return $this->owner?->capacity ?? die('string has no buffer');
     }
 
     /**
@@ -822,7 +837,7 @@ public struct string
         // stays small enough to inline into a tight loop
         if ($this->uniquely_owned()) {
             if ($this->owner != null) {
-                $this->owner->append($src, $count);
+                $this->owner?->append($src, $count);
                 $this->reseat();
 
                 return;

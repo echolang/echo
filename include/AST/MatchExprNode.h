@@ -8,6 +8,7 @@
 #include "AST/ExprNode.h"
 #include "Token.h"
 
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -74,6 +75,13 @@ namespace AST
             // ordinary locals of an ordinary block, the frame machinery ends them, and no ownership
             // rule, drop rule or codegen arm appears anywhere for a binding
             ScopeNode *scope = nullptr;
+
+            // how many payload names the pattern wrote. those are the scope's first children; a
+            // block arm's own declarations follow them and are not part of this count. resolution
+            // reads this rather than every leading declaration, because a local at the start of
+            // the block is a declaration too. shallow-copied with the arm, so a generic instance
+            // keeps the number the parser counted
+            size_t binding_count = 0;
 
             // the value this arm produces, or null for a `{ ... }` arm - which is what makes the whole
             // match `void`. one edge rather than two arm kinds, because "this arm produces nothing" and

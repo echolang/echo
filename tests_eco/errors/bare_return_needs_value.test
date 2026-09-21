@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] bare_return_needs_value.eco:5:5
+
+  'f' returns a 'int32', so name the value - a bare 'return;' hands back nothing.
+
+  4 | {
+  5 |     return;
+    :     ^^^^^^
+  6 | }
+
+1 error, nothing was compiled.

@@ -485,7 +485,15 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     // two declarations mangling to one name means the mangler lost information, and the failure
     // is otherwise silent: push_function overwrites by name, gen_function_decl looks the function
     // up by name, and Function::Create quietly renames the loser to "<name>.1" - so two bodies
-    // end up in one function. fail loudly instead
+    // end up in one function. fail loudly instead.
+    //
+    // the same declaration asked for twice is one symbol, and that is not the defect above. a
+    // generic class's box is lowered on first use, after function maps, so its conformance table
+    // is written with vtables already filled. slot 0 of that vtable is the release thunk, and
+    // building the thunk declares this class's `$deinit` - from inside build_class_box, which then
+    // asks for the same `$deinit` again to fill the typeinfo slot. a second Function::Create keeps
+    // the thunk pointed at a bodyless declaration and emits the body as "<name>.N", which is an
+    // undefined symbol at the link and a jump to nowhere under the JIT
     if (auto existing_id = cmp_unit.function_table.get_function_id(func_name); existing_id != 0) {
         const auto *existing = cmp_unit.function_table.get_function(existing_id).ast_funcdecl;
         if (existing != node) {
@@ -498,6 +506,8 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
                 node->namespaced_func_name()
             ));
         }
+
+        return cmp_unit.function_table.get_llvm_function(existing_id);
     }
 
     // **external here even for an ODR-shared definition**, and weakened later, in

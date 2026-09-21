@@ -40,8 +40,9 @@ public class task<T>
         $h->join();
     }
 
-    private constructor()
+    private constructor(box<T> $slot)
     {
+        $this->slot = $slot;
     }
 
     /**
@@ -50,9 +51,8 @@ public class task<T>
      */
     static function spawn(function<T()> $work) : result<task<T>, error>
     {
-        task<T> $t = task<T>();
         box<T> $out = box<T>();
-        $t->slot = $out;
+        task<T> $t = task<T>($out);
 
         handle $h = guard handle::spawn(function[mv $work, mv $out]() : void {
             T $v = $work();

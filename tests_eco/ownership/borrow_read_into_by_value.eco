@@ -63,7 +63,7 @@ function through_mut_counted(Counted& $c) : int32
 // a `string`, which owns a buffer through a class
 function take_string(string $s) : usize
 {
-    return mem::refs<str::buf>($s->owner);
+    return mem::refs($s->owner);
 }
 
 function through_const_string(const string& $s) : usize
@@ -105,7 +105,7 @@ function through_mut_string(string& $s) : usize
     echo through_const_string($s);
     echo through_mut_string($s);
 
-    echo mem::refs<str::buf>($s->owner);
+    echo mem::refs($s->owner);
 }
 
 // nothing the copies took was left behind

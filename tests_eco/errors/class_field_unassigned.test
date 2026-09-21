@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConstructionLeavesFieldUnassigned  class_field_unassigned.eco:18:12
+
+  '$inner' is not assigned on all paths of this constructor.
+
+  17 | 
+  18 |     public constructor()
+     :            ^^^^^^^^^^^
+  19 |     {
+
+1 error, nothing was compiled.

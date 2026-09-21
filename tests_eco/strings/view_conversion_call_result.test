@@ -9,7 +9,7 @@
 --- RAST --->
 # the release of the buffer, in the one body every teardown of a `string` goes through - written into the
 # module that declares `string`, so it is printed with the standard library and ahead of everything below
-CHECK: release(ma<str::buf>(varref<string&>(var($this))->owner))
+CHECK: release(ma<str::buf?>(varref<string&>(var($this))->owner))
 
 # the ordering *is* the assertion: the clone is bound, the view is taken of it, `show` reads through the
 # view, and only then is the clone torn down - which is where its buffer is released, one body down. a

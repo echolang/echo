@@ -1,0 +1,39 @@
+// a local at the start of a match arm is not another pattern binding. the payload
+// name is the one the parentheses wrote; the declaration after it is the arm's own
+enum Action
+{
+    case play(float32 $rate);
+    case stop;
+}
+
+function go(Action $a) : int32
+{
+    match ($a) {
+        .play($rate) => {
+            int32 $x = 1;
+            return $x;
+        },
+        .stop => {
+            int32 $y = 2;
+            return $y;
+        },
+    }
+}
+
+function label<T>(Action $a, T $v) : int32
+{
+    match ($a) {
+        .play($rate) => {
+            T $copy = $v;
+            return 1;
+        },
+        .stop => {
+            return 2;
+        },
+    }
+}
+
+float32 $rate = 0.5;
+echo go(Action::stop);
+echo go(Action::play($rate));
+echo label(Action::play($rate), 9);

@@ -1,0 +1,31 @@
+// the same shape as class_field_unassigned, with the field seated. the read is the
+// object's value, not whatever the zero word pointed at
+class Inner
+{
+    public int32 $value;
+
+    public constructor()
+    {
+        $this->value = 42;
+    }
+}
+
+class Outer
+{
+    private Inner $inner;
+    private int32 $tag;
+
+    public constructor()
+    {
+        $this->tag = 7;
+        $this->inner = Inner();
+    }
+
+    public function read() : int32
+    {
+        return $this->inner->value;
+    }
+}
+
+Outer $o = Outer();
+echo $o->read();

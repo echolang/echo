@@ -23,7 +23,7 @@
     $rows->push($first);
 
     assert(mem::live_allocations() == 3, 'the buffer, and the string retained rather than copied');
-    assert(mem::refs<str::buf>($first->owner) == 2, 'the local and the slot');
+    assert(mem::refs($first->owner) == 2, 'the local and the slot');
 
     echo $rows[0];
 
@@ -37,8 +37,8 @@
     $rows[$at] = $next;
 
     assert(mem::live_allocations() == 5, 'nothing allocated and nothing leaked');
-    assert(mem::refs<str::buf>($first->owner) == 1, 'the slot gave its reference back');
-    assert(mem::refs<str::buf>($next->owner) == 2, 'and the new value has it');
+    assert(mem::refs($first->owner) == 1, 'the slot gave its reference back');
+    assert(mem::refs($next->owner) == 2, 'and the new value has it');
 
     echo $rows[0];
 }
