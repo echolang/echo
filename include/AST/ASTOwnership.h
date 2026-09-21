@@ -362,6 +362,13 @@ namespace AST
             MaterializationScope::BoundValue kept = MaterializationScope::BoundValue::t_kept
         );
 
+        // a borrowed place hanging on a node that is not itself a place: `?->`'s continuation,
+        // `??`'s right-hand side, a mixed match arm. the form is t_materializable, so arrive_value
+        // of it never inserts the copy - `return $x->id` retains, `return $x?->id` did not. hang
+        // the copy on the place, on the path that produces it. a computed value is already an
+        // owner and is only walked
+        ExprNode *arrive_computed_place(ExprNode *expr);
+
         // the nodes walked so far that need storage for their operand, innermost first. two owners, and
         // between them every way a value with no home is reached into: a **member access**, whose base is
         // the value (`$o->get()->tag`), and an **`&`**, whose operand is - which is how a *receiver* gets

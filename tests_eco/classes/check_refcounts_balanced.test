@@ -1,0 +1,5 @@
+flags: --check-refcounts
+
+--- OUT --->
+2
+1

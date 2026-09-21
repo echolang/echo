@@ -1,0 +1,34 @@
+// `??` with a place right-hand side. the lhs lie is already repaired; the rhs was only walked,
+// so `$maybe ?? $this->name` handed back a borrowed string. a literal rhs hides it - this one
+// is heap-owning
+
+class Named
+{
+    string $name;
+
+    constructor()
+    {
+        string $built = '';
+        $built->append('cooked');
+        $built->append('/terrain/sandy_rocks_02/albedo');
+        $this->name = $built;
+    }
+
+    function pick(string? $maybe) : string
+    {
+        return $maybe ?? $this->name;
+    }
+}
+
+Named $n = Named();
+echo mem::refs($n->name->owner);
+
+{
+    string $got = $n->pick(null);
+    echo mem::refs($n->name->owner);
+    echo $got;
+}
+
+echo mem::refs($n->name->owner);
+echo $n->name;
+echo mem::live_allocations() > 0;

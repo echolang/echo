@@ -1,0 +1,16 @@
+// two names, one retain: a bitwise copy of a class handle, then both drop. `--check-refcounts`
+// poisons the box instead of freeing it, so the second release finds the dead count and stops
+// with the type's name
+
+class Probe
+{
+    int32 $n;
+}
+
+Probe $a = Probe(1);
+ptr<Probe> $slot = mem::alloc<Probe>(1);
+mem::copy<Probe>($slot, ptr<Probe>(&$a), 1);
+Probe $b = mem::take<Probe>($slot:$[0]);
+mem::free<Probe>($slot);
+echo $a->n;
+echo $b->n;

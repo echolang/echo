@@ -448,6 +448,24 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_check_refcounts, "check-refcounts", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "trap on releasing an already-dead object",
+            "Have every class release check that the object it is about to decrement is still alive, "
+            "and stop with the type's name when it is not:\n"
+            "  echoc run --check-refcounts app.eco\n"
+            "A reference counted one time too many frees an object a live handle still points at. "
+            "Nothing fails there; the program dies later, in an unrelated allocation, with a pointer "
+            "that was never allocated. This flag moves the stop to the release that was one too many.\n"
+            "To do that it keeps every class box instead of freeing it, poisoned, so a later release "
+            "still finds the poison rather than whatever reused the memory. That leaks by design: the "
+            "run costs memory in exchange for naming the fault, which is why it is a flag of its own "
+            "and not something --debug switches on.",
+            {}, nullptr
+        },
+        {
             Opt::t_no_stdlib, "no-stdlib", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_build,
             accepts::compiling | accepts::lsp, 0, ExclusionGroup::t_stdlib_use,

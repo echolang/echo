@@ -62,6 +62,7 @@ namespace Compiler
         t_debug_symbols,
         t_no_tbaa,
         t_track_allocations,
+        t_check_refcounts,
         t_no_stdlib,
         t_emit_stdlib_header,
         t_target_os,

@@ -1,0 +1,88 @@
+// `?->` of a place continuation must copy an owning payload. the chain is t_materializable, so
+// arrive_value of the form itself never inserts the copy: `return $x->id` retains, `return $x?->id`
+// did not. the value the chain lands on was released as if the function owned it.
+//
+// a string literal (and anything that fits in the 16-byte inline window) has a *null* owner, and
+// on a null handle the missing retain and the extra release are both no-ops. these cases use a
+// 16-byte seed plus a path so the buffer is real - the same move stdlib_cow.eco makes, and the
+// one every earlier repro of this hole lacked
+//
+// mem::refs of the string itself is refused ("only a class carries a reference count"). the
+// str::buf inside is reachable, and that is the count this miss moves
+
+class Ref
+{
+    string $id;
+
+    constructor(const string& $seed)
+    {
+        string $built = '';
+        $built->append($seed);
+        $built->append('/terrain/sandy_rocks_02/albedo');
+        $this->id = $built;
+    }
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+class Mid
+{
+    Ref? $albedo;
+
+    constructor(Ref? $albedo)
+    {
+        $this->albedo = $albedo;
+    }
+}
+
+// a struct root reached by `const &`, which is the shape the read came in on
+struct Layer
+{
+    Mid? $material;
+}
+
+function chainId(const Layer& $layer) : string
+{
+    return $layer->material?->albedo?->id ?? '';
+}
+
+function heapSeed() : string
+{
+    string $s = '';
+    $s->append('cooked');
+    return $s;
+}
+
+{
+    Ref $ref = Ref(heapSeed());
+    Layer $layer = Layer(Mid($ref));
+
+    // the field is the only owner of the buffer
+    echo mem::refs($ref->id->owner);
+
+    // while a caller holds a copy the count is two, and it is back to one after the copy dies.
+    // unretained, it reads one here and zero after - and the field is left naming freed memory
+    {
+        string $first = chainId($layer);
+        echo mem::refs($ref->id->owner);
+    }
+
+    echo mem::refs($ref->id->owner);
+
+    {
+        string $second = chainId($layer);
+        echo mem::refs($ref->id->owner);
+    }
+
+    echo mem::refs($ref->id->owner);
+
+    // and the text is still readable, which a freed buffer would not be
+    echo $ref->id;
+    echo 'balanced';
+}
+
+// 900 from Ref's destructor, then nothing outstanding
+echo mem::live_allocations();

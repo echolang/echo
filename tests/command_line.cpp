@@ -617,6 +617,18 @@ TEST_CASE("explaining memory implies tracking allocations", "[cli]")
     REQUIRE_FALSE(counted.options.report_allocations);
 }
 
+TEST_CASE("check-refcounts is its own flag", "[cli]")
+{
+    const DriverOptions flagged = resolved({ "run", "--check-refcounts", "a.eco" });
+
+    REQUIRE(flagged.options.check_refcounts);
+    REQUIRE_FALSE(flagged.options.track_allocations);
+
+    const DriverOptions plain = resolved({ "run", "a.eco" });
+
+    REQUIRE_FALSE(plain.options.check_refcounts);
+}
+
 TEST_CASE("a repeated dump request is every dump rather than the last", "[cli]")
 {
     const DriverOptions driver

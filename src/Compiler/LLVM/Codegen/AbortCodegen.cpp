@@ -435,6 +435,61 @@ void AbortCodegen::gen_abort_if(
     _ctx.set_insert_point(ok_block);
 }
 
+llvm::Constant *AbortCodegen::odr_string(const std::string &symbol, const std::string &text)
+{
+    if (auto *existing = _ctx.current_module()->getGlobalVariable(symbol, true)) {
+        return existing;
+    }
+
+    llvm::Constant *data = llvm::ConstantDataArray::getString(*_ctx.llvm_context, text, true);
+    auto *global = new llvm::GlobalVariable(
+        *_ctx.current_module(),
+        data->getType(),
+        /*isConstant=*/true,
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        data,
+        symbol);
+    global->setAlignment(llvm::Align(1));
+    return global;
+}
+
+void AbortCodegen::gen_abort_if_unlocated(
+    llvm::Value *condition,
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &symbol_stem
+)
+{
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
+
+    llvm::BasicBlock *abort_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "abort", fn);
+    llvm::BasicBlock *ok_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "abort.ok", fn);
+
+    _ctx.builder->CreateCondBr(condition, abort_block, ok_block);
+
+    _ctx.set_insert_point(abort_block);
+
+    // "<runtime>" rather than a file: there is no source line that wrote this check, and a
+    // per-unit basename here would be the same ODR hazard the named globals above avoid
+    const std::string where = "<runtime>";
+    _ctx.builder->CreateCall(get_or_create_abort_thunk(), {
+        odr_string("__eco_msg_head_" + symbol_stem, headline),
+        llvm::ConstantInt::get(i64, headline.size()),
+        odr_string("__eco_msg_body_" + symbol_stem, detail),
+        llvm::ConstantInt::get(i64, detail.size()),
+        odr_string("__eco_msg_where", where),
+        llvm::ConstantInt::get(i64, where.size()),
+        llvm::ConstantInt::get(i32, 0),
+        odr_string("__eco_msg_zero", "0"),
+        llvm::ConstantInt::get(i64, 1),
+    });
+    _ctx.builder->CreateUnreachable();
+
+    _ctx.set_insert_point(ok_block);
+}
+
 llvm::Value *AbortCodegen::swap_hook(llvm::Value *fn)
 {
     // the slot is reachable from every thread the moment a program can spawn one

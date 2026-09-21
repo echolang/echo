@@ -227,7 +227,7 @@ namespace Compiler::LLVM
         // **one decrement, two things that can end at zero.** the strong count reaching zero runs the
         // payload's teardown and gives back the collective weak reference; the weak count reaching zero
         // frees the block. everything around that is identical - the linkonce_odr `void(ptr)` thunk, the
-        // saved and restored builder position, the null check, the load/sub/store, and the branch on zero -
+        // saved and restored builder position, the null check, the decrement, and the branch on zero -
         // and it was written out twice before this, which is two decrement sequences that could disagree
         // about which word they were touching
         //
@@ -239,13 +239,17 @@ namespace Compiler::LLVM
         // declared before it asks for the weak thunk it calls, so the call reads above the definition
         llvm::Function *declare_release_thunk(const std::string &name, const char *handle_name);
 
+        // `audit_label` is what `--check-refcounts` names in its message, and the stem of the
+        // message globals' symbols. the mangled type token for a class thunk; "weak" for the
+        // shared weak one
         llvm::Function *build_count_release_thunk(
             llvm::Function *thunk,
             llvm::Type *box_type,
             unsigned count_index,
             const char *zero_block_name,
             llvm::function_ref<void(llvm::Value *handle)> on_zero,
-            CountAccess access
+            CountAccess access,
+            const std::string &audit_label
         );
 
         // the address of one header word inside `handle`'s block. takes the box type rather than a layout,

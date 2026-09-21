@@ -96,4 +96,71 @@ llvm::Value *apply_count_access(
     return joined;
 }
 
+llvm::Value *decrement_count(
+    CodegenContext &ctx,
+    CountAccess access,
+    llvm::Value *handle,
+    llvm::Type *box_type,
+    llvm::Value *count_ptr,
+    const char *label
+)
+{
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*ctx.llvm_context);
+    return apply_count_access(
+        ctx, access, handle, box_type, "dec",
+        [&](bool atomic) -> llvm::Value * {
+            if (atomic) {
+                // atomicrmw sub yields the old value
+                llvm::Value *old = ctx.builder->CreateAtomicRMW(
+                    llvm::AtomicRMWInst::Sub,
+                    count_ptr,
+                    llvm::ConstantInt::get(i64, 1),
+                    CountAtomics::word(),
+                    CountAtomics::decrement());
+                old->setName(label);
+                return ctx.builder->CreateSub(
+                    old, llvm::ConstantInt::get(i64, 1), std::string(label) + ".dec");
+            }
+
+            llvm::Value *current = ctx.builder->CreateLoad(i64, count_ptr, label);
+            llvm::Value *next = ctx.builder->CreateSub(
+                current, llvm::ConstantInt::get(i64, 1), std::string(label) + ".dec");
+            ctx.builder->CreateStore(next, count_ptr);
+            return next;
+        });
+}
+
+void poison_counts(CodegenContext &ctx, llvm::Value *handle, CountAccess access)
+{
+    // negative so the one comparison the release path adds catches both this and
+    // a plain underflow. one apply for both words: `access` is what the thunk
+    // just decremented with, and the two stores have to be the same protocol
+    constexpr long long dead_count = -0x0EAD;
+
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*ctx.llvm_context);
+    llvm::Type *header = ctx.types->class_header_llvm_type();
+    llvm::Constant *dead = llvm::ConstantInt::getSigned(i64, dead_count);
+
+    llvm::Value *strong_ptr = ctx.builder->CreateStructGEP(
+        header, handle, ClassBox::strong_index, "dead_strong_ptr");
+    llvm::Value *weak_ptr = ctx.builder->CreateStructGEP(
+        header, handle, ClassBox::weak_index, "dead_weak_ptr");
+
+    apply_count_access(
+        ctx, access, handle, header, "poison",
+        [&](bool atomic) -> llvm::Value * {
+            llvm::StoreInst *strong = ctx.builder->CreateStore(dead, strong_ptr);
+            llvm::StoreInst *weak = ctx.builder->CreateStore(dead, weak_ptr);
+
+            if (atomic) {
+                strong->setAtomic(CountAtomics::decrement());
+                strong->setAlignment(CountAtomics::word());
+                weak->setAtomic(CountAtomics::decrement());
+                weak->setAlignment(CountAtomics::word());
+            }
+
+            return nullptr;
+        });
+}
+
 };

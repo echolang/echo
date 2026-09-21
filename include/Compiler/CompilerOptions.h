@@ -38,6 +38,14 @@ namespace Compiler
         // where the options are built - a report over a counter nothing maintains reads zero forever
         bool report_allocations = false;
 
+        // does every class release check that the object it is about to decrement is still alive?
+        //
+        // its own flag for track_allocations' reason, and one more: paying for it means keeping every
+        // class box rather than freeing it, so a release that comes one too many still finds a poisoned
+        // header instead of whatever reused the memory. That is a deliberate leak, and not something a
+        // plain debug build should start doing
+        bool check_refcounts = false;
+
         // **turns off the per-unit baseline pipeline** that prepare_unit_for_emission runs on every ordinary
         // build. for reading raw IR, for bisecting a miscompile against the optimizer, and for the two
         // goldens that pin unoptimized output on purpose. it is not the inverse of `-O`, which is a
@@ -106,6 +114,13 @@ namespace Compiler
 
         bool reporting_allocations() const {
             return report_allocations;
+        }
+
+        // poison-and-leak rather than free, and the cache key for that. the cheap `next < 0`
+        // compare after decrement is `assertions_enabled()`'s question; this is or'd in so
+        // a release `--check-refcounts` build still aborts on the poison it just wrote
+        bool checking_refcounts() const {
+            return check_refcounts;
         }
 
         // and the same rule again. four emitters will ask - the unit's compile unit, the subprogram, the

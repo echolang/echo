@@ -1,0 +1,21 @@
+# two-level `?->` from a const & struct root, landing on a heap-owning string, consumed by `?? ''`.
+# the counts are the string's str::buf: 1, 2, 1, 2, 1. unretained they read 1, 1, 0 and the field
+# names freed memory. 900 is Ref's destructor, once, after the copies have died
+
+--- OUT --->
+1
+2
+1
+2
+1
+cooked/terrain/sandy_rocks_02/albedo
+balanced
+900
+0
+--- RAST --->
+# the copy hangs on the continuation, inside the present path - a nested chain, so the inner
+# optchain's continuation is the field read. a string is a struct, so the copy is the synthesized
+# constructor rather than a retain
+CHECK: function chainId
+CHECK: optchain<string?>(
+CHECK: call string(

@@ -1,0 +1,13 @@
+// `--check-refcounts` on a program that retains and releases in step. it must not abort. it
+// keeps every class box rather than freeing it, so live_allocations is not a question this
+// case can ask
+
+class Probe
+{
+    int32 $n;
+}
+
+Probe $a = Probe(1);
+Probe $b = $a;
+echo mem::refs($a);
+echo $b->n;

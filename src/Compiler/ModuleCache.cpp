@@ -147,6 +147,11 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.tracking_allocations() ? std::string("track") : std::string("notrack"), environment);
 
+    // **and whether release thunks poison instead of free.** `--check-refcounts` changes every
+    // class's teardown, so without this a flagged build is served the object that did not check
+    environment = fnv1a64(
+        options.checking_refcounts() ? std::string("rc") : std::string("norc"), environment);
+
     // **and whether the object carries DWARF**, which none of the three above covers. Every module that
     // declares a function emits different bytes with `-g`, so without this entry a debug session is
     // served a stripped artifact for every cached module and its breakpoints simply never resolve -

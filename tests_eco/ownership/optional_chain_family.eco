@@ -1,0 +1,116 @@
+// the rest of the family: an owning struct, a weak, an interface, a callable, and a non-const
+// root. each landing type classifies as something other than t_bytes, so a missing arrival is a
+// missing retain or copy - and a literal would hide it
+
+struct Pair
+{
+    string $id;
+}
+
+class Box
+{
+    Pair $p;
+
+    constructor()
+    {
+        string $built = '';
+        $built->append('cooked');
+        $built->append('/terrain/sandy_rocks_02/albedo');
+        $this->p = Pair($built);
+    }
+}
+
+function pairId(Box? $b) : string
+{
+    return $b?->p->id ?? '';
+}
+
+class Node
+{
+    int32 $tag;
+}
+
+class WeakWrap
+{
+    weak<Node> $w;
+
+    constructor(weak<Node> $w)
+    {
+        $this->w = $w;
+    }
+}
+
+interface Drawable
+{
+    function draw() : int32;
+}
+
+class Circle : Drawable
+{
+    int32 $size;
+
+    function draw() : int32
+    {
+        return $this->size;
+    }
+}
+
+class Face
+{
+    Drawable $d;
+
+    constructor(Drawable $d)
+    {
+        $this->d = $d;
+    }
+}
+
+class FnHold
+{
+    function<int32(int32)> $fn;
+
+    constructor(function<int32(int32)> $fn)
+    {
+        $this->fn = $fn;
+    }
+}
+
+Box $box = Box();
+echo mem::refs($box->p->id->owner);
+
+{
+    echo pairId($box);
+    echo mem::refs($box->p->id->owner);
+}
+
+echo mem::refs($box->p->id->owner);
+
+Node $n = Node(3);
+weak<Node> $wn = &$n;
+WeakWrap $ww = WeakWrap($wn);
+echo mem::weaks($n);
+
+{
+    WeakWrap? $maybe = $ww;
+    weak<Node>? $got = $maybe?->w;
+    echo mem::weaks($n);
+}
+
+echo mem::weaks($n);
+
+Face $face = Face(Circle(4));
+{
+    Face? $maybe = $face;
+    Drawable? $d = $maybe?->d;
+    echo $d?->draw() ?? -1;
+}
+
+FnHold $fh = FnHold(function(int32 $k) : int32 { return $k + 1; });
+{
+    FnHold? $maybe = $fh;
+    function<int32(int32)> $fn = $maybe?->fn ?? function(int32 $k) : int32 { return 0; };
+    echo $fn(3);
+}
+
+echo $n->tag;
+echo mem::live_allocations() > 0;

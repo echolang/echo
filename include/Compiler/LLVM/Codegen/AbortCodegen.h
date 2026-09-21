@@ -79,6 +79,17 @@ namespace Compiler::LLVM
             const std::string &detail,
             const TokenReference &at);
 
+        // the same conditional stop, from inside a `linkonce_odr` body that has no source location
+        // to name - a generated release thunk is the caller this exists for. `gen_abort_if` would
+        // mint anonymous globals for its pieces, and an anonymous global's *name* differs per unit,
+        // which is what makes such a body fail the ODR comparison in LLVMCompiler. The pieces here
+        // are named linkonce_odr constants keyed by `symbol_stem`, so every unit's copy is identical
+        void gen_abort_if_unlocated(
+            llvm::Value *condition,
+            const std::string &headline,
+            const std::string &detail,
+            const std::string &symbol_stem);
+
         // the crash-hook store. `swap` is set_hook: write `fn`, return what was there (null if
         // the default report was in place). `take` writes null. both are the only writers of
         // `__eco_crash_hook`
@@ -120,6 +131,9 @@ namespace Compiler::LLVM
         llvm::GlobalVariable *hook_global();
 
         void emit_thunk(llvm::Function *thunk);
+
+        // a named linkonce_odr string constant, for the unlocated stop above
+        llvm::Constant *odr_string(const std::string &symbol, const std::string &text);
 
         void call_thunk(
             const std::string &headline,

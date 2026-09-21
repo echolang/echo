@@ -1,0 +1,74 @@
+// the same heap-owning string field, consumed by `guard`, a by-value parameter, a return, and a
+// depth-one chain. a method that already returns a string by value is a computed continuation and
+// must stay balanced without a second copy
+
+class Holder
+{
+    string $id;
+
+    constructor()
+    {
+        string $built = '';
+        $built->append('cooked');
+        $built->append('/terrain/sandy_rocks_02/albedo');
+        $this->id = $built;
+    }
+
+    function getId() : string
+    {
+        return $this->id;
+    }
+}
+
+function viaReturn(Holder? $h) : string
+{
+    return $h?->id ?? '';
+}
+
+function viaDepthOne(Holder? $h) : string
+{
+    return $h?->id ?? '';
+}
+
+function take(string $s) : usize
+{
+    return $s->size();
+}
+
+function viaArg(Holder? $h) : usize
+{
+    return take($h?->id ?? '');
+}
+
+function viaGuard(Holder? $h) : string
+{
+    string $s = guard $h?->id else {
+        return '';
+    }
+    return $s;
+}
+
+function viaMethod(Holder? $h) : string
+{
+    return $h?->getId() ?? '';
+}
+
+Holder $h = Holder();
+echo mem::refs($h->id->owner);
+
+{
+    echo viaReturn($h)->size();
+    echo mem::refs($h->id->owner);
+    echo viaDepthOne($h)->size();
+    echo mem::refs($h->id->owner);
+    echo viaArg($h);
+    echo mem::refs($h->id->owner);
+    echo viaGuard($h)->size();
+    echo mem::refs($h->id->owner);
+    echo viaMethod($h)->size();
+    echo mem::refs($h->id->owner);
+}
+
+echo mem::refs($h->id->owner);
+echo $h->id;
+echo mem::live_allocations() > 0;

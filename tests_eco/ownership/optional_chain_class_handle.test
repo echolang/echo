@@ -1,0 +1,11 @@
+# 900 prints once, after the outer block - `$n` dying. unretained, it prints during `pick` and
+# the later drop of `$n` is a use-after-free
+
+--- OUT --->
+2
+3
+7
+2
+900
+99
+0

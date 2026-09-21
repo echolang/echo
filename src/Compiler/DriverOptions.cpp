@@ -98,6 +98,7 @@ bool Compiler::resolve_driver_options(
     out.options.report_allocations = out.explains(ExplainKind::t_memory);
     out.options.track_allocations
         = out.options.report_allocations || cli.flag(Opt::t_track_allocations);
+    out.options.check_refcounts = cli.flag(Opt::t_check_refcounts);
 
     // the request as written, resolved by Compiler::resolve_subtarget wherever it is needed
     out.options.target_cpu = cli.value(Opt::t_target_cpu);

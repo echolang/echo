@@ -1398,6 +1398,41 @@ ExprNode *OwnershipPass::walk_value_edge(ExprNode *expr, MaterializationScope::B
     return scope.close(walk_expression(expr));
 }
 
+ExprNode *OwnershipPass::arrive_computed_place(ExprNode *expr)
+{
+    if (expr == nullptr) {
+        return nullptr;
+    }
+
+    // a borrowed place hanging on a node that is not itself a place. arrive_value of the form
+    // never inserts the copy: the node is t_materializable (`?->`, `??`, a mixed match), so
+    // `return $x->id` retains and `return $x?->id` did not. hang the copy on the place, on the
+    // path that produces it. a computed value - a call returning T - is already an owner and
+    // is only walked
+    //
+    // **read_reaches_storage, not is_place_expression**: a call returning `T&` is the other
+    // shape whose value is an address, and skipping it is the same miss `string $s = $a->at(0)`
+    // used to be. value_result_type is the peel: a match binding is `Node&`, and classifying
+    // the borrow as t_bytes would skip the retain of the object. make_mutable is the
+    // implicit-cast path's: a const-field continuation interned `optional<const string>`,
+    // and a copy constructor takes `const T&` and produces T
+    //
+    // resolve_value_arrival rather than walk-then-arrive: walking a T&-returning call first
+    // would arrive its arguments twice. it already opens the MaterializationScope walk_value_edge
+    // would, so nested `$a?->child()?->save()` still binds the inner call inside the outer
+    // continuation
+    if (read_reaches_storage(*expr)) {
+        const ValueType target = ValueType::make_mutable(value_result_type(*expr));
+
+        if (copy_needs_constructor(target)) {
+            return resolve_value_arrival(
+                expr, target, nullptr, ValueDestination::t_declaration);
+        }
+    }
+
+    return walk_value_edge(expr);
+}
+
 ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
 {
     if (expr == nullptr) {
@@ -1666,7 +1701,14 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             //
             // the continuation is rooted at the marker, which stands for the base rather than
             // holding it - so it cannot ask for the base a second time
-            chain->continuation = walk_value_edge(chain->continuation);
+            //
+            // **and a place continuation is a lie the same way `??` of a place is.** the chain
+            // is t_materializable, so arrive_value of the form itself never inserts the copy:
+            // `return $x->id` retains, `return $x?->id` did not. hang the copy on the
+            // continuation, inside reach_block, so the absent path does not release a value it
+            // never took. a computed continuation - a call returning T, a nested chain - is
+            // already an owner and is only walked
+            chain->continuation = arrive_computed_place(chain->continuation);
             break;
         }
 
@@ -1685,7 +1727,10 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         {
             auto *coalesce = static_cast<NullCoalesceExprNode *>(expr);
             coalesce->lhs = walk_expression(coalesce->lhs);
-            coalesce->rhs = walk_value_edge(coalesce->rhs);
+            // **a place right-hand side is the lhs lie's mirror.** `$maybe ?? $this->name` hands
+            // back a borrowed string: the `??` is not a place, so arrive_value of it cannot
+            // insert the copy, and the rhs was only walked. a computed rhs is already an owner
+            coalesce->rhs = arrive_computed_place(coalesce->rhs);
 
             ExprNode *lhs = coalesce->lhs;
 
@@ -1753,7 +1798,16 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                     continue;
                 }
 
-                arm.value = walk_value_edge(arm.value);
+                // **mixed arms lose the copy all-place arms get from yields_a_place.** one
+                // place arm plus one literal sets all_places = false, the match is
+                // t_materializable, and the place arm was a borrowed payload with no copy.
+                // all-place stays a walk: the match itself is the address, and arriving each
+                // arm would copy then copy again at the destination
+                if (!node->yields_a_place) {
+                    arm.value = arrive_computed_place(arm.value);
+                } else {
+                    arm.value = walk_value_edge(arm.value);
+                }
 
                 if (arm.value != nullptr && expression_never_returns(*arm.value)) {
                     continue;
@@ -2047,10 +2101,12 @@ ExprNode *OwnershipPass::arrive_value(
     // computed - a constructor call, a call returning `T` - is one nobody else holds, so it needs no
     // annotation and leaves nothing behind
     //
-    // **`??` of a place is the one computed value that is a lie**, and that copy is not this
-    // arrival's to insert: the `??` is not a place (`gen_lvalue` throws). the walk of the node
-    // itself hangs it off `present_value`, over the payload place, so by the time the `??`
-    // arrives here it is already a copy nobody else holds
+    // **a place yielded by a form that is not itself a place is a lie**, and that copy is not
+    // this arrival's to insert. `?->`, `??` and a mixed match are t_materializable (`gen_lvalue`
+    // throws on the chain and on `??`). `arrive_computed_place` hangs the copy on the producing
+    // edge — the continuation, the right-hand side, the mixed arm — and a place left-hand side of
+    // `??` hangs its own off `present_value`, over the payload place. by the time any of those
+    // forms arrives here it is already a copy nobody else holds
     //
     // **a call returning a borrow is on the copying side**, which is the whole of why this asks
     // AST::read_reaches_storage rather than is_place_expression: `string $s = $a->at(0);` reads

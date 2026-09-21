@@ -1,0 +1,44 @@
+// a chain landing on a class handle. the destructor echo fires once, when `$n` dies - an
+// unretained read runs it at the return of `pick`, while `$n` is still live
+
+class Node
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+class Wrap
+{
+    Node $n;
+
+    constructor(Node $n)
+    {
+        $this->n = $n;
+    }
+}
+
+function pick(Wrap? $w) : Node?
+{
+    return $w?->n;
+}
+
+{
+    Node $n = Node(7);
+    Wrap $w = Wrap($n);
+    echo mem::refs($n);
+
+    {
+        Node? $kept = pick($w);
+        echo mem::refs($n);
+        echo $kept?->tag ?? -1;
+    }
+
+    echo mem::refs($n);
+}
+
+echo 99;
+echo mem::live_allocations();

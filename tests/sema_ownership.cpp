@@ -12,6 +12,7 @@
 #include <AST/ExprNode.h>
 #include <AST/IfStatementNode.h>
 #include <AST/FunctionDeclNode.h>
+#include <AST/MatchExprNode.h>
 #include <AST/ReturnNode.h>
 #include <AST/ScopeNode.h>
 #include <AST/TemporaryBindExprNode.h>
@@ -1089,6 +1090,88 @@ TEST_CASE("a class read out of a temporary is retained before the temporary is r
     REQUIRE(bind->body != nullptr);
     REQUIRE(bind->body->get_node_type() == NodeType::n_expr_retain);
     REQUIRE_FALSE(bind->teardown.empty());
+}
+
+TEST_CASE("an optional-chained class field is retained on the continuation", "[ownership]")
+{
+    // the `?->` is t_materializable, so arrive_value of the chain itself never inserts the copy:
+    // `return $x->n` retains, `return $x?->n` did not. the retain hangs on the continuation, which
+    // is the present path only
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Node { int32 $v; }\n"
+        "class Wrap { Node $n; }\n"
+        "function f(Wrap? $w) : Node? { return $w?->n; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    OptionalChainExprNode *chain = nullptr;
+
+    for (auto *node : m.nodes.of_type<OptionalChainExprNode>()) {
+        chain = node;
+        break;
+    }
+
+    REQUIRE(chain != nullptr);
+    REQUIRE(chain->continuation != nullptr);
+    REQUIRE(chain->continuation->get_node_type() == NodeType::n_expr_retain);
+}
+
+TEST_CASE("a place right-hand side of `??` is retained", "[ownership]")
+{
+    // the lhs lie is already repaired via present_value; the rhs was only walked. `$maybe ?? $other`
+    // of a class is a borrowed handle on the absent path without this
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Node { int32 $v; }\n"
+        "function f(Node? $maybe, Node $other) : Node { return $maybe ?? $other; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    NullCoalesceExprNode *coalesce = nullptr;
+
+    for (auto *node : m.nodes.of_type<NullCoalesceExprNode>()) {
+        coalesce = node;
+        break;
+    }
+
+    REQUIRE(coalesce != nullptr);
+    REQUIRE(coalesce->rhs != nullptr);
+    REQUIRE(coalesce->rhs->get_node_type() == NodeType::n_expr_retain);
+}
+
+TEST_CASE("a mixed match copies a place arm", "[ownership]")
+{
+    // all-place arms are saved by yields_a_place; one place arm plus one constructor sets
+    // all_places = false and the place arm was a borrowed payload with no copy
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Node { int32 $v; }\n"
+        "enum Slot {\n"
+        "    case some(Node $n);\n"
+        "    case none;\n"
+        "}\n"
+        "function f(Slot $s) : Node {\n"
+        "    return match ($s) {\n"
+        "        Slot::some($n) => $n,\n"
+        "        else => Node(0),\n"
+        "    };\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    MatchExprNode *match = nullptr;
+
+    for (auto *node : m.nodes.of_type<MatchExprNode>()) {
+        match = node;
+        break;
+    }
+
+    REQUIRE(match != nullptr);
+    REQUIRE_FALSE(match->yields_a_place);
+    REQUIRE(match->arms.size() >= 1);
+    REQUIRE(match->arms[0].value != nullptr);
+    REQUIRE(match->arms[0].value->get_node_type() == NodeType::n_expr_retain);
 }
 
 TEST_CASE("the three positions that cannot hold a temporary refuse one", "[ownership]")

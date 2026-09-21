@@ -1,0 +1,8 @@
+flags: --check-refcounts
+expect: fail
+
+--- OUT --->
+1
+1
+fatal error: released an object that was already destroyed: 5Probe
+  at <runtime>:0

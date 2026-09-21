@@ -151,9 +151,18 @@ llvm::Function *ClassCodegen::get_or_create_weak_release_thunk()
             // through the memory subsystem, which is what makes a class box show up in the count. asking
             // it for the free thunk from inside this one's body is safe: it guards and restores its own
             // insert point, exactly as the abort thunk already does when a body stops
+            // `--check-refcounts` keeps the block instead, with both count words poisoned
+            // through the same access this thunk decrements with, so a later release still
+            // has the sentinel to subtract from. Deliberate leak: that is the trade the flag names
+            if (_ctx.options.checking_refcounts()) {
+                poison_counts(_ctx, handle, CountAccess::t_from_typeinfo);
+                return;
+            }
+
             _ctx.memory->gen_free(handle);
         },
-        CountAccess::t_from_typeinfo);
+        CountAccess::t_from_typeinfo,
+        "weak");
 }
 
 llvm::Value *ClassCodegen::gen_weak_of(llvm::Value *handle, const AST::ValueType &class_type)
@@ -816,7 +825,8 @@ llvm::Function *ClassCodegen::build_release_thunk(
 
             _ctx.builder->CreateCall(weak_release, { handle });
         },
-        access);
+        access,
+        complex != nullptr ? complex->mangled_token() : std::string("env"));
 }
 
 // the payload's teardown, when there is any. the deinit takes `Foo&` - a pointer to a *slot* holding a
@@ -916,7 +926,8 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
     unsigned count_index,
     const char *zero_block_name,
     llvm::function_ref<void(llvm::Value *handle)> on_zero,
-    CountAccess access
+    CountAccess access,
+    const std::string &audit_label
 )
 {
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
@@ -942,33 +953,23 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
 
     llvm::Value *count_ptr = gen_header_ptr(handle, box_type, count_index, count + "_ptr");
 
-    auto emit_plain_dec = [&]() -> llvm::Value * {
-        llvm::Value *current = _ctx.builder->CreateLoad(i64, count_ptr, count);
-        llvm::Value *next =
-            _ctx.builder->CreateSub(current, llvm::ConstantInt::get(i64, 1), count + ".dec");
-        _ctx.builder->CreateStore(next, count_ptr);
-        return next;
-    };
+    // **the audit is the value the decrement just produced.** a live count starts at 1, so the
+    // release that ends the object yields 0 and a release of a word already at 0, or of the
+    // poison sentinel, yields a negative result. one compare, on that result, so the shared
+    // weak thunk pays the typeinfo split once. the cheap half is the debug default;
+    // `--check-refcounts` is poison instead of free, so a later release still has a word
+    llvm::Value *next = decrement_count(
+        _ctx, access, handle, box_type, count_ptr, count.c_str());
 
-    auto emit_atomic_dec = [&]() -> llvm::Value * {
-        // atomicrmw sub yields the old value
-        llvm::Value *old = _ctx.builder->CreateAtomicRMW(
-            llvm::AtomicRMWInst::Sub,
-            count_ptr,
-            llvm::ConstantInt::get(i64, 1),
-            CountAtomics::word(),
-            CountAtomics::decrement());
-        old->setName(count);
-        return _ctx.builder->CreateSub(old, llvm::ConstantInt::get(i64, 1), count + ".dec");
-    };
+    if (_ctx.options.checking_refcounts() || _ctx.options.assertions_enabled()) {
+        _ctx.abort->gen_abort_if_unlocated(
+            _ctx.builder->CreateICmpSLT(next, llvm::ConstantInt::get(i64, 0), count + ".dead"),
+            "fatal error",
+            "released an object that was already destroyed: " + audit_label,
+            audit_label + "_" + count);
+    }
 
     const bool needs_zero_fence = access != CountAccess::t_plain;
-
-    llvm::Value *next = apply_count_access(
-        _ctx, access, handle, box_type, "dec",
-        [&](bool atomic) -> llvm::Value * {
-            return atomic ? emit_atomic_dec() : emit_plain_dec();
-        });
 
     _ctx.builder->CreateCondBr(
         _ctx.builder->CreateICmpEQ(next, llvm::ConstantInt::get(i64, 0), "is_last_" + count),
