@@ -692,6 +692,15 @@ std::string AST::interface_erasure_refusal(const AST::ValueType &from, const AST
         return "";
     }
 
+    return interface_storage_refusal(interface);
+}
+
+std::string AST::interface_storage_refusal(const AST::ValueType &interface)
+{
+    if (!interface.is_interface()) {
+        return "";
+    }
+
     // **an associated type has no binding at an erased use site.** a vtable *can* be built - every
     // requirement still has an answering member - but `iterate() : Iter` has no static result type once
     // the value has forgotten which implementor it holds. that is an existential, and there is no opaque

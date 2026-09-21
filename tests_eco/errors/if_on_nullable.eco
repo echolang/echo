@@ -1,0 +1,25 @@
+// an `if` / `while` / `for` condition has to be a bool. a T?, a ptr (written
+// `$p:$` so the adjuster does not peel it to the pointee), and an integer all
+// used to reach CreateCondBr and fail the verifier instead of a located diagnostic
+int32? $n = 1;
+if ($n) {
+    echo 1;
+}
+
+int32 $i = 0;
+ptr<int32> $p = &$i;
+if ($p:$) {
+    echo 2;
+}
+
+if ($i) {
+    echo 3;
+}
+
+while ($i) {
+    echo 4;
+}
+
+for (int32 $k = 0; $k; $k = $k + 1) {
+    echo 5;
+}

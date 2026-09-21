@@ -5,6 +5,7 @@
 
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/CountAtomics.h"
+#include "Token.h"
 
 #include <llvm/ADT/STLFunctionalExtras.h>
 #include <llvm/ADT/Twine.h>
@@ -54,6 +55,15 @@ namespace Compiler::LLVM
         // not an identity. against a struct it folds to false, which needs no runtime at all
         void gen_instanceof(AST::InstanceOfExprNode &node);
 
+        // `$x as I` / `$x as Class` from a stored interface or a class whose conformance is
+        // not static. `fallible` is `$x as I?`: miss is a wrapped absence rather than an abort
+        llvm::Value *gen_iface_recast(
+            llvm::Value *value,
+            const AST::ValueType &from,
+            const AST::ValueType &to,
+            bool fallible,
+            const TokenReference &at
+        );
 
         // "move the strong count of this value", whatever kind of value it is. the one entry point for
         // both, so a teardown site added later cannot forget that a callable counts its environment
@@ -156,10 +166,11 @@ namespace Compiler::LLVM
             const char *label,
             CountAccess access);
 
-        // the interface half of gen_instanceof: walk the block's conformance table looking for the
-        // interface's identity global. a loop rather than a comparison because conformance is a *set* -
-        // a class may answer several interfaces, and which slot one sits in is not knowable from the
-        // interface alone. pushes an i1
+        // walk the block's conformance table looking for the interface's identity. returns a
+        // pointer to that `{ identity, vtable }` row, or null if the class does not list it.
+        // instanceof is `icmp ne` of the row; recast loads the vtable beside the identity.
+        // a present identity with a null vtable (an operator-only interface) is still a hit,
+        // so instanceof does not depend on the table having been filled
         //
         // `handle` is already evaluated and already known non-null: the null guard is the caller's, since
         // it is the same guard the class arm needs and a second one would be a second answer to "is null

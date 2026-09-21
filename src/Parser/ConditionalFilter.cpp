@@ -309,7 +309,7 @@ namespace
             return parse_term(out);
         }
 
-        // an axis test or a flag. which it is, is decided by the *name*: the two axes are reserved, so a
+        // an axis test or a flag. which it is, is decided by the *name*: the axes are reserved, so a
         // bare `os` is a mistake rather than a flag lookup
         bool parse_term(bool &out)
         {

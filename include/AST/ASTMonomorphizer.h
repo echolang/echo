@@ -124,9 +124,10 @@ namespace AST
 
         size_t _instance_count = 0;
 
-        // set once the instance cap fires, so the runaway-instantiation diagnostic is reported a
-        // single time rather than for every subsequent over-cap request
+        // set once each runaway guard fires, so the diagnostic is reported a single time rather
+        // than for every subsequent over-cap request
         bool _instance_cap_reported = false;
+        bool _depth_cap_reported = false;
 
         // when true (env ECO_TRACE_MONO set) the pass prints its per-round resolution decisions to
         // stdout, replacing the add/remove-fprintf loop the retrospective flagged as its own cost
@@ -141,7 +142,11 @@ namespace AST
         // candidate-scoring caller must not do
         std::optional<std::vector<ValueType>> determine_type_args(FunctionCallExprNode *call, Module &mod, bool &is_error);
 
-        FunctionDeclNode *get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args);
+        FunctionDeclNode *get_or_create_function_instance(
+            FunctionDeclNode *tmpl,
+            const std::vector<ValueType> &args,
+            const TokenReference *call_at = nullptr
+        );
 
         // AST::live_calls, so a new transient node is one arm in ASTRegion.cpp rather than a second
         // skip list here

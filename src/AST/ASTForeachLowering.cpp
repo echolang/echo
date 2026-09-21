@@ -7,11 +7,13 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTMutation.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
 
 #include <fmt/core.h>
@@ -155,6 +157,21 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     auto &wrapper = _current_module->nodes.emplace_back<ScopeNode>();
     wrapper.parent_ptr = &scope;
 
+    ExprNode *source = loop->source;
+
+    // a call-result array dies at the end of `$__it = <src>->iterate()` if it has no
+    // slot of its own. the iterator then reads freed elements (empty strings, or a
+    // double-free). a place already lives in the enclosing frame
+    if (!is_place_expression(*source)) {
+        auto &source_decl = _current_module->nodes.emplace_back<VarDeclNode>(
+            _current_module->make_virtual_token("$__src", Token::Type::t_varname, loop->token_foreach),
+            &_current_module->nodes.emplace_back<TypeNode>(source->result_type()));
+        source_decl.init_expr = source;
+        wrapper.add_vardecl(source_decl);
+        VarRefNode &src_place = local_place(*_current_module, source_decl);
+        source = &src_place;
+    }
+
     // `$__it`
     auto &iterator_decl = _current_module->nodes.emplace_back<VarDeclNode>(
         _current_module->make_virtual_token("$__it", Token::Type::t_varname, loop->token_foreach),
@@ -177,7 +194,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
         // AddrOf over a non-place, which is exactly the shape the ownership pass's addrof arm mints a
         // temporary for
         iterator_decl.init_expr =
-            &make_resolved_member_call(*_current_module, plan.iterate, loop->token_foreach, loop->source);
+            &make_resolved_member_call(*_current_module, plan.iterate, loop->token_foreach, source);
 
         // **typed here rather than left to the re-derivation sweep.** `plan.iterate` is the *template's*
         // declaration - find_member_functions redirects an instantiation through template_ref - so its
@@ -194,7 +211,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
         // addressing: a place that is not already an address is borrowed, a call's result is
         // owned. a cursor that arrived as `Iter&` must not become `ptr<ptr<Iter>>` - the same
         // rule GuardLowering's `$__guardN` uses, and the reason this is not a second AddrOf
-        seat_receiver_local(*_current_module, iterator_decl, loop->source);
+        seat_receiver_local(*_current_module, iterator_decl, source);
     }
 
     // used exactly once on every path above, so "one subtree per use" holds by construction

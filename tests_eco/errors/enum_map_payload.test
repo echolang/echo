@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_payload.eco:6:5
+
+  A map cannot be declared on 'Event' - a map is a relation over payload-free cases.
+
+  5 | 
+  6 |     map glfw : int32
+    :     ^^^
+  7 |     {
+
+1 error, nothing was compiled.

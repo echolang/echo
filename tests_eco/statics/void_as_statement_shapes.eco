@@ -1,0 +1,36 @@
+// the same statement form across the shapes that were reported as failing with the original:
+// a class, a parameter, a generic owner, and a discarded non-void return - void is what *forces*
+// the statement form, but discarding a value as `Type::f();` is the same production
+public class Flag
+{
+    public static function raise() : void
+    {
+        echo 1;
+    }
+}
+
+public struct Box<T>
+{
+    public static function reset() : void
+    {
+        echo 2;
+    }
+}
+
+public struct Marker
+{
+    public static function show(int32 $n) : void
+    {
+        echo $n;
+    }
+
+    public static function count() : int32
+    {
+        return 9;
+    }
+}
+
+Flag::raise();
+Box<int32>::reset();
+Marker::show(3);
+Marker::count();

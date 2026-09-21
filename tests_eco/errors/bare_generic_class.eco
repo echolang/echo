@@ -1,0 +1,9 @@
+// a generic class named without type arguments is the template, not a type. codegen used
+// to throw InternalCompilerException lowering T at global scope
+class Box<T>
+{
+    T $v;
+}
+
+Box $b;
+echo 1;

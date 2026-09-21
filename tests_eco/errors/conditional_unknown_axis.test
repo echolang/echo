@@ -3,4 +3,4 @@ expect: fail
 --- OUT --->
 [error] Conditional Compilation Failed
 
-  line 4: unknown condition axis 'cpu', expected one of: os, arch
+  line 4: unknown condition axis 'cpu', expected one of: os, arch, family

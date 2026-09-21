@@ -305,7 +305,10 @@ void MatchResolution::resolve(MatchExprNode &node)
     // form rather than one per arm: the value a match hands back is a single value, so an arm list that
     // disagreed would be a phi with two types
     // an overloaded `&name` in an arm has no type until a destination binds it. the
-    // enclosing function's return type is that destination for `return match { => &add }`
+    // enclosing function's return type is that destination for `return match { => &add }`.
+    // a leading-dot shorthand is the same question, but parse already asked when the match
+    // sat at a typed slot or a return - binding every match in the function to the return
+    // type would type `echo match { => .color }` as the return, which it is not
     if (_enclosing_function != nullptr) {
         const ValueType wanted = _enclosing_function->get_return_type();
 
@@ -382,6 +385,12 @@ void MatchResolution::resolve(MatchExprNode &node)
         // AST::value_type_of is that one rule and exactly one level, so this is not compensating for
         // the adjuster - it is asking the same question the adjuster answers, at the only moment this
         // pass can ask it
+        // a later shorthand takes the type the earlier arms already met at, so
+        // `PixelDump::normal => PixelDump::normal, else => .color` binds the dot
+        if (!first) {
+            bind_shorthand_to(arm.value, unified);
+        }
+
         const ValueType arm_type = arm.value != nullptr
             ? value_type_of(arm.value->result_type())
             : ValueType::make_void();

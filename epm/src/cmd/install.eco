@@ -33,7 +33,10 @@ public function install_at(const string& $start, command::CLIContext $ctx) : int
         return 1;
     }
 
-    array<manifest::Requirement> $need = manifest::all_requires($man);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($man) else ($e) {
+        $ctx->printError($e);
+        return 1;
+    }
 
     if ($need->count() == 0) {
         $ctx->line('nothing to install');
@@ -97,7 +100,10 @@ public function update_at(
         return 1;
     }
 
-    array<manifest::Requirement> $need = manifest::all_requires($man);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($man) else ($e) {
+        $ctx->printError($e);
+        return 1;
+    }
 
     if ($need->count() == 0) {
         lock::Lock $empty = lock::Lock();

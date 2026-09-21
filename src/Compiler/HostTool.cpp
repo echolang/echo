@@ -1,5 +1,6 @@
 #include "Compiler/HostTool.h"
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/ProgressReporter.h"
 
 #include <llvm/Support/FileSystem.h>
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -450,6 +452,36 @@ std::filesystem::path Compiler::darwin_sdk_root()
 #endif
 }
 
+std::filesystem::path Compiler::apple_sdk_root(const std::string &sdk)
+{
+#if !defined(__APPLE__)
+    (void)sdk;
+    return {};
+#else
+    if (sdk.empty()) {
+        return darwin_sdk_root();
+    }
+
+    static std::map<std::string, std::filesystem::path> cache;
+    const auto found = cache.find(sdk);
+    if (found != cache.end()) {
+        return found->second;
+    }
+
+    const CapturedProcess shown = run_captured({ "xcrun", "--sdk", sdk, "--show-sdk-path" });
+    std::filesystem::path root;
+    if (shown.exit_code == 0) {
+        const std::string path = trim_right(shown.output);
+        if (!path.empty()) {
+            root = std::filesystem::path(path);
+        }
+    }
+
+    cache.emplace(sdk, root);
+    return root;
+#endif
+}
+
 void Compiler::append_darwin_sdk_args(std::vector<std::string> &argv)
 {
 #if !defined(__APPLE__)
@@ -462,6 +494,37 @@ void Compiler::append_darwin_sdk_args(std::vector<std::string> &argv)
 
     argv.push_back("-isysroot");
     argv.push_back(sdk.string());
+#endif
+}
+
+bool Compiler::append_apple_target_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    std::string &out_error
+)
+{
+#if !defined(__APPLE__)
+    (void)target;
+    (void)out_error;
+    append_darwin_sdk_args(argv);
+    return true;
+#else
+    if (target.apple_sdk.empty()) {
+        append_darwin_sdk_args(argv);
+        return true;
+    }
+
+    const std::filesystem::path sdk = apple_sdk_root(target.apple_sdk);
+    if (sdk.empty()) {
+        out_error = "the '" + target.apple_sdk + "' SDK was not found. install Xcode's iOS platform support";
+        return false;
+    }
+
+    argv.push_back("-isysroot");
+    argv.push_back(sdk.string());
+    argv.push_back("-target");
+    argv.push_back(target.effective_triple());
+    return true;
 #endif
 }
 

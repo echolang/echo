@@ -1,4 +1,5 @@
 #include "AST/ASTValueType.h"
+#include "AST/ASTEnumMapType.h"
 
 #include "eco.h"
 
@@ -10,6 +11,7 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <cassert>
 std::string AST::get_primitive_name(ValueTypePrimitive primitive)
 {
@@ -637,6 +639,7 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // as non-exhaustive against a set of nothing
     instantiated->_enum_cases = tmpl->_enum_cases;
     instantiated->enum_backing = tmpl->enum_backing;
+    instantiated->enum_closed_from = tmpl->enum_closed_from;
 
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = normalized;
@@ -795,6 +798,50 @@ void AST::ComplexType::mark_open_remainder(size_t ordinal)
 {
     assert(ordinal < _enum_cases.size());
     _enum_cases[ordinal].is_open_remainder = true;
+}
+
+void AST::ComplexType::add_enum_map(EnumMap *map)
+{
+    if (map != nullptr) {
+        _enum_maps.push_back(map);
+    }
+}
+
+AST::EnumMap *AST::ComplexType::find_enum_map(const std::string &name)
+{
+    for (EnumMap *map : _enum_maps) {
+        if (map != nullptr && map->name == name) {
+            return map;
+        }
+    }
+
+    return nullptr;
+}
+
+const AST::EnumMap *AST::ComplexType::find_enum_map(const std::string &name) const
+{
+    for (const EnumMap *map : _enum_maps) {
+        if (map != nullptr && map->name == name) {
+            return map;
+        }
+    }
+
+    return nullptr;
+}
+
+bool AST::ComplexType::is_enum_map_function(const FunctionDeclNode *decl) const
+{
+    if (decl == nullptr) {
+        return false;
+    }
+
+    for (const EnumMap *map : _enum_maps) {
+        if (map != nullptr && (decl == map->forward || decl == map->reverse)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::string AST::enum_case_construction_refusal(const ValueType &owner, const std::string &name)
@@ -1006,6 +1053,53 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
     }
 
     return false;
+}
+
+size_t AST::generic_application_depth(const ValueType &type)
+{
+    // wrappers are intern keys, same as a generic application: dump<ptr<T>> grows
+    // through a pointer, not through Box
+    if (type.is_pointer()) {
+        return generic_application_depth(type.pointee()) + 1;
+    }
+
+    if (type.is_weak()) {
+        return generic_application_depth(type.weak_target()) + 1;
+    }
+
+    if (type.is_inline_array()) {
+        return std::max(
+            generic_application_depth(type.array_element()),
+            generic_application_depth(type.array_length())) + 1;
+    }
+
+    if (type.has_signature()) {
+        size_t depth = generic_application_depth(type.signature().return_type);
+
+        for (const auto &parameter_type : type.signature().parameter_types) {
+            depth = std::max(depth, generic_application_depth(parameter_type));
+        }
+
+        return depth + 1;
+    }
+
+    if (type.is_wrapped_optional()) {
+        return generic_application_depth(type.optional_payload()) + 1;
+    }
+
+    if (type.has_complex_type()) {
+        ComplexType *ct = type.get_complex_type();
+        if (ct != nullptr && ct->is_instantiated()) {
+            size_t inner = 0;
+            for (const auto &arg : ct->instantiation_args) {
+                inner = std::max(inner, generic_application_depth(arg));
+            }
+
+            return inner + 1;
+        }
+    }
+
+    return 0;
 }
 
 // flags live on the ValueType, not on the interned layout. every rebuild arm mints a bare type
@@ -1226,6 +1320,60 @@ std::optional<std::string> AST::nested_void_as_value_refusal(const ValueType &ty
         }
 
         return nested_void_as_value_refusal(sig.return_type);
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::string> AST::bare_generic_type_refusal(const ValueType &type)
+{
+    // a template is the ComplexType with type_parameters and no template_ref.
+    // instantiations clear the list, so is_generic() is exactly "this is the template"
+    const ValueType bare = ValueType::make_mutable(type);
+
+    if (bare.has_complex_type()) {
+        const ComplexType *ct = bare.get_complex_type();
+        if (ct != nullptr && ct->is_generic()) {
+            const std::string spelling = ct->namespaced_name();
+            return fmt::format(
+                "'{}' is generic, so it needs its type arguments - write '{}<...>'.",
+                spelling, spelling);
+        }
+
+        if (ct != nullptr) {
+            for (const ValueType &arg : ct->instantiation_args) {
+                if (auto refusal = bare_generic_type_refusal(arg)) {
+                    return refusal;
+                }
+            }
+        }
+    }
+
+    if (bare.is_pointer()) {
+        return bare_generic_type_refusal(bare.pointee());
+    }
+
+    if (bare.is_weak()) {
+        return bare_generic_type_refusal(bare.weak_target());
+    }
+
+    if (bare.is_wrapped_optional()) {
+        return bare_generic_type_refusal(bare.optional_payload());
+    }
+
+    if (bare.is_inline_array()) {
+        return bare_generic_type_refusal(bare.array_element());
+    }
+
+    if (bare.has_signature()) {
+        const CallableSignature &sig = bare.signature();
+        for (const ValueType &param : sig.parameter_types) {
+            if (auto refusal = bare_generic_type_refusal(param)) {
+                return refusal;
+            }
+        }
+
+        return bare_generic_type_refusal(sig.return_type);
     }
 
     return std::nullopt;

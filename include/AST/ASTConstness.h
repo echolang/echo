@@ -76,6 +76,8 @@ namespace AST
     // site may reach a `private` property, and AST::ConstantExpander asks it for what `self::` denotes.
     // held apart they answered "inside the type" differently - one accepted an interface, the other did
     // not - so a body could be inside its type for one rule and outside it for the other
+    //
+    // a closure is not a method, so it walks FunctionDeclNode::enclosing_function until it finds one
     ComplexType *enclosing_type_of(const FunctionDeclNode &decl);
 
     // **may a body written inside `from` reach a property declared private on `owner`?**

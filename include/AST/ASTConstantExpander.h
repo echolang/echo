@@ -75,6 +75,11 @@ namespace AST
         // cycle guard both
         void expand_initializer(ConstDeclNode &decl);
 
+        // the RHS of a named map lives on File::enum_maps, not as an edge of any function until
+        // mint clones it. rewrite those expressions here so check_enum_maps folds the same tree
+        // ConstantExpander already settled
+        void expand_enum_map_values(Module &module);
+
         // the constant a reference names, or null with a diagnostic already collected
         ConstDeclNode *resolve(ConstRefExprNode &ref);
 

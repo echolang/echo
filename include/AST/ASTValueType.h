@@ -41,6 +41,7 @@ namespace AST
     // only ever stores and hands back the pointer
     class TypeDeclNode;
     class VarDeclNode;
+    struct EnumMap;
 
     enum class ValueTypeKind
     {
@@ -1318,6 +1319,19 @@ namespace AST
             return open_remainder() != nullptr;
         }
 
+        // **does any case carry a payload?** one walk of the case table, so a map's range check,
+        // enum `==`, and the overlay layout do not each keep a copy that can drift. a non-enum's
+        // case list is empty, so this is false there without a kind test
+        bool has_payload_case() const {
+            for (const EnumCase &entry : _enum_cases) {
+                if (entry.has_payload()) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // Parser::finalize_enum's write, after the case list is complete. ordinal is
         // EnumCase::ordinal, which is also the index in `_enum_cases`
         void mark_open_remainder(size_t ordinal);
@@ -1326,6 +1340,29 @@ namespace AST
         // a plain enum and for one with payload cases, the two being mutually exclusive at the
         // declaration. what reads it is the synthesized `value()` and the choice of `__tag`'s own type
         std::optional<ValueType> enum_backing;
+
+        // the synthesized unlabeled `from` of a closed integer-backed enum, or null. identity for
+        // `AST::enum_lut_of`, so codegen does not recover it from the name "from"
+        FunctionDeclNode *enum_closed_from = nullptr;
+
+        // named maps on this type, as pointers into File::enum_maps. the file owns the record
+        // because a map may name an enum in another module, and mint/plant/fold walk the file
+        // that wrote it. lookup lives here so `$key->glfw()` still resolves on KeyCode.
+        // not copied onto an instantiation: maps are refused on a generic enum, and
+        // `enum_lut_of` already goes through `template_or_self()`
+        void add_enum_map(EnumMap *map);
+
+        const std::vector<EnumMap *> &enum_maps() const {
+            return _enum_maps;
+        }
+
+        // the map of that name, or null. linear, as find_enum_case is
+        EnumMap *find_enum_map(const std::string &name);
+        const EnumMap *find_enum_map(const std::string &name) const;
+
+        // true when this decl is a function a named map minted. plant_file_enum_maps is the
+        // planter, so publish_synthesized skips these rather than asking LUT kind
+        bool is_enum_map_function(const FunctionDeclNode *decl) const;
 
         // the types declared *inside* this one, by name. `string::view` is reached through its owner
         // and lives in no namespace at all, which is the same decision that keeps a method out of
@@ -1521,6 +1558,7 @@ namespace AST
         std::vector<ValueType> _conformances;
         std::vector<TypeParamDecl *> _associated_types;
         std::vector<EnumCase> _enum_cases;
+        std::vector<EnumMap *> _enum_maps;
 
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };
@@ -1769,6 +1807,13 @@ namespace AST
     // operand mentions, because nothing at a use site could ever bind it
     bool contains_type_param(const ValueType &type, const TypeParamDecl *param);
 
+    // how many intern-key distinctions sit in this type: `int32` is 0, `Box<int32>` is 1,
+    // `ptr<Box<int32>>` is 2. a pointer, a weak, a tagged optional, a signature and an
+    // inline array each count, because the monomorphizer intern-keys them and a recursive
+    // `dump<ptr<T>>` grows through those wrappers. the growing-type guard asks this of
+    // every type argument
+    size_t generic_application_depth(const ValueType &type);
+
     // true when nothing has answered what this type is yet: unknown, or still mentioning a
     // type parameter that a substitution has not bound
     //
@@ -1795,6 +1840,20 @@ namespace AST
     // the nested half: the type itself may be void (a function return). type arguments,
     // optional payloads, array elements, pointees and callable parameters still may not
     std::optional<std::string> nested_void_as_value_refusal(const ValueType &type);
+
+    // **why may this type not sit where a value lives, for being a generic template?**
+    // nullopt when it may. a template (`struct Box<T>`, `class AssetRef<T>`) is not a
+    // value type: instantiations are, and they are distinct. `Box $b` and
+    // `map<string, AssetRef>` name the template, so codegen would try to lower `T`.
+    //
+    // not `contains_type_param` / `is_undetermined_type`: those are "not yet". a
+    // template is a determined wrong type. ranking one as undetermined would infer
+    // from it.
+    //
+    // names the template, not the wrapper, the way void_as_value_refusal names void
+    // inside `result<void, E>`. asked by TypeChecker of every declaration, and by
+    // the type grammar of every type argument
+    std::optional<std::string> bare_generic_type_refusal(const ValueType &type);
 
     // the type a value-position read of `type` yields: the pointee for a pointer, the type itself
     // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`

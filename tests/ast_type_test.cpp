@@ -44,6 +44,34 @@ TEST_CASE("void is not a value type", "[types]")
     REQUIRE_FALSE(void_as_value_refusal(prim(ValueTypePrimitive::t_int32)).has_value());
 }
 
+TEST_CASE("a generic template is not a value type", "[types][generics]")
+{
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    declare_param(params, box, "T");
+
+    ValueType tmpl = ValueType::make_struct(&box);
+    REQUIRE(bare_generic_type_refusal(tmpl).has_value());
+    REQUIRE(*bare_generic_type_refusal(tmpl)
+        == "'Box' is generic, so it needs its type arguments - write 'Box<...>'.");
+
+    ComplexType *inst = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
+    REQUIRE_FALSE(bare_generic_type_refusal(ValueType::make_struct(inst)).has_value());
+
+    // map<int32, Box> names the template as an argument: refuse Box, not the map
+    ComplexType pair("Pair");
+    declare_param(params, pair, "K");
+    declare_param(params, pair, "V");
+    ComplexType *applied = reg.get_or_create_instantiation(
+        &pair, { prim(ValueTypePrimitive::t_int32), tmpl });
+    auto nested = bare_generic_type_refusal(ValueType::make_struct(applied));
+    REQUIRE(nested.has_value());
+    REQUIRE(*nested == "'Box' is generic, so it needs its type arguments - write 'Box<...>'.");
+
+    REQUIRE_FALSE(bare_generic_type_refusal(prim(ValueTypePrimitive::t_int32)).has_value());
+}
+
 TEST_CASE("substitute_type resolves a bare type parameter", "[types][generics]")
 {
     TypeRegistry reg;
@@ -129,6 +157,31 @@ TEST_CASE("substitute_type leaves primitives and concrete types unchanged", "[ty
     point.add_property("x", prim(ValueTypePrimitive::t_float32));
     ValueType point_type = ValueType::make_struct(&point);
     REQUIRE(substitute_type(point_type, subst, reg) == point_type);
+}
+
+TEST_CASE("generic_application_depth counts interned applications and wrappers", "[types][generics]")
+{
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    TypeParamDecl *t = declare_param(params, box, "T");
+    box.add_property("value", ValueType::make_type_param(t));
+
+    REQUIRE(generic_application_depth(prim(ValueTypePrimitive::t_int32)) == 0);
+
+    ComplexType *box_i = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
+    REQUIRE(generic_application_depth(ValueType::make_struct(box_i)) == 1);
+
+    ComplexType *box_box = reg.get_or_create_instantiation(&box, { ValueType::make_struct(box_i) });
+    REQUIRE(generic_application_depth(ValueType::make_struct(box_box)) == 2);
+
+    // a pointer is an intern key, so dump<T> → dump<ptr<T>> is a depth
+    ValueType ptr = ValueType::make_pointer(ValueType::make_struct(box_box), true);
+    REQUIRE(generic_application_depth(ptr) == 3);
+
+    ValueType ptr_i = ValueType::make_pointer(prim(ValueTypePrimitive::t_int32), true);
+    REQUIRE(generic_application_depth(ptr_i) == 1);
+    REQUIRE(generic_application_depth(ValueType::make_pointer(ptr_i, true)) == 2);
 }
 
 TEST_CASE("TypeRegistry interns instantiations by (template, args) identity", "[types][generics]")

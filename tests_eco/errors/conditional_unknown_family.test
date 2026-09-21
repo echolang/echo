@@ -1,0 +1,5 @@
+expect: fail
+--- OUT --->
+[error] Conditional Compilation Failed
+
+  line 2: unknown family 'darwn', expected one of: darwin, linux, windows

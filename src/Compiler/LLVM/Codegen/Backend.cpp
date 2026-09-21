@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TargetFacts.h"
@@ -19,7 +20,6 @@
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
-#include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
 #include <llvm/IR/Comdat.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -296,13 +296,13 @@ void Backend::init_target()
 {
     Compiler::ensure_native_target_registered();
 
-    _ctx.target_triple = llvm::sys::getDefaultTargetTriple();
+    _ctx.target_triple = _ctx.options.codegen.effective_triple();
 
     std::string error;
     auto *target = llvm::TargetRegistry::lookupTarget(_ctx.target_triple, error);
     if (!target) {
         throw Compiler::InternalCompilerException(fmt::format(
-            "Could not resolve the host target '{}': {}", _ctx.target_triple, error));
+            "Could not resolve the target '{}': {}", _ctx.target_triple, error));
     }
 
     // **the subtarget is not a detail of this line.** every cost model in the compiler reads the machine
@@ -376,9 +376,9 @@ std::optional<std::vector<std::string>> host_linker_command(
         return std::nullopt;
     }
 
-    // Compiler::TargetFacts owns "what architecture is this", and derives it from the same default
-    // triple Backend::init_target hands the TargetMachine - so what is compiled and what is linked
-    // cannot disagree. Spelled here as its own `#if defined(__aarch64__)` chain, they could
+    // host only: the caller skips this path when CodegenTarget::is_cross(), so the Darwin
+    // `ld -syslibroot` of the Mac SDK is never asked to link an iOS object. architecture is
+    // the host's, matching the Mac SDK this command names
     const std::string arch = Compiler::TargetFacts::host().architecture;
 
     if (arch.empty()) {
@@ -571,20 +571,28 @@ bool Backend::link_executable(
     }
 #endif
 
-    if (const auto command = host_linker_command(output, objects, link_objects, link_words)) {
-        if (Compiler::run_tool(command.value())) {
-            gen_debug_symbols(output);
-            return true;
-        }
+    // a cross-compile is not a Darwin ld -syslibroot of the Mac SDK. the clang
+    // driver below is the one that knows `-target` / `-isysroot` for the row
+    if (!_ctx.options.codegen.is_cross()) {
+        if (const auto command = host_linker_command(output, objects, link_objects, link_words)) {
+            if (Compiler::run_tool(command.value())) {
+                gen_debug_symbols(output);
+                return true;
+            }
 
-        // not a hard failure: the flags above are a guess about the host, and clang below knows better.
-        // A linker error in the *program* will be reported by clang in a moment anyway
-        llvm::errs() << "Note: the system linker failed, retrying through the clang driver\n";
+            // not a hard failure: the flags above are a guess about the host, and clang below knows better.
+            // A linker error in the *program* will be reported by clang in a moment anyway
+            llvm::errs() << "Note: the system linker failed, retrying through the clang driver\n";
+        }
     }
 
     std::vector<std::string> fallback = { "clang", "-o", output };
     Compiler::append_windows_sysroot_link_args(fallback);
-    Compiler::append_darwin_sdk_args(fallback);
+    std::string apple_error;
+    if (!Compiler::append_apple_target_args(fallback, _ctx.options.codegen, apple_error)) {
+        llvm::errs() << apple_error << '\n';
+        return false;
+    }
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     for (const std::string &word : link_words) {

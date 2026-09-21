@@ -1,0 +1,25 @@
+// the reverse is a span compare and a load with the optimizer off - not an if-chain per case.
+// an enum range still keys the LUT on the discriminant.
+enum Color
+{
+    case red;
+    case green;
+    case blue;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+
+    map color : Color
+    {
+        .ok    = .green;
+        .warn  = .blue;
+        .error = .red;
+    }
+}
+
+echo Status::from(color: Color::green) != null;
+echo Status::ok->color() == Color::green;

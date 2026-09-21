@@ -1,0 +1,18 @@
+// the reverse is a span compare and a load with the optimizer off - not an if-chain per case
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+
+    map glfw : int32
+    {
+        .unknown = -1;
+        .space   = 32;
+        .escape  = 256;
+    }
+}
+
+echo KeyCode::from(glfw: 32) != null;
+echo KeyCode::from(glfw: 999) == null;
+echo KeyCode::space->glfw();

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownStaticFunction  unknown_static_as_statement.eco:10:9
+
+  The type 'Marker' has no static function named 'missing'
+
+   9 | 
+  10 | Marker::missing();
+     :         ^^^^^^^
+  11 | 
+
+  help: a static function is declared 'static function' in the type's body and called on the type itself. an ordinary method is reached through a value instead, with '->'
+
+1 error, nothing was compiled.

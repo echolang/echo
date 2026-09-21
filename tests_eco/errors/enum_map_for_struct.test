@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_for_struct.eco:6:1
+
+  A map has to name an enum - 'Point' is not one.
+
+  5 | 
+  6 | map glfw : int32 for Point
+    : ^^^
+  7 | {
+
+1 error, nothing was compiled.

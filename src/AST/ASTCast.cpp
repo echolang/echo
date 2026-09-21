@@ -69,18 +69,38 @@ namespace AST
             return CastLookup::ok(CastKind::t_numeric);
         }
 
-        if (arrival_wraps_optional(from, to)) {
-            return CastLookup::ok(CastKind::t_optional_wrap);
-        }
+        // recast before optional wrap: `$s as Other?` would otherwise wrap a conversion
+        // coerce_value cannot do (interface → interface has no vtable at the site)
+        const ValueType recast_dest = to.is_wrapped_optional()
+            ? ValueType::make_non_nullable(to)
+            : to;
 
-        if (to.is_interface() && from.is_class()) {
-            const std::string why = interface_erasure_refusal(from, to);
+        if (recast_dest.is_interface() && (from.is_interface() || from.is_class())) {
+            const std::string why = from.is_interface()
+                ? interface_storage_refusal(recast_dest)
+                : interface_erasure_refusal(from, recast_dest);
 
-            if (why.empty()) {
-                return CastLookup::ok(CastKind::t_interface);
+            if (!why.empty()) {
+                return CastLookup::refused(why);
             }
 
-            return CastLookup::refused(why);
+            // a class that conforms is a widening: the vtable is known here. `$x as I?` of
+            // that is an optional wrap of the widening. a class that does not still recasts,
+            // so `bind<T : A>` can write `$x as B` and instantiate for a T that is not B
+            if (from.is_class() && conforms_to(from, recast_dest)) {
+                return CastLookup::ok(
+                    to.is_wrapped_optional() ? CastKind::t_optional_wrap : CastKind::t_interface);
+            }
+
+            return CastLookup::ok(CastKind::t_interface_recast);
+        }
+
+        if (from.is_interface() && recast_dest.is_class()) {
+            return CastLookup::ok(CastKind::t_interface_recast);
+        }
+
+        if (arrival_wraps_optional(from, to)) {
+            return CastLookup::ok(CastKind::t_optional_wrap);
         }
 
         // the same peel CallResolver uses at an argument. a second copy of it is the

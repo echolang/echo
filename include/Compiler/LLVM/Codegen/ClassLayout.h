@@ -57,15 +57,12 @@ namespace Compiler::LLVM
     //
     //     %eco.typeinfo = { i64 conformance_count, ptr conformances }
     //
-    // `conformances` points at a `[N x ptr]` of interface identities - `@Drawable.itype` and friends,
-    // each its own `linkonce_odr` byte whose address is that interface's identity, exactly as a class's
-    // typeinfo address is the class's. null when the count is zero, which is every class today that
-    // declares no conformance and every closure environment
+    // `conformances` points at a `[N x { ptr identity, ptr vtable }]`. identities are known
+    // during struct maps; vtables are filled after function maps, because a vtable names
+    // method bodies that do not exist yet. null when the count is zero
     //
-    // **the vtable is deliberately not in here.** dispatch resolves its vtable at the *widening* site,
-    // where the concrete class is statically known, so an interface value carries it directly and a call
-    // costs one load rather than a scan. that leaves each structure answering exactly one question: this
-    // table answers "is it one", the value's own vtable pointer answers "which method"
+    // **dispatch still uses the value's own vtable**, filled at the widening, so a call is one load.
+    // a recast is a scan of this table: match identity, seat the neighbour vtable
     namespace ClassTypeInfo
     {
         static constexpr unsigned conformance_count_index = 0;
@@ -78,6 +75,14 @@ namespace Compiler::LLVM
         static constexpr unsigned deinit_index = 3;
 
         static constexpr uint64_t atomic_flag = 1;
+    };
+
+    // one row of the array typeinfo.conformances points at. instanceof is "is there a row
+    // whose identity matches"; recast loads the vtable beside it. two questions, one scan
+    namespace ClassConformance
+    {
+        static constexpr unsigned identity_index = 0;
+        static constexpr unsigned vtable_index = 1;
     };
 
     // what a class needs from codegen beyond the handle. resolved together because the box cannot be

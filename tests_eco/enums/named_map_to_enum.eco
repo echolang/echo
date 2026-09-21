@@ -1,0 +1,40 @@
+// a named map to another payload-free enum. the colon is the destination, so the RHS is the
+// leading dot — the same shorthand a `Color $c = .green` uses.
+enum Color
+{
+    case red;
+    case green;
+    case blue;
+    case yellow;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+
+    map color : Color
+    {
+        .ok    = .green;
+        .warn  = .blue;
+        .error = .red;
+    }
+}
+
+echo Status::ok->color() == Color::green;
+echo Status::warn->color() == Color::blue;
+echo Status::error->color() == Color::red;
+
+echo Status::from(color: Color::green) != null;
+echo Status::from(color: Color::blue) != null;
+echo Status::from(color: Color::red) != null;
+echo Status::from(color: Color::yellow) == null;
+
+Status $ok = guard Status::from(color: Color::green);
+echo $ok == Status::ok;
+
+Status $miss = Status::from(color: Color::green) ?? .error;
+echo $miss == Status::ok;
+
+echo $ok->color() == Color::green;

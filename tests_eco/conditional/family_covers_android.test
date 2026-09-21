@@ -1,0 +1,3 @@
+flags: --target-os android
+--- OUT --->
+linux-family

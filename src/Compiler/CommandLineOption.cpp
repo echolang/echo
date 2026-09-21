@@ -1,7 +1,11 @@
 #include "Compiler/CommandLineOption.h"
 
+#include "Compiler/TargetFacts.h"
 #include "Compiler/TerminalCapabilities.h"
 #include "Compiler/TestSelection.h"
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <cassert>
 #include <cstddef>
@@ -10,9 +14,9 @@
 
 namespace
 {
-    // the two flag parsers that already own their own vocabularies, adapted to OptionCheck. They report
-    // their own "Expected one of: ..." out of their own tables, which is why those values are not listed
-    // a second time in the rows below
+    // vocabularies somebody else already owns, adapted to OptionCheck. They report their own
+    // "Expected one of: ..." out of their own tables, which is why those values are not listed a
+    // second time in the rows below
     bool check_color(const std::string &value, std::string &out_error)
     {
         Compiler::ColorChoice choice = Compiler::ColorChoice::t_auto;
@@ -32,6 +36,30 @@ namespace
     {
         Compiler::TestFilter filter;
         return Compiler::parse_test_filter(value, filter, out_error);
+    }
+
+    bool check_target_os(const std::string &value, std::string &out_error)
+    {
+        if (Compiler::TargetFacts::is_known_operating_system(value)) {
+            return true;
+        }
+
+        out_error = fmt::format(
+            "unknown --target-os '{}', expected one of: {}",
+            value, fmt::join(Compiler::TargetFacts::known_operating_systems(), ", "));
+        return false;
+    }
+
+    bool check_target_arch(const std::string &value, std::string &out_error)
+    {
+        if (Compiler::TargetFacts::is_known_architecture(value)) {
+            return true;
+        }
+
+        out_error = fmt::format(
+            "unknown --target-arch '{}', expected one of: {}",
+            value, fmt::join(Compiler::TargetFacts::known_architectures(), ", "));
+        return false;
     }
 
     bool check_timeout(const std::string &value, std::string &out_error)
@@ -461,16 +489,19 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "evaluated against the name you give here, so the other platform's regions are the ones that "
             "get parsed:\n"
             "  echoc build --target-os linux -o app main.eco\n"
-            "One of 'darwin', 'linux' or 'windows'. A name outside that list is an error rather than a "
-            "condition that is quietly false, because '#[if: os == darwn]' should not be a region that "
-            "vanishes in silence.\n"
-            "It does not cross-compile. The code is still compiled for this machine, so a foreign OS "
-            "will usually fail at link. What you get is a check on another platform's branch without "
-            "owning that platform, which is the only way an '#[if: os == linux]' region is ever looked "
-            "at on a Mac.\n"
+            "One of 'darwin', 'linux', 'windows', 'ios' or 'android'. A name outside that list is an "
+            "error rather than a condition that is quietly false, because '#[if: os == darwn]' should "
+            "not be a region that vanishes in silence.\n"
+            "On Darwin, 'echoc build --target-os ios' is a real cross-compile: objects and C "
+            "sources target the iOS simulator SDK (`<arch>-apple-ios15.0-simulator`, this "
+            "machine's arch unless '--target-arch' says otherwise). Pass '--ios-device' as "
+            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc run --target-os ios' "
+            "still only picks '#[if:]' arms and JITs for this machine, like every other "
+            "'--target-os'. Other names still only pick '#[if:]' arms on every subcommand - "
+            "there is no Linux sysroot on a Mac.\n"
             "'clean' takes it too, because a manifest may hide its '#[depends:]' behind a condition: "
             "without the same flag, the graph 'clean' walks is not the graph your build produced.",
-            {}, nullptr
+            {}, check_target_os
         },
         {
             Opt::t_target_arch, "target-arch", nullptr, '\0',
@@ -478,10 +509,27 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<name>", "",
             "the same for the architecture",
-            "The same thing for '#[if: arch == ...]', with 'arm64' or 'x86_64' as the vocabulary:\n"
+            "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
+            "admits:\n"
             "  echoc build --target-arch x86_64 -o app main.eco\n"
-            "Same rules as --target-os, including the part where it does not cross-compile and an "
-            "unknown name is an error.",
+            "Same closed vocabulary a condition admits. Combined with '--target-os ios' on "
+            "'build' it also chooses the simulator triple's arch. '--ios-device' is arm64: an "
+            "explicit '--target-arch' other than arm64 is refused, while a host that is not "
+            "arm64 still emits arm64 and conditions see arm64 too. An unknown name is an error.",
+            {}, check_target_arch
+        },
+        {
+            Opt::t_ios_device, "ios-device", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_target,
+            accepts::build, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "compile for a physical iPhone",
+            "Compile for a physical iPhone rather than the simulator:\n"
+            "  echoc build --target-os ios --ios-device --target pbr\n"
+            "The triple becomes `arm64-apple-ios15.0` and C sources see the iPhoneOS SDK. Without this "
+            "flag `echoc build --target-os ios` stays the simulator. Refused without `--target-os ios`, "
+            "off Darwin, or with `--target-arch` other than arm64. Only 'build' takes it: the other "
+            "subcommands do not emit an iOS artifact.",
             {}, nullptr
         },
         {

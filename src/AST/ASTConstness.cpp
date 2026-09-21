@@ -60,12 +60,25 @@ AST::ComplexType *AST::enclosing_type_of(const AST::FunctionDeclNode &decl)
     // reached through a receiver - so `owner_type` is null on one and the type it belongs to is the
     // thing it returns. that is the body that most needs to reach a private property, so getting this
     // arm wrong would put every constructor outside its own type
-    if (decl.is_constructor()) {
-        AST::ValueType returned = decl.get_return_type();
-        return returned.has_property_layout() ? returned.get_complex_type() : nullptr;
+    //
+    // a closure hangs off the file root and is not a method, so owner_type is null there too.
+    // enclosing_function is the parse-time chain back to the method (or outer closure) it was
+    // written in, which is what lets `$host->hits` and `self::MAX` inside a closure name that type
+    for (const FunctionDeclNode *fn = &decl; fn != nullptr; ) {
+        if (fn->is_constructor()) {
+            AST::ValueType returned = fn->get_return_type();
+            if (returned.has_property_layout()) {
+                return returned.get_complex_type();
+            }
+        }
+        else if (fn->owner_type != nullptr) {
+            return fn->owner_type;
+        }
+
+        fn = fn->is_closure ? fn->enclosing_function : nullptr;
     }
 
-    return decl.owner_type;
+    return nullptr;
 }
 
 bool AST::can_reach_private_member(const AST::ComplexType *from, const AST::ComplexType *owner)

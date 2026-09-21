@@ -1,0 +1,22 @@
+enum Color
+{
+    case red;
+    case green;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+
+    const function color() : Color
+    {
+        return .red;
+    }
+
+    map color : Color
+    {
+        .ok   = .green;
+        .warn = .green;
+    }
+}

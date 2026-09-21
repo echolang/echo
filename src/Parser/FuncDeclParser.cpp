@@ -30,7 +30,7 @@
 
 void Parser::push_implicit_param(
     Parser::Payload &payload,
-    AST::FunctionDeclNode &decl,
+    std::vector<AST::VarDeclNode *> &args,
     AST::ScopeNode &into,
     const std::string &name,
     AST::TypeNode *type_node,
@@ -42,7 +42,7 @@ void Parser::push_implicit_param(
 
     // ahead of everything the caller wrote. FunctionDeclNode::clone clones args before the body
     // precisely so the body's references rebind to the cloned declaration
-    decl.args.push_back(vardecl);
+    args.push_back(vardecl);
 
     // declared in the argument scope, not in the body, so it resolves the same way every other
     // parameter does. the argument scope's children are never emitted - the body is a separate child
@@ -137,7 +137,7 @@ bool Parser::starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &eff
 
 bool Parser::parse_parameter_list(
     Parser::Payload &payload,
-    AST::FunctionDeclNode &decl,
+    std::vector<AST::VarDeclNode *> &args,
     AST::ScopeNode &into,
     const TokenReference &report_at,
     Token::Type closing
@@ -190,7 +190,7 @@ bool Parser::parse_parameter_list(
             }
 
             if (label.has_value()) {
-                for (const AST::VarDeclNode *earlier : decl.args) {
+                for (const AST::VarDeclNode *earlier : args) {
                     if (earlier != nullptr && earlier->has_label() && earlier->label() == label->value()) {
                         payload.collector.collect_issue<AST::Issue::DuplicateParameterLabel>(
                             payload.context.code_ref(label.value()),
@@ -204,7 +204,7 @@ bool Parser::parse_parameter_list(
             }
         }
 
-        decl.args.push_back(param);
+        args.push_back(param);
     }
 
     // skip the closing token
@@ -306,7 +306,7 @@ void Parser::skip_refused_function(Parser::Payload &payload)
 // it - two closures of one signature capturing different things are one type
 static void push_environment_param(
     Parser::Payload &payload,
-    AST::FunctionDeclNode &decl,
+    std::vector<AST::VarDeclNode *> &args,
     AST::ScopeNode &into,
     AST::ComplexType *environment,
     const TokenReference &at
@@ -314,7 +314,7 @@ static void push_environment_param(
 {
     auto &env_type = payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_class(environment));
 
-    Parser::push_implicit_param(payload, decl, into, "$__env", &env_type, at);
+    Parser::push_implicit_param(payload, args, into, "$__env", &env_type, at);
 }
 
 AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
@@ -374,6 +374,9 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     if (AST::FunctionDeclNode *enclosing = payload.context.current_function_ptr) {
         closure_decl->type_parameters = enclosing->type_parameters;
         closure_decl->inherited_type_param_count = closure_decl->type_parameters.size();
+        // the method (or outer closure) this was written in. AST::enclosing_type_of
+        // walks it; a closure is not a method, so owner_type stays null
+        closure_decl->enclosing_function = enclosing;
     }
 
     auto &closure_scope = payload.context.emplace_node<AST::ScopeNode>();
@@ -390,17 +393,22 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
         payload.context.current_namespace);
 
     // `args[0]`, ahead of everything the user wrote - which is where capture_variable reads it back from
-    push_environment_param(payload, *closure_decl, closure_scope, environment, function_token);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    push_environment_param(payload, rebuilt, closure_scope, environment, function_token);
 
     if (!payload.expect_token(Token::Type::t_open_paren)) {
+        closure_decl->replace_args(std::move(rebuilt));
         return nullptr;
     }
 
     cursor.skip(); // the open paren
 
-    if (!parse_parameter_list(payload, *closure_decl, closure_scope, function_token)) {
+    if (!parse_parameter_list(payload, rebuilt, closure_scope, function_token)) {
+        closure_decl->replace_args(std::move(rebuilt));
         return nullptr;
     }
+
+    closure_decl->replace_args(std::move(rebuilt));
 
     // `: T` is optional here exactly as it is on a declaration, where a missing return type is void
     if (cursor.is_type(Token::Type::t_colon)) {
@@ -777,10 +785,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // the name token, before the parameter list that would tell the overloads apart has been parsed
     AST::FunctionDeclNode *funcdecl = payload.collector.functions.find_by_declaration_site(nametoken);
 
-    if (funcdecl != nullptr) {
-        // the arguments are rebuilt against this pass's context, so drop the previous pass's
-        funcdecl->args.clear();
-    } else {
+    if (funcdecl == nullptr) {
         funcdecl = &payload.context.emplace_node<AST::FunctionDeclNode>(nametoken);
     }
 
@@ -897,11 +902,16 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // create an empty base scope for the function and the arguments to sit in
     auto &funcscope = payload.context.emplace_node<AST::ScopeNode>();
 
+    // rebuilt off to the side so the live declaration keeps its previous signature until this
+    // list is complete. ranking a method with args.clear()'d used to write filled[0] of an
+    // empty vector
+    std::vector<AST::VarDeclNode *> rebuilt;
+
     // the receiver is a real parameter, ahead of everything the caller wrote - see
     // Parser::push_receiver_param, shared with the destructor arm
     if (has_receiver) {
         funcdecl->member_kind = AST::MemberKind::t_method;
-        push_receiver_param(payload, *funcdecl, funcscope, self_type, nametoken);
+        push_receiver_param(payload, rebuilt, funcscope, self_type, nametoken);
     }
     else if (modifiers.is_static()) {
         // the whole of what `static` does to the shape: the kind is set and no receiver is pushed, so
@@ -911,9 +921,12 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     }
 
     // parse the function arguments
-    if (!parse_parameter_list(payload, *funcdecl, funcscope, nametoken)) {
+    if (!parse_parameter_list(payload, rebuilt, funcscope, nametoken)) {
+        funcdecl->replace_args(std::move(rebuilt));
         return nullptr;
     }
+
+    funcdecl->replace_args(std::move(rebuilt));
 
     // next token should be ":" for the return type
     if (!cursor.is_type(Token::Type::t_colon)) {

@@ -29,7 +29,7 @@ internal struct timespec
     int64 $nsec;
 }
 
-#[if: os != windows]
+#[if: family != windows]
 internal extern {
     function clock_gettime as c_clock_gettime(int32 $clock, ptr<timespec> $ts) : int32;
     function nanosleep as c_nanosleep(ptr<timespec> $req, ptr<timespec> $rem) : int32;
@@ -38,7 +38,7 @@ internal extern {
 
 internal const int32 CLOCK_REALTIME = 0;
 
-#[if: os == darwin]
+#[if: family == darwin]
 internal const int32 CLOCK_MONOTONIC = 6;
 #[else]
 internal const int32 CLOCK_MONOTONIC = 1;

@@ -1,0 +1,34 @@
+// user-written color() must not silence uniqueness or the reverse. the table
+// folds `.green` off the range, not off a planted match
+enum Color
+{
+    case red;
+    case green;
+    case blue;
+    case yellow;
+}
+
+enum Status
+{
+    case ok;
+    case warn;
+    case error;
+
+    const function color() : Color
+    {
+        return .red;
+    }
+
+    map color : Color
+    {
+        .ok    = .green;
+        .warn  = .blue;
+        .error = .red;
+    }
+}
+
+echo Status::ok->color() == Color::red;
+echo Status::from(color: Color::green) != null;
+echo Status::from(color: Color::blue) != null;
+echo Status::from(color: Color::red) != null;
+echo Status::from(color: Color::yellow) == null;

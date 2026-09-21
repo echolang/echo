@@ -1,0 +1,4 @@
+// family is a closed axis, so a typo is an error rather than a silently false comparison.
+#[if: family == darwn]
+echo 1;
+#[end]

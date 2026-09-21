@@ -1,0 +1,19 @@
+// `ioerror` as an enum payload - the honest cut for AssetError.io, ShaderError.scan,
+// DumpError.io, DeviceError.metal. stringify at the call site was the workaround
+
+enum AssetError
+{
+    case missing;
+    case io(std::io::ioerror $inner);
+}
+
+function code_of(AssetError $e) : int32
+{
+    return match ($e) {
+        AssetError::io($inner) => $inner->code,
+        AssetError::missing => -1,
+    };
+}
+
+echo code_of(AssetError::missing);
+echo code_of(AssetError::io(std::io::ioerror(2)));

@@ -1652,7 +1652,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // which is what lets it sit anywhere a value may: an argument, a return, the right of an `=`, or
     // alone as a statement
     else if (Parser::starts_match(cursor)) {
-        AST::MatchExprNode *node = Parser::parse_match(payload);
+        AST::MatchExprNode *node = Parser::parse_match(payload, expected_type);
 
         if (node == nullptr) {
             return AST::make_void_ref();

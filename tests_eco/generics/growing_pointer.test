@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] growing_pointer.eco:7:5
+
+  generic 'dump' instantiated at type depth 33, which is likely a recursively growing type
+
+  6 | {
+  7 |     dump<ptr<T>>(&$x);
+    :     ^^^^
+  8 | }
+
+1 error, nothing was compiled.

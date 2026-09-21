@@ -6,9 +6,23 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 
+#include <cassert>
+#include <string>
+#include <vector>
+
 bool AST::FunctionDeclNode::is_interface_requirement() const
 {
     return owner_type != nullptr && owner_type->is_interface_kind();
+}
+
+void AST::FunctionDeclNode::replace_args(std::vector<VarDeclNode *> next)
+{
+    if (next.empty() && !args.empty()) {
+        return;
+    }
+
+    args = std::move(next);
+    assert(implicit_arg_count() <= args.size());
 }
 
 const std::string AST::FunctionDeclNode::node_description()
@@ -18,6 +32,14 @@ const std::string AST::FunctionDeclNode::node_description()
 
     if (args.size() > 0) {
         for (auto arg : args) {
+            // parse_parameter_list keeps a slot even when parse_varexpr failed, so arity is
+            // preserved for recovery. a dump that walks the list must not assume every entry is a
+            // declaration
+            if (arg == nullptr) {
+                buffer += " - ?\n";
+                continue;
+            }
+
             buffer += " - " + arg->node_description() + "\n";
         }
     }
@@ -27,6 +49,54 @@ const std::string AST::FunctionDeclNode::node_description()
     }
 
     return buffer;
+}
+
+std::vector<std::string> AST::FunctionDeclNode::written_parameter_spellings() const
+{
+    std::vector<std::string> spellings;
+
+    for (size_t i = implicit_arg_count(); i < args.size(); i++) {
+        if (args[i] == nullptr) {
+            // parse_parameter_list keeps a slot even when parse_varexpr failed, so arity is
+            // preserved for recovery. parameter_type and access_effect_of already tolerate a
+            // hole; this string is what BodylessFunction prints
+            spellings.push_back("?");
+            continue;
+        }
+
+        std::string spelling;
+
+        // `mv` is part of how a call has to be written, so it belongs in the signature a diagnostic
+        // shows even though it is not part of the type and not something a call resolves on. an
+        // access effect is the same case and renders through the same branch - and through
+        // AST::declared_access_effect rather than access_effect_of, because a `const T&` already
+        // says `read` in its type and printing both would be one fact twice
+        const AST::AccessEffect effect = AST::declared_access_effect(*args[i]);
+        if (effect != AST::AccessEffect::t_none) {
+            spelling += AST::access_effect_spelling(effect);
+            spelling += " ";
+        }
+
+        if (args[i]->has_label()) {
+            spelling += args[i]->label();
+            spelling += ": ";
+        }
+
+        spelling += args[i]->type().get_type_desciption();
+
+        // a labelled parameter's `$name` is not how a caller writes it, so it belongs next to the
+        // label in the signature a diagnostic shows. an unlabelled one stays `int32` as it always
+        // was - the `$name:` sugar is optional, and listing it on every candidate would reword
+        // every overload golden for a fact the call site does not have to use
+        if (args[i]->has_label()) {
+            spelling += " ";
+            spelling += args[i]->name_full();
+        }
+
+        spellings.push_back(std::move(spelling));
+    }
+
+    return spellings;
 }
 
 const std::string AST::FunctionDeclNode::signature_description() const
@@ -70,35 +140,9 @@ const std::string AST::FunctionDeclNode::signature_description() const
     }
 
     buffer += "(";
-    for (size_t i = implicit_arg_count(); i < args.size(); i++) {
-        buffer += (i > implicit_arg_count() ? ", " : "");
-
-        // `mv` is part of how a call has to be written, so it belongs in the signature a diagnostic
-        // shows even though it is not part of the type and not something a call resolves on. an
-        // access effect is the same case and renders through the same branch - and through
-        // AST::declared_access_effect rather than access_effect_of, because a `const T&` already
-        // says `read` in its type and printing both would be one fact twice
-        const AST::AccessEffect effect = AST::declared_access_effect(*args[i]);
-        if (effect != AST::AccessEffect::t_none) {
-            buffer += AST::access_effect_spelling(effect);
-            buffer += " ";
-        }
-
-        if (args[i]->has_label()) {
-            buffer += args[i]->label();
-            buffer += ": ";
-        }
-
-        buffer += args[i]->type().get_type_desciption();
-
-        // a labelled parameter's `$name` is not how a caller writes it, so it belongs next to the
-        // label in the signature a diagnostic shows. an unlabelled one stays `int32` as it always
-        // was - the `$name:` sugar is optional, and listing it on every candidate would reword
-        // every overload golden for a fact the call site does not have to use
-        if (args[i]->has_label()) {
-            buffer += " ";
-            buffer += args[i]->name_full();
-        }
+    const std::vector<std::string> params = written_parameter_spellings();
+    for (size_t i = 0; i < params.size(); i++) {
+        buffer += (i > 0 ? ", " : "") + params[i];
     }
     buffer += ")";
 

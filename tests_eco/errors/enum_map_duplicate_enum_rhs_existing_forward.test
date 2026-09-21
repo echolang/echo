@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_duplicate_enum_rhs_existing_forward.eco:20:10
+
+  '.ok' and '.warn' both map to the same 'color' - the reverse would not be a function.
+
+  19 |         .ok   = .green;
+  20 |         .warn = .green;
+     :          ^^^^
+  21 |     }
+
+1 error, nothing was compiled.

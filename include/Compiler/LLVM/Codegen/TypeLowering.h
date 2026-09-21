@@ -11,11 +11,13 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
 
 #include <functional>
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace AST
 {
@@ -90,6 +92,16 @@ namespace Compiler::LLVM
         // four times
         ReturnAbi return_abi_of(
             const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
+
+        // **write an aggregate into storage one leaf field at a time, never as a whole-struct store.**
+        // the granularity is the point: a `store %Foo %v, ptr %slot` of an already-assembled value is
+        // something SROA folds back into the insertvalue chain it came from, restoring the first-class
+        // aggregate this ABI exists to remove
+        void store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type);
+
+        // **hand this function's answer back**, sret or first-class. one owner so a LUT body and
+        // gen_return do not each re-derive the store. the value is already coerced
+        void emit_returned_value(llvm::Value *value);
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property
@@ -114,6 +126,12 @@ namespace Compiler::LLVM
             const AST::ComplexType &interface,
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
+
+        // seat vtables into each unit's `@Foo.conformances` after function maps. typeinfo is
+        // built during struct maps, before method bodies exist, so each row starts
+        // `{ identity, null }`. every unit that emitted the table is filled, including a
+        // class box lowered later during body codegen (that path fills inline)
+        void fill_conformance_vtables();
 
         // the `linkonce_odr` global whose *address* is `T`'s identity, which `type_id<T>()` wraps.
         // a class reuses its typeinfo, an interface its itype, everything else a one-byte `.typeid`.
@@ -202,6 +220,10 @@ namespace Compiler::LLVM
         // llvm uniques an identical literal to one type across every unit
         llvm::StructType *typeinfo_llvm_type();
 
+        // one `{ ptr identity, ptr vtable }` row of the array typeinfo.conformances points at.
+        // a literal StructType, like typeinfo_llvm_type, so every unit agrees structurally
+        llvm::StructType *conformance_entry_llvm_type();
+
         // the `[N x ptr]` of a class's implementations of an interface's requirements, in slot order -
         // `@Circle.8Drawable.vtable`. resolved at the **widening**, where the concrete class is still
         // statically known, which is what makes a dispatch one load rather than a table scan
@@ -258,12 +280,23 @@ namespace Compiler::LLVM
         // apart - `Foo` in two namespaces, and an instantiation whose name is the string `Box<int32>`
         void build_class_box(Structure &structure, const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
 
-        // the `[N x ptr]` of interface identities a class conforms to, or null when it conforms to none.
-        // what a typeinfo's `conformances` slot points at, and what `instanceof <interface>` scans
+        // the `[N x { ptr identity, ptr vtable }]` a class conforms to, or null when none.
+        // identities are known here; vtables are filled after function maps, or immediately
+        // when those maps already exist (a class box lowered during body codegen)
         llvm::Constant *build_conformance_table(
             const AST::ComplexType &type,
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
+
+        // the array initializer build_conformance_table and fill_conformance_vtables share.
+        // `with_vtables` is false during struct maps, true once function maps exist
+        llvm::Constant *conformance_table_constant(
+            const AST::ComplexType &type,
+            CmpUnit &cmp_unit,
+            bool with_vtables
+        );
+
+        void fill_unit_conformance_table(const AST::ComplexType &type, CmpUnit &cmp_unit);
 
         // the one way this file mints a runtime structure: a `linkonce_odr constant` looked up by name
         // first, so a unit that already emitted it reuses the definition rather than colliding with it.
@@ -291,6 +324,16 @@ namespace Compiler::LLVM
         CodegenContext &_ctx;
 
         std::unordered_map<const AST::ComplexType *, llvm::StructType *> _context_structs;
+
+        // `{type, unit}` for each conformance table minted before function maps.
+        // fill_conformance_vtables walks this so every ODR copy is filled, not the first
+        struct PendingConformanceFill
+        {
+            const AST::ComplexType *type = nullptr;
+            CmpUnit *unit = nullptr;
+        };
+        std::vector<PendingConformanceFill> _pending_conformance_fills;
+        bool _function_maps_ready = false;
     };
 };
 

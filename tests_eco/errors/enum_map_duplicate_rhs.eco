@@ -1,0 +1,13 @@
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+
+    map glfw : int32
+    {
+        .unknown = 32;
+        .space   = 32;
+        .escape  = 256;
+    }
+}

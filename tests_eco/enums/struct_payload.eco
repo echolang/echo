@@ -1,0 +1,25 @@
+// a user struct as an enum case payload. the owning-string case is
+// tests_eco/enums/owning_payload.eco; this is the shape visu wanted for
+// `AssetError.io(ioerror $inner)`
+
+struct Inner
+{
+    int32 $code;
+}
+
+enum AssetError
+{
+    case missing;
+    case io(Inner $inner);
+}
+
+function code_of(AssetError $e) : int32
+{
+    return match ($e) {
+        AssetError::io($inner) => $inner->code,
+        AssetError::missing => -1,
+    };
+}
+
+echo code_of(AssetError::missing);
+echo code_of(AssetError::io(Inner(2)));

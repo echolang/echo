@@ -1,6 +1,7 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ConstDeclParser.h"
 #include "Parser/EnumDeclParser.h"
+#include "Parser/EnumMapParser.h"
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
@@ -27,8 +28,9 @@
 #include <unordered_set>
 #include <vector>
 
-// the node a previous pass already registered for this declaration site, with its arguments dropped,
-// or null when the running pass is the first to reach it
+// the node a previous pass already registered for this declaration site, or null when the running
+// pass is the first to reach it. arguments are rebuilt into a local vector and assigned as a unit
+// - see FunctionDeclNode::replace_args - so ranking never sees a cleared list
 //
 // a module is parsed in several passes over identical token indices, so the declaration *site* is
 // exact - and unlike the name, which every overload of a set shares, it identifies one declaration
@@ -37,10 +39,6 @@
 static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, const TokenReference &site_token)
 {
     AST::FunctionDeclNode *decl = payload.collector.functions.find_by_declaration_site(site_token);
-
-    if (decl != nullptr) {
-        decl->args.clear();
-    }
 
     return decl;
 }
@@ -589,9 +587,13 @@ static void parse_constructor(
     // ctor argument + body scope
     auto &ctor_scope = payload.context.emplace_node<AST::ScopeNode>();
 
-    if (!parse_parameter_list(payload, *ctor_decl, ctor_scope, name_token)) {
+    std::vector<AST::VarDeclNode *> rebuilt;
+    if (!parse_parameter_list(payload, rebuilt, ctor_scope, name_token)) {
+        ctor_decl->replace_args(std::move(rebuilt));
         return;
     }
+
+    ctor_decl->replace_args(std::move(rebuilt));
 
     // the signature is complete, so this is the earliest point the declaration can join its overload
     // set. registering in both passes is intentional and cheap: the declaration pass makes the
@@ -718,26 +720,32 @@ static void parse_destructor(
     // receiver + body scope
     auto &dtor_scope = payload.context.emplace_node<AST::ScopeNode>();
 
-    Parser::push_receiver_param(payload, *dtor_decl, dtor_scope, self_type_node, dtor_token);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_receiver_param(payload, rebuilt, dtor_scope, self_type_node, dtor_token);
 
     // parsed rather than required-empty so a parameter list gets a located error naming what is
     // wrong, instead of "unexpected token" at whatever the first parameter happens to start with
-    // the receiver is already in `args`, so anything beyond it is the user's
-    if (!parse_parameter_list(payload, *dtor_decl, dtor_scope, dtor_token)) {
+    // the receiver is already in `rebuilt`, so anything beyond it is the user's
+    if (!parse_parameter_list(payload, rebuilt, dtor_scope, dtor_token)) {
+        dtor_decl->replace_args(std::move(rebuilt));
         return;
     }
 
-    if (dtor_decl->args.size() > dtor_decl->implicit_arg_count()) {
+    const size_t implicit = dtor_decl->implicit_arg_count();
+
+    if (rebuilt.size() > implicit) {
         payload.collector.collect_issue<AST::Issue::DestructorHasParameters>(
             payload.context.code_ref(dtor_token),
             fmt::format("A destructor takes no parameters - '{}' declares {}.",
                 struct_node->type_name(),
-                dtor_decl->args.size() - dtor_decl->implicit_arg_count()));
+                rebuilt.size() - implicit));
 
         // the extra parameters are dropped rather than carried: nothing ever passes an argument to a
         // destructor, so a signature that declares one would fail at the drop site instead of here
-        dtor_decl->args.resize(dtor_decl->implicit_arg_count());
+        rebuilt.resize(implicit);
     }
+
+    dtor_decl->replace_args(std::move(rebuilt));
 
     // a declared return type is rejected outright rather than checked against void. `destructor() :
     // void` reads as though the colon were meaningful, and it never is
@@ -854,7 +862,9 @@ static void parse_init(
     }
 
     auto &init_scope = payload.context.emplace_node<AST::ScopeNode>();
-    Parser::push_receiver_param(payload, *init_decl, init_scope, self_type_node, init_token);
+    std::vector<AST::VarDeclNode *> rebuilt;
+    Parser::push_receiver_param(payload, rebuilt, init_scope, self_type_node, init_token);
+    init_decl->replace_args(std::move(rebuilt));
 
     AST::FunctionDeclNode *existing = struct_node->complex_type().type_init();
 
@@ -1427,6 +1437,22 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             parse_enum_case(payload, struct_node, self_value_type, collect_members);
         }
+        else if (starts_enum_map(cursor)) {
+            // contextual `map name : type { }`, recognised by the three-token shape so `map<K, V>`
+            // as a property type is still starts_vardecl. an enum is the only body that keeps one
+            if (!is_enum_body) {
+                refuse_braced_member("a map");
+                continue;
+            }
+
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "A map is as reachable as the enum it belongs to - the methods it mints are named "
+                "through that enum, so there is no call site for a modifier to narrow.");
+
+            parse_enum_map(payload, struct_node, collect_members, visibility);
+        }
         else if (starts_typedecl(cursor)) {
             // a nested type. recursed into rather than skipped, so one function owns "what does a
             // struct body contain" - and the recursion needs nothing passed to it: the SelfScope
@@ -1759,9 +1785,16 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         if (is_enum_body) {
             const auto publish_synthesized = [&](const std::vector<AST::FunctionDeclNode *> &members) {
                 for (AST::FunctionDeclNode *member : members) {
-                    if (member != nullptr && member->is_implicitly_generated && member->body != nullptr) {
-                        payload.context.declaration_scope().add_funcdecl(*member);
+                    if (member == nullptr || !member->is_implicitly_generated || member->body == nullptr) {
+                        continue;
                     }
+
+                    // named maps plant in the file that wrote them, from plant_file_enum_maps
+                    if (struct_node->complex_type().is_enum_map_function(member)) {
+                        continue;
+                    }
+
+                    payload.context.declaration_scope().add_funcdecl(*member);
                 }
             };
 

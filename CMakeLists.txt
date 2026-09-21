@@ -32,6 +32,12 @@ message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
 find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+if(LLVM_VERSION VERSION_LESS 20)
+    message(FATAL_ERROR
+        "LLVM >= 20 is required, found LLVM ${LLVM_VERSION}"
+    )
+endif()
+
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
@@ -243,6 +249,18 @@ endif()
 
 message(STATUS "NATIVE_ARCH: ${NATIVE_ARCH}")
 list(APPEND LLVM_COMPONENTS ${NATIVE_ARCH})
+
+# Darwin `echoc build --target-os ios` names AArch64 (device) or X86 (Intel simulator)
+# triples. native is one of those; the other must be linked or lookupTarget refuses a
+# triple CodegenTarget can name
+if(APPLE)
+    if(NOT NATIVE_ARCH STREQUAL "AArch64")
+        list(APPEND LLVM_COMPONENTS AArch64)
+    endif()
+    if(NOT NATIVE_ARCH STREQUAL "X86")
+        list(APPEND LLVM_COMPONENTS X86)
+    endif()
+endif()
 
 llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 # llvm_map_components_to_libnames(LLVM_LIBS support core irreader mcjit native)

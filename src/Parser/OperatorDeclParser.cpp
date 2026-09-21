@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <fmt/core.h>
+#include <vector>
 
 namespace
 {
@@ -477,10 +478,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // a constructor's `constructor` keyword plays - and unlike the name below, which is minted
     AST::FunctionDeclNode *funcdecl = payload.collector.functions.find_by_declaration_site(operator_token);
 
-    if (funcdecl != nullptr) {
-        // the arguments are rebuilt against this pass's context, so drop the previous pass's
-        funcdecl->args.clear();
-    } else {
+    if (funcdecl == nullptr) {
         // the name is **virtual**: an operator has no name token, and the decorated spelling is what
         // FunctionRegistry keys the overload set on. positioned at the symbol so every diagnostic
         // about this declaration points where a reader would look
@@ -515,6 +513,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     AST::TypeParamScope type_param_scope(payload.context, funcdecl->type_parameters);
 
     auto &funcscope = payload.context.emplace_node<AST::ScopeNode>();
+    std::vector<AST::VarDeclNode *> rebuilt;
 
     // the operand lists, in the order the fixity says they are written. an infix declaration has two
     // groups around the symbol, so the left one has to be parsed from a position the header already
@@ -524,7 +523,8 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
         cursor.restore(*header.left_params);
         cursor.skip(); // `(`
 
-        if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token)) {
+        if (!parse_parameter_list(payload, rebuilt, funcscope, operator_token)) {
+            funcdecl->replace_args(std::move(rebuilt));
             return nullptr;
         }
 
@@ -539,8 +539,9 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
         cursor.restore(*header.index_params);
         cursor.skip(); // `[`
 
-        if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token,
+        if (!parse_parameter_list(payload, rebuilt, funcscope, operator_token,
                 Token::Type::t_close_bracket)) {
+            funcdecl->replace_args(std::move(rebuilt));
             return nullptr;
         }
 
@@ -555,7 +556,8 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
         cursor.restore(*header.value_params);
         cursor.skip(); // `(`
 
-        if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token)) {
+        if (!parse_parameter_list(payload, rebuilt, funcscope, operator_token)) {
+            funcdecl->replace_args(std::move(rebuilt));
             return nullptr;
         }
 
@@ -565,16 +567,20 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     if (header.fixity == AST::OpFixity::t_prefix || header.fixity == AST::OpFixity::t_infix) {
         if (!cursor.is_type(Token::Type::t_open_paren)) {
             payload.collect_unexpected_token(Token::Type::t_open_paren);
+            funcdecl->replace_args(std::move(rebuilt));
             skip_operator_remainder(payload);
             return nullptr;
         }
 
         cursor.skip(); // `(`
 
-        if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token)) {
+        if (!parse_parameter_list(payload, rebuilt, funcscope, operator_token)) {
+            funcdecl->replace_args(std::move(rebuilt));
             return nullptr;
         }
     }
+
+    funcdecl->replace_args(std::move(rebuilt));
 
     if (!cursor.is_type(Token::Type::t_colon)) {
         payload.collect_unexpected_token(Token::Type::t_colon);

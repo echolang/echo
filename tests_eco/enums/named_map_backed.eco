@@ -1,0 +1,17 @@
+// a map on an integer-backed enum: tags are discriminants, not ordinals
+enum Status : int32
+{
+    case ok = 200;
+    case not_found = 404;
+
+    map wire : int32
+    {
+        .ok        = 1;
+        .not_found = 2;
+    }
+}
+
+echo Status::ok->wire();
+echo Status::not_found->wire();
+echo Status::from(wire: 2) != null;
+echo Status::from(wire: 3) == null;

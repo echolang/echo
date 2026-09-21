@@ -416,7 +416,7 @@ namespace AST
         MAKE_ISSUE_DEF1(InvalidManifestScope, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(EmptySourcePattern, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvableDependency, IssueSeverity::Error, const std::string, _message);
-        MAKE_ISSUE_DEF1(PackageNotVendored, IssueSeverity::Error, const std::string, _message,
+        MAKE_ISSUE_DEF2(PackageNotVendored, IssueSeverity::Error, const std::string, _message, bool, on_path_dependency,
             std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(DuplicateModuleName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(ModuleDependencyCycle, IssueSeverity::Error, const std::string, _message);

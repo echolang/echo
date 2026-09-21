@@ -1,0 +1,11 @@
+// a static `: void` is called as a whole statement. that form used to consume `Marker::` as a
+// namespace and report UnknownFunction for a method sitting on the type
+public struct Marker
+{
+    public static function activate() : void
+    {
+    }
+}
+
+Marker::activate();
+echo 1;

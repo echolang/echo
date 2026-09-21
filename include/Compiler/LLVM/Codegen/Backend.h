@@ -32,7 +32,7 @@ namespace Compiler::LLVM
         Backend(CodegenContext &ctx);
         ~Backend();
 
-        // resolves the host target and publishes its data layout on the context, so every
+        // resolves this invocation's target and publishes its data layout on the context, so every
         // llvm::Module can be created with a layout already attached. must run before
         // create_cmp_units
         //
@@ -186,9 +186,9 @@ namespace Compiler::LLVM
 
         CodegenContext &_ctx;
 
-        // the host target, resolved once by init_target. object emission needs one too and it
-        // must describe the same target as the layout codegen ran against, so it is the same
-        // instance rather than a second lookup
+        // this invocation's target, resolved once by init_target. object emission needs one too
+        // and it must describe the same target as the layout codegen ran against, so it is the
+        // same instance rather than a second lookup
         std::unique_ptr<llvm::TargetMachine> _target_machine;
 
         // built by prune_to_entry, read by prune_report. accumulated unconditionally: it costs one walk

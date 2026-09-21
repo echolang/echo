@@ -13,6 +13,8 @@
 #include "AST/AttributeNode.h"
 
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace AST
 {
@@ -97,6 +99,10 @@ namespace AST
         std::optional<TokenReference> declaration_token;
 
         std::vector<VarDeclNode*> args;
+
+        // replace the parameter list as a unit. an empty `next` leaves a previous non-empty list
+        // in place, so a failed rebuild does not expose `has_receiver() && args.empty()` to ranking
+        void replace_args(std::vector<VarDeclNode *> next);
 
         // this function's own generic type parameters (the T, U in `function name<T, U>(...)`),
         // owned by the collector's TypeParamRegistry. a method of a generic struct shares the
@@ -224,6 +230,11 @@ namespace AST
         // in every other respect - hoisted to the file root, mangled, emitted - but it is in no overload
         // set, no name reaches it, and its `args[0]` is the environment its captures live in
         bool is_closure = false;
+
+        // the function this closure literal was written in. AST::enclosing_type_of walks
+        // it for the type whose privates (and `self::`) the body may name. not `owner_type`:
+        // a closure is not a method. null for a named function, and for a closure at file scope
+        FunctionDeclNode *enclosing_function = nullptr;
 
         // how many leading `args` entries the caller did not write: a method's receiver, or a closure's
         // environment. never both, since a closure is not a member - spelled as a count rather than a
@@ -437,6 +448,12 @@ namespace AST
         // the signature as a reader wrote it - `a::foo(int32, float64)`. for diagnostics only;
         // the symbol-table identity is decorated_func_name()
         const std::string signature_description() const;
+
+        // one fragment per written parameter, `"?"` for a hole `parse_parameter_list` left so
+        // arity survived recovery. signature_description joins these. LSP signature help starts
+        // from the same fragments and adds an unlabelled `$name` - that is the editor naming the
+        // argument the cursor is in, not a second spelling of the type
+        std::vector<std::string> written_parameter_spellings() const;
 
         // returns the decorated function name as it would appear in the symbol table
         // this is the name that is used to uniquely identify the function aka the mangled name

@@ -11,16 +11,17 @@ namespace Compiler
 {
     // **the sole answer to "what can a condition see".**
     //
-    // what `#[if: os == darwin]` is evaluated against, and the whole of it: an operating system, an
-    // architecture, and the flags the invocation declared. Nothing else is visible to a condition and
-    // nothing else may become visible without passing through here - a second source of truth about what
-    // platform this is would let two files disagree about it inside one compile.
+    // what `#[if: os == darwin]` is evaluated against, and the whole of it: an operating system, the
+    // ABI family that os belongs to, an architecture, and the flags the invocation declared. Nothing
+    // else is visible to a condition and nothing else may become visible without passing through here
+    // - a second source of truth about what platform this is would let two files disagree about it
+    // inside one compile.
     //
-    // deliberately **not** on CodegenContext, where `target_triple` lives. That one is published by
-    // Backend::init_target(), which runs inside compile_bundle - long after the three parse passes, and
-    // therefore long after the filter has already had to decide what to keep. These read
-    // llvm::sys::getDefaultTargetTriple() directly, which is free to call at any point and which
-    // Compiler::compute_module_keys already calls for the same reason.
+    // deliberately **not** the LLVM triple objects are emitted for - that is Compiler::CodegenTarget,
+    // and folding them is what would make `--target-os` start choosing instruction sets. These read
+    // llvm::sys::getDefaultTargetTriple() only to map the host onto the closed vocabularies.
+    // Backend::init_target publishes `target_triple` long after the filter has already had to decide
+    // what to keep.
     //
     // an Echo `const` can never reach here, and that is architectural rather than an omission: the filter
     // runs before pass 1, so no Echo declaration exists yet to read.
@@ -32,13 +33,16 @@ namespace Compiler
         // block vanishes without a word. The rule the manifest reader already lives by
         static const std::vector<std::string> &known_operating_systems();
         static const std::vector<std::string> &known_architectures();
+        static const std::vector<std::string> &known_families();
 
         static bool is_known_operating_system(const std::string &name);
         static bool is_known_architecture(const std::string &name);
+        static bool is_known_family(const std::string &name);
 
         // **the axes a condition may name**, and the whole of what routing on one costs a caller. closed,
         // so `#[if: cpu == arm64]` is caught rather than read as a flag called `cpu` that nobody defined -
-        // which would be false, and silently so
+        // which would be false, and silently so. one table in the .cpp: a fourth axis is a row, not a
+        // ternary beside os and arch
         static bool is_axis(const std::string &name);
         static std::string axis_names();
 
@@ -65,9 +69,14 @@ namespace Compiler
             std::string &out_error
         );
 
+        // LLVM's triple mapped onto these vocabularies. **the named mapping**, so a test can hand it
+        // `aarch64-unknown-linux-android` without being on Android, and so `host()` is one spelling of
+        // `from_triple(getDefaultTargetTriple())` rather than a second copy of the predicates
+        static TargetFacts from_triple(const std::string &triple);
+
         // the host's facts and nothing else, for a caller that legitimately has no command line to read -
-        // the unit tests. One spelling of `resolve("", "", {})`, which cannot fail: every way it reports an
-        // error is an override outside a vocabulary, and there are no overrides here.
+        // the unit tests. One spelling of `from_triple` on this machine's default triple, which cannot
+        // fail: an unrecognised host leaves the axes empty rather than refusing
         //
         // **not a default anywhere.** A parser that quietly resolved these when nobody configured it is what
         // let the manifest reader evaluate `#[if: os == ...]` against the wrong platform for as long as it
@@ -92,6 +101,15 @@ namespace Compiler
         std::string operating_system;
         std::string architecture;
 
+        // **derived from operating_system, never stored.** ios shares Darwin's libc, dylibs and
+        // `-framework`; android shares Linux's. a stored field would desync the first time a test did
+        // `facts.operating_system = "linux"` on a host-copied object, which is a real caller
+        //
+        // empty when os is empty, so an unrecognised host makes `family == darwin` false the same way
+        // `os == darwin` is. not independently overridable: `--target-os ios` is how you look at iOS,
+        // and family follows. `--define family` is refused because family is an axis
+        std::string family() const;
+
         // sorted, because this is folded into the module cache key and a key that depends on the order
         // two flags were typed in is a key that misses for no reason
         std::set<std::string> defines;
@@ -112,9 +130,11 @@ namespace Compiler
         // written by someone who had already passed `--define TRACE`
         bool has_define(const std::string &name) const;
 
-        // `os=darwin;arch=arm64;define=A;define=B;` - everything a condition can see, in one string, for
-        // the module cache to fold. Here rather than in ModuleCache because *what the facts are* is this
-        // type's question: a fact added without a line here would silently share a cache key with a build
+        // `os=darwin;arch=arm64;family=darwin;define=A;define=B;` - everything a condition can see, in
+        // one string, for the module cache to fold. family is determined by os and is still here:
+        // recategorising android out of linux-family must miss the old object without a manual cache
+        // version bump. Here rather than in ModuleCache because *what the facts are* is this type's
+        // question: a fact added without a line here would silently share a cache key with a build
         // that did not have it, which is the one cache failure with no diagnostic
         std::string cache_signature() const;
 

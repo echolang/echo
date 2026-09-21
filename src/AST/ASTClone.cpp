@@ -149,9 +149,17 @@ Node *FunctionCallExprNode::clone(CloneContext &cc) const
     FunctionCallExprNode *c = cc.shallow(this);
     for (auto &arg : c->arguments) arg = cc.child(arg);
     for (auto &ta : c->explicit_type_args) ta = cc.child(ta);
-    // decl points at the (generic) declaration; the monomorphizer repoints it at the
-    // concrete instance afterwards. rebind keeps self-recursive calls correct in the meantime
-    c->decl = cc.rebind(c->decl);
+
+    // a generic callee stays the template. rebinding a self-recursive call to this instance
+    // is fac's same-T case, which intern already handles - and it is explode<Nest<T>>'s
+    // growing case, which intern must *not* collapse onto this instance. the monomorphizer
+    // repoints at the concrete clone once the type arguments are known
+    //
+    // a concrete callee still rebinds: a nested function cloned with this subtree has to
+    // call the clone, not the original
+    if (c->decl == nullptr || !c->decl->is_generic()) {
+        c->decl = cc.rebind(c->decl);
+    }
 
     // **the owner of a static call is a *type*, so it substitutes like a parameter type does.**
     // cc.shallow copy-constructs, so without this line a `result<T, E>::ok(...)` written inside a
@@ -739,6 +747,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     for (auto &arg : c->args) arg = cc.child(arg);
     c->return_type = cc.child(c->return_type);
     c->body = cc.child(c->body);
+    c->enclosing_function = cc.rebind(c->enclosing_function);
     return c;
 }
 

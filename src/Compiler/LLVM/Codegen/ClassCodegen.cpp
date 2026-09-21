@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/CountAccess.h"
 #include "Compiler/LLVM/Codegen/CountAtomics.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
@@ -415,7 +416,9 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
     llvm::Value *answer = nullptr;
 
     if (against_interface) {
-        answer = gen_conformance_scan(handle, operand_box, *node.queried_type.get_complex_type());
+        llvm::Value *row = gen_conformance_scan(
+            handle, operand_box, *node.queried_type.get_complex_type());
+        answer = _ctx.builder->CreateIsNotNull(row, "conforms");
     }
     else {
         llvm::Value *typeinfo = _ctx.builder->CreateLoad(
@@ -450,9 +453,9 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
     const AST::ComplexType &interface
 )
 {
-    llvm::Type *i1 = llvm::Type::getInt1Ty(*_ctx.llvm_context);
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    auto *entry_type = _ctx.types->conformance_entry_llvm_type();
 
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
     llvm::GlobalVariable *wanted =
@@ -463,7 +466,7 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
         gen_header_ptr(handle, box_type, ClassBox::typeinfo_index, "typeinfo_ptr"),
         "typeinfo");
 
-    // the descriptor's two slots: how many interfaces, and where the identities are. asked of the one
+    // the descriptor's two slots: how many interfaces, and where the rows are. asked of the one
     // function that spells its shape, so the writer that mints it and this scan cannot disagree about
     // which slot is which - they used to build the type independently, four lines each
     auto *info_type = _ctx.types->typeinfo_llvm_type();
@@ -495,8 +498,12 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
     llvm::PHINode *index = _ctx.builder->CreatePHI(i64, 2, "conforms.i");
     index->addIncoming(llvm::ConstantInt::get(i64, 0), read_block);
 
-    llvm::Value *slot = _ctx.builder->CreateGEP(opaque_ptr, table, index, "conforms.slot");
-    llvm::Value *found = _ctx.builder->CreateLoad(opaque_ptr, slot, "conforms.entry");
+    llvm::Value *slot = _ctx.builder->CreateGEP(entry_type, table, index, "conforms.slot");
+    llvm::Value *found = _ctx.builder->CreateLoad(
+        opaque_ptr,
+        _ctx.builder->CreateStructGEP(
+            entry_type, slot, ClassConformance::identity_index, "conforms.id_ptr"),
+        "conforms.entry");
     llvm::Value *hit = _ctx.builder->CreateICmpEQ(found, wanted, "conforms.hit");
     _ctx.builder->CreateCondBr(hit, exit_block, next_block);
 
@@ -507,13 +514,136 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
         _ctx.builder->CreateICmpULT(stepped, count, "conforms.more"), loop_block, exit_block);
 
     // three ways in and only one of them is a yes: the table was empty, the whole table was walked, or an
-    // entry matched. a PHI rather than a mutable flag, so the answer is an SSA value like every other
+    // entry matched. a PHI of the row pointer rather than a flag, so instanceof is `icmp ne` and recast
+    // loads the vtable beside the identity without a second walk
     _ctx.set_insert_point(exit_block);
-    llvm::PHINode *result = _ctx.builder->CreatePHI(i1, 3, "conforms.result");
-    result->addIncoming(llvm::ConstantInt::get(i1, 0), read_block);
-    result->addIncoming(llvm::ConstantInt::get(i1, 1), loop_block);
-    result->addIncoming(llvm::ConstantInt::get(i1, 0), next_block);
+    llvm::PHINode *result = _ctx.builder->CreatePHI(opaque_ptr, 3, "conforms.row");
+    result->addIncoming(
+        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr)), read_block);
+    result->addIncoming(slot, loop_block);
+    result->addIncoming(
+        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr)), next_block);
 
+    return result;
+}
+
+llvm::Value *ClassCodegen::gen_iface_recast(
+    llvm::Value *value,
+    const AST::ValueType &from,
+    const AST::ValueType &to,
+    bool fallible,
+    const TokenReference &at
+)
+{
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    llvm::Type *header = _ctx.types->class_header_llvm_type();
+    auto *entry_type = _ctx.types->conformance_entry_llvm_type();
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    const AST::ValueType dest = to.is_wrapped_optional()
+        ? AST::ValueType::make_non_nullable(to)
+        : to;
+
+    const std::string miss_detail = fmt::format(
+        "'{}' cannot be read as a '{}' - the object does not conform",
+        from.get_type_desciption(), dest.get_type_desciption());
+
+    llvm::Value *handle = value;
+    if (from.is_interface()) {
+        handle = _ctx.builder->CreateExtractValue(value, { IfaceValue::object_index }, "recast.obj");
+    }
+
+    auto load_vtable = [&](llvm::Value *row) {
+        return _ctx.builder->CreateLoad(
+            opaque_ptr,
+            _ctx.builder->CreateStructGEP(
+                entry_type, row, ClassConformance::vtable_index, "recast.vt_ptr"),
+            "recast.vt");
+    };
+
+    auto seat = [&](llvm::Value *obj, llvm::Value *vtable) {
+        llvm::Value *erased = llvm::UndefValue::get(_ctx.types->iface_llvm_type());
+        erased = _ctx.builder->CreateInsertValue(erased, obj, { IfaceValue::object_index }, "recast.obj");
+        erased = _ctx.builder->CreateInsertValue(erased, vtable, { IfaceValue::vtable_index }, "recast.vt");
+        return erased;
+    };
+
+    auto class_matches = [&](llvm::Value *obj) {
+        llvm::Value *typeinfo = _ctx.builder->CreateLoad(
+            opaque_ptr,
+            gen_header_ptr(obj, header, ClassBox::typeinfo_index, "typeinfo_ptr"),
+            "typeinfo");
+        const ClassLayout wanted =
+            _ctx.types->get_or_create_class_layout(dest.get_complex_type(), *_ctx.current_cmp_unit);
+        return _ctx.builder->CreateICmpEQ(typeinfo, wanted.typeinfo, "recast.same");
+    };
+
+    if (!fallible) {
+        _ctx.abort->gen_abort_if(_ctx.builder->CreateIsNull(handle), "fatal error", miss_detail, at);
+
+        if (dest.is_interface()) {
+            llvm::Value *row = gen_conformance_scan(handle, header, *dest.get_complex_type());
+            _ctx.abort->gen_abort_if(_ctx.builder->CreateIsNull(row), "fatal error", miss_detail, at);
+            llvm::Value *vtable = load_vtable(row);
+            _ctx.abort->gen_abort_if(_ctx.builder->CreateIsNull(vtable), "fatal error", miss_detail, at);
+            return seat(handle, vtable);
+        }
+
+        _ctx.abort->gen_abort_if(
+            _ctx.builder->CreateNot(class_matches(handle)), "fatal error", miss_detail, at);
+        return handle;
+    }
+
+    llvm::BasicBlock *lookup_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "recast.lookup", function);
+    llvm::BasicBlock *ok_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "recast.ok", function);
+    llvm::BasicBlock *miss_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "recast.miss", function);
+    llvm::BasicBlock *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "recast.done", function);
+
+    _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), miss_block, lookup_block);
+
+    _ctx.set_insert_point(lookup_block);
+
+    llvm::Value *ok_payload = nullptr;
+    if (dest.is_interface()) {
+        llvm::Value *row = gen_conformance_scan(handle, header, *dest.get_complex_type());
+        llvm::BasicBlock *load_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "recast.load", function);
+        _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(row), miss_block, load_block);
+
+        _ctx.set_insert_point(load_block);
+        llvm::Value *vtable = load_vtable(row);
+        _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(vtable), miss_block, ok_block);
+
+        _ctx.set_insert_point(ok_block);
+        ok_payload = seat(handle, vtable);
+    }
+    else {
+        _ctx.builder->CreateCondBr(class_matches(handle), ok_block, miss_block);
+
+        _ctx.set_insert_point(ok_block);
+        ok_payload = handle;
+    }
+
+    llvm::StructType *opt_ty = _ctx.types->optional_llvm_type(to, *_ctx.current_cmp_unit);
+    llvm::Value *ok_wrapped = llvm::UndefValue::get(opt_ty);
+    ok_wrapped = _ctx.builder->CreateInsertValue(
+        ok_wrapped,
+        llvm::ConstantInt::getTrue(*_ctx.llvm_context),
+        { AST::k_optional_has_index },
+        "recast.has");
+    ok_wrapped = _ctx.builder->CreateInsertValue(
+        ok_wrapped, ok_payload, { AST::k_optional_value_index }, "recast.val");
+    _ctx.builder->CreateBr(done_block);
+    llvm::BasicBlock *ok_end = _ctx.builder->GetInsertBlock();
+
+    _ctx.set_insert_point(miss_block);
+    llvm::Value *absent = _ctx.types->gen_absent(to, *_ctx.current_cmp_unit);
+    _ctx.builder->CreateBr(done_block);
+    llvm::BasicBlock *miss_end = _ctx.builder->GetInsertBlock();
+
+    _ctx.set_insert_point(done_block);
+    llvm::PHINode *result = _ctx.builder->CreatePHI(opt_ty, 2, "recast.result");
+    result->addIncoming(ok_wrapped, ok_end);
+    result->addIncoming(absent, miss_end);
     return result;
 }
 

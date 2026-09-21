@@ -180,29 +180,24 @@ public function remove(const App& $app, const command::Parsed& $cli) : int32
 
     while ($i < $man->depends->count()) {
         string $depend = $man->depends[$i];
-        string $probe = $depend;
-
-        if (!sys::is_absolute($probe)) {
-            $probe = sys::join(sys::dirname($mod), $depend);
+        string $lib_mod = guard manifest::depend_module($mod, $depend) else {
+            $i = $i + 1;
+            continue;
         }
 
-        string $lib_mod = sys::join($probe, 'module.eco');
+        manifest::Manifest $dep = guard manifest::load($lib_mod) else {
+            $i = $i + 1;
+            continue;
+        }
 
-        if (sys::is_file($lib_mod)) {
-            manifest::Manifest $dep = guard manifest::load($lib_mod) else {
-                $i = $i + 1;
-                continue;
+        if ($dep->name == $name) {
+            bool $gone = guard manifest::remove_depend_line($mod, $depend) else ($e) {
+                $ctx->printError($e);
+                return 1;
             }
 
-            if ($dep->name == $name) {
-                bool $gone = guard manifest::remove_depend_line($mod, $depend) else ($e) {
-                    $ctx->printError($e);
-                    return 1;
-                }
-
-                $ctx->line("removed path depend {$name} -> {$depend}");
-                return 0;
-            }
+            $ctx->line("removed path depend {$name} -> {$depend}");
+            return 0;
         }
 
         $i = $i + 1;

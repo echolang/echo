@@ -78,10 +78,17 @@ namespace Compiler
         // was added to keep. milliseconds, because that is what the flag takes
         unsigned timeout_ms = 0;
 
-        // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what they
-        // mean, asked in run_front_end and in main_clean as it is today
+        // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what
+        // they mean for `#[if:]`. Compiler::resolve_codegen_target is the owner of what they emit
         std::string target_os;
         std::string target_arch;
+
+        // with `--target-os ios` on `build`: the iPhoneOS SDK and `arm64-apple-ios15.0`,
+        // not the simulator. false is the default and the simulator. not a fact a
+        // condition can see - Compiler::CodegenTarget is the emission half. it does
+        // imply arm64 for facts when `--target-arch` was not stated, via
+        // Compiler::facts_architecture, so a condition cannot still see the host arch
+        bool ios_device = false;
 
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order
         std::filesystem::path build_dir;

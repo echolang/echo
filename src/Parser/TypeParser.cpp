@@ -762,6 +762,7 @@ static AST::ValueType parse_generic_application(
     cursor.skip(); // skip '<'
 
     std::vector<AST::ValueType> args;
+    std::vector<TokenReference> arg_sites;
     while (!cursor.is_generic_close()) {
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(name_token), Token::Type::t_close_angle, Token::Type::t_unknown);
@@ -776,6 +777,7 @@ static AST::ValueType parse_generic_application(
 
         if (slot != nullptr && slot->is_value_param()) {
             args.push_back(parse_const_generic_arg(payload, slot, name_token));
+            arg_sites.push_back(name_token);
         } else if (cursor_is_integer_literal(cursor)) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(cursor.current()),
@@ -783,14 +785,17 @@ static AST::ValueType parse_generic_application(
                     "Type parameter '{}' of '{}' is a type, not a value",
                     slot != nullptr ? slot->name : std::to_string(index),
                     template_ct->name.value_or(name_token.value())));
+            arg_sites.push_back(cursor.current());
             cursor.skip();
             args.push_back(AST::ValueType::make_unknown());
         } else {
+            const TokenReference arg_at = cursor.current();
             auto arg_type = parse_value_type(payload, names);
             if (!arg_type.has_value()) {
                 return AST::ValueType::make_unknown();
             }
             args.push_back(arg_type.value());
+            arg_sites.push_back(arg_at);
         }
 
         if (cursor.is_type(Token::Type::t_comma)) {
@@ -810,10 +815,19 @@ static AST::ValueType parse_generic_application(
         }
     }
 
-    for (const auto &arg : args) {
-        if (auto refusal = AST::void_as_value_refusal(arg)) {
+    for (size_t i = 0; i < args.size(); i++) {
+        if (auto refusal = AST::void_as_value_refusal(args[i])) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(name_token),
+                std::move(refusal.value()));
+            return AST::ValueType::make_unknown();
+        }
+
+        // report at the argument, so `map<string, AssetRef>` points at AssetRef. returning
+        // from the parse loop would leave `>` in the stream
+        if (auto refusal = AST::bare_generic_type_refusal(args[i])) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(arg_sites[i]),
                 std::move(refusal.value()));
             return AST::ValueType::make_unknown();
         }

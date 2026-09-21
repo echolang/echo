@@ -1,0 +1,15 @@
+enum Color
+{
+    case red;
+    case named(int32 $n);
+}
+
+enum Status
+{
+    case ok;
+
+    map color : Color
+    {
+        .ok = .red;
+    }
+}

@@ -1,0 +1,3 @@
+#[module: "glfwbind"]
+#[depends: "../lib_keycode"]
+#[sources: "src/*.eco"]

@@ -1,0 +1,20 @@
+// a match that is not going to a typed slot must not steal the enclosing
+// function's return type for a leading-dot shorthand. `return match` already
+// passes that destination at parse; `echo match` has none
+enum Dump
+{
+    case color;
+    case normal;
+}
+
+function f() : Dump
+{
+    echo match (Dump::color) {
+        Dump::normal => .normal,
+        else => .color,
+    };
+
+    return .color;
+}
+
+f();

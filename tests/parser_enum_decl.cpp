@@ -3,6 +3,7 @@
 #include <AST/ASTBundle.h>
 #include <AST/ASTCopy.h>
 #include <AST/ASTDestruction.h>
+#include <AST/ASTEnumMapType.h>
 #include <AST/ASTMemberLookup.h>
 #include <AST/ASTValueType.h>
 #include <AST/FunctionDeclNode.h>
@@ -169,6 +170,181 @@ TEST_CASE("a backed enum records its backing and takes the tag's type from it", 
     REQUIRE_FALSE(plain.enum_backing.has_value());
     REQUIRE(plain.get_property_type(k_enum_tag_index) == ValueType(ValueTypePrimitive::t_uint8));
     REQUIRE(find_member_functions(&plain, "value").empty());
+}
+
+TEST_CASE("a named map mints a total accessor and a labelled from", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum KeyCode {\n"
+        "    case unknown;\n"
+        "    case space;\n"
+        "    map glfw : int32 {\n"
+        "        .unknown = -1;\n"
+        "        .space = 32;\n"
+        "    }\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "KeyCode")->complex_type();
+    REQUIRE(type.enum_maps().size() == 1);
+    REQUIRE(type.find_enum_map("glfw") != nullptr);
+    REQUIRE(type.find_enum_map("glfw")->associations.size() == 2);
+    REQUIRE(find_member_functions(&type, "glfw").size() == 1);
+
+    auto froms = find_static_functions(&type, "from");
+    REQUIRE(froms.size() == 1);
+    REQUIRE(froms[0]->args.size() == 1);
+    REQUIRE(froms[0]->args[0]->has_label());
+    REQUIRE(froms[0]->args[0]->label() == "glfw");
+}
+
+TEST_CASE("an incomplete map mints an optional accessor", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Color {\n"
+        "    case red;\n"
+        "    case green;\n"
+        "}\n"
+        "enum Status {\n"
+        "    case ok;\n"
+        "    case error;\n"
+        "    map color : Color {\n"
+        "        .ok = .green;\n"
+        "    }\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &status = type_named(bundle->modules.find_module("test"), "Status")->complex_type();
+    REQUIRE(status.enum_maps().size() == 1);
+    REQUIRE(status.find_enum_map("color") != nullptr);
+    REQUIRE_FALSE(status.find_enum_map("color")->total);
+
+    auto colors = find_member_functions(&status, "color");
+    REQUIRE(colors.size() == 1);
+    REQUIRE(colors[0]->get_return_type().is_wrapped_optional());
+}
+
+TEST_CASE("a named map to an enum mints a total accessor and a labelled from", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Color {\n"
+        "    case red;\n"
+        "    case green;\n"
+        "}\n"
+        "enum Status {\n"
+        "    case ok;\n"
+        "    case warn;\n"
+        "    map color : Color {\n"
+        "        .ok = .green;\n"
+        "        .warn = .red;\n"
+        "    }\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &status = type_named(bundle->modules.find_module("test"), "Status")->complex_type();
+    REQUIRE(status.enum_maps().size() == 1);
+    REQUIRE(status.find_enum_map("color") != nullptr);
+    REQUIRE(status.find_enum_map("color")->value_type.is_enum());
+    REQUIRE(status.find_enum_map("color")->total);
+    auto colors = find_member_functions(&status, "color");
+    REQUIRE(colors.size() == 1);
+    REQUIRE(colors[0]->get_return_type().is_enum());
+    REQUIRE_FALSE(colors[0]->get_return_type().is_wrapped_optional());
+
+    auto froms = find_static_functions(&status, "from");
+    REQUIRE(froms.size() == 1);
+    REQUIRE(froms[0]->args.size() == 1);
+    REQUIRE(froms[0]->args[0]->has_label());
+    REQUIRE(froms[0]->args[0]->label() == "color");
+    REQUIRE(froms[0]->args[0]->type().is_enum());
+}
+
+TEST_CASE("a file-scope map attaches to an enum declared elsewhere", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum KeyCode {\n"
+        "    case unknown;\n"
+        "    case space;\n"
+        "}\n"
+        "map glfw : int32 for KeyCode {\n"
+        "    .unknown = -1;\n"
+        "    .space = 32;\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "KeyCode")->complex_type();
+    REQUIRE(type.enum_maps().size() == 1);
+    REQUIRE(type.find_enum_map("glfw") != nullptr);
+    REQUIRE(find_member_functions(&type, "glfw").size() == 1);
+
+    auto froms = find_static_functions(&type, "from");
+    REQUIRE(froms.size() == 1);
+    REQUIRE(froms[0]->args[0]->has_label());
+    REQUIRE(froms[0]->args[0]->label() == "glfw");
+}
+
+TEST_CASE("a map in an earlier file still sees cases collected later", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "map glfw : int32 for KeyCode {\n"
+        "    .unknown = -1;\n"
+        "    .space = 32;\n"
+        "}\n",
+        "enum KeyCode {\n"
+        "    case unknown;\n"
+        "    case space;\n"
+        "}\n",
+    });
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "KeyCode")->complex_type();
+    REQUIRE(type.enum_maps().size() == 1);
+    REQUIRE(find_member_functions(&type, "glfw").size() == 1);
+}
+
+TEST_CASE("a call in an earlier file sees a map in a later file", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "echo KeyCode::space->glfw();\n"
+        "echo KeyCode::from(glfw: 32) != null;\n",
+        "enum KeyCode {\n"
+        "    case space;\n"
+        "}\n"
+        "map glfw : int32 for KeyCode {\n"
+        "    .space = 32;\n"
+        "}\n",
+    });
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "KeyCode")->complex_type();
+    REQUIRE(find_member_functions(&type, "glfw").size() == 1);
+    REQUIRE(find_static_functions(&type, "from").size() == 1);
+}
+
+TEST_CASE("a file-scope map without for is refused", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum KeyCode { case a; }\n"
+        "map glfw : int32 { .a = 1; }\n");
+    REQUIRE(has_issue_containing(*bundle, "A map at file scope has to name the enum"));
+}
+
+TEST_CASE("a map for a struct is refused", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point { int32 $x; }\n"
+        "map glfw : int32 for Point { }\n");
+    REQUIRE(has_issue_containing(*bundle, "A map has to name an enum"));
+}
+
+TEST_CASE("for inside an enum body is refused", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum KeyCode {\n"
+        "    case a;\n"
+        "    map glfw : int32 for KeyCode { .a = 1; }\n"
+        "}\n");
+    REQUIRE(has_issue_containing(*bundle, "A map inside the enum already names it"));
 }
 
 // the refusals are what keep the layout the compiler's. each is reported at the member rather than on

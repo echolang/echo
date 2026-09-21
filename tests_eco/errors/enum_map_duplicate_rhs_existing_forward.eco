@@ -1,0 +1,16 @@
+enum KeyCode
+{
+    case a;
+    case b;
+
+    const function glfw() : int32
+    {
+        return 0;
+    }
+
+    map glfw : int32
+    {
+        .a = 1;
+        .b = 1;
+    }
+}

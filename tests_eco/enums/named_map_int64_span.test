@@ -1,0 +1,11 @@
+flags: --optimize none
+
+--- OUT --->
+1
+1
+1
+1
+1
+--- IR --->
+CHECK: define
+CHECK-NOT: .lut.rev

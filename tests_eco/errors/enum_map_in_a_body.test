@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_map_in_a_body.eco:8:5
+
+  A map belongs at file or namespace scope, or inside the enum it maps.
+
+  7 | {
+  8 |     map glfw : int32 for KeyCode
+    :     ^^^
+  9 |     {
+
+1 error, nothing was compiled.

@@ -455,6 +455,43 @@ TEST_CASE("a builtin that does something rather than answering is refused", "[co
     REQUIRE(fold_subject(*bundle).result == ConstFoldResult::Result::t_refused);
 }
 
+TEST_CASE("a payload-free enum case constructor folds to its discriminant", "[const_fold]")
+{
+    auto qualified = EchoTests::tests_make_parsed_bundle(
+        "enum Color { case red; case green; }\n"
+        "Color $subject = Color::green;\n");
+    const ConstFoldResult folded = fold_subject(*qualified);
+    REQUIRE(folded.is_folded());
+    REQUIRE(folded.type.is_enum());
+    REQUIRE(folded.bits == 1);
+
+    auto shorthand = EchoTests::tests_make_parsed_bundle(
+        "enum Color { case red; case green; }\n"
+        "Color $subject = .green;\n");
+    const ConstFoldResult short_folded = fold_subject(*shorthand);
+    REQUIRE(short_folded.is_folded());
+    REQUIRE(short_folded.bits == 1);
+}
+
+TEST_CASE("payload-free enum equality folds", "[const_fold]")
+{
+    auto not_equal_bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Color { case red; case green; }\n"
+        "if (Color::red == Color::green) { echo 1; }\n");
+    const ConstFoldResult not_equal = fold_last_condition(*not_equal_bundle);
+    REQUIRE(not_equal.is_folded());
+    REQUIRE(not_equal.is_bool());
+    REQUIRE_FALSE(not_equal.as_bool());
+
+    auto equal_bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Color { case red; case green; }\n"
+        "if (Color::red == Color::red) { echo 1; }\n");
+    const ConstFoldResult equal = fold_last_condition(*equal_bundle);
+    REQUIRE(equal.is_folded());
+    REQUIRE(equal.is_bool());
+    REQUIRE(equal.as_bool());
+}
+
 TEST_CASE("a variable and an ordinary call are refused", "[const_fold]")
 {
     auto with_var = EchoTests::tests_make_parsed_bundle(

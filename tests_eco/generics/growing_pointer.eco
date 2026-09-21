@@ -1,0 +1,10 @@
+// dump names ptr<T> so intern grows dump<int32> → dump<ptr<int32>> →
+// dump<ptr<ptr<int32>>>. inference of &$x against T would decay and
+// not grow; the depth guard has to count the pointer
+
+function dump<T>(T $x) : void
+{
+    dump<ptr<T>>(&$x);
+}
+
+dump(1);

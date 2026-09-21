@@ -3,6 +3,7 @@
 #include "eco.h"
 
 #include "Compiler/BuildLayout.h"
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
@@ -125,7 +126,11 @@ bool c_spec_digest(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), digest);
 
     digest = Compiler::fnv1a64(Compiler::windows_sysroot().string(), digest);
-    digest = Compiler::fnv1a64(Compiler::darwin_sdk_root().string(), digest);
+    // the SDK the compile actually uses: empty apple_sdk is the Mac SDK, the
+    // iOS rows are iphonesimulator / iphoneos. hashing darwin_sdk_root here
+    // while compiling against iPhoneOS is the unsound-cache case
+    digest = Compiler::fnv1a64(
+        Compiler::apple_sdk_root(options.codegen.apple_sdk).string(), digest);
 
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
@@ -528,7 +533,9 @@ bool Compiler::build_c_sources(
         }
 
         Compiler::append_windows_sysroot_cc_args(argv);
-        Compiler::append_darwin_sdk_args(argv);
+        if (!Compiler::append_apple_target_args(argv, options.codegen, out_error)) {
+            return false;
+        }
 
         argv.push_back("-o");
         argv.push_back(object.string());

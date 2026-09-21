@@ -1,0 +1,40 @@
+// a named map is a compile-time relation from every case to an integer, and a fallible reverse.
+// GLFW-shaped: sparse codes, including a negative sentinel, written once.
+enum KeyCode
+{
+    case unknown;
+    case space;
+    case escape;
+    case a;
+    case menu;
+
+    map glfw : int32
+    {
+        .unknown = -1;
+        .space   = 32;
+        .escape  = 256;
+        .a       = 65;
+        .menu    = 348;
+    }
+}
+
+echo KeyCode::space->glfw();
+echo KeyCode::unknown->glfw();
+echo KeyCode::menu->glfw();
+
+echo KeyCode::from(glfw: 32) != null;
+echo KeyCode::from(glfw: 999) == null;
+echo KeyCode::from(glfw: 0) == null;
+
+KeyCode $space = guard KeyCode::from(glfw: 32);
+echo $space == KeyCode::space;
+
+KeyCode $unknown = guard KeyCode::from(glfw: -1);
+echo $unknown == KeyCode::unknown;
+
+KeyCode $key = KeyCode::from(glfw: 65) ?? .unknown;
+echo $key == KeyCode::a;
+echo $key->glfw();
+
+KeyCode $miss = KeyCode::from(glfw: 999) ?? .unknown;
+echo $miss == KeyCode::unknown;

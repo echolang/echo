@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
 #include "Parser/ParserPayload.h"
 
@@ -56,6 +58,45 @@ namespace Parser
     // binds and not one the compiler knows - so under `--no-stdlib` an integer backing still works and
     // a `: string` is refused with this sentence rather than crashing on an unbound core type
     std::string enum_backing_refusal(const AST::ValueType &backing, const AST::CoreTypes &core);
+
+    // the chassis a synthesized enum member is built from - case constructors, `value()`, `from()`,
+    // and a named map's two functions. EnumMapParser is the other caller; these are not a public
+    // parse entry
+    AST::FunctionDeclNode &begin_synthesized_enum_function(
+        Payload &payload,
+        AST::ComplexType &owner,
+        const TokenReference &name_token,
+        AST::MemberKind kind,
+        const AST::ValueType &return_type);
+
+    void push_enum_const_receiver(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        const AST::ValueType &self_value_type,
+        const TokenReference &at);
+
+    void push_enum_raw_param(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        const AST::ValueType &backing,
+        const TokenReference &at);
+
+    // one arm of a reverse `from`: `if ($raw == <rhs>) return Case();`. closed `from` and a named
+    // map's reverse plant the same chain; the rhs is a discriminant literal or a clone of the map
+    void plant_enum_from_equality_arm(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        AST::FunctionDeclNode *constructor,
+        const AST::ValueType &self_value_type,
+        const AST::ValueType &optional,
+        AST::ExprNode *rhs,
+        const TokenReference &at);
+
+    void plant_enum_from_null_return(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        const AST::ValueType &optional,
+        const TokenReference &at);
 };
 
 #endif

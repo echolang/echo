@@ -1,0 +1,3 @@
+flags: --target-os ios
+--- OUT --->
+darwin-family

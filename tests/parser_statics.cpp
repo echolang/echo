@@ -149,6 +149,88 @@ TEST_CASE("a static's owner binds the owner's type parameters", "[statics][gener
     REQUIRE(calls[0]->decl->instantiation_args[1].is_boolean_type());
 }
 
+TEST_CASE("a static void call as a statement still finds the method on its type", "[statics]")
+{
+    // **the statement form, not the expression form.** `$x = Point::origin()` already went through
+    // parse_expr's try_parse_static_call arm; `Marker::activate();` is a whole statement, and the
+    // call-statement arm used to consume `Marker::` as a namespace and report UnknownFunction for a
+    // name sitting on the type. void is what *forces* that form - a value return is usually bound
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Marker {\n"
+        "    static function activate() : void {}\n"
+        "}\n"
+        "Marker::activate();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *marker = type_named(m, "Marker");
+    REQUIRE(marker != nullptr);
+    REQUIRE(find_static_functions(&marker->complex_type(), "activate").size() == 1);
+
+    auto calls = calls_to(m, "activate");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->static_owner.has_complex_type());
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->decl->is_static_method());
+}
+
+TEST_CASE("a namespaced free call as a statement is still a free call", "[statics]")
+{
+    // the static-call speculation has to hand this back: `util` is a namespace, not a type, and
+    // util::ping() is the qualified free call starts_call_statement already recognised
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "namespace util;\n"
+        "function ping() : void {}\n"
+        "util::ping();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "ping");
+    REQUIRE(calls.size() == 1);
+    REQUIRE_FALSE(calls[0]->static_owner.has_complex_type());
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE_FALSE(calls[0]->decl->is_static_method());
+}
+
+TEST_CASE("a static void on a generic owner as a statement binds from the owner", "[statics][generics]")
+{
+    // starts_call_statement walks only `identifier ::` pairs, so `Box<int32>::reset();` used to
+    // read `Box` as a free function with type arguments. try_parse_static_call is what sees the
+    // generic owner, and the owner's T is the substitution seed a static has no receiver to bind
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> {\n"
+        "    static function reset() : void {}\n"
+        "}\n"
+        "Box<int32>::reset();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "reset");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->static_owner.has_complex_type());
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->decl->is_static_method());
+    REQUIRE_FALSE(calls[0]->decl->is_generic());
+    REQUIRE(calls[0]->decl->instantiation_args.size() == 1);
+    REQUIRE(calls[0]->decl->instantiation_args[0] == EchoTests::prim(ValueTypePrimitive::t_int32));
+}
+
+TEST_CASE("a missing static as a statement is UnknownStaticFunction, not UnknownFunction", "[statics]")
+{
+    // once the owner is known to be a type the call is committed, so the miss names the type
+    // rather than searching a minted namespace
+    EchoTests::assert_code_emits_issue(
+        "struct Marker {\n"
+        "    static function activate() : void {}\n"
+        "}\n"
+        "Marker::missing();\n",
+        "The type 'Marker' has no static function named 'missing'"
+    );
+}
+
 TEST_CASE("static is refused where no type owns the declaration", "[statics]")
 {
     EchoTests::assert_code_emits_issue(

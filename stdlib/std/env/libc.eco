@@ -27,7 +27,7 @@ internal extern {
     function getenv as c_getenv(ptr<const uint8> $name) : ptr<uint8>;
 }
 
-#[if: os != windows]
+#[if: family != windows]
 internal extern {
     // writes the path into `$buf` and hands it back, or null when it does not fit - which is the
     // only failure `cwd` has to distinguish, and why it grows its buffer rather than
@@ -76,14 +76,14 @@ internal const uint32 CP_UTF8 = 65001;
 // exists anywhere else, and a declaration of the wrong one is a *link* error rather than a compile error -
 // so the declaration has to be absent on the platforms that lack it, which is what the filter buys. The
 // arms are the block, not just the body.
-#[if: os == darwin]
+#[if: family == darwin]
 internal extern {
     // writes the path into `$buf` and the length it needed into `$size`. 0 on success, -1 when the buffer
     // was too small - and on that path it has already overwritten `$size` with the length required, which
     // is what makes the retry exact rather than a doubling guess
     function _NSGetExecutablePath as c_exe_path(ptr<uint8> $buf, ptr<uint32> $size) : int32;
 }
-#[elif: os == linux]
+#[elif: family == linux]
 internal extern {
     // the byte count written, or -1. It does **not** terminate, which is the one thing a caller here has to
     // remember - `str::from` would read past the end

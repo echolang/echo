@@ -27,6 +27,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
 #include <llvm/TargetParser/Triple.h>
@@ -103,6 +104,8 @@ void TypeLowering::create_cmp_units(
     // that mentions it. Built here because a ComplexType has no back-pointer to its TypeDeclNode
     _ctx.type_site_map.clear();
 
+    // file-root children first: a named map plants in the file that wrote it, and that
+    // file must win over the owner's TypeDecl, which a dependency module walks first
     for (auto &module : bundle.modules) {
         for (auto &file : module->files()) {
             if (file.root == nullptr) {
@@ -111,7 +114,8 @@ void TypeLowering::create_cmp_units(
 
             for (auto &child : file.root->children) {
                 if (child.has_type<AST::FunctionDeclNode>()) {
-                    _ctx.function_file_map[child.get_ptr<AST::FunctionDeclNode>()] = &file;
+                    _ctx.function_file_map.try_emplace(
+                        child.get_ptr<AST::FunctionDeclNode>(), &file);
                 }
                 else if (child.has_type<AST::TypeDeclNode>()) {
                     AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
@@ -119,10 +123,28 @@ void TypeLowering::create_cmp_units(
 
                     _ctx.type_site_map[&type_decl->complex_type()] = CodegenContext::TypeSite{
                         &file, at != nullptr ? at->line() : 0 };
+                }
+            }
+        }
+    }
 
-                    for (AST::FunctionDeclNode *method : type_decl->methods()) {
-                        _ctx.function_file_map[method] = &file;
-                    }
+    for (auto &module : bundle.modules) {
+        for (auto &file : module->files()) {
+            if (file.root == nullptr) {
+                continue;
+            }
+
+            for (auto &child : file.root->children) {
+                if (!child.has_type<AST::TypeDeclNode>()) {
+                    continue;
+                }
+
+                AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
+                for (AST::FunctionDeclNode *method : type_decl->methods()) {
+                    _ctx.function_file_map.try_emplace(method, &file);
+                }
+                for (AST::FunctionDeclNode *method : type_decl->complex_type().static_methods()) {
+                    _ctx.function_file_map.try_emplace(method, &file);
                 }
             }
         }
@@ -139,7 +161,7 @@ void TypeLowering::create_cmp_units(
             auto found = _ctx.function_file_map.find(decl->template_ref);
 
             if (found != _ctx.function_file_map.end()) {
-                _ctx.function_file_map[decl] = found->second;
+                _ctx.function_file_map.try_emplace(decl, found->second);
             }
         }
     }
@@ -211,6 +233,45 @@ ReturnAbi TypeLowering::return_abi_of(
     }
 
     return return_abi_for(get_llvm_type(node->get_return_type(), cmp_unit));
+}
+
+void TypeLowering::store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type)
+{
+    if (auto *structure = llvm::dyn_cast<llvm::StructType>(type)) {
+        for (unsigned i = 0; i < structure->getNumElements(); i++) {
+            store_aggregate_fieldwise(
+                _ctx.builder->CreateExtractValue(value, i),
+                _ctx.builder->CreateStructGEP(structure, slot, i),
+                structure->getElementType(i));
+        }
+
+        return;
+    }
+
+    if (auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) {
+        for (uint64_t i = 0; i < array->getNumElements(); i++) {
+            store_aggregate_fieldwise(
+                _ctx.builder->CreateExtractValue(value, static_cast<unsigned>(i)),
+                _ctx.builder->CreateConstInBoundsGEP2_64(array, slot, 0, i),
+                array->getElementType());
+        }
+
+        return;
+    }
+
+    // a leaf. no `!tbaa`: this is the caller's return storage, which nothing else names yet
+    _ctx.builder->CreateStore(value, slot);
+}
+
+void TypeLowering::emit_returned_value(llvm::Value *value)
+{
+    if (_ctx.sret_pointer != nullptr) {
+        store_aggregate_fieldwise(value, _ctx.sret_pointer, _ctx.sret_type);
+        _ctx.builder->CreateRetVoid();
+        return;
+    }
+
+    _ctx.builder->CreateRet(value);
 }
 
 void TypeLowering::apply_function_attributes(
@@ -707,21 +768,22 @@ void TypeLowering::gen_type_id(AST::FunctionCallExprNode &node)
     _ctx.push(agg);
 }
 
-llvm::Constant *TypeLowering::build_conformance_table(
+llvm::Constant *TypeLowering::conformance_table_constant(
     const AST::ComplexType &type,
-    const Compiler::LLVM::CmpUnit &cmp_unit
+    CmpUnit &cmp_unit,
+    bool with_vtables
 )
 {
     const auto &conformances = type.conformances();
-
-    if (conformances.empty()) {
-        return nullptr;
-    }
+    assert(!conformances.empty() && "conformance_table_constant on a class that conforms to nothing");
 
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    auto *entry_type = conformance_entry_llvm_type();
+    const AST::ValueType class_type =
+        AST::ValueType::make_class(const_cast<AST::ComplexType *>(&type));
 
-    std::vector<llvm::Constant *> identities;
-    identities.reserve(conformances.size());
+    std::vector<llvm::Constant *> entries;
+    entries.reserve(conformances.size());
 
     for (const AST::ValueType &conformance : conformances) {
         // only valid interface types are ever published on a ComplexType - parse_typedecl refuses
@@ -730,23 +792,89 @@ llvm::Constant *TypeLowering::build_conformance_table(
         // from one list in two places: a scan bounded by the longer one reads past the array
         assert(conformance.is_interface() && "a non-interface reached ComplexType::conformances()");
 
-        identities.push_back(
-            get_or_create_interface_identity(*conformance.get_complex_type(), cmp_unit));
+        llvm::Constant *identity =
+            get_or_create_interface_identity(*conformance.get_complex_type(), cmp_unit);
+        llvm::Constant *vtable = llvm::ConstantPointerNull::get(
+            llvm::cast<llvm::PointerType>(opaque_ptr));
+
+        if (with_vtables) {
+            if (llvm::Constant *filled = get_or_create_vtable(class_type, conformance, cmp_unit)) {
+                vtable = filled;
+            }
+        }
+
+        entries.push_back(llvm::ConstantStruct::get(entry_type, { identity, vtable }));
     }
 
-    auto *table_type = llvm::ArrayType::get(opaque_ptr, identities.size());
+    auto *table_type = llvm::ArrayType::get(entry_type, entries.size());
+    return llvm::ConstantArray::get(table_type, entries);
+}
 
-    // linkonce_odr like the typeinfo that points at it, and named off the same mangled token: two units
-    // that both lower this class emit identical tables and the linker keeps one
-    return get_or_create_odr_constant(
+llvm::Constant *TypeLowering::build_conformance_table(
+    const AST::ComplexType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
+{
+    if (type.conformances().empty()) {
+        return nullptr;
+    }
+
+    CmpUnit &unit = const_cast<CmpUnit &>(cmp_unit);
+    llvm::Constant *table = get_or_create_odr_constant(
         type.mangled_token() + ".conformances",
-        [&] { return llvm::ConstantArray::get(table_type, identities); },
+        [&] { return conformance_table_constant(type, unit, _function_maps_ready); },
         cmp_unit);
+
+    // struct maps run before function maps, so the rows start `{ identity, null }`. remember
+    // the unit that emitted this copy - fill has to rewrite every ODR definition, not the
+    // first one it finds. a box lowered after fill already has `_function_maps_ready` and
+    // is written complete here
+    if (!_function_maps_ready) {
+        _pending_conformance_fills.push_back({ &type, &unit });
+    }
+
+    return table;
+}
+
+void TypeLowering::fill_unit_conformance_table(const AST::ComplexType &type, CmpUnit &cmp_unit)
+{
+    if (type.conformances().empty()) {
+        return;
+    }
+
+    llvm::GlobalVariable *slot = cmp_unit.llvm_module->getGlobalVariable(
+        type.mangled_token() + ".conformances", true);
+
+    if (slot == nullptr) {
+        return;
+    }
+
+    slot->setInitializer(conformance_table_constant(type, cmp_unit, true));
 }
 
 void TypeLowering::forget_interned_structs()
 {
     _context_structs.clear();
+    _pending_conformance_fills.clear();
+    _function_maps_ready = false;
+}
+
+void TypeLowering::fill_conformance_vtables()
+{
+    _function_maps_ready = true;
+    CmpUnit *previous = _ctx.current_cmp_unit;
+
+    for (const PendingConformanceFill &pending : _pending_conformance_fills) {
+        if (pending.type == nullptr || pending.unit == nullptr) {
+            continue;
+        }
+
+        _ctx.current_cmp_unit = pending.unit;
+        fill_unit_conformance_table(*pending.type, *pending.unit);
+    }
+
+    _pending_conformance_fills.clear();
+    _ctx.current_cmp_unit = previous;
 }
 
 llvm::StructType *TypeLowering::intern_struct_type(const AST::ComplexType *type, const std::string &name)
@@ -1041,6 +1169,16 @@ llvm::StructType *TypeLowering::typeinfo_llvm_type()
 
     // by slot index rather than in written order, so the names in Codegen/ClassLayout.h are what decides
     // the layout - the one place the descriptor's shape is spelled, for the writer and the scan both
+    return llvm::StructType::get(*_ctx.llvm_context, members);
+}
+
+llvm::StructType *TypeLowering::conformance_entry_llvm_type()
+{
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    std::vector<llvm::Type *> members(2);
+    members[ClassConformance::identity_index] = opaque_ptr;
+    members[ClassConformance::vtable_index] = opaque_ptr;
+
     return llvm::StructType::get(*_ctx.llvm_context, members);
 }
 

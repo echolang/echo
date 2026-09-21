@@ -1,0 +1,6 @@
+#[module: "pathlib"]
+#[version: "0.1.0"]
+
+#[requires: "libhello" { version: "^1", source: git "https://x" }]
+
+#[sources: "src/*.eco"]
