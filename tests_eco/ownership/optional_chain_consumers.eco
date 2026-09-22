@@ -1,6 +1,6 @@
-// the same heap-owning string field, consumed by `guard`, a by-value parameter, a return, and a
-// depth-one chain. a method that already returns a string by value is a computed continuation and
-// must stay balanced without a second copy
+// the same heap-owning string field, consumed by `guard`, a by-value parameter, a return,
+// a depth-one chain kept as `string?`, and a method that already returns a string by value.
+// the method continuation is computed and must stay balanced without a second copy
 
 class Holder
 {
@@ -25,9 +25,9 @@ function viaReturn(Holder? $h) : string
     return $h?->id ?? '';
 }
 
-function viaDepthOne(Holder? $h) : string
+function viaDepthOne(Holder? $h) : string?
 {
-    return $h?->id ?? '';
+    return $h?->id;
 }
 
 function take(string $s) : usize
@@ -59,7 +59,7 @@ echo mem::refs($h->id->owner);
 {
     echo viaReturn($h)->size();
     echo mem::refs($h->id->owner);
-    echo viaDepthOne($h)->size();
+    echo (viaDepthOne($h) ?? '')->size();
     echo mem::refs($h->id->owner);
     echo viaArg($h);
     echo mem::refs($h->id->owner);

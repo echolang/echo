@@ -8,7 +8,6 @@
 #include "AST/ExprNode.h"
 #include "Token.h"
 
-#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -70,18 +69,17 @@ namespace AST
             // resolution can only give once the subject has settled
             TypeNode *owner = nullptr;
 
-            // the arm's own scope. its first children are the payload bindings, seeded there by the
-            // parser exactly as a `foreach`'s bindings and a `guard`'s failure are - so they are
-            // ordinary locals of an ordinary block, the frame machinery ends them, and no ownership
+            // the arm's own scope. the payload bindings are ordinary locals of an ordinary
+            // block, seeded there by the parser exactly as a `foreach`'s bindings and a
+            // `guard`'s failure are - so the frame machinery ends them, and no ownership
             // rule, drop rule or codegen arm appears anywhere for a binding
             ScopeNode *scope = nullptr;
 
-            // how many payload names the pattern wrote. those are the scope's first children; a
-            // block arm's own declarations follow them and are not part of this count. resolution
-            // reads this rather than every leading declaration, because a local at the start of
-            // the block is a declaration too. shallow-copied with the arm, so a generic instance
-            // keeps the number the parser counted
-            size_t binding_count = 0;
+            // the payload names the pattern wrote. they live in `scope`; this list is which
+            // of those children are the pattern, so a local at the start of `{ }` is not an
+            // extra binding. cloned by rebinding each pointer after the scope, the same
+            // contract GuardNode::failure uses
+            std::vector<VarDeclNode *> bindings;
 
             // the value this arm produces, or null for a `{ ... }` arm - which is what makes the whole
             // match `void`. one edge rather than two arm kinds, because "this arm produces nothing" and

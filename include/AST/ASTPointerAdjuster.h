@@ -79,7 +79,7 @@ namespace AST
         File *_current_file = nullptr;
 
         // the function whose body is currently being walked, so a return knows what the value
-        // has to fit. null at file scope, where a return has no declared type to answer to
+        // has to fit. null at file scope, where a return answers AST::entry_return_type()
         FunctionDeclNode *_current_function = nullptr;
 
         // the value-position form of an expression: descend into it, then a pointer read gains one

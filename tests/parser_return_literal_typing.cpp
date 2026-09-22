@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/FunctionDeclNode.h>
+#include <AST/LiteralValueNode.h>
 #include <AST/ReturnNode.h>
 #include <AST/ScopeNode.h>
 #include <AST/ExprNode.h>
@@ -157,6 +158,31 @@ TEST_CASE("the return type hint is only passed down when it can type a literal",
 
         REQUIRE_FALSE(bundle->collector.has_critical_issues());
         REQUIRE(return_expr_of(bundle->modules.find_module("test"), "f") == nullptr);
+    }
+
+    SECTION("a bare return at file scope is planted as int32 0")
+    {
+        // the file root is `i32 main`. parse plants the 0 so PointerAdjuster,
+        // TypeChecker and StmtCodegen see an ordinary valued return
+        auto bundle = EchoTests::tests_make_parsed_bundle("return;\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto &m = bundle->modules.find_module("test");
+        ReturnNode *ret = nullptr;
+
+        for (auto *node : m.nodes.of_type<ReturnNode>()) {
+            if (EchoTests::is_file_root_child(m, node)) {
+                ret = node;
+                break;
+            }
+        }
+
+        REQUIRE(ret != nullptr);
+        REQUIRE(ret->expr != nullptr);
+        REQUIRE(ret->expr->get_node_type() == NodeType::n_literal_int);
+        REQUIRE(ret->expr->result_type() == prim(ValueTypePrimitive::t_int32));
+        REQUIRE(static_cast<LiteralIntExprNode *>(ret->expr)->int32_value() == 0);
     }
 }
 

@@ -415,12 +415,7 @@ void AbortCodegen::gen_exit(llvm::Value *code)
     _ctx.builder->CreateUnreachable();
 }
 
-void AbortCodegen::gen_abort_if(
-    llvm::Value *condition,
-    const std::string &headline,
-    const std::string &detail,
-    const TokenReference &at
-)
+void AbortCodegen::abort_when(llvm::Value *condition, llvm::function_ref<void()> emit_stop)
 {
     llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
 
@@ -430,9 +425,21 @@ void AbortCodegen::gen_abort_if(
     _ctx.builder->CreateCondBr(condition, abort_block, ok_block);
 
     _ctx.set_insert_point(abort_block);
-    gen_abort(headline, detail, at);
+    emit_stop();
 
     _ctx.set_insert_point(ok_block);
+}
+
+void AbortCodegen::gen_abort_if(
+    llvm::Value *condition,
+    const std::string &headline,
+    const std::string &detail,
+    const TokenReference &at
+)
+{
+    abort_when(condition, [&] {
+        gen_abort(headline, detail, at);
+    });
 }
 
 llvm::Constant *AbortCodegen::odr_string(const std::string &symbol, const std::string &text)
@@ -453,8 +460,7 @@ llvm::Constant *AbortCodegen::odr_string(const std::string &symbol, const std::s
     return global;
 }
 
-void AbortCodegen::gen_abort_if_unlocated(
-    llvm::Value *condition,
+void AbortCodegen::emit_unlocated_abort(
     const std::string &headline,
     const std::string &detail,
     const std::string &symbol_stem
@@ -462,14 +468,6 @@ void AbortCodegen::gen_abort_if_unlocated(
 {
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
-
-    llvm::BasicBlock *abort_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "abort", fn);
-    llvm::BasicBlock *ok_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "abort.ok", fn);
-
-    _ctx.builder->CreateCondBr(condition, abort_block, ok_block);
-
-    _ctx.set_insert_point(abort_block);
 
     // "<runtime>" rather than a file: there is no source line that wrote this check, and a
     // per-unit basename here would be the same ODR hazard the named globals above avoid
@@ -486,8 +484,18 @@ void AbortCodegen::gen_abort_if_unlocated(
         llvm::ConstantInt::get(i64, 1),
     });
     _ctx.builder->CreateUnreachable();
+}
 
-    _ctx.set_insert_point(ok_block);
+void AbortCodegen::gen_abort_if(
+    llvm::Value *condition,
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &symbol_stem
+)
+{
+    abort_when(condition, [&] {
+        emit_unlocated_abort(headline, detail, symbol_stem);
+    });
 }
 
 llvm::Value *AbortCodegen::swap_hook(llvm::Value *fn)

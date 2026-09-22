@@ -354,8 +354,12 @@ Node *MatchExprNode::clone(CloneContext &cc) const
         arm.owner = cc.child(arm.owner);
 
         // the scope before the value, which is the order they are reached in: the bindings are the
-        // scope's own children, and the value reads them
+        // scope's own children, and the value reads them. rebind after the scope so the map
+        // already holds the cloned declarations
         arm.scope = cc.child(arm.scope);
+        for (VarDeclNode *&binding : arm.bindings) {
+            binding = cc.rebind(binding);
+        }
         arm.value = cc.child(arm.value);
     }
 

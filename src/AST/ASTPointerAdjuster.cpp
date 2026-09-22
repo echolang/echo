@@ -3,6 +3,7 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTFileRoot.h"
 #include "AST/ASTRegion.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
@@ -328,7 +329,9 @@ void PointerAdjuster::visitReturn(ReturnNode &node)
     // does not match operand")
     node.expr = as_value_for(
         node.expr,
-        _current_function != nullptr ? _current_function->get_return_type() : ValueType::make_unknown());
+        _current_function != nullptr
+            ? _current_function->get_return_type()
+            : entry_return_type());
 
     // the drops this return owes. they were skipped while this pass drove its own traversal, on the
     // argument that AST::needs_destruction says a pointer is never an owner so a drop's place cannot

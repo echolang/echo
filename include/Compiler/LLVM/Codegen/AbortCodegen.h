@@ -5,6 +5,7 @@
 
 #include "Token.h"
 
+#include <llvm/ADT/STLFunctionalExtras.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
@@ -79,12 +80,10 @@ namespace Compiler::LLVM
             const std::string &detail,
             const TokenReference &at);
 
-        // the same conditional stop, from inside a `linkonce_odr` body that has no source location
-        // to name - a generated release thunk is the caller this exists for. `gen_abort_if` would
-        // mint anonymous globals for its pieces, and an anonymous global's *name* differs per unit,
-        // which is what makes such a body fail the ODR comparison in LLVMCompiler. The pieces here
-        // are named linkonce_odr constants keyed by `symbol_stem`, so every unit's copy is identical
-        void gen_abort_if_unlocated(
+        // the same stop from inside a `linkonce_odr` body that has no source location.
+        // anonymous globals would differ per unit and fail the ODR comparison; pieces
+        // here are named linkonce_odr constants keyed by `symbol_stem`
+        void gen_abort_if(
             llvm::Value *condition,
             const std::string &headline,
             const std::string &detail,
@@ -134,6 +133,13 @@ namespace Compiler::LLVM
 
         // a named linkonce_odr string constant, for the unlocated stop above
         llvm::Constant *odr_string(const std::string &symbol, const std::string &text);
+
+        void abort_when(llvm::Value *condition, llvm::function_ref<void()> emit_stop);
+
+        void emit_unlocated_abort(
+            const std::string &headline,
+            const std::string &detail,
+            const std::string &symbol_stem);
 
         void call_thunk(
             const std::string &headline,

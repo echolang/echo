@@ -2,7 +2,9 @@
 
 #include "Parser/ExprParser.h"
 
+#include "AST/ASTFileRoot.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/LiteralValueNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
@@ -46,6 +48,18 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
             auto *this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
 
             return payload.context.emplace_node<AST::ReturnNode>(this_ref, return_token);
+        }
+
+        // a file root is `i32 main`. a bare `return;` there is the 0 that falls off
+        // the end, planted so PointerAdjuster, TypeChecker and StmtCodegen see an
+        // ordinary valued return. a `: void` function is the case a missing expr is for
+        if (payload.context.current_function_ptr == nullptr) {
+            auto zero = payload.context.make_virtual_token(
+                "0", Token::Type::t_integer_literal, return_token);
+            auto *literal = payload.context.emplace_nodep<AST::LiteralIntExprNode>(
+                zero, AST::entry_return_type().get_primitive_type());
+
+            return payload.context.emplace_node<AST::ReturnNode>(literal, return_token);
         }
 
         return payload.context.emplace_node<AST::ReturnNode>(nullptr, return_token);

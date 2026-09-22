@@ -40,13 +40,11 @@ namespace
     {
         FieldSet fallthrough;
         bool falls_through = true;
-        // a `return` happened on some path. `die` does not set this: a helper whose
-        // body is `die` does not come back to its caller
-        bool did_return = false;
         std::vector<FieldSet> completed;
-        // assignments at a `die`. used only when no path returns or falls through,
-        // so a failure branch that dies before the fields are seated does not erase
-        // the path that continues and seats them
+        // seats at a `die`. completing paths are returns and fallthrough; a die
+        // is not one, so a failure branch that dies does not erase the continuing
+        // path. consulted only when every path died, so an always-die constructor
+        // still owes the fields it did not seat
         std::vector<FieldSet> died_with;
         FieldSet assigned_any;
     };
@@ -151,7 +149,6 @@ namespace
         join_completed(into, from);
         into.died_with.insert(into.died_with.end(), from.died_with.begin(), from.died_with.end());
         into.assigned_any.insert(from.assigned_any.begin(), from.assigned_any.end());
-        into.did_return = into.did_return || from.did_return;
     }
 
     FieldSet all_paths_of(const PathResult &walked)
@@ -162,10 +159,12 @@ namespace
             completing.push_back(walked.fallthrough);
         }
 
-        // no path hands the object back. a constructor that only `die`s still assigned
-        // whatever it seated before the `die` — `$this->h = Handle($v); die(...)` is
-        // not a blank field. a constructor that never reaches a `die` either, and
-        // does not return, assigned nothing
+        // completing paths are returns and fallthrough. a `die` is not one: a
+        // failure branch that dies must not erase the seats of the path that
+        // continues. when every path died, those seats are still the
+        // constructor's - the object is never handed back, but
+        // ConstructionLeavesFieldUnassigned still names what it owed and did
+        // not seat
         if (completing.empty()) {
             completing = walked.died_with;
         }
@@ -235,7 +234,7 @@ namespace
             std::vector<Read> *reads,
             WalkEnv &env
         ) :
-            result { std::move(incoming), true, false, {}, {}, {} },
+            result { std::move(incoming), true, {}, {}, {} },
             self(self),
             reads(reads),
             env(env)
@@ -291,7 +290,6 @@ namespace
             collect_value(node.expr);
             result.completed.push_back(result.fallthrough);
             result.falls_through = false;
-            result.did_return = true;
         }
 
         void visit_loop_control(AST::LoopControlNode &) override
@@ -530,7 +528,7 @@ namespace
         MethodSummary summary;
         summary.assigned_all = all_paths_of(walked);
         summary.assigned_any = walked.assigned_any;
-        summary.never_completes = !walked.falls_through && !walked.did_return;
+        summary.never_completes = !walked.falls_through && walked.completed.empty();
         return env.summaries.emplace(&decl, std::move(summary)).first->second;
     }
 
@@ -567,7 +565,7 @@ namespace
             result.assigned_any.insert(
                 inner.result.assigned_any.begin(), inner.result.assigned_any.end());
 
-            if (as_statement && !inner.result.falls_through && !inner.result.did_return) {
+            if (as_statement && !inner.result.falls_through && inner.result.completed.empty()) {
                 result.falls_through = false;
             }
 

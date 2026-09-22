@@ -190,28 +190,11 @@ void MatchResolution::resolve(MatchExprNode &node)
         covered[entry->ordinal] = true;
         arm.case_ordinal = entry->ordinal;
 
-        // the bindings, which the arm's scope holds as its own first declarations. **the count is
-        // the pattern's, recorded at parse, not every leading declaration in the block**: a local
-        // at the start of `{ }` is a VarDecl too, and counting it reports a payload arity the
-        // author did not write. checked against the case rather than the constructor: a pattern
-        // is not a call, and asking the overload set would make "how many names may I write here"
-        // depend on a ranking
-        const size_t written = arm.binding_count;
-        std::vector<VarDeclNode *> bindings;
-
-        if (arm.scope != nullptr) {
-            const size_t available = arm.scope->children.size();
-
-            for (size_t i = 0; i < written && i < available; i++) {
-                // asked through has_type rather than a null get_ptr, which asserts on a mismatch
-                // rather than answering
-                if (!arm.scope->children[i].has_type<VarDeclNode>()) {
-                    break;
-                }
-
-                bindings.push_back(arm.scope->children[i].get_ptr<VarDeclNode>());
-            }
-        }
+        // the bindings the parser recorded on the arm, not every leading declaration in
+        // the block: a local at the start of `{ }` is a VarDecl too. checked against the
+        // case rather than the constructor: a pattern is not a call, and asking the
+        // overload set would make "how many names may I write here" depend on a ranking
+        const std::vector<VarDeclNode *> &bindings = arm.bindings;
 
         if (bindings.size() != entry->payload_field_count) {
             refuse(node, arm.token, fmt::format(
@@ -221,7 +204,7 @@ void MatchResolution::resolve(MatchExprNode &node)
                 entry->payload_field_count == 1 ? "" : "s",
                 entry->payload_field_count,
                 entry->payload_field_count == 1 ? "" : "s",
-                written));
+                bindings.size()));
             return;
         }
 

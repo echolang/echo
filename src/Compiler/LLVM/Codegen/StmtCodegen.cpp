@@ -7,6 +7,7 @@
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "AST/ASTFileRoot.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
 #include "AST/ScopeNode.h"
@@ -399,34 +400,32 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
         }
     };
 
-    // a bare `return;` with no enclosing function is file scope, and file scope is `i32 main`.
-    // the 0 is the value falling off the end already returns. a `: void` function is the other
-    // null expression, and it really does return nothing. TypeChecker::visitReturn is the reader
-    // that accepts the first and refuses a bare return from a function that returns a value
-    if (node.expr == nullptr) {
-        emit_unwind();
+    const AST::ValueType destination = _ctx.current_function != nullptr
+        ? _ctx.current_function->get_return_type()
+        : AST::entry_return_type();
 
-        if (_ctx.current_function == nullptr) {
-            _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+    // a `: void` function really does return nothing. a written file-scope
+    // `return;` was planted as `return 0` at parse, so it takes the valued path
+    // below. this is the empty stack after a void-like expression, and the 0
+    // that falls off `i32 main` when nothing was computed
+    auto emit_empty = [&]() {
+        emit_unwind();
+        if (destination.is_void()) {
+            _ctx.builder->CreateRetVoid();
             return;
         }
+        _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+    };
 
-        _ctx.builder->CreateRetVoid();
+    if (node.expr == nullptr) {
+        emit_empty();
         return;
     }
 
     node.expr->accept(*_ctx.visitor);
 
-    // check if we actually got a value on the stack
     if (_ctx.value_stack.empty()) {
-        emit_unwind();
-
-        if (_ctx.current_function == nullptr) {
-            _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
-            return;
-        }
-
-        _ctx.builder->CreateRetVoid();
+        emit_empty();
         return;
     }
 
@@ -441,18 +440,12 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     //
     // result_type() may answer unknown (a binary expression whose operands differ does), which
     // coerce_value takes as "read the signedness off the value itself". a `: void` function
-    // still `CreateRetVoid` - the LLVM ABI for a function that produces no value. a file-scope
-    // return has no Echo signature; it answers to `i32 main`, so the value is coerced to int32
-    // rather than handed to CreateRet in whatever width it was written
-    if (_ctx.current_function != nullptr && _ctx.current_function->get_return_type().is_void()) {
+    // still `CreateRetVoid`. a file-scope return answers AST::entry_return_type()
+    if (destination.is_void()) {
         emit_unwind();
         _ctx.builder->CreateRetVoid();
         return;
     }
-
-    const AST::ValueType destination = _ctx.current_function != nullptr
-        ? _ctx.current_function->get_return_type()
-        : AST::ValueType(AST::ValueTypePrimitive::t_int32);
 
     ret = _ctx.types->coerce_value(
         ret, node.expr->result_type(), destination, *_ctx.current_cmp_unit);

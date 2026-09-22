@@ -2115,8 +2115,8 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
 
         _ctx.set_insert_point(arm_blocks[i]);
 
-        // the arm's scope first - its bindings are the scope's own leading declarations, so this is
-        // what seats and initializes them, and a block arm's statements follow in the same walk
+        // the arm's scope first - the bindings are ordinary locals of that block, so this
+        // is what seats and initializes them, and a block arm's statements follow in the same walk
         if (arm.scope != nullptr) {
             arm.scope->accept(*_ctx.visitor);
         }

@@ -962,7 +962,7 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
         _ctx, access, handle, box_type, count_ptr, count.c_str());
 
     if (_ctx.options.checking_refcounts() || _ctx.options.assertions_enabled()) {
-        _ctx.abort->gen_abort_if_unlocated(
+        _ctx.abort->gen_abort_if(
             _ctx.builder->CreateICmpSLT(next, llvm::ConstantInt::get(i64, 0), count + ".dead"),
             "fatal error",
             "released an object that was already destroyed: " + audit_label,

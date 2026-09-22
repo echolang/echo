@@ -200,9 +200,8 @@ AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload, AST::TypeNode 
             }
         }
 
-        // the names in the parentheses, and nothing the block declares afterwards. resolution
-        // types this many leading children and leaves the arm's own locals alone
-        arm.binding_count = bindings.size();
+        // the names in the parentheses, and nothing the block declares afterwards
+        arm.bindings = bindings;
 
         if (!payload.expect_token(Token::Type::t_double_arrow)) {
             skip_to_next_arm();
