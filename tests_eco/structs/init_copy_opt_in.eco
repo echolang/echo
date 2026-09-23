@@ -1,3 +1,5 @@
+// a written copy constructor still runs `init`
+
 class Handle
 {
     int32 $n;
@@ -16,8 +18,18 @@ struct Counts
 
 struct Tagged
 {
-    Handle $h;
+    int32 $id;
     int32 $stamp;
+
+    constructor(int32 $id)
+    {
+        $this->id = $id;
+    }
+
+    constructor(const Tagged& $other)
+    {
+        $this->id = $other->id;
+    }
 
     init
     {
@@ -25,11 +37,11 @@ struct Tagged
     }
 }
 
-Tagged $a = Tagged(Handle(1));
+Tagged $a = Tagged(1);
 echo $a->stamp;
-echo Counts::$n;
-
 Tagged $b = $a;
 echo $b->stamp;
-echo Counts::$n;
+Tagged $c = Tagged($a);
+echo $c->stamp;
 echo $a->stamp;
+echo $c->id;

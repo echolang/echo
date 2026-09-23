@@ -1,0 +1,50 @@
+// a write to an `init`-derived field survives copy
+
+class Handle
+{
+    int32 $n;
+}
+
+struct Plain
+{
+    int32 $w;
+    int32 $bg;
+
+    init
+    {
+        $this->bg = 0;
+    }
+}
+
+struct Held
+{
+    Handle $h;
+    int32 $bg;
+
+    init
+    {
+        $this->bg = 0;
+    }
+}
+
+function plainBg(Plain $p) : int32
+{
+    return $p->bg;
+}
+
+function heldBg(Held $p) : int32
+{
+    return $p->bg;
+}
+
+Plain $a = Plain(10);
+$a->bg = 5;
+Plain $b = $a;
+echo $b->bg;
+echo plainBg($a);
+
+Held $c = Held(Handle(1));
+$c->bg = 5;
+Held $d = $c;
+echo $d->bg;
+echo heldBg($c);

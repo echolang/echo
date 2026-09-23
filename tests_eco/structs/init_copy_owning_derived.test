@@ -1,0 +1,7 @@
+flags: --track-allocations
+
+--- OUT --->
+14
+n=7
+100
+0

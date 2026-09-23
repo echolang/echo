@@ -7,6 +7,7 @@ namespace AST
 {
     class ScopeNode;
     class ExprNode;
+    class NodeReference;
 
     // **how far does control go when it leaves this scope?** ordered, weakest first, so an `if` is the
     // weaker of its two arms and every caller's question is a comparison rather than a flag.
@@ -41,6 +42,9 @@ namespace AST
     // StmtCodegen::gen_scope stops at the first terminated block. **it must only ever answer above t_none
     // when it is certain**, since a false positive is a leak in one caller and a broken binding in another
     ExitKind scope_exit_kind(const ScopeNode &scope);
+
+    // per-statement half of scope_exit_kind. OwnershipPass uses it to ignore unreachable tails
+    ExitKind statement_exit_kind(const NodeReference &statement);
 
     // **does evaluating this expression never come back?** the expression half of the question above, and
     // the reason it is worth naming separately is that a value can be written where a statement was

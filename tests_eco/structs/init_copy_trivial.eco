@@ -1,0 +1,67 @@
+// derived fields survive copy for both a trivial struct and one holding a class
+
+class Handle
+{
+    int32 $n;
+}
+
+struct Counts
+{
+    static int32 $n = 0;
+
+    public static function bump() : int32
+    {
+        Counts::$n = Counts::$n + 1;
+        return Counts::$n;
+    }
+}
+
+struct Plain
+{
+    int32 $id;
+    int32 $stamp;
+
+    init
+    {
+        $this->stamp = Counts::bump();
+    }
+}
+
+struct Held
+{
+    Handle $h;
+    int32 $stamp;
+
+    init
+    {
+        $this->stamp = Counts::bump();
+    }
+}
+
+function takePlain(Plain $p) : int32
+{
+    return $p->stamp;
+}
+
+function takeHeld(Held $p) : int32
+{
+    return $p->stamp;
+}
+
+// plain ints: construct, assign, pass by value
+Plain $a = Plain(1);
+echo $a->stamp;
+Plain $b = $a;
+echo $b->stamp;
+echo takePlain($a);
+echo $a->stamp;
+
+// the same three steps with a class handle beside the stamp
+Held $c = Held(Handle(1));
+echo $c->stamp;
+Held $d = $c;
+echo $d->stamp;
+echo takeHeld($c);
+echo $c->stamp;
+
+echo Counts::$n;

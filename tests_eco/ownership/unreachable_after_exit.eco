@@ -1,0 +1,51 @@
+// a statement after one that leaves is not a use-after-move of what the leave moved
+
+class Handle
+{
+    int32 $n;
+}
+
+struct Box
+{
+    Handle $h;
+    int32 $flag;
+
+    constructor(int32 $n)
+    {
+        $this->h = Handle($n);
+        const if (true) {
+            return;
+        }
+    }
+
+    init
+    {
+        $this->flag = 7;
+    }
+}
+
+function early() : Box
+{
+    Box $b = Box(1);
+    const if (true) {
+        return $b;
+    }
+    return $b;
+}
+
+function dead() : Box
+{
+    Box $b = Box(2);
+    return $b;
+    return $b;
+}
+
+function run() : void
+{
+    echo early()->h->n;
+    echo dead()->h->n;
+    echo Box(3)->flag;
+}
+
+run();
+echo mem::live_allocations();

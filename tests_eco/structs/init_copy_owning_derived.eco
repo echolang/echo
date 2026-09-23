@@ -1,0 +1,34 @@
+// copying a derived owning field retains; it does not leak
+
+class Handle
+{
+    int32 $n;
+}
+
+struct Cached
+{
+    Handle $h;
+    Handle $cache;
+    string $label;
+
+    init
+    {
+        $this->cache = Handle($this->h->n * 2);
+        $this->label = "n={$this->h->n}";
+    }
+}
+
+function copies() : void
+{
+    Cached $a = Cached(Handle(7));
+    Cached $b = $a;
+    echo $b->cache->n;
+    echo $b->label;
+
+    // one object: the copy retained `$a`'s rather than building its own
+    $a->cache->n = 100;
+    echo $b->cache->n;
+}
+
+copies();
+echo mem::live_allocations();

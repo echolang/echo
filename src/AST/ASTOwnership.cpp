@@ -372,7 +372,15 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
     NodeReferenceList rebuilt;
     rebuilt.reserve(scope.children.size());
 
+    bool left = false;
+
     for (auto &child : scope.children) {
+        if (left) {
+            // keep the tail in the tree for TypeChecker; codegen stops at the first terminator
+            rebuilt.push_back(child);
+            continue;
+        }
+
         // what walk_statement hands back is what the scope keeps - normally the statement itself, but a
         // discarded owning temporary is replaced by the declaration that now owns it
         const NodeReference kept = walk_statement(child);
@@ -417,6 +425,10 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
         }
 
         rebuilt.push_back(kept);
+
+        if (statement_exit_kind(child) != ExitKind::t_none) {
+            left = true;
+        }
     }
 
     // spliced *before* the question below rather than after. the question reads the scope's statements,
@@ -3421,8 +3433,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
     close_constructor_body(*_current_module, decl, this_decl);
 
-    AST::plant_init_call(*_current_module, decl, AST::find_init(ct));
-
+    // a synthesized copy does not run `init`; a written copy constructor still does
     publish_synthesized_decl(decl);
 
     return &decl;
