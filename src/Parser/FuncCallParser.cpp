@@ -506,6 +506,16 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
             return &funcall;
         }
 
+        // the declaration pass is still collecting signatures. a property default, a parameter
+        // default and a constant initializer are parsed *during* that pass, so a `Zin()` whose
+        // constructor is registered by a later file - or later in this one - is a not-yet rather
+        // than a miss. operator calls in the same position already keep the node for this reason.
+        // the fixpoint's finalizing sweep reports whatever is still unknown after every file's
+        // constructors exist
+        if (payload.pass == Pass::t_declarations) {
+            return &funcall;
+        }
+
         // the type is named and its static overload set has nothing by that name. a different
         // sentence from UnknownFunction's, because the search was not a search of any namespace -
         // and reported here rather than left to the fixpoint, the owner already being concrete

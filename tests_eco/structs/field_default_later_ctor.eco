@@ -1,0 +1,4 @@
+// the library lists two::Zout's file before one::Zin's. Zin() in the field default used to be
+// UnknownFunction because pass 2 parsed the default before the constructor existed
+two::Zout $o = two::Zout();
+echo $o->inner->x;

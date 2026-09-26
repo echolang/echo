@@ -1,0 +1,26 @@
+// the field-of-static twin of foreach_field_of_temporary: Holder::$box->rows is a place
+// rooted in a global, so iterate() must borrow the field rather than a copy of it
+struct Bag
+{
+    public array<int32> $rows;
+
+    public constructor()
+    {
+        $this->rows = array<int32>();
+        $this->rows[] = 3;
+        $this->rows[] = 4;
+    }
+}
+
+struct Holder
+{
+    static Bag $box = Bag();
+}
+
+foreach (Holder::$box->rows as &$x) {
+    $x = $x + 1;
+}
+
+foreach (Holder::$box->rows as $y) {
+    echo $y;
+}

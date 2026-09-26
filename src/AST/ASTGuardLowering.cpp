@@ -233,14 +233,16 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
     // became one after substitution runs the same four lines the parser's immediate path runs, which
     // is also what fixes a latent bug: `$v = guard $w` in a template over `T = int32?` would type
     // the binding `unwrapped_type_of(T)` = `T`, substituting back to `int32?` - one level too
-    // nullable. statement form has no payload to type: an rvalue subject is hoisted so the frame
-    // owns it, a place is already somebody else's
+    // nullable. statement form has no payload to type: a subject whose storage does not already
+    // live is hoisted so the frame owns it. a local and a static already live; a place rooted
+    // in a temporary (`guard Box()->n else`) does not - AST::seat_receiver_local copies that,
+    // through hoist_subject, the same seating ForeachLowering's `$__src` uses
     if (plan.kind == UnwrapSource::t_builtin_nullable) {
         if (!bind_payload_type(*guard, plan.payload_type, subject_type)) {
             return;
         }
 
-        if (guard->decl == nullptr && !is_place_expression(*subject)) {
+        if (guard->decl == nullptr && !place_outlives_statement(subject)) {
             VarDeclNode &subject_decl = hoist_subject(scope, index, *guard, subject);
             guard->set_tested(&local_place(*_current_module, subject_decl));
         }

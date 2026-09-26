@@ -1,0 +1,40 @@
+// `foreach (Rows()->rows as $row)` is a place (a member access), so the lowering used to skip
+// `$__src`. iterate() then borrowed a field of a Rows() that died at the end of that statement.
+// heap strings so a missing retain is a use-after-free rather than an SSO no-op
+struct Row
+{
+    public string $label;
+    public int32 $n;
+}
+
+class Rows
+{
+    public array<Row> $rows;
+
+    public constructor()
+    {
+        $this->rows = array<Row>();
+        $this->rows[] = Row('view tool label long enough to be heap', 1);
+        $this->rows[] = Row('terrain tool label long enough to be heap', 2);
+        $this->rows[] = Row('grass tool label long enough to be heap', 3);
+    }
+}
+
+function run() : void
+{
+    foreach (Rows()->rows as $row) {
+        echo "{$row->n} {$row->label}";
+    }
+
+    Rows $all = Rows();
+    foreach ($all->rows as $row) {
+        echo "{$row->n} {$row->label}";
+    }
+
+    foreach (Rows()->rows as &$row) {
+        echo $row->n;
+    }
+}
+
+run();
+echo mem::live_allocations();

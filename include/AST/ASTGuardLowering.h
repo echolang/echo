@@ -24,13 +24,13 @@ namespace AST
     //
     // a `T?` with a binding never reaches this pass at all: Parser::parse_guard decides that one,
     // because a nullable's payload is a property of the type and nothing later can change it.
-    // statement-form `T?` does reach it, but only to hoist an rvalue subject into `$__guardN` so
-    // the frame owns it - no protocol calls, codegen still tests with gen_has_value. what is left
-    // for the protocol path is a subject that declares `contract::unwrappable<V>` or
-    // `contract::checkable`, which no parse could have answered - so this pass asks
-    // AST::unwrap_plan_for once the fixpoint has settled the subject's type, and mints the calls
-    // the plan named. **const is refused here**, and only for a callee this form would actually
-    // mint: `has_value()` is const, `unwrap()` / `failure()` are not.
+    // statement-form `T?` does reach it, but only to hoist a subject whose storage does not
+    // already live into `$__guardN` so the frame owns it - no protocol calls, codegen still
+    // tests with gen_has_value. what is left for the protocol path is a subject that declares
+    // `contract::unwrappable<V>` or `contract::checkable`, which no parse could have answered -
+    // so this pass asks AST::unwrap_plan_for once the fixpoint has settled the subject's type,
+    // and mints the calls the plan named. **const is refused here**, and only for a callee this
+    // form would actually mint: `has_value()` is const, `unwrap()` / `failure()` are not.
     //
     //     <subject hoisted into an ordinary declaration ahead of the statement>
     //     guard  <decl>->init_expr = deref($__guard0->unwrap())
@@ -131,8 +131,9 @@ namespace AST
         );
 
         // **`$__guardN` spliced ahead of the guard**, typed and initialized through
-        // AST::seat_receiver_local. protocol and statement-form T? rvalue share it so a place
-        // that is already an address is not wrapped twice in one path and owned in the other
+        // AST::seat_receiver_local. protocol and statement-form T? share it so a place that is
+        // already an address is not wrapped twice in one path and owned in the other, and a
+        // place rooted in a temporary (`Box()->n`) is copied rather than addressed
         VarDeclNode &hoist_subject(
             ScopeNode &scope,
             size_t index,

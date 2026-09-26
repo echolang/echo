@@ -1,0 +1,8 @@
+--- OUT --->
+10
+20
+30
+--- RAST --->
+CHECK: $__it
+CHECK-NOT: $__src
+CHECK-NOT: foreach

@@ -1,0 +1,15 @@
+--- OUT --->
+1 view tool label long enough to be heap
+2 terrain tool label long enough to be heap
+3 grass tool label long enough to be heap
+1 view tool label long enough to be heap
+2 terrain tool label long enough to be heap
+3 grass tool label long enough to be heap
+1
+2
+3
+0
+--- RAST --->
+CHECK: $__src
+CHECK: $__it
+CHECK-NOT: foreach

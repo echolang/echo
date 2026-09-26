@@ -1,0 +1,4 @@
+modules: structs/later_ctor
+
+--- OUT --->
+0

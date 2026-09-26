@@ -3,6 +3,7 @@
 #include <AST/ASTBundle.h>
 #include <AST/ASTMemberLookup.h>
 #include <AST/AssignNode.h>
+#include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
@@ -56,6 +57,22 @@ namespace
         }
 
         return nullptr;
+    }
+
+    void require_resolved_inner_default(Bundle &bundle)
+    {
+        REQUIRE_FALSE(bundle.collector.has_critical_issues());
+
+        auto *zout = require_type(bundle, "Zout");
+        auto *synth = zout->synthesized_constructor();
+        REQUIRE(synth != nullptr);
+        REQUIRE(synth->args.size() == 2);
+        REQUIRE(synth->args[1]->init_expr != nullptr);
+        REQUIRE(synth->args[1]->init_expr->get_node_type() == NodeType::n_expr_call);
+
+        auto *call = static_cast<FunctionCallExprNode *>(synth->args[1]->init_expr);
+        REQUIRE(call->decl != nullptr);
+        REQUIRE(call->decl->is_constructor());
     }
 }
 
@@ -389,4 +406,103 @@ TEST_CASE("a mixed default on the implicit constructor is still type-checked", "
 
     REQUIRE(bundle->collector.has_critical_issues());
     REQUIRE(bundle->collector.issues.size() == 1);
+}
+
+TEST_CASE("a field default can call a constructor declared in a later file", "[property_defaults]")
+{
+    // pass 2 parses the default while the later file's constructor is not yet registered.
+    // UnknownFunction used to discard the node; the call is kept and settled after every
+    // signature exists
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string> {
+        "namespace two;\n"
+        "use one::Zin;\n"
+        "struct Zout {\n"
+        "    int32 $n = 1;\n"
+        "    Zin $inner = Zin();\n"
+        "}\n"
+        "Zout $o = Zout();\n",
+        "namespace one;\n"
+        "struct Zin {\n"
+        "    int32 $x = 0;\n"
+        "}\n",
+    });
+
+    require_resolved_inner_default(*bundle);
+}
+
+TEST_CASE("a field default can call a constructor declared in an earlier file", "[property_defaults]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string> {
+        "namespace one;\n"
+        "struct Zin {\n"
+        "    int32 $x = 0;\n"
+        "}\n",
+        "namespace two;\n"
+        "use one::Zin;\n"
+        "struct Zout {\n"
+        "    int32 $n = 1;\n"
+        "    Zin $inner = Zin();\n"
+        "}\n"
+        "Zout $o = Zout();\n",
+    });
+
+    require_resolved_inner_default(*bundle);
+}
+
+TEST_CASE("a field default can call a constructor written later in the same file", "[property_defaults]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Zout {\n"
+        "    int32 $n = 1;\n"
+        "    Zin $inner = Zin();\n"
+        "}\n"
+        "struct Zin {\n"
+        "    int32 $x = 0;\n"
+        "}\n"
+        "Zout $o = Zout();\n");
+
+    require_resolved_inner_default(*bundle);
+}
+
+TEST_CASE("a field default can call a qualified constructor from a later file", "[property_defaults]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string> {
+        "namespace two;\n"
+        "struct Zout {\n"
+        "    int32 $n = 1;\n"
+        "    one::Zin $inner = one::Zin();\n"
+        "}\n"
+        "Zout $o = Zout();\n",
+        "namespace one;\n"
+        "struct Zin {\n"
+        "    int32 $x = 0;\n"
+        "}\n",
+    });
+
+    require_resolved_inner_default(*bundle);
+}
+
+TEST_CASE("a field default can call a static of a type declared in a later file", "[property_defaults]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string> {
+        "struct Outer {\n"
+        "    int32 $n = Inner::make();\n"
+        "}\n"
+        "Outer $o = Outer();\n",
+        "struct Inner {\n"
+        "    static function make() : int32 { return 4; }\n"
+        "}\n",
+    });
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *outer = require_type(*bundle, "Outer");
+    auto *synth = outer->synthesized_constructor();
+    REQUIRE(synth != nullptr);
+    REQUIRE(synth->args.size() == 1);
+    REQUIRE(synth->args[0]->init_expr != nullptr);
+    REQUIRE(synth->args[0]->init_expr->get_node_type() == NodeType::n_expr_call);
+
+    auto *call = static_cast<FunctionCallExprNode *>(synth->args[0]->init_expr);
+    REQUIRE(call->decl != nullptr);
 }

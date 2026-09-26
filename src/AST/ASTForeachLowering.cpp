@@ -161,15 +161,18 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
 
     // a call-result array dies at the end of `$__it = <src>->iterate()` if it has no
     // slot of its own. the iterator then reads freed elements (empty strings, or a
-    // double-free). a place already lives in the enclosing frame
-    if (!is_place_expression(*source)) {
+    // double-free). `foreach (Rows()->rows as $row)` is a *place* - a member access -
+    // but its storage is the field of a temporary, so the same bind is owed.
+    // AST::place_outlives_statement is the question; AST::seat_receiver_local is the
+    // seating, shared with GuardLowering's `$__guardN`. a static is a living place
+    // with no local under it, so it is not given a slot
+    if (!place_outlives_statement(source)) {
         auto &source_decl = _current_module->nodes.emplace_back<VarDeclNode>(
             _current_module->make_virtual_token("$__src", Token::Type::t_varname, loop->token_foreach),
-            &_current_module->nodes.emplace_back<TypeNode>(source->result_type()));
-        source_decl.init_expr = source;
+            nullptr);
+        seat_receiver_local(*_current_module, source_decl, source);
         wrapper.add_vardecl(source_decl);
-        VarRefNode &src_place = local_place(*_current_module, source_decl);
-        source = &src_place;
+        source = &local_place(*_current_module, source_decl);
     }
 
     // `$__it`
@@ -207,9 +210,8 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
             &_current_module->nodes.emplace_back<TypeNode>(plan.iterator_type));
     }
     else {
-        // the source already *is* a cursor, or a call produced one. seat_receiver_local is the
-        // addressing: a place that is not already an address is borrowed, a call's result is
-        // owned. a cursor that arrived as `Iter&` must not become `ptr<ptr<Iter>>` - the same
+        // the source already *is* a cursor, or a call produced one. `$__it` is the cursor;
+        // seat_receiver_local is the addressing so a `T&` is not wrapped twice - the same
         // rule GuardLowering's `$__guardN` uses, and the reason this is not a second AddrOf
         seat_receiver_local(*_current_module, iterator_decl, source);
     }

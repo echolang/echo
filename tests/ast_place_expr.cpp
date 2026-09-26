@@ -7,6 +7,7 @@
 #include <AST/LiteralValueNode.h>
 #include <AST/MemberAccessNode.h>
 #include <AST/NullNode.h>
+#include <AST/StaticPropertyExprNode.h>
 #include <AST/TemporaryBindExprNode.h>
 #include <AST/VarDeclNode.h>
 #include <AST/VarNode.h>
@@ -598,6 +599,50 @@ TEST_CASE("A bound temporary is not a place either", "[AST][pointer][ownership]"
     // address of a local" reads - the reason a pointer read out of a temporary has to be refused where
     // the temporary is created rather than left to that check
     REQUIRE(place_root_of(bind) == nullptr);
+    REQUIRE_FALSE(place_outlives_statement(bind));
+}
+
+TEST_CASE("place_outlives_statement is a local or a static, not a field of a temporary", "[AST][pointer]")
+{
+    // the seating question: ForeachLowering and statement-form T? hoist when this is false.
+    // place_root_of names a frame local, so a static is null there and still lives here
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { int32 $n; }\n"
+        "struct Holder { static Bag $box = Bag(0); static int32 $n = 1; }\n"
+        "Bag $local = Bag(0);\n"
+        "echo Holder::$n;\n"
+        "echo Holder::$box->n;\n"
+        "echo $local->n;\n"
+        "echo Bag(0)->n;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *stat = first_of<StaticPropertyExprNode>(*bundle);
+    REQUIRE(stat != nullptr);
+    REQUIRE(place_outlives_statement(stat));
+    REQUIRE(place_root_of(stat) == nullptr);
+
+    auto *call = first_of<FunctionCallExprNode>(*bundle);
+    REQUIRE(call != nullptr);
+    REQUIRE_FALSE(place_outlives_statement(call));
+    REQUIRE(place_root_of(call) == nullptr);
+
+    auto &module = bundle->modules.find_module("test");
+    int living_static_fields = 0;
+    int living_local_fields = 0;
+
+    for (auto *node : module.nodes.of_type<MemberAccessNode>()) {
+        const bool lives = place_outlives_statement(node);
+        VarDeclNode *root = place_root_of(node);
+
+        if (lives && root == nullptr) {
+            living_static_fields++;
+        } else if (lives) {
+            living_local_fields++;
+        }
+    }
+
+    REQUIRE(living_static_fields >= 1);
+    REQUIRE(living_local_fields >= 1);
 }
 
 TEST_CASE("infer_declaration_type collapses a pointer to no information", "[AST][pointer]")

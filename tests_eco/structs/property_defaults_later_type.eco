@@ -1,0 +1,16 @@
+// the callee type is written below the field default that constructs it. pass 2 still walks
+// top to bottom, so this is the same hole as a later file
+struct ClearPassOptions
+{
+    int32 $clearColor = 1;
+    Color $color = Color();
+}
+
+struct Color
+{
+    int32 $r = 0;
+}
+
+ClearPassOptions $plain = ClearPassOptions();
+echo $plain->clearColor;
+echo $plain->color->r;

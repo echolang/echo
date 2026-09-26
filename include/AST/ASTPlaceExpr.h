@@ -394,12 +394,22 @@ namespace AST
     // the variable an expression ultimately addresses, walking through everything that only
     // re-addresses existing storage rather than naming new storage: every place, plus `&E` and
     // `E:$`, which change what is being said about an address without changing whose it is
-    // null when the expression names no variable at all
+    // null when the expression names no *local* at all - a call result, a field of one, and a
+    // static property. a static's `decl` is the template's, shared across instantiations, and
+    // LastRead / Mutation / construction treat a non-null result as a frame local, so this
+    // must not return one
     //
-    // lives next to the predicates above because it encodes the same taxonomy. a new place kind
-    // that updates the predicate and not this walk fails silently, by simply not finding the
-    // variable
+    // AST::place_outlives_statement is the "does this storage already live?" twin, and the two
+    // share the spine walk. a new place kind that updates one and not the other fails silently
     VarDeclNode *place_root_of(ExprNode *expr);
+
+    // **does this place's storage outlive the statement it sits in?** the same spine
+    // place_root_of walks (varref / member / index / deref / peel / addrof), yes for a
+    // local *and* for `n_expr_static_property`. a call result, and a place rooted in one
+    // (`Box()->n`, `Rows()->rows`), answers no: that storage dies at the end of the
+    // statement, so ForeachLowering binds `$__src` and statement-form `T?` hoists
+    // `$__guardN`. seat_receiver_local borrows vs copies on this answer
+    bool place_outlives_statement(ExprNode *expr);
 
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers
     // already look, but owned by AST::source_token_of ([ASTSourceToken.h]) - which answers the same

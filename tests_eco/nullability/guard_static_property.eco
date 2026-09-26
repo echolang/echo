@@ -1,0 +1,27 @@
+// statement-form T? over a static must not hoist: the storage already lives
+struct Holder
+{
+    static int32? $n = 7;
+}
+
+function present() : void
+{
+    guard Holder::$n else {
+        echo 0;
+        return;
+    }
+    echo 1;
+}
+
+function absent() : void
+{
+    Holder::$n = null;
+    guard Holder::$n else {
+        echo 2;
+        return;
+    }
+    echo 3;
+}
+
+present();
+absent();

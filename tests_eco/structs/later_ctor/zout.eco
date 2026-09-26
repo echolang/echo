@@ -1,0 +1,9 @@
+namespace two;
+
+use one::Zin;
+
+public struct Zout
+{
+    public int32 $n = 1;
+    public Zin $inner = Zin();
+}

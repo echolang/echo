@@ -27,15 +27,19 @@ bool value_is_an_address(const ExprNode &expr)
     return static_cast<const MatchExprNode &>(expr).yields_a_place;
 }
 
-VarDeclNode *place_root_of(ExprNode *expr)
+namespace
+{
+
+// the last node of a place that only re-addresses existing storage: a variable or a static
+// property. null when the expression names no lasting storage at all - a call result, a
+// field of one (`Box()->n`)
+ExprNode *place_anchor(ExprNode *expr)
 {
     while (expr != nullptr) {
         switch (expr->get_node_type()) {
             case NodeType::n_varref:
-            {
-                auto *var_ref = static_cast<VarRefNode *>(expr);
-                return var_ref->is_var() ? &var_ref->get_var().decl() : nullptr;
-            }
+            case NodeType::n_expr_static_property:
+                return expr;
 
             case NodeType::n_expr_addrof:
                 expr = static_cast<AddrOfExprNode *>(expr)->operand;
@@ -66,6 +70,38 @@ VarDeclNode *place_root_of(ExprNode *expr)
     }
 
     return nullptr;
+}
+
+}
+
+VarDeclNode *place_root_of(ExprNode *expr)
+{
+    ExprNode *anchor = place_anchor(expr);
+
+    if (anchor == nullptr || anchor->get_node_type() != NodeType::n_varref) {
+        return nullptr;
+    }
+
+    auto *var_ref = static_cast<VarRefNode *>(anchor);
+
+    return var_ref->is_var() ? &var_ref->get_var().decl() : nullptr;
+}
+
+bool place_outlives_statement(ExprNode *expr)
+{
+    ExprNode *anchor = place_anchor(expr);
+
+    if (anchor == nullptr) {
+        return false;
+    }
+
+    if (anchor->get_node_type() == NodeType::n_expr_static_property) {
+        return true;
+    }
+
+    auto *var_ref = static_cast<VarRefNode *>(anchor);
+
+    return var_ref->is_var();
 }
 
 };  // namespace AST

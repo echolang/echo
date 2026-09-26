@@ -1,0 +1,6 @@
+// a name that is never declared is still UnknownFunction when it sits in a field default.
+// pass 2 keeps the call as a not-yet; the fixpoint reports it once every signature exists
+struct Holder
+{
+    int32 $n = nope();
+}

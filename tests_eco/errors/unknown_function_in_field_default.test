@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownFunction  unknown_function_in_field_default.eco:5:16
+
+  The function 'nope' could not be found
+
+  4 | {
+  5 |     int32 $n = nope();
+    :                ^^^^
+  6 | }
+
+1 error, nothing was compiled.

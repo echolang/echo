@@ -279,7 +279,11 @@ AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode 
 
 void AST::seat_receiver_local(AST::Module &module, AST::VarDeclNode &local, AST::ExprNode *expr)
 {
-    local.init_expr = is_place_expression(*expr)
+    // a local and a static already live, so the seated local borrows them. a call
+    // result, and a place rooted in one (`Box()->n`, `Rows()->rows`), has no frame slot:
+    // addressing it is TemporaryMember. copy the value instead. AST::place_outlives_statement
+    // is the same question ForeachLowering asks before binding `$__src`
+    local.init_expr = place_outlives_statement(expr)
         ? receiver_for_member_call(module, expr)
         : expr;
     local.set_type_node(&module.nodes.emplace_back<AST::TypeNode>(

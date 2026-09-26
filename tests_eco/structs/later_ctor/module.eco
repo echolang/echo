@@ -1,0 +1,10 @@
+/*
+ * Two files of one module, outer type listed first. A field default of the outer calls the
+ * inner type's implicit constructor, which pass 2 has not registered yet when it parses the
+ * default. The program that consumes this is field_default_later_ctor.eco.
+ */
+
+#[module: "laterctor"]
+#[version: "0.1.0"]
+
+#[sources: ["zout.eco", "zin.eco"]]

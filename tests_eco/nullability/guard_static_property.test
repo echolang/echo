@@ -1,0 +1,6 @@
+--- OUT --->
+1
+2
+--- RAST --->
+CHECK: guard static_property<int32?>(Holder::$n)
+CHECK-NOT: $__guard

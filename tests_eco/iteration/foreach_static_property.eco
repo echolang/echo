@@ -1,0 +1,20 @@
+// a static is a living place with no frame local under it. asking place_root_of == nullptr
+// copied the array, so the borrow mutated the copy and Holder::$rows stayed 1, 2, 3
+struct Holder
+{
+    static array<int32> $rows = array<int32>();
+}
+
+array<int32> $init = [];
+$init[] = 1;
+$init[] = 2;
+$init[] = 3;
+Holder::$rows = $init;
+
+foreach (Holder::$rows as &$x) {
+    $x = $x * 10;
+}
+
+foreach (Holder::$rows as $y) {
+    echo $y;
+}

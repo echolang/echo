@@ -1,0 +1,90 @@
+// statement `guard` over a field of a temporary used to skip the hoist because the subject is a
+// place. seat_receiver_local copies an unrooted place, so Box() can die after the bind.
+// the protocol subject is the same seating through hoist_subject, not a second plant
+class Box
+{
+    public int32? $n;
+
+    public constructor(int32? $n)
+    {
+        $this->n = $n;
+    }
+}
+
+function nullable_present() : void
+{
+    guard Box(7)->n else {
+        echo 0;
+        return;
+    }
+    echo 1;
+}
+
+function nullable_absent() : void
+{
+    guard Box(null)->n else {
+        echo 2;
+        return;
+    }
+    echo 3;
+}
+
+nullable_present();
+nullable_absent();
+
+struct parsed_int : contract::unwrappable<int32>
+{
+    private int32 $value;
+    private bool $ok;
+
+    constructor(int32 $value)
+    {
+        $this->value = $value;
+        $this->ok = true;
+    }
+
+    constructor(bool $ok)
+    {
+        $this->value = 0;
+        $this->ok = $ok;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->value;
+    }
+}
+
+class Holder
+{
+    public parsed_int $p;
+
+    public constructor(parsed_int $p)
+    {
+        $this->p = $p;
+    }
+}
+
+function take(int32 $n) : int32
+{
+    int32 $v = guard Holder(parsed_int($n))->p else { return -1; }
+    return $v;
+}
+
+echo take(10);
+
+function protocol_absent() : void
+{
+    guard Holder(parsed_int(false))->p else {
+        echo 5;
+        return;
+    }
+    echo 6;
+}
+
+protocol_absent();

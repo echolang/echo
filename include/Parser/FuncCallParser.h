@@ -48,6 +48,11 @@ namespace Parser
         AST::ValueType constructed_type = AST::ValueType::make_unknown();
     };
 
+    // **an unresolved name is kept in the declaration pass.** property defaults, parameter
+    // defaults and constant initializers are parsed then, before later files register
+    // constructors, so `Zin()` in a field default is a not-yet. the body pass reports
+    // UnknownFunction: every signature already exists. the fixpoint reports whatever is
+    // still unknown after that
     AST::FunctionCallExprNode *parse_funccall(
         Parser::Payload &payload,
         const AST::Namespace *requested_namespace = nullptr,
@@ -68,11 +73,10 @@ namespace Parser
     // arguments, OwnershipPass copies what needs copying, and codegen emits a CreateCall. that is
     // why operator overloading needs no arm anywhere downstream
     //
-    // **an unresolved call is kept, not discarded.** parse_funccall above reports UnknownFunction and
-    // throws the node away, which is right for a misspelled name and wrong here: the overload set is
-    // filled by the declaration pass, and a use site inside a struct property initializer is parsed
-    // *during* that pass. so resolution is left to the fixpoint, which reports whatever never
-    // resolved - the same standing an ordinary forward reference inside a body has
+    // **an unresolved call is kept, not discarded.** an operator's overload set is filled by
+    // the declaration pass, which is also when a use inside a property initializer is parsed,
+    // so a miss here is a not-yet. parse_funccall owns the named-call keep; this always
+    // keeps. the fixpoint reports whatever never resolved
     //
     // null only when the operands are not usable at all
     AST::FunctionCallExprNode *build_operator_call(

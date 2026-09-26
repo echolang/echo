@@ -1,0 +1,22 @@
+// the same hole over a struct temporary: Bundle().rows is a place into storage that dies
+// at the end of `$__it = ...->iterate()` unless the field is bound first
+struct Row
+{
+    public int32 $n;
+}
+
+struct Bundle
+{
+    public array<Row> $rows;
+
+    public constructor()
+    {
+        $this->rows = array<Row>();
+        $this->rows[] = Row(4);
+        $this->rows[] = Row(5);
+    }
+}
+
+foreach (Bundle()->rows as $row) {
+    echo $row->n;
+}
