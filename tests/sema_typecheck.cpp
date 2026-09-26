@@ -221,14 +221,63 @@ TEST_CASE("returning the address of a local is rejected", "[sema][pointer]")
 TEST_CASE("returning a value where a borrow is declared is rejected", "[sema][pointer]")
 {
     // this used to reach codegen and fail llvm's verifier with "Function return type does not
-    // match operand type of return inst", which named neither the function nor the line
+    // match operand type of return inst", which named neither the function nor the line.
+    // a computed value has no storage to keep; TemporaryMember is the owner
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function bad(int $x) : int& {\n"
+        "    return $x + 1;\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "would point into a value destroyed at the end of this statement"));
+}
+
+TEST_CASE("returning a by-value parameter as a borrow is rejected", "[sema][pointer]")
+{
+    // auto-borrow of `return $x` from `: T&` plants AddrOf. the parameter is callee-frame
+    // storage, so the TypeChecker dangling-return gate must treat it as a local. a T&
+    // parameter is the caller's storage and still returns
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function bad(int $x) : int& {\n"
         "    return $x;\n"
         "}\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "cannot return 'int32' from a function declared 'int32&'"));
+    REQUIRE(has_issue_containing(*bundle, "cannot return the address of local '$x'"));
+}
+
+TEST_CASE("returning an element of a by-value array as a borrow is rejected", "[sema][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function bad(int32[2] $a) : int32& {\n"
+        "    return $a[0];\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot return the address of local '$a'"));
+}
+
+TEST_CASE("returning an element of a by-value container as a borrow is rejected", "[sema][pointer]")
+{
+    // after the rewrite the container is the operator [] receiver, not Index.base.
+    // the spine has to follow it or this compiles as a dangling borrow
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { int32 $v; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->v; }\n"
+        "function bad(Bag $b) : int32& { return $b[0]; }\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot return the address of local '$b'"));
+}
+
+TEST_CASE("a T& parameter still returns as a borrow", "[sema][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function pick(int &$x) : int& {\n"
+        "    return $x;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
 // the four below are regression guards for crashes. each aborted or segfaulted the compiler
@@ -246,7 +295,7 @@ TEST_CASE("taking the address of something with no storage is a diagnostic", "[s
 
     EchoTests::assert_code_emits_issue(
         "function get() : int { return 5; }\nint& $r = &get();\n",
-        "Invalid type conversion: cannot implicitly convert 'int32' to 'int32&'");
+        "'int32' has no storage of its own, so the address of it would point into a value destroyed at the end of this statement.");
 }
 
 TEST_CASE("an address only compares against another address", "[sema][pointer]")

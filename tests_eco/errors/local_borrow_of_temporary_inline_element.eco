@@ -1,0 +1,14 @@
+// a T[N] index is a GEP, so there is no operator [] receiver wrap to request
+// storage for make(). the declaration auto-borrows a place that dies with
+// the statement
+
+function make() : int32[2]
+{
+    int32[2] $a;
+    $a[0] = 10;
+    $a[1] = 20;
+    return $a;
+}
+
+int32& $r = make()[0];
+echo $r;

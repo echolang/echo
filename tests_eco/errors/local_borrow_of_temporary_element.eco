@@ -1,0 +1,12 @@
+// indexing a container returned by value still produces a place, so the
+// declaration auto-borrows it - and then the temporary dies at the end of
+// the statement, which is the same refusal `&make()[0]` already got
+
+function make() : array<int32>
+{
+    array<int32> $a = [10, 20, 30];
+    return $a;
+}
+
+int32& $r = make()[0];
+echo $r;

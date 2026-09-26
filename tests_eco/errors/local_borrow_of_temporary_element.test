@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] TemporaryMember  local_borrow_of_temporary_element.eco:11:13
+
+  'array<int32>' has no storage of its own, so the address of it would point into a value destroyed at the end of this statement.
+
+  10 | 
+  11 | int32& $r = make()[0];
+     :             ^^^^
+  12 | echo $r;
+
+  help: Bind it to a variable first.
+
+1 error, nothing was compiled.

@@ -1,0 +1,18 @@
+// a mutable T& cannot bind a const element's place. the const operator []
+// peels to const Track, and borrow_preserves_const refuses the write
+
+struct Track
+{
+    array<float32> $keys;
+    int32 $node;
+}
+
+function viaLocal(const array<Track>& $ts) : int32
+{
+    Track& $t = $ts[0];
+    return $t->node;
+}
+
+array<Track> $ts = array<Track>();
+$ts[] = Track([1.0f], 7);
+echo viaLocal($ts);

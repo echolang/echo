@@ -91,14 +91,11 @@ namespace AST
                 return borrow_through_pointer(nodes, arg);
             }
 
-            // the four ranks that plant a bare AddrOf, asked of AST::fit_is_borrow rather than
-            // enumerated here: the const it gains is already on the operand's type, and which ranks
-            // are those borrows is the fit ordering's own question
-            if (!fit_is_borrow(fit)) {
-                return arg;
-            }
-
-            return &nodes.emplace_back<AddrOfExprNode>(arg);
+            // the four ranks that plant a bare AddrOf, asked of AST::borrow_place_if_wanted rather
+            // than enumerated here: the const it gains is already on the operand's type, and which
+            // ranks are those borrows is the fit ordering's own question. OwnershipPass plants the
+            // same node at a T& declaration
+            return borrow_place_if_wanted(nodes, arg, fit);
         }
 
         // a value handed to a parameter its own type declared a conversion to becomes a call to that

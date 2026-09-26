@@ -1,6 +1,9 @@
-// returning a value where the signature promises a borrow
+// returning a computed value where the signature promises a borrow.
+// `return $x` of a by-value parameter is a dangling-local error (the
+// wrap plants AddrOf; TypeChecker treats a by-value parameter as a
+// local). a non-place still cannot answer T&
 function bad(int $x) : int& {
-    return $x;
+    return $x + 1;
 }
 
 echo 1;

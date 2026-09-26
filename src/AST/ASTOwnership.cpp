@@ -1,5 +1,6 @@
 #include "AST/ASTOwnership.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
@@ -1597,10 +1598,10 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // because a call is not a place whatever it returns and `&5` names nothing at all. **that is
             // the whole marker**, and it is why no flag on the node was needed: an AddrOfExprNode
             // over a non-place is, by construction, one the compiler wrote - CallResolver's borrow
-            // coercion, its `#[implicit]` receiver, the parser's method receiver, or emit_resolved_
-            // member_call. so this arm only ever sees an address something in the same expression is
-            // about to read through - and where that is not true, the destination refuses it (see
-            // resolve_value_arrival)
+            // coercion, OwnershipPass's wrap of a T& declaration or return, its `#[implicit]`
+            // receiver, the parser's method receiver, or emit_resolved_member_call. so this arm
+            // only ever sees an address something in the same expression is about to read through
+            // - and where that is not true, the destination refuses it (see resolve_value_arrival)
             if (borrow_operand_needs_storage(*addr->operand)) {
                 request_storage_for(expr);
             }
@@ -1944,19 +1945,55 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     }
 
     if (wanted.is_pointer()) {
+        // **the same AddrOf CallResolver plants at an argument.** a T& declaration (and a T&
+        // return) keeps an address past the statement, so a place that already answers a
+        // parameter - `$a[0]`, `$i`, a field - has to be addressed here too, or arrive_value
+        // copies the element and TypeChecker reports `Track` arriving at `Track&`. asked of
+        // AST::argument_fit / fit_is_borrow, the one ranking, and of AST::borrow_place_if_wanted,
+        // the one wrap. t_borrow_through stays out: a `ptr<T>` at a `T&` still needs the
+        // explicit cast. a temporary ranks t_borrow_temporary and the scope below refuses it
+        if (expr != nullptr) {
+            const ArgumentFit fit = argument_fit(expr->result_type(), expr, wanted);
+
+            if (fit_is_borrow(fit)) {
+                expr = borrow_place_if_wanted(_current_module->nodes, expr, fit);
+                _changed = true;
+            }
+        }
+
         // one rule, worded as the **source** spells it: the author's own `&`, or a borrow the
-        // destination asked for and AST::CallResolver would have inserted. asked of `expr` rather than
+        // destination asked for and the wrap above inserted. asked of `expr` rather than
         // of what arrive_value hands back, which is what the wording means and is also the only order
         // a scope allows - a refusal states its reason when it opens. the two answer alike on every
         // path that can reach here: the wrappings arrive_value adds are a retain, which takes a place,
         // and an interface cast, which needs a non-pointer destination
         const bool addressed = expr != nullptr && expr->get_node_type() == NodeType::n_expr_addrof;
+        const size_t mark = _pending_temporaries.size();
 
         MaterializationScope scope(*this,
             addressed ? "the address of" : "a borrow of",
             "would point into a value destroyed at the end of this statement");
 
-        return scope.close(arrive_value(expr, wanted, param, destination));
+        ExprNode *arrived = arrive_value(expr, wanted, param, destination);
+
+        // a T& declaration or return keeps the address past the statement, which is
+        // AST::place_outlives_statement's question. the AddrOf arm only requests storage for a
+        // non-place (`t_borrow_temporary`, an operator [] receiver); a GEP of a temporary
+        // (`make()[0]` on `T[N]`) is already a place, so without this the wrap type-checks and
+        // dangles. skip when the walk already requested: operator [] of a container is the
+        // same destination and the better wording. arguments never reach here, so a call-site
+        // borrow still forwards
+        if (addressed && _pending_temporaries.size() == mark) {
+            ExprNode *operand = static_cast<AddrOfExprNode *>(expr)->operand;
+
+            if (operand != nullptr
+                && is_place_expression(*operand)
+                && !place_outlives_statement(operand)) {
+                request_storage_for(expr);
+            }
+        }
+
+        return scope.close(arrived);
     }
 
     // the close is **last** on purpose: arrive_value decides copy-or-move while the expression is

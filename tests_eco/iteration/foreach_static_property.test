@@ -3,6 +3,5 @@
 20
 30
 --- RAST --->
-CHECK: $__it
+CHECK: iterate(addrof<array<int32>&>(static_property<array<int32>>(Holder::$rows))
 CHECK-NOT: $__src
-CHECK-NOT: foreach

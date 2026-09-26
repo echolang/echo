@@ -10,6 +10,6 @@
 3
 0
 --- RAST --->
-CHECK: $__src
-CHECK: $__it
+CHECK: vardecl<type<array<Row>>>($__src)
+CHECK: vardecl<type<slice_iterator<Row>>>($__it)
 CHECK-NOT: foreach

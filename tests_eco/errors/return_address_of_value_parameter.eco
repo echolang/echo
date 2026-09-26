@@ -1,0 +1,7 @@
+// auto-borrow of `return $x` from `: T&` plants AddrOf. a by-value parameter
+// is callee-frame storage, so this is the same refusal as `return &$local`
+function bad(int $x) : int& {
+    return $x;
+}
+
+echo 1;

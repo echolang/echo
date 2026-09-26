@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] return_element_of_value_parameter.eco:4:5
+
+  cannot return the address of local '$a' - its storage ends with the call
+
+  3 | function bad(int32[2] $a) : int32& {
+  4 |     return $a[0];
+    :     ^^^^^^
+  5 | }
+
+1 error, nothing was compiled.

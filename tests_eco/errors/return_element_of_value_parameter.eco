@@ -1,0 +1,7 @@
+// `$a[0]` of a by-value T[N] is a place rooted in the parameter. auto-borrow
+// plants AddrOf; the parameter's storage ends with the call
+function bad(int32[2] $a) : int32& {
+    return $a[0];
+}
+
+echo 1;

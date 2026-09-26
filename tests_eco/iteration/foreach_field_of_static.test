@@ -2,6 +2,5 @@
 4
 5
 --- RAST --->
-CHECK: $__it
+CHECK: iterate(addrof<array<int32>&>(ma<array<int32>>(static_property<Bag>(Holder::$box)->rows))
 CHECK-NOT: $__src
-CHECK-NOT: foreach

@@ -291,6 +291,19 @@ namespace AST
         return &nodes.emplace_back<AddrOfExprNode>(&nodes.emplace_back<DerefExprNode>(arg));
     }
 
+    // `AddrOf(arg)` - the wrap the four fit_is_borrow ranks score. CallResolver plants it at an
+    // argument; OwnershipPass plants the same node at a T& declaration or return, so a place
+    // (`$a[0]`, `$i`) answers a local borrow the way it already answers a parameter
+    inline ExprNode *borrow_place_if_wanted(NodeCollection &nodes, ExprNode *arg, ArgumentFit fit)
+    {
+        if (!fit_is_borrow(fit)) {
+            return arg;
+        }
+
+        assert(arg != nullptr && "borrow_place_if_wanted of a missing argument");
+        return &nodes.emplace_back<AddrOfExprNode>(arg);
+    }
+
     // **what a `#[implicit]` conversion has to return to answer this parameter.**
     //
     // A borrow parameter is answered by a conversion to its *pointee*. The conversion produces a value,
@@ -376,8 +389,9 @@ namespace AST
     // three readers that each take a different amount of it:
     //
     //  - AST::match_function ranks with the whole ordering, which is what picks an overload;
-    //  - AST::CallResolver's argument coercion reads only `t_borrow`, so a candidate the matcher
-    //    accepted on the borrow arm is a candidate the coercion then actually wraps;
+    //  - AST::CallResolver's argument coercion, and OwnershipPass at a T& declaration or
+    //    return, read `fit_is_borrow`, so a place the matcher accepted is a place the wrap
+    //    then actually addresses;
     //  - AST::TypeChecker reads only `!= t_none`, so a call it reports is a call resolution could
     //    not have chosen.
     //

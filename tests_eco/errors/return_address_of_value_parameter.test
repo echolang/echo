@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] return_address_of_value_parameter.eco:4:5
+
+  cannot return the address of local '$x' - its storage ends with the call
+
+  3 | function bad(int $x) : int& {
+  4 |     return $x;
+    :     ^^^^^^
+  5 | }
+
+1 error, nothing was compiled.

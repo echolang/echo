@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  local_borrow_of_const_element.eco:12:12
+
+  Invalid type conversion: cannot implicitly convert 'const Track' to 'Track&'
+
+  11 | {
+  12 |     Track& $t = $ts[0];
+     :            ^^
+  13 |     return $t->node;
+
+1 error, nothing was compiled.

@@ -1310,3 +1310,61 @@ TEST_CASE("a scope control cannot fall out of is owed no drops after its last st
         REQUIRE(dropped_variable(drops[0])->name() == "b");
     }
 }
+
+TEST_CASE("a T& declaration auto-borrows a place", "[ownership][pointer]")
+{
+    // the wrap CallResolver plants at a T& parameter, planted at a declaration so
+    // `int32& $r = $i` is the same tree as `int32& $r = &$i`. an index is the same
+    // rank; the e2e corpus covers that over array<T>
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f() : void {\n"
+        "    int32 $i = 1;\n"
+        "    int32& $r = $i;\n"
+        "    const int32& $c = $i;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto &body = body_of(m, "f");
+
+    int seen = 0;
+
+    for (auto &child : body.children) {
+        if (!child.has_type<VarDeclNode>()) {
+            continue;
+        }
+
+        auto &decl = child.get<VarDeclNode>();
+
+        if (decl.name_full() != "$r" && decl.name_full() != "$c") {
+            continue;
+        }
+
+        REQUIRE(decl.init_expr != nullptr);
+        REQUIRE(decl.init_expr->get_node_type() == NodeType::n_expr_addrof);
+        auto *addr = static_cast<AddrOfExprNode *>(decl.init_expr);
+        REQUIRE(addr->operand != nullptr);
+        REQUIRE(addr->operand->get_node_type() == NodeType::n_varref);
+        seen += 1;
+    }
+
+    REQUIRE(seen == 2);
+}
+
+TEST_CASE("a T& declaration refuses a GEP of a temporary", "[ownership][pointer]")
+{
+    // operator [] requests storage for its receiver; a T[N] index is a GEP with no
+    // such wrap. place_outlives_statement is the living-storage owner at this destination
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function make() : int32[2] {\n"
+        "    int32[2] $a;\n"
+        "    $a[0] = 1;\n"
+        "    $a[1] = 2;\n"
+        "    return $a;\n"
+        "}\n"
+        "int32& $r = make()[0];\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "would point into a value destroyed at the end of this statement"));
+}

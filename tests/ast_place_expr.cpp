@@ -470,6 +470,12 @@ TEST_CASE("A container index is a place, before and after the rewrite", "[AST][p
 
     // the element, not the container and not the borrow the operator hands back
     REQUIRE(index->result_type().is_primitive_of_type(ValueTypePrimitive::t_int32));
+
+    // the rewrite moved the container into the call; the spine still names `$g`
+    REQUIRE(place_outlives_statement(index));
+    VarDeclNode *root = place_root_of(index);
+    REQUIRE(root != nullptr);
+    REQUIRE(root->name_full() == "$g");
 }
 
 // the honest answer while the contract has not been attached yet. peeling the base there would hand

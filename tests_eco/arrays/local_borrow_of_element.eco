@@ -1,0 +1,73 @@
+// a T& / const T& local auto-borrows a place the same way a T& parameter does.
+// `$a[0]` is a place of the element (IndexExprNode peels operator []'s T& down to T);
+// argument passing already took its address, a declaration did not
+
+struct Track
+{
+    array<float32> $keys;
+    int32 $node;
+}
+
+struct Clip
+{
+    array<Track> $tracks;
+}
+
+function viaLocal(const array<Track>& $ts) : int32
+{
+    const Track& $t = $ts[0];
+    return $t->node;
+}
+
+function viaField(const Clip& $clip) : int32
+{
+    const Track& $t = $clip->tracks[0];
+    return $t->node;
+}
+
+function first(array<int32>& $a) : int32&
+{
+    return $a[0];
+}
+
+function readParam(const Track& $t) : int32
+{
+    return $t->node;
+}
+
+array<Track> $ts = array<Track>();
+$ts[] = Track([1.0f], 7);
+$ts[] = Track([2.0f], 9);
+
+echo viaLocal($ts);
+echo viaField(Clip($ts));
+echo readParam($ts[0]);
+
+Track& $mut = $ts[0];
+$mut->node = 11;
+echo $ts[0]->node;
+
+const Track& $view = $ts[1];
+echo $view->node;
+
+array<int32> $ns = [3, 4];
+int32& $n = $ns[0];
+$n = $n + 1;
+echo $ns[0];
+
+int32 $i = 5;
+int32& $r = $i;
+$r = 6;
+echo $i;
+
+int32& $slot = &$ns[1];
+$slot = 8;
+echo $ns[1];
+
+int32& $head = first($ns);
+$head = 10;
+echo $ns[0];
+
+Track $copy = $ts[0];
+$copy->node = 99;
+echo $ts[0]->node;

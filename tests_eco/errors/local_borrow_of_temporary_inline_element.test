@@ -1,14 +1,14 @@
 expect: fail
 
 --- OUT --->
-[error] TemporaryMember  address_of_call_result.eco:10:13
+[error] TemporaryMember  local_borrow_of_temporary_inline_element.eco:13:19
 
   'int32' has no storage of its own, so the address of it would point into a value destroyed at the end of this statement.
 
-   9 | 
-  10 | int32& $r = &get();
-     :             ^
-  11 | 
+  12 | 
+  13 | int32& $r = make()[0];
+     :                   ^
+  14 | echo $r;
 
   help: Bind it to a variable first.
 

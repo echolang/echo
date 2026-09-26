@@ -405,10 +405,12 @@ namespace AST
 
     // **does this place's storage outlive the statement it sits in?** the same spine
     // place_root_of walks (varref / member / index / deref / peel / addrof), yes for a
-    // local *and* for `n_expr_static_property`. a call result, and a place rooted in one
-    // (`Box()->n`, `Rows()->rows`), answers no: that storage dies at the end of the
-    // statement, so ForeachLowering binds `$__src` and statement-form `T?` hoists
-    // `$__guardN`. seat_receiver_local borrows vs copies on this answer
+    // local *and* for `n_expr_static_property`. a rewritten container index walks the
+    // `operator []` receiver, because `base` is cleared once the call owns the operands.
+    // a call result, and a place rooted in one (`Box()->n`, `Rows()->rows`), answers no:
+    // that storage dies at the end of the statement, so ForeachLowering binds `$__src`
+    // and statement-form `T?` hoists `$__guardN`. seat_receiver_local borrows vs copies
+    // on this answer
     bool place_outlives_statement(ExprNode *expr);
 
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers

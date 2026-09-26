@@ -54,8 +54,23 @@ ExprNode *place_anchor(ExprNode *expr)
                 break;
 
             case NodeType::n_expr_index:
-                expr = static_cast<IndexExprNode *>(expr)->base;
+            {
+                auto *index = static_cast<IndexExprNode *>(expr);
+
+                // after the rewrite the container lives as the operator [] receiver, not
+                // `base` (that edge is cleared so PointerAdjuster cannot rewrite it twice).
+                // the spine has to follow it or every `$a[0]` looks like a call result:
+                // place_outlives_statement goes false and a T& of a local element is
+                // TemporaryMember; place_root_of goes null and `return $a[0]` of a by-value
+                // array skips the dangling-return gate
+                if (index->element_call != nullptr && !index->element_call->arguments.empty()) {
+                    expr = index->element_call->arguments[0];
+                    break;
+                }
+
+                expr = index->base;
                 break;
+            }
 
             case NodeType::n_member_access:
             {
