@@ -1,0 +1,22 @@
+// the owner axis of the same copy: a private field is reachable from the synthesized
+// constructor because enclosing_type_of answers the type, and TypeHomeScope writes the
+// body at that type
+internal struct Item
+{
+    private string $name;
+
+    public constructor(const string& $name)
+    {
+        $this->name = $name;
+    }
+
+    public const function name() : string
+    {
+        return $this->name;
+    }
+}
+
+array<Item> $a = array<Item>();
+$a[] = Item('private');
+array<Item> $b = $a;
+echo $b[0]->name();

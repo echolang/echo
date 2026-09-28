@@ -3307,6 +3307,19 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
     ComplexType *ct = type.get_complex_type();
 
+    // **where the declaration is written: at the type, not at the copy that asked for it.**
+    // the same TypeHomeScope ensure_deinit and a static's initializer take, and the header
+    // already names a copy constructor as owing it. without this, `array<Item> $b = $a`
+    // synthesizes Item's field-wise copy into stdlib, TypeChecker walks it from there, and
+    // an `internal` field is InaccessibleDeclaration pointing at array.eco
+    const TypeHomeScope home(*this, ct);
+
+    std::optional<TokenReference> at = site;
+
+    if (home.home() != nullptr) {
+        at.emplace(home.home()->decl->name_token.value());
+    }
+
     // the type's own, stripped of whatever per-level flags the *use* that asked for this copy carried -
     // `const Foo`, `Foo?`. build_deinit above has the same rule and the note there says why: a
     // declaration synthesized for a type belongs to the type, and the first use to reach it is decided
@@ -3315,7 +3328,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
     // named after the struct, like every constructor - the *template's* name for an instantiation,
     // since `Box<int32>` is what the layout is called and `Box` is what a constructor of it is
-    auto &decl = begin_synthesized_decl(ct->template_or_self()->name.value_or(""), site);
+    auto &decl = begin_synthesized_decl(ct->template_or_self()->name.value_or(""), at.value());
     const BodyMutationScope mutating(*this, decl);
 
     // a constructor, and so deliberately **not** a member: owner_type is what implicit_arg_count()
@@ -3349,7 +3362,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     const ValueType source_type =
         copy_source_may_be_const(own_type) ? ValueType::make_const(own_type) : own_type;
 
-    auto &other_decl = add_borrow_parameter(decl, "$other", source_type, site);
+    auto &other_decl = add_borrow_parameter(decl, "$other", source_type, at.value());
 
     ScopeNode &body = *decl.body;
 
@@ -3368,7 +3381,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     // reference kind is ever synthesizable - is deliberately *not* what this relies on. that guard lives
     // in another file, and a body built around an assumption held somewhere else is exactly how this
     // line came to write through a handle that was never allocated
-    auto &this_decl = declare_constructor_this(*_current_module, self_type, site);
+    auto &this_decl = declare_constructor_this(*_current_module, self_type, at.value());
     body.add_vardecl(this_decl);
 
     // **a tagged optional copies its payload only when it has one.** the tag is copied either way, and the
@@ -3423,7 +3436,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
         ExprNode *source = make_place(&other_decl, path);
 
         if (prop.type.is_inline_array() && classify_copy(prop.type) == CopyKind::t_elements) {
-            emit_inline_array_copies(target, source, prop.type, site, body);
+            emit_inline_array_copies(target, source, prop.type, at.value(), body);
             continue;
         }
 
@@ -3432,11 +3445,11 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
         // the same re-seating form the synthesized field-wise constructor spells
         if (prop.type.is_pointer()) {
             target = &_current_module->nodes.emplace_back<PointerValueNode>(
-                target, virtual_token(prop.name, Token::Type::t_identifier, site));
+                target, virtual_token(prop.name, Token::Type::t_identifier, at.value()));
         }
 
         auto &assign = _current_module->nodes.emplace_back<AssignNode>(
-            target, source, virtual_token(prop.name, Token::Type::t_identifier, site));
+            target, source, virtual_token(prop.name, Token::Type::t_identifier, at.value()));
 
         // fresh storage, so no teardown is owed and a `const` property gets its one legitimate write
         assign.is_initialization = true;
@@ -3458,14 +3471,14 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     // branch build_deinit's optional arm makes, and the tag is read off `$other` because it is `$other`'s
     // payload the write inside reads
     if (present != nullptr) {
-        body.children.push_back(make_ref(branch_when_present(&other_decl, present, site)));
+        body.children.push_back(make_ref(branch_when_present(&other_decl, present, at.value())));
     }
 
     // and the enum's, one per case that has a payload, for the same reason and read off `$other` for
     // the same one: it is `$other`'s payload each branch copies
     for (const auto &[entry, scope] : case_scopes) {
         body.children.push_back(
-            make_ref(branch_when_case(&other_decl, ct, entry->discriminant, scope, site)));
+            make_ref(branch_when_case(&other_decl, ct, entry->discriminant, scope, at.value())));
     }
 
     close_constructor_body(*_current_module, decl, this_decl);

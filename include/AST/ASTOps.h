@@ -120,7 +120,8 @@ namespace AST
         // since it runs ahead of every lookup. a static rather than a second comparison at that site: the
         // symbol is named once, so a further prefix-only one cannot be added here and missed there
         static inline bool is_prefix_only_token(Token::Type type) {
-            return type == Token::Type::t_exclamation;
+            return type == Token::Type::t_exclamation
+                || type == Token::Type::t_tilde;
         }
 
         // the operators that ask a question about two operands rather than combining them

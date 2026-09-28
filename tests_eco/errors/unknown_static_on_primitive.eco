@@ -1,0 +1,2 @@
+// usize is a type, so this is UnknownStaticFunction, not UnknownFunction
+usize::nope();

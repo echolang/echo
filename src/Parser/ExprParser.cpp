@@ -894,7 +894,10 @@ namespace
                         payload, owner_name, *payload.context.current_namespace);
 
                     if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
-                        return nullptr;
+                        // a primitive is an owner too: `usize::max()`. it is not a Symbol
+                        if (!Parser::is_primitive_type_name(owner_name)) {
+                            return nullptr;
+                        }
                     }
                 }
             }
@@ -949,7 +952,9 @@ namespace
         // a type parameter is a legitimate owner - `T::from(...)` - and has no ComplexType until
         // substitution. anything else that is not a named type goes back for the namespace walk
         if (owner_node == nullptr || !consumed_owner
-            || !(owner_node->type.has_complex_type() || owner_node->type.is_type_param())) {
+            || !(owner_node->type.has_complex_type()
+                || owner_node->type.is_type_param()
+                || (owner_node->type.is_primitive() && !owner_node->type.is_void()))) {
             cursor.restore(start);
             return nullptr;
         }
@@ -1371,18 +1376,10 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             const AST::ValueType base_type =
                 AST::target_type_of(current_ref.unsafe_ptr<AST::ExprNode>()->result_type());
 
-            // the property is asked for first even though the member-function gate is the more
-            // interesting condition: find_property is an O(1) map hit, where find_member_functions is a
-            // linear scan that builds a vector. `->name(` is overwhelmingly an ordinary method call, and
-            // in that shape there is no callable property, so this way it never pays for the scan
-            const AST::ComplexType::Property *property = base_type.has_property_layout()
-                ? base_type.get_complex_type()->find_property(member_token.value())
-                : nullptr;
-
-            if (property != nullptr
-                && property->type.has_signature()
-                && AST::find_member_functions(base_type.get_complex_type(), member_token.value()).empty())
-            {
+            // AST::callable_property_of: a property of callable type, and no method of that name.
+            // rewrite_callable_property_calls retries the same question once an untyped index
+            // receiver becomes concrete - `$a[0]->fn(1)` is a pending member call until then
+            if (AST::callable_property_of(base_type, member_token.value()) != nullptr) {
                 auto &member_access =
                     payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
 
@@ -1520,7 +1517,7 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
     bool qualified = false;
     AST::ValueType static_owner;
 
-    if (owner != nullptr && owner->type.has_complex_type() && cursor.is_type(Token::Type::t_identifier)) {
+    if (owner != nullptr && cursor.is_type(Token::Type::t_identifier)) {
         static_owner = owner->type;
     }
     else {
@@ -1559,7 +1556,7 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
 
     cursor.skip();
 
-    const auto candidates = AST::function_ref_candidates(ref, payload.collector.functions);
+    const auto candidates = AST::function_ref_candidates(ref, payload.collector);
 
     if (!ref.is_static()
         && AST::find_constant(
@@ -1588,7 +1585,7 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
     }
 
     if (expected_type != nullptr) {
-        AST::bind_function_ref_to(&ref, expected_type->type, payload.collector.functions);
+        AST::bind_function_ref_to(&ref, expected_type->type, payload.collector);
     }
 
     auto chained = Parser::parse_postfix_chain(payload, AST::make_ref(ref));

@@ -271,10 +271,42 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     const size_t prev_unsafe = _unsafe_depth;
     _unsafe_depth = 0;
 
-    RecursiveVisitor::visitFunctionDecl(node);
+    check_parameter_defaults(node);
+
+    const bool prev_parameter = _in_parameter;
+    _in_parameter = true;
+    for (VarDeclNode *arg : node.args) {
+        statement_edge(arg);
+    }
+    _in_parameter = prev_parameter;
+    statement_edge(node.body);
 
     _unsafe_depth = prev_unsafe;
     _current_function = prev;
+}
+
+void TypeChecker::check_parameter_defaults(FunctionDeclNode &node)
+{
+    for (size_t i = 0; i < node.args.size(); i++) {
+        VarDeclNode *arg = node.args[i];
+
+        if (arg == nullptr || arg->init_expr == nullptr || !arg->has_type() || arg->binds_unwrapped) {
+            continue;
+        }
+
+        if (array_literal_of(arg->init_expr) != nullptr) {
+            continue;
+        }
+
+        check_call_argument(
+            arg->init_expr,
+            arg->type(),
+            node.user_arg_number(i),
+            &node,
+            std::string(),
+            arg->token_varname
+        );
+    }
 }
 
 void TypeChecker::visitScope(ScopeNode &node)
@@ -2318,7 +2350,7 @@ void TypeChecker::visit_assign(AssignNode &node)
 void TypeChecker::visit_function_ref_expr(FunctionRefExprNode &node)
 {
     if (!node.resolved) {
-        const auto candidates = function_ref_candidates(node, _collector.functions);
+        const auto candidates = function_ref_candidates(node, _collector);
 
         std::string named;
         for (size_t i = 0; i < candidates.size(); i++) {
@@ -2398,8 +2430,13 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
         // place by AST::OperatorRewriter before this pass, so those never reach here as literals
         if (array_literal_of(node.init_expr) != nullptr) {
             bind_array_literal_to(node.init_expr, node.type(), _collector.core_types);
-        } else {
-            check_destination_fits(Destination::t_declaration, node.type(), *node.init_expr, node.token_varname);
+        } else if (!_in_parameter) {
+            check_destination_fits(
+                Destination::t_declaration,
+                node.type(),
+                *node.init_expr,
+                node.token_varname
+            );
         }
     }
 

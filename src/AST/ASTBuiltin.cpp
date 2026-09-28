@@ -1,5 +1,10 @@
 #include "AST/ASTBuiltin.h"
 
+#include "AST/ASTCollector.h"
+#include "AST/ASTVisibility.h"
+#include "AST/FunctionDeclNode.h"
+#include "AST/TypeNode.h"
+
 #include <cassert>
 #include <optional>
 #include <unordered_map>
@@ -13,6 +18,8 @@ namespace
             { "align_of", AST::BuiltinKind::t_align_of },
             { "is_trivially_copyable", AST::BuiltinKind::t_is_trivially_copyable },
             { "needs_destruction", AST::BuiltinKind::t_needs_destruction },
+            { "integer_min", AST::BuiltinKind::t_integer_min },
+            { "integer_max", AST::BuiltinKind::t_integer_max },
             { "type_id", AST::BuiltinKind::t_type_id },
             { "erased_from", AST::BuiltinKind::t_erased_from },
             { "erased_retain", AST::BuiltinKind::t_erased_retain },
@@ -69,6 +76,8 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         // one spelling rather than two held in step by nothing
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max:
             return AST::BuiltinFoldability::t_ast_fact;
 
         // and the two that read a DataLayout. they still fold, at codegen, where there is one
@@ -138,6 +147,8 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max:
         case AST::BuiltinKind::t_type_id:
         case AST::BuiltinKind::t_erased_from:
         case AST::BuiltinKind::t_erased_retain:
@@ -194,6 +205,8 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max:
         case AST::BuiltinKind::t_type_id:
         case AST::BuiltinKind::t_erased_from:
         case AST::BuiltinKind::t_erased_retain:
@@ -243,6 +256,8 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max:
         case AST::BuiltinKind::t_type_id:
         case AST::BuiltinKind::t_erased_from:
         case AST::BuiltinKind::t_erased_retain:
@@ -296,6 +311,8 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max:
         case AST::BuiltinKind::t_type_id:
         case AST::BuiltinKind::t_erased_from:
         case AST::BuiltinKind::t_erased_retain:
@@ -324,4 +341,51 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
     }
 
     return false;
+}
+
+uint64_t AST::integer_bound_bits(ValueTypePrimitive primitive, bool is_max)
+{
+    // IntegerSize is the one extrema table: a literal's range check already reads it, so
+    // `usize::max()` cannot drift from what `18446744073709551615 as usize` is allowed to be
+    const IntegerSize size = get_integer_size(primitive);
+
+    if (is_max) {
+        return size.get_max_positive_value();
+    }
+
+    return static_cast<uint64_t>(size.get_max_negative_value());
+}
+
+AST::FunctionDeclNode *AST::integer_bound_decl(
+    Collector &collector,
+    const ValueType &type,
+    const std::string &name,
+    const TokenReference &at
+)
+{
+    if (!type.is_integer_type() || (name != "min" && name != "max")) {
+        return nullptr;
+    }
+
+    const bool is_max = name == "max";
+    const uint32_t key =
+        (static_cast<uint32_t>(type.get_primitive_type()) << 1) | (is_max ? 1u : 0u);
+
+    if (auto found = collector._integer_bound_decls.find(key); found != collector._integer_bound_decls.end()) {
+        return found->second;
+    }
+
+    auto &decl = collector._compiler_nodes.emplace_back<FunctionDeclNode>(at);
+    decl.builtin = is_max ? "integer_max" : "integer_min";
+    decl.is_implicitly_generated = true;
+    decl.visibility = Visibility::t_public;
+    decl.instantiation_args = { ValueType(type.get_primitive_type()) };
+
+    auto &return_type = collector._compiler_nodes.emplace_back<TypeNode>(
+        ValueType(type.get_primitive_type())
+    );
+    decl.return_type = &return_type;
+
+    collector._integer_bound_decls[key] = &decl;
+    return &decl;
 }

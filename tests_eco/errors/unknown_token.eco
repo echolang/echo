@@ -1,0 +1,4 @@
+// a character the lexer has no rule for is a located refusal, not an uncaught C++ exception
+
+int32 $n = 1 @ 2;
+echo $n;

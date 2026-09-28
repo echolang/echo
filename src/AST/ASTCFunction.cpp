@@ -1,9 +1,9 @@
 #include "AST/ASTCFunction.h"
 
+#include "AST/ASTCollector.h"
 #include "AST/ASTCompleteness.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionEmission.h"
-#include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTVariadic.h"
@@ -244,26 +244,35 @@ std::optional<std::string> AST::c_function_ref_refusal(const AST::FunctionDeclNo
 
 std::vector<AST::FunctionDeclNode *> AST::function_ref_candidates(
     const AST::FunctionRefExprNode &node,
-    AST::FunctionRegistry &functions
+    AST::Collector &collector
 )
 {
     if (node.is_static()) {
-        auto statics = find_static_functions(node.static_owner.get_complex_type(), node.lookup_name());
+        auto statics = find_static_functions(
+            collector,
+            node.static_owner,
+            node.lookup_name(),
+            node.token_name
+        );
 
         if (!statics.empty()) {
             return statics;
         }
 
         // a method of that name, so `&Type::method` is refused by c_function_ref_refusal
-        // rather than as an unknown name
-        return find_member_functions(node.static_owner.get_complex_type(), node.lookup_name());
+        // rather than as an unknown name. after the closed search, never as a receiver walk
+        if (node.static_owner.has_complex_type()) {
+            return find_member_functions(node.static_owner.get_complex_type(), node.lookup_name());
+        }
+
+        return {};
     }
 
     if (node.lookup_namespace == nullptr) {
         return {};
     }
 
-    return functions.overloads(node.lookup_name(), *node.lookup_namespace);
+    return collector.functions.overloads(node.lookup_name(), *node.lookup_namespace);
 }
 
 AST::FunctionRefExprNode *AST::function_ref_of(AST::ExprNode *expr)
@@ -285,7 +294,7 @@ const AST::FunctionRefExprNode *AST::function_ref_of(const AST::ExprNode *expr)
 bool AST::bind_function_ref_to(
     AST::ExprNode *expr,
     const AST::ValueType &destination,
-    AST::FunctionRegistry &functions
+    AST::Collector &collector
 )
 {
     FunctionRefExprNode *ref = function_ref_of(expr);
@@ -325,7 +334,7 @@ bool AST::bind_function_ref_to(
 
     std::vector<FunctionDeclNode *> matches;
 
-    for (FunctionDeclNode *candidate : function_ref_candidates(*ref, functions)) {
+    for (FunctionDeclNode *candidate : function_ref_candidates(*ref, collector)) {
         const bool match = want_callable
             ? callable_fits(*candidate, wanted)
             : c_function_signatures_match(candidate->c_function_type().signature(), wanted.signature());

@@ -3,11 +3,19 @@
 
 #pragma once
 
+#include "AST/ASTValueType.h"
+
+#include "Token.h"
+
+#include <cstdint>
 #include <optional>
 #include <string>
 
 namespace AST
 {
+    class Collector;
+    class FunctionDeclNode;
+
     // the compiler builtins a function declaration can be bound to with `#[builtin: ...]`
     //
     // a builtin is answered by the compiler at the call site rather than being emitted as a
@@ -37,6 +45,13 @@ namespace AST
         // the compiler already knows, and one owner that already decides it is the point
         t_is_trivially_copyable,
         t_needs_destruction,
+
+        // **`T::min()` / `T::max()` on an integer primitive.** AST facts about the width, the
+        // same table a literal's range check reads (IntegerSize). interned by
+        // AST::integer_bound_decl rather than written in the stdlib: a primitive has no
+        // ComplexType to hang a static on
+        t_integer_min,
+        t_integer_max,
 
         // **the runtime identity of a type**, as a value a program can hold. `type_id<T>()` is the
         // address of a `linkonce_odr` global: a class's existing typeinfo, an interface's itype, or
@@ -299,6 +314,21 @@ namespace AST
     // `mem::ref_count` and `mem::weak_count` - which take a plain `T&` - laundered a raw address into a
     // trusted borrow with nothing asked of the author
     bool builtin_owns_raw_storage(BuiltinKind kind);
+
+    // the bits `T::min()` / `T::max()` fold to. signed values are sign-extended to 64 bits.
+    // IntegerSize is the one extrema table: a literal's range check already reads it
+    uint64_t integer_bound_bits(ValueTypePrimitive primitive, bool is_max);
+
+    // **`T::min()` / `T::max()` on an integer primitive.** interned, `#[builtin:]`, no symbol.
+    // null when `name` is neither, or `type` is not an integer. `at` names the decl on first mint.
+    // a primitive has no ComplexType to hang a static on, so CallResolver asks this rather than
+    // find_static_functions
+    FunctionDeclNode *integer_bound_decl(
+        Collector &collector,
+        const ValueType &type,
+        const std::string &name,
+        const TokenReference &at
+    );
 };
 
 #endif

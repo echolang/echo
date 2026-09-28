@@ -4,6 +4,8 @@
 #include "AST/ASTConstFold.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
+#include "AST/ASTOps.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTVisitor.h"
@@ -17,6 +19,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
 #include "AST/MatchExprNode.h"
+#include "AST/OperatorNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/StringInterpolationNode.h"
 #include "AST/TypeCastNode.h"
@@ -182,6 +185,56 @@ namespace
             }
 
             RecursiveVisitor::visit_index_expr(node);
+        }
+
+        // **a binary or unary that will become a call has not been fitted yet.** OperatorRewriter
+        // runs in desugar, ahead of settle, so `$xs[0]->view() == $v` is still a BinaryExprNode in
+        // the round the view() call settles - builtin meaning is false once the operands are
+        // `string::view`, the rewrite is next round, and walking now would own a tree that is about
+        // to grow an AddrOf. the same hole as an unsettled call, one step earlier: argument_fit
+        // plants the `&` on the call, this pass walks a body exactly once
+        //
+        // "not decided yet" answers true from binary_has_builtin_meaning / unary_has_builtin_meaning,
+        // so an unknown operand does not take this arm - an unsettled call in the operand already does
+        void visitBinaryExpr(BinaryExprNode &node) override
+        {
+            if (node.op_node != nullptr && node.op_node->op != nullptr
+                && node.lhs != nullptr && node.rhs != nullptr
+                && node.op_node->op->has_fixity(OpFixity::t_infix)
+                && !binary_has_builtin_meaning(
+                    node.op_node->op,
+                    parse_time_operand(node.lhs),
+                    parse_time_operand(node.rhs)
+                )) {
+                pending = true;
+                return;
+            }
+
+            RecursiveVisitor::visitBinaryExpr(node);
+        }
+
+        void visitUnaryExpr(UnaryExprNode &node) override
+        {
+            // a unary node keeps its token rather than an OperatorNode. unary_has_builtin_meaning
+            // is the same predicate OperatorRewriter uses one pass earlier; a declared prefix
+            // has no builtin meaning, so this waits for the rewrite
+            if (node.expr == nullptr) {
+                RecursiveVisitor::visitUnaryExpr(node);
+                return;
+            }
+
+            const Operator op(
+                node.token_operator.type(),
+                node.token_operator.value(),
+                {OpAssociativity::none, 0}
+            );
+
+            if (!unary_has_builtin_meaning(&op, parse_time_operand(node.expr))) {
+                pending = true;
+                return;
+            }
+
+            RecursiveVisitor::visitUnaryExpr(node);
         }
 
         // **a call that has not settled has not been fitted to its parameters**, and fitting is what

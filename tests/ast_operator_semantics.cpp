@@ -234,9 +234,11 @@ TEST_CASE("unary_has_builtin_meaning covers negation and both meanings of '!'", 
 
     const Operator *neg = op_for(registry, Token::Type::t_op_sub);
     const Operator *bang = op_for(registry, Token::Type::t_exclamation);
+    const Operator *tilde = op_for(registry, Token::Type::t_tilde);
 
     REQUIRE(neg != nullptr);
     REQUIRE(bang != nullptr);
+    REQUIRE(tilde != nullptr);
 
     REQUIRE(unary_has_builtin_meaning(neg, value(s.i32)));
     REQUIRE(unary_has_builtin_meaning(neg, value(s.f64)));
@@ -250,6 +252,11 @@ TEST_CASE("unary_has_builtin_meaning covers negation and both meanings of '!'", 
     REQUIRE(unary_has_builtin_meaning(bang, value(s.weak_handle)));
     REQUIRE_FALSE(unary_has_builtin_meaning(bang, value(s.i32)));
     REQUIRE_FALSE(unary_has_builtin_meaning(bang, value(s.structure)));
+
+    REQUIRE(unary_has_builtin_meaning(tilde, value(s.i32)));
+    REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(s.f64)));
+    REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(s.boolean)));
+    REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(s.structure)));
 }
 
 // AST::binary_reconciles_operands and AST::binary_operation_type - "do these two operands meet at one

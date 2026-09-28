@@ -140,12 +140,13 @@ AST::OperatorRegistry::OperatorRegistry()
     register_predefined_token_op(Token::Type::t_op_pow);
     register_predefined_token_op(Token::Type::t_op_inc);
     register_predefined_token_op(Token::Type::t_op_dec);
-    // **`!` carries no precedence tier**, deliberately: it is prefix-only, so it never enters the
-    // shunting yard as an operator part and there is nothing for a tier to order it against.
-    // registered all the same, because `get_operator(TokenReference)` is how AST::TypeChecker and
-    // AST::OperatorRewriter ask what a UnaryExprNode's symbol means - an unregistered `!` answers
-    // null there and every use of it is refused after it finally parses
+    // **`!` and `~` carry no precedence tier**, deliberately: they are prefix-only, so they never
+    // enter the shunting yard as an operator part and there is nothing for a tier to order them
+    // against. registered all the same, because `get_operator(TokenReference)` is how
+    // AST::TypeChecker and AST::OperatorRewriter ask what a UnaryExprNode's symbol means - an
+    // unregistered `!` answers null there and every use of it is refused after it finally parses
     register_predefined_token_op(Token::Type::t_exclamation);
+    register_predefined_token_op(Token::Type::t_tilde);
 }
 
 void AST::OperatorRegistry::register_predefined_token_op(const Token::Type &type)

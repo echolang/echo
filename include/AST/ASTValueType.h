@@ -1829,6 +1829,23 @@ namespace AST
         return type.is_unknown() || contains_type_param(type);
     }
 
+    // **a placeholder seated behind an address is still a placeholder.** is_undetermined_type
+    // asks the level it is given, so `ptr<unknown>` is a determined pointer to nothing in
+    // particular. a match binding is declared `unknown&` by the parser - the pointer level is
+    // deliberate, so a member call in the arm knows its receiver is already addressed.
+    //
+    // ranking or settling against that pointee is premature: argument_fit would score `t_none`
+    // and CallResolver's `t_no_viable` arm is final, taken in the round before MatchResolution
+    // answers what the binding holds. the two readers are argument_fit and
+    // CallResolver::arguments_are_determined
+    inline bool type_is_determined_for_fit(const ValueType &type) {
+        if (is_undetermined_type(type)) {
+            return false;
+        }
+
+        return !(type.is_pointer() && type.pointee().is_unknown());
+    }
+
     // **why may this type not sit where a value lives?** a local, a field, a parameter, a
     // type argument. nullopt when it may. `: void` and `function<void()>` are returns, not
     // this - those ask nested_void_as_value_refusal so a `result<void, E>` is still refused

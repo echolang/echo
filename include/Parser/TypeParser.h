@@ -78,6 +78,11 @@ namespace Parser
 
     AST::TypeNode *parse_type(Payload &payload);
 
+    // silent: a name the type grammar would read as a primitive (`usize`, `int32`, …).
+    // parse_static_owner needs this before it calls parse_type, which reports an unknown
+    // identifier - speculation cannot afford that
+    bool is_primitive_type_name(const std::string &name);
+
     // one type parameter exactly as written, before it becomes a declaration. parsing produces
     // syntax; minting the owned TypeParamDecl is the declaring step, which the owner node does
     // (see AST::declare_type_parameters) so it can stay idempotent across the two parser passes

@@ -428,7 +428,12 @@ public:
     struct UnknownTokenException : public TokenException
     {
         UnknownTokenException(const std::string &snippet, size_t line, size_t char_offset) :
-            TokenException("Unknown token at line " + std::to_string(line) + " offset " + std::to_string(char_offset) + " near: " + snippet, snippet, line, char_offset)
+            TokenException(
+                "unexpected '" + snippet + "' at line " + std::to_string(line) + " column " + std::to_string(char_offset),
+                snippet,
+                line,
+                char_offset
+            )
         {}
     };
 

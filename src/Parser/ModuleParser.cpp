@@ -112,10 +112,9 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
         // process-wide reporter from the parser exactly as the ScopedPhase above it does
         Compiler::ProgressReporter::instance().tick(file.get_path().filename().string());
 
-#if ECO_DONT_CATCH_EXCEPTIONS
-        auto tfile = make_tokenized_file(module, file);
-        file_payloads.push_back(std::make_tuple(&file, tfile));
-#else
+        // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says**, matching TokenFilterException in
+        // ParsePipeline. that macro exists to let a *compiler bug* crash with a stack trace, and a
+        // character the lexer has no rule for is a mistake in the source being compiled
         try {
             auto tfile = make_tokenized_file(module, file);
             file_payloads.push_back(std::make_tuple(&file, tfile));
@@ -123,7 +122,6 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
         catch (const Lexer::TokenException &e) {
             throw TokenizationException(e, &file);
         }
-#endif
     }
     }
 

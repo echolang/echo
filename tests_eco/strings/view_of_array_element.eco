@@ -1,0 +1,21 @@
+// comparing a view produced by a method on an indexed element. `operator ==` for views takes
+// `const string::view&`, so the call result needs a temporary to borrow from. a method on a
+// plain `const string&` already worked; the array element in front was the hole
+
+function hit(const array<string>& $xs, string::view $v) : bool
+{
+    return $xs[0]->view() == $v;
+}
+
+function hit_local(const string& $s, string::view $v) : bool
+{
+    return $s->view() == $v;
+}
+
+array<string> $xs = ['hello'];
+string $s = 'hello';
+string::view $v = $s->view();
+
+echo hit($xs, $v);
+echo hit_local($s, $v);
+echo hit($xs, 'nope'->view());

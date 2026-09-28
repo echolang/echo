@@ -1,0 +1,1 @@
+extern function<usize()> $f = &usize::max;

@@ -148,9 +148,9 @@ namespace AST
     bool binary_has_builtin_meaning(const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs);
 
     // the same question for a unary operator, where the built-in surface is far smaller:
-    // ExprCodegen::gen_unary_expr lowers negation over a number and `!` over a bool or anything that
-    // may be absent, and nothing else. unary `+` never reaches here at all - the parser folds it away,
-    // since it carries no semantics
+    // ExprCodegen::gen_unary_expr lowers negation over a number, `~` over an integer, and `!` over
+    // a bool or anything that may be absent, and nothing else. unary `+` never reaches here at all
+    // - the parser folds it away, since it carries no semantics
     bool unary_has_builtin_meaning(const Operator *op, const OperandFacts &operand);
 
     // **why these two operands cannot answer this operator - said about the operands, not about a

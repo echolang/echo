@@ -132,6 +132,11 @@ namespace AST
         // which variables are the caller's. null at file scope
         FunctionDeclNode *_current_function = nullptr;
 
+        // true while visitFunctionDecl is walking the parameter list. a parameter default is an
+        // argument expression, ranked by argument_fit; visitVarDecl's declaration destination
+        // does not admit borrow-of-temporary
+        bool _in_parameter = false;
+
         // how many `unsafe { }` blocks enclose the statement being checked. a *depth* and not a flag,
         // because blocks nest and an inner ordinary block inside an unsafe one is still unsafe -
         // which is right: the promise is about a region of source, and a `{ }` written inside it is
@@ -193,6 +198,10 @@ namespace AST
         // from. **called ahead of the generic early-return** in visitFunctionDecl, since a bodyless
         // template is exactly one of the cases - see the note there
         void check_has_implementation(FunctionDeclNode &node);
+
+        // a parameter default is cloned into the call, so it is ranked as an argument.
+        // visitVarDecl skips the declaration-destination check while `_in_parameter`
+        void check_parameter_defaults(FunctionDeclNode &node);
 
         // where a `#[core: variadic_args]` may be written, asked of the declaration as a whole -
         // see AST::variadic_args_refusal for why it is one question rather than four

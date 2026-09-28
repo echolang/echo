@@ -519,7 +519,8 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
         // the type is named and its static overload set has nothing by that name. a different
         // sentence from UnknownFunction's, because the search was not a search of any namespace -
         // and reported here rather than left to the fixpoint, the owner already being concrete
-        if (lookup.static_owner.has_complex_type()) {
+        if (lookup.static_owner.has_complex_type()
+            || (lookup.static_owner.is_primitive() && !lookup.static_owner.is_void())) {
             payload.collector.collect_issue<AST::Issue::UnknownStaticFunction>(
                 payload.context.code_ref(funcname_token),
                 funcname_token.value(),

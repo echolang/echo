@@ -64,6 +64,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_optional_arrow: return "optional accessor (?->)";
         case Token::Type::t_double_arrow: return "double arrow (=>)";
         case Token::Type::t_exclamation: return "exclamation (!)";
+        case Token::Type::t_tilde: return "tilde (~)";
         case Token::Type::t_open_angle: return "open_angle (<)";
         case Token::Type::t_close_angle: return "close_angle (>)";
         case Token::Type::t_open_paren: return "open_paren '('";
@@ -162,6 +163,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_optional_arrow: return "?->";
         case Token::Type::t_double_arrow: return "=>";
         case Token::Type::t_exclamation: return "!";
+        case Token::Type::t_tilde: return "~";
         case Token::Type::t_open_angle: return "<";
         case Token::Type::t_close_angle: return ">";
         case Token::Type::t_open_paren: return "(";
@@ -243,9 +245,10 @@ bool Token::is_operator_type() const
         Token::Type::t_op_pow,
         Token::Type::t_op_inc,
         Token::Type::t_op_dec,
-        // `!`, the one prefix-only symbol the language spells - see AST::Operator::is_prefix_only.
-        // `!=` is its own token and the lexer trie takes the longest match, so this never splits one
-        Token::Type::t_exclamation
+        // `!` and `~`, the prefix-only symbols the language spells - see AST::Operator::is_prefix_only.
+        // `!=` is its own token and the lexer trie takes the longest match, so `!` never splits one
+        Token::Type::t_exclamation,
+        Token::Type::t_tilde
     });
 }
 

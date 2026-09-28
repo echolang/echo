@@ -418,6 +418,11 @@ AST::ValueType get_primitive_type(const std::string &types_string)
     return AST::ValueType::make_unknown();
 }
 
+bool Parser::is_primitive_type_name(const std::string &name)
+{
+    return !get_primitive_type(name).is_unknown();
+}
+
 // expands a named constraint alias (e.g. `numeric`) into the set of concrete types it
 // covers, or nullopt if `name` is not a known alias. the sets are derived from the existing
 // ValueType category predicates so they stay in sync with the type system automatically

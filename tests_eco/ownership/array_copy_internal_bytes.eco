@@ -1,0 +1,16 @@
+// all-bytes T copies with mem::copy and never names fields, so internal int32 is fine
+// even without TypeHomeScope. pin that this path stays un-synthesized
+internal struct Cell
+{
+    internal int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+array<Cell> $a = array<Cell>();
+$a[] = Cell(7);
+array<Cell> $b = $a;
+echo $b[0]->n;

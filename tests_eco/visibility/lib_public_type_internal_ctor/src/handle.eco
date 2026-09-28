@@ -1,0 +1,30 @@
+// a public type only this module constructs. `use lib::{Handle}` has to import the type even
+// though the constructor is internal - constructing is refused at the call, which is the site
+// that names it
+
+namespace lib;
+
+public class Handle
+{
+    int32 $id;
+
+    internal constructor(int32 $id)
+    {
+        $this->id = $id;
+    }
+
+    public function id() : int32
+    {
+        return $this->id;
+    }
+}
+
+public function make(int32 $id) : Handle
+{
+    return Handle($id);
+}
+
+internal function hidden() : int32
+{
+    return 0;
+}

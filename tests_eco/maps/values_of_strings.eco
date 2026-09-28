@@ -1,0 +1,9 @@
+// `values()` used to form `string&` from a raw slot outside `unsafe`, which the stdlib's own
+// rule refused. `keys()` already wrapped the same read. both now copy an owning V the same way
+
+map<int64, string> $m = map<int64, string>();
+$m->set(1, 'hello');
+
+array<string> $v = $m->values();
+echo $v->count();
+echo $v[0];

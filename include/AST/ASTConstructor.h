@@ -133,7 +133,11 @@ namespace AST
     // a copy constructor is skipped here rather than at the caller: it fills from `$other`, and
     // seating the defaults first is a throwaway allocation on every copy of an owning field. `$this`
     // is `body->children.front()` by construction; inserting at the front would write through a class
-    // handle that is still null
+    // handle that is still null.
+    //
+    // a field the constructor assigns on every completing path is skipped the same way derived
+    // fields are: the body's write is the one initialization, so cloning the default would be a
+    // second one. an owning field then leaked the recipe (both writes claimed the slot was fresh)
     //
     // body pass only: the declaration pass has no file root, so a clone then cannot publish a nested
     // closure. `declaration_scope` is that root, and a clone that contains a closure is published

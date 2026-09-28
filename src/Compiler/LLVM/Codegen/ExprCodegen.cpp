@@ -641,6 +641,16 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
             }
             break;
 
+        case Token::Type::t_tilde:
+            if (type.is_integer_type()) {
+                _ctx.value_stack.push(_ctx.builder->CreateNot(value, "bitnot"));
+            }
+            else {
+                throw _ctx.error(fmt::format("unary '~' is not supported for operand type '{}' {}",
+                    type.get_type_desciption(), _ctx.function_context()));
+            }
+            break;
+
         // **`!` over a bool is the negation; over anything that may be absent it is the presence
         // test, inverted.** the second arm emits nothing of its own - TypeLowering::gen_has_value is
         // the one owner of the wrapped-optional / free-over-an-address split, and the `== null` arm
@@ -989,6 +999,8 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max:
             // the kind is handed down rather than looked up again: this switch has already made
             // the routing decision, so the callee's contract is four kinds, not all of them
             gen_type_query_builtin(node, kind);
@@ -1287,7 +1299,9 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         // fixpoint round gets `t_pending`, because it has more rounds, and this throws, because an
         // un-instantiated template reaching codegen is a compiler bug rather than a source error
         case AST::BuiltinKind::t_is_trivially_copyable:
-        case AST::BuiltinKind::t_needs_destruction: {
+        case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_integer_min:
+        case AST::BuiltinKind::t_integer_max: {
             const AST::ConstFoldResult folded = AST::const_fold(&node);
 
             if (folded.result != AST::ConstFoldResult::Result::t_folded) {

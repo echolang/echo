@@ -699,7 +699,7 @@ namespace AST
         bool is_qualified = false;
 
         // set for `&Type::name`. unknown when the name is free
-        ValueType static_owner;
+        ValueType static_owner = ValueType::make_unknown();
 
         FunctionDeclNode *decl = nullptr;
 
@@ -719,7 +719,7 @@ namespace AST
         ~FunctionRefExprNode() {}
 
         bool is_static() const {
-            return static_owner.has_complex_type();
+            return !static_owner.is_unknown();
         }
 
         ValueType result_type() const override;

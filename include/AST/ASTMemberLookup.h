@@ -12,6 +12,7 @@
 
 namespace AST
 {
+    class Collector;
     class ExprNode;
     class FunctionCallExprNode;
     class FunctionDeclNode;
@@ -51,6 +52,24 @@ namespace AST
     // and takes no type arguments (a nested type, a constant); this takes overload sets declared with
     // the owner's type parameters in scope
     std::vector<FunctionDeclNode *> find_static_functions(const ComplexType *ct, const std::string &name);
+
+    // the closed static search for an owner type: ComplexType statics, or T::min()/T::max()
+    // interned on an integer primitive. empty for a type parameter (not yet) and for anything
+    // else. never a receiver walk - argument 0 of `usize::nope($b)` is not a method receiver.
+    // CallResolver::candidates_for and function_ref_candidates both ask this
+    std::vector<FunctionDeclNode *> find_static_functions(
+        Collector &collector,
+        const ValueType &owner,
+        const std::string &name,
+        const TokenReference &at
+    );
+
+    // **`->name(` through a callable property**, not a method. the property exists, its type
+    // has a signature, and the type declares no member function of that name - so `$h->op(21)`
+    // cannot steal a real method. one owner: the parser asks it when the receiver is already
+    // typed, and rewrite_callable_property_calls retries it once an index or generic receiver
+    // becomes concrete
+    const ComplexType::Property *callable_property_of(const ValueType &type, const std::string &name);
 
     // **may a value arriving here name a static owner?** - asked of a destination type, by the two
     // things that have to agree about it: Parser::parse_return's gate on whether to hand the return

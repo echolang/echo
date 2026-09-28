@@ -13,9 +13,9 @@ namespace AST
 {
     class CoreTypes;
     class ExprNode;
+    class Collector;
     class FunctionDeclNode;
     class FunctionRefExprNode;
-    class FunctionRegistry;
 
     // **why may this signature not be a C function pointer?** nullopt when it may.
     //
@@ -61,7 +61,7 @@ namespace AST
     // CallResolver::candidates_for follows
     std::vector<FunctionDeclNode *> function_ref_candidates(
         const FunctionRefExprNode &node,
-        FunctionRegistry &functions
+        Collector &collector
     );
 
     // **gives `&name` the destination's signature.** a C function pointer or an Echo
@@ -72,7 +72,7 @@ namespace AST
     //
     // CallResolver is the only asker that can type a direct call's argument. the parser
     // asks where the destination is already known
-    bool bind_function_ref_to(ExprNode *expr, const ValueType &destination, FunctionRegistry &functions);
+    bool bind_function_ref_to(ExprNode *expr, const ValueType &destination, Collector &collector);
 
     // **what `&name` is at this destination.** a C function pointer sitting at a
     // callable destination is the Echo callable of the same signature; otherwise

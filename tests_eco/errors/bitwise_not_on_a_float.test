@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] bitwise_not_on_a_float.eco:4:7
+
+  operator '~' is not supported on an operand of type 'float64'
+
+  3 | float64 $f = 1.5;
+  4 | echo (~$f);
+    :       ^
+  5 | 
+
+1 error, nothing was compiled.

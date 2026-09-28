@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownStaticFunction  unknown_static_on_primitive_arg.eco:8:8
+
+  The type 'usize' has no static function named 'nope'
+
+  7 | Box $b = Box();
+  8 | usize::nope($b);
+    :        ^^^^
+  9 | 
+
+  help: a static function is declared 'static function' in the type's body and called on the type itself. an ordinary method is reached through a value instead, with '->'
+
+1 error, nothing was compiled.

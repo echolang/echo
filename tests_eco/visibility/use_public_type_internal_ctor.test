@@ -1,0 +1,4 @@
+modules: visibility/lib_public_type_internal_ctor
+
+--- OUT --->
+7

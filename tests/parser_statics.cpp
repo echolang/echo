@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTBundle.h>
+#include <AST/ASTBuiltin.h>
 #include <AST/ASTConstness.h>
 #include <AST/ASTInstantiation.h>
 #include <AST/ASTMemberLookup.h>
@@ -229,6 +230,57 @@ TEST_CASE("a missing static as a statement is UnknownStaticFunction, not Unknown
         "Marker::missing();\n",
         "The type 'Marker' has no static function named 'missing'"
     );
+}
+
+TEST_CASE("a missing static on a primitive does not resolve as a member of its argument", "[statics]")
+{
+    // a closed static lookup: argument 0 is not a receiver. without that, `usize::nope($b)`
+    // would settle as `$b->nope()`
+    EchoTests::assert_code_emits_issue(
+        "struct Box {\n"
+        "    function nope() : void {}\n"
+        "}\n"
+        "Box $b = Box();\n"
+        "usize::nope($b);\n",
+        "The type 'usize' has no static function named 'nope'"
+    );
+}
+
+TEST_CASE("a non-integer primitive is a static owner with an empty set", "[statics]")
+{
+    EchoTests::assert_code_emits_issue(
+        "float32::max();\n",
+        "The type 'float32' has no static function named 'max'"
+    );
+}
+
+TEST_CASE("taking the address of an integer bound is the builtin-has-no-symbol refusal", "[statics]")
+{
+    EchoTests::assert_code_emits_issue(
+        "extern function<usize()> $f = &usize::max;\n",
+        "cannot take the address of 'max' - a builtin has no symbol at all - there is nothing to take the address of."
+    );
+}
+
+TEST_CASE("integer primitives expose min and max as statics", "[statics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "echo usize::max();\n"
+        "echo int32::min();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto max_calls = calls_to(m, "max");
+    REQUIRE(max_calls.size() == 1);
+    REQUIRE(max_calls[0]->decl != nullptr);
+    REQUIRE(max_calls[0]->decl->is_builtin());
+    REQUIRE(max_calls[0]->static_owner.get_primitive_type() == ValueTypePrimitive::t_usize);
+
+    REQUIRE(integer_bound_bits(ValueTypePrimitive::t_usize, true)
+        == get_integer_size(ValueTypePrimitive::t_usize).get_max_positive_value());
+    REQUIRE(integer_bound_bits(ValueTypePrimitive::t_int32, false)
+        == static_cast<uint64_t>(get_integer_size(ValueTypePrimitive::t_int32).get_max_negative_value()));
 }
 
 TEST_CASE("static is refused where no type owns the declaration", "[statics]")

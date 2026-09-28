@@ -145,7 +145,8 @@ void LexerEngine::run(TokenCollection &tokens, LexerCursor &cursor) const
         }
 
         if (!step(tokens, cursor)) {
-            throw Lexer::UnknownTokenException("Unexpected", cursor.line, cursor.char_offset);
+            const std::string sample(1, cursor.peek());
+            throw Lexer::UnknownTokenException(sample, cursor.line, cursor.char_offset);
         }
     }
 }
@@ -213,6 +214,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_qmark_qmark);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_qmark);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_exclamation);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_tilde);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_angle);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_angle);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_paren);

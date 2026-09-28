@@ -303,7 +303,7 @@ void MatchResolution::resolve(MatchExprNode &node)
 
         if (wanted.is_c_function()) {
             for (MatchExprNode::Arm &arm : node.arms) {
-                bind_function_ref_to(arm.value, wanted, _collector.functions);
+                bind_function_ref_to(arm.value, wanted, _collector);
             }
         }
     }
@@ -474,7 +474,7 @@ void MatchResolution::resolve(MatchExprNode &node)
     // CallResolver asks for a call argument
     if (!node.yields_a_place) {
         for (MatchExprNode::Arm &arm : node.arms) {
-            bind_function_ref_to(arm.value, node.result, _collector.functions);
+            bind_function_ref_to(arm.value, node.result, _collector);
         }
     }
 

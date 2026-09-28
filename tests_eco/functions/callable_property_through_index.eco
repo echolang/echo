@@ -1,0 +1,41 @@
+// `$a[0]->fn(1)` is an untyped index at parse time, so the callable-property check
+// has to retry once operator [] is attached. a typed `const Box&` already worked
+internal struct Box
+{
+    internal function<int32(int32)> $fn;
+}
+
+internal function viaBorrow(const Box& $b) : int32
+{
+    return $b->fn(1);
+}
+
+internal function viaArray(const array<Box>& $a) : int32
+{
+    return $a[0]->fn(1);
+}
+
+internal function viaMutable(array<Box>& $a) : int32
+{
+    return $a[0]->fn(2);
+}
+
+internal struct Holder
+{
+    internal array<Box> $boxes;
+}
+
+internal function viaField(const Holder& $h) : int32
+{
+    return $h->boxes[0]->fn(3);
+}
+
+Box $b = Box(function(int32 $n) : int32 { return $n + 10; });
+array<Box> $a = array<Box>();
+$a[] = $b;
+Holder $h = Holder($a);
+
+echo viaBorrow($b);
+echo viaArray($a);
+echo viaMutable($a);
+echo viaField($h);

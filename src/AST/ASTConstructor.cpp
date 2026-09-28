@@ -150,6 +150,8 @@ void AST::prepend_property_defaults(
     }
 
     const std::unordered_set<std::string> derived = AST::derived_fields_of(type);
+    const std::unordered_set<std::string> seated_by_body =
+        AST::fields_assigned_on_all_paths(ctor.body, this_decl);
 
     std::vector<AST::NodeReference> seats;
 
@@ -163,6 +165,15 @@ void AST::prepend_property_defaults(
         // the parameter, and a closure in it was parsed onto a scratch scope - publish the original
         // onto the file root so codegen emits it
         if (derived.count(prop->name()) != 0) {
+            continue;
+        }
+
+        // the constructor already seats this field on every completing path, so the recipe
+        // would be a second initialization of the same storage. an owning field then leaked
+        // the default (both writes claimed the slot was fresh) and OwnershipPass refused it
+        // as initialized twice. skip the clone: the body's write is the one initialization
+        if (seated_by_body.count(prop->name()) != 0) {
+            AST::publish_cloned_closures(*prop->init_expr, &declaration_scope, nullptr, {});
             continue;
         }
 

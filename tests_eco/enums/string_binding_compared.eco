@@ -1,0 +1,35 @@
+// a string payload bound in a match arm is a borrow of the subject. comparing it, and passing
+// it where a `const string&` is wanted, must not disagree between argument_fit and OwnershipPass
+
+enum Message
+{
+    case empty;
+    case text(string $body);
+}
+
+function is_quit(const string& $s) : bool
+{
+    return $s == 'quit';
+}
+
+function check(Message $m) : int32
+{
+    return match ($m) {
+        Message::empty => 0,
+        Message::text($t) => {
+            if ($t == 'quit') {
+                return 1;
+            }
+
+            if (is_quit($t)) {
+                return 2;
+            }
+
+            return 3;
+        },
+    };
+}
+
+echo check(Message::empty());
+echo check(Message::text('quit'));
+echo check(Message::text('hello'));

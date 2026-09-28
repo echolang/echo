@@ -1,0 +1,15 @@
+// a fixed_array field starts as N zeros, matching fixed_array<T, N>() and a T[N] local
+internal struct Packed
+{
+    internal fixed_array<uint8, 4> $a;
+    internal uint8[2] $raw;
+
+    public constructor()
+    {
+    }
+}
+
+Packed $p = Packed();
+echo $p->a[0];
+echo $p->a->count();
+echo $p->raw[1];

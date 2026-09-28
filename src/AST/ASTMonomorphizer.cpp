@@ -13,6 +13,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
 #include "AST/ASTCallResolution.h"
+#include "AST/ASTCallableProperty.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTLiteralTyping.h"
@@ -814,7 +815,9 @@ namespace AST
 
     bool Monomorphizer::settle()
     {
-        return settle_calls();
+        bool progressed = rewrite_callable_property_calls(_bundle);
+        progressed |= settle_calls();
+        return progressed;
     }
 
     bool Monomorphizer::own()

@@ -12,14 +12,20 @@
 #include "AST/ASTValueType.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTNode.h"
 
+#include "Token.h"
+
+#include <cstdint>
 #include <set>
 #include <tuple>
 #include <typeindex>
+#include <unordered_map>
 
 namespace AST
 {
     class DiagnosticRenderer;
+    class FunctionDeclNode;
 
     class Collector
     {
@@ -92,7 +98,20 @@ namespace AST
             return count_of(IssueSeverity::Warning);
         }
 
+        friend FunctionDeclNode *integer_bound_decl(
+            Collector &collector,
+            const ValueType &type,
+            const std::string &name,
+            const TokenReference &at
+        );
+
     private:
+
+        // compiler-minted declarations that are not a module's source: `usize::max()` and
+        // `int32::min()`. interned so two use sites share one FunctionDeclNode. AST::integer_bound_decl
+        // is the only reader
+        NodeCollection _compiler_nodes;
+        std::unordered_map<uint32_t, FunctionDeclNode *> _integer_bound_decls;
 
         std::set<std::tuple<std::type_index, const TokenCollection *, size_t, size_t, std::string>> _reported;
     };

@@ -1,0 +1,8 @@
+// a closed static lookup: argument 0 is not a receiver
+struct Box
+{
+    function nope() : void {}
+}
+
+Box $b = Box();
+usize::nope($b);

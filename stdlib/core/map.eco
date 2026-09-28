@@ -497,7 +497,9 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         while ($i < $this->cap) {
             if ($this->slot_is_live($i)) {
-                $out[] = $this->values:$[$i];
+                unsafe {
+                    $out[] = $this->values:$[$i];
+                }
             }
 
             $i = $i + 1;

@@ -200,10 +200,9 @@ TEST_CASE("a dependency's tests are not this invocation's", "[test_targets]")
 //
 // the corpus asserts the first half: tests_eco/tests/a_normal_run_never_parses_one holds a body with a parse
 // error and an unresolvable call, and its `mode: run` golden is the program's own output. What the corpus
-// cannot assert is the second half, because a lexer error is an uncaught exception by design
-// (ECO_DONT_CATCH_EXCEPTIONS) and the message on the way out is the C++ runtime's rather than echoc's -
-// `libc++abi:` here and something else entirely on libstdc++. So the exit code is what is asserted, and the
-// message deliberately is not
+// cannot assert is the second half from a corpus golden: a lexer error is a Tokenization Failed
+// banner (a user typo, caught whatever ECO_DONT_CATCH_EXCEPTIONS says) rather than a located
+// diagnostic with a span. the exit code and the banner are what this case asserts
 TEST_CASE("a test body is never parsed by a build, and is still lexed", "[test_targets]")
 {
     ScopedProject project("dropped_bodies");
@@ -238,10 +237,8 @@ TEST_CASE("a test body is never parsed by a build, and is still lexed", "[test_t
     // dropped body still has to have produced tokens - the same price an `#[if:]` region for another platform
     // pays, and the reason to run your tests rather than trusting a green build.
     //
-    // a lexer error is an uncaught exception by design (ECO_DONT_CATCH_EXCEPTIONS), so this is the one case in
-    // the suite whose child dies on a signal - and `sh` announces that on the *test binary's* stderr as
-    // `Abort trap: 6`. Expected, captured by nothing, and asserted on by nothing: what is asserted is the exit
-    // code and that the program never ran
+    // a character the lexer has no rule for is a user error, reported as Tokenization Failed rather
+    // than an uncaught exception. the program never ran
     write_file(project.root() / "unlexable.eco",
         "test holds_a_character_the_lexer_refuses\n"
         "{\n"
@@ -254,6 +251,8 @@ TEST_CASE("a test body is never parsed by a build, and is still lexed", "[test_t
 
     REQUIRE(unlexable.exit_code != 0);
     REQUIRE(unlexable.output.find("NEVER REACHED") == std::string::npos);
+    REQUIRE(unlexable.output.find("Tokenization Failed") != std::string::npos);
+    REQUIRE(unlexable.output.find("unexpected '@'") != std::string::npos);
 }
 
 // a test build and a normal build hold different bodies for the same module, so they must not share an

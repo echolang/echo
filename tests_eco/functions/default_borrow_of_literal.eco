@@ -1,0 +1,10 @@
+// a `const string&` parameter may default to a literal: the default is cloned into the call,
+// where argument_fit ranks t_borrow_temporary_const and OwnershipPass mints the slot
+
+function greet(const string& $who = 'world') : void
+{
+    echo $who;
+}
+
+greet();
+greet('echo');

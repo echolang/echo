@@ -987,6 +987,19 @@ TEST_CASE("an owning field initialized twice in one constructor is reported", "[
     REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
 }
 
+TEST_CASE("an owning field default is skipped when the constructor assigns it", "[ownership]")
+{
+    // the body's write is the one initialization, so the default is not cloned and nothing leaks
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "struct Outer {\n"
+        "    Box $inner = Box(0, null);\n"
+        "    constructor(usize $t) { $this->inner = Box($t, null); }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
 // --- a temporary with an owner -------------------------------------------------------
 //
 // `$o->get()->tag` reads a member off a value the callee handed back and nobody stored. the pass gives

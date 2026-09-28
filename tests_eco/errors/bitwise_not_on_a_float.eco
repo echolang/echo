@@ -1,0 +1,4 @@
+// `~` is integer-only, the unary half of the bitwise five
+
+float64 $f = 1.5;
+echo (~$f);

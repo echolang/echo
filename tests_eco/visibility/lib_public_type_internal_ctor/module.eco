@@ -1,0 +1,2 @@
+#[module: "libhandle"]
+#[sources: "src/*.eco"]

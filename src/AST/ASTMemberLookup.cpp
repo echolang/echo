@@ -1,6 +1,8 @@
 #include "AST/ASTMemberLookup.h"
 
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTBuiltin.h"
+#include "AST/ASTCollector.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
@@ -64,6 +66,51 @@ std::vector<AST::FunctionDeclNode *> AST::find_static_functions(const AST::Compl
     }
 
     return candidates;
+}
+
+std::vector<AST::FunctionDeclNode *> AST::find_static_functions(
+    Collector &collector,
+    const ValueType &owner,
+    const std::string &name,
+    const TokenReference &at
+)
+{
+    if (owner.is_type_param()) {
+        return {};
+    }
+
+    if (owner.has_complex_type()) {
+        return find_static_functions(owner.get_complex_type(), name);
+    }
+
+    if (FunctionDeclNode *bound = integer_bound_decl(collector, owner, name, at)) {
+        return { bound };
+    }
+
+    return {};
+}
+
+const AST::ComplexType::Property *AST::callable_property_of(
+    const AST::ValueType &type,
+    const std::string &name
+)
+{
+    if (!type.has_property_layout()) {
+        return nullptr;
+    }
+
+    ComplexType *ct = type.get_complex_type();
+    const ComplexType::Property *property = ct->find_property(name);
+
+    if (property == nullptr || !property->type.has_signature()) {
+        return nullptr;
+    }
+
+    if (!find_member_functions(ct, name).empty()) {
+        return nullptr;
+    }
+
+    return property;
 }
 
 bool AST::destination_names_a_static_owner(const AST::ValueType &destination)

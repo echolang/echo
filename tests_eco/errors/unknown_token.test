@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+[error] Tokenization Failed
+
+  unexpected '@' at line 3 column 14

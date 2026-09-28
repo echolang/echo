@@ -51,6 +51,7 @@ public:
         t_qmark_qmark,              // ??
         t_optional_arrow,           // ?->
         t_exclamation,              // !
+        t_tilde,                    // ~ bitwise not, prefix-only like `!`
         t_open_angle,               // <
         t_close_angle,              // >
         t_open_paren,               // (

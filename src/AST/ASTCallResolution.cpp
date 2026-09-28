@@ -191,7 +191,7 @@ namespace AST
                 const ValueType expected = call.decl->args[i]->type();
 
                 bind_null_to(call.arguments[i], expected);
-                bind_function_ref_to(call.arguments[i], expected, collector.functions);
+                bind_function_ref_to(call.arguments[i], expected, collector);
 
                 // **the one destination a shorthand cannot reach at parse time**, which is why it is
                 // here rather than only in the expression parser: a parameter's type sits on a
@@ -258,7 +258,7 @@ namespace AST
                 // would leave every call to a C variadic function pending forever
                 if (auto *pack = variadic_pack_of(arg)) {
                     for (const auto *element : pack->elements) {
-                        if (element != nullptr && is_undetermined_type(element->result_type())) {
+                        if (element != nullptr && !type_is_determined_for_fit(element->result_type())) {
                             return false;
                         }
                     }
@@ -266,7 +266,9 @@ namespace AST
                     continue;
                 }
 
-                if (is_undetermined_type(arg->result_type())) {
+                // AST::type_is_determined_for_fit: a match binding is declared `unknown&`, and
+                // ranking that as determined lets a lone candidate settle by match rule 2
+                if (!type_is_determined_for_fit(arg->result_type())) {
                     return false;
                 }
             }
@@ -296,19 +298,20 @@ namespace AST
             return _collector.functions.overloads(*owner->name, *owner->ast_namespace);
         }
 
-        // a **static** call: the type names the overload set. asked ahead of the namespace arm because
-        // `Type::f()` carries both a written owner and the namespace the parser was standing in, and
-        // the owner is the one that decides - falling through would let the registry's outward walk
-        // answer with a free `f` from an enclosing scope
+        // a **static** call: the type names the overload set. a closed search - falling through
+        // would let argument 0 be read as a receiver, so `usize::nope($s)` would become `$s->nope()`.
+        // asked ahead of the namespace arm because `Type::f()` carries both a written owner and the
+        // namespace the parser was standing in, and the owner is the one that decides
         //
         // a type-parameter owner is a not-yet, the same empty set a shorthand has: `T::from(...)`
         // inside a template body has nothing to search until substitution names the type
-        if (call.static_owner.is_type_param()) {
-            return {};
-        }
-
-        if (call.static_owner.has_complex_type()) {
-            return find_static_functions(call.static_owner.get_complex_type(), call.lookup_name());
+        if (!call.static_owner.is_unknown()) {
+            return find_static_functions(
+                _collector,
+                call.static_owner,
+                call.lookup_name(),
+                call.token_function_name
+            );
         }
 
         // a shorthand whose destination has not named an owner yet. empty rather than falling through

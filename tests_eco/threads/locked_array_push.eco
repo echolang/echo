@@ -1,0 +1,17 @@
+// `$held->value` is a `T&`, so a method on an array behind a mutex does not need `unsafe`,
+// and `[]` is the container's operator rather than pointer arithmetic
+
+use std::thread;
+
+thread::mutex<array<int32>> $m = thread::mutex<array<int32>>(array<int32>());
+
+{
+    thread::locked<array<int32>> $held = $m->lock();
+    $held->value->push(7);
+    $held->value->push(9);
+    echo $held->value[0];
+    echo $held->value[1];
+}
+
+thread::locked<array<int32>> $held = $m->lock();
+echo $held->value->count();

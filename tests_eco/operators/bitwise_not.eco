@@ -1,0 +1,10 @@
+// prefix `~` is bitwise not, integer-only, the unary half of `& | ^ << >>`
+
+echo (~5);
+echo (~~5);
+
+uint32 $n = 5;
+echo (~$n);
+
+const int32 flipped = ~0;
+echo flipped;

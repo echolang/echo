@@ -432,8 +432,22 @@ namespace
             case AST::BuiltinKind::t_needs_destruction:
                 return fold_bool(AST::needs_destruction(subject));
 
+            case AST::BuiltinKind::t_integer_min:
+            case AST::BuiltinKind::t_integer_max:
+                if (!subject.is_integer_type()) {
+                    return ConstFoldResult::pending();
+                }
+
+                return ConstFoldResult::folded(
+                    subject,
+                    AST::integer_bound_bits(
+                        subject.get_primitive_type(),
+                        kind == AST::BuiltinKind::t_integer_max
+                    )
+                );
+
             default:
-                // unreachable: builtin_foldability answered t_ast_fact, and those are the two
+                // unreachable: builtin_foldability answered t_ast_fact
                 return ConstFoldResult::refused(fmt::format(
                     "'{}' is not a fact about a type.", call.decl->builtin.value()));
         }
@@ -531,8 +545,31 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
                 return fold_bool(operand.bits == 0);
             }
 
-            // the parser folds unary `+` away, so `-` and `!` are the whole built-in surface here.
-            // anything else is a declared operator, which is the arm below
+            if (unary.token_operator.type() == Token::Type::t_tilde) {
+                if (!is_foldable_integer(operand.type)) {
+                    return ConstFoldResult::refused(fmt::format(
+                        "'~' folds over a whole number, and this operand is a '{}'.",
+                        operand.type.get_type_desciption()));
+                }
+
+                // a ConstFoldResult is sign-extended to 64 bits for a signed type and zero-extended
+                // for an unsigned one. `~` of those bits is the 64-bit not; masking back to the
+                // width and re-extending is what keeps `~uint8(5)` at 0xFA rather than 0xFF..FA
+                const AST::IntegerSize size =
+                    AST::get_integer_size(operand.type.get_primitive_type());
+                const unsigned width = size.bit_width();
+                const uint64_t mask = width == 64 ? ~uint64_t{0} : ((uint64_t{1} << width) - 1);
+                uint64_t bits = (~operand.bits) & mask;
+
+                if (size.is_signed && width < 64 && (bits & (uint64_t{1} << (width - 1))) != 0) {
+                    bits |= ~mask;
+                }
+
+                return ConstFoldResult::folded(operand.type, bits);
+            }
+
+            // the parser folds unary `+` away, so `-`, `!` and `~` are the whole built-in surface
+            // here. anything else is a declared operator, which is the arm below
             if (unary.token_operator.type() != Token::Type::t_op_sub) {
                 return ConstFoldResult::refused(fmt::format(
                     "'{}' is not an operator the compiler folds.", unary.token_operator.value()));

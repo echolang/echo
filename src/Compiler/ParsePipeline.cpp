@@ -43,9 +43,9 @@ namespace
         Parser::ModuleParser::InputPayload &input
     )
     {
-        // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says**, unlike the tokenization error inside. That
-        // macro exists to let a *compiler bug* crash with a stack trace, and a malformed `#[if: ...]` is
-        // not one - it is a mistake in the source being compiled, and reporting it as a crash would
+        // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says.** that macro exists to let a *compiler
+        // bug* crash with a stack trace, and a malformed `#[if: ...]` or a character the lexer has
+        // no rule for is a mistake in the source being compiled. reporting either as a crash would
         // blame echoc for it.
         //
         // the banner names conditional compilation and covers a malformed `test` header too, that being

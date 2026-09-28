@@ -214,8 +214,9 @@ TEST_CASE("a user constructor() occupies the all-defaults zero-arg signature", "
     REQUIRE(user->args.empty());
     REQUIRE_FALSE(user->is_implicitly_generated);
 
-    // default first, then the body write
-    REQUIRE(init_assignments(user) == 2);
+    // the constructor seats `$a` on every path, so the default is not cloned - the body
+    // write is the one initialization
+    REQUIRE(init_assignments(user) == 1);
 
     auto *first = nth_assign(user, 0);
     REQUIRE(first != nullptr);

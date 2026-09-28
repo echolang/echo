@@ -1,0 +1,19 @@
+modules: visibility/lib_public_type_internal_ctor
+expect: fail
+
+--- OUT --->
+[error] InaccessibleDeclaration  use_internal_function.eco:4:1
+
+  'hidden' is internal to the module 'libhandle', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'libhandle' offers.
+
+  3 | 
+  4 | use lib::{hidden};
+    : ^^^^^^^^^^^^^^^^^
+  5 | 
+
+  26 | 
+  27 | internal function hidden() : int32
+     :                   ------ declared here
+  28 | {
+
+1 error, nothing was compiled.

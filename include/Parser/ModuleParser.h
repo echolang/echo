@@ -51,7 +51,10 @@ namespace Parser
             TokenizationException(Lexer::TokenException exception, AST::File *file) :
                 exception(exception), file(file)
             {
-                message = (std::string(exception.what()) + " in file " + file->get_path().string());
+                // basename only: the e2e corpus byte-compares this banner, and an absolute path
+                // would make every golden machine-dependent. FrontEndFailure still carries the
+                // full path for anything that wants it
+                message = std::string(exception.what());
             };
 
             const char *what() const noexcept override {

@@ -1,0 +1,22 @@
+// copying array<T> instantiates T's synthesized copy. that body used to be written into
+// stdlib, so an internal field was InaccessibleDeclaration pointing at array.eco
+internal struct Item
+{
+    internal string $name;
+
+    public constructor(const string& $name)
+    {
+        $this->name = $name;
+    }
+}
+
+internal function dup(const array<Item>& $a) : array<Item>
+{
+    array<Item> $b = $a;
+    return $b;
+}
+
+array<Item> $a = array<Item>();
+$a[] = Item('gate');
+array<Item> $b = dup($a);
+echo $b[0]->name;

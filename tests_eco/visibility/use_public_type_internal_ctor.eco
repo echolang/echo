@@ -1,0 +1,7 @@
+// the type is public; only its constructor is internal. importing the type is how a consumer
+// names a value `lib::make` handed back
+
+use lib::{Handle};
+
+Handle $h = lib::make(7);
+echo $h->id();

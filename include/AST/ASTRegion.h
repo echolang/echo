@@ -50,9 +50,10 @@ namespace AST
     void assert_region_accepts_mutation(FunctionDeclNode *fn, File *file);
 
     // **the deny-list OwnershipPass walked as BodyAnswerable.** true while anything in the scope is
-    // still arriving - an unfolder const if, an unlowered foreach, a non-terminal call, an untyped
-    // declaration. nested function declarations and type declarations are separate regions and do
-    // not count. a new transient node is one arm here
+    // still arriving - an unfolder const if, an unlowered foreach, a non-terminal call, a binary
+    // or unary that will become a declared-operator call, an untyped declaration. nested function
+    // declarations and type declarations are separate regions and do not count. a new transient
+    // node is one arm here
     bool body_is_pending(ScopeNode &scope);
 
     inline bool body_is_concrete(ScopeNode &scope)

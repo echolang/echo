@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_ref_of_integer_bound.eco:1:31
+
+  cannot take the address of 'max' - a builtin has no symbol at all - there is nothing to take the address of.
+
+  1 | extern function<usize()> $f = &usize::max;
+    :                               ^
+  2 | 
+
+1 error, nothing was compiled.

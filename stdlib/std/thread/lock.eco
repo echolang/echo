@@ -2,8 +2,9 @@
  * A sleeping mutex, and the guard that unlocks on drop.
  *
  * The value lives inside the lock: there is no way to name it without going through
- * `lock()`. `$held->value` is a place. Copying that address out and reading it after
- * the guard dies is the same class of rule as a slice outliving its array.
+ * `lock()`. `$held->value` is a `T&` - a method, an index, an assignment all go
+ * through that borrow. Copying the address out and reading it after the guard
+ * dies is the same class of rule as a slice outliving its array.
  */
 
 namespace std::thread;
@@ -50,7 +51,7 @@ public class mutex<T>
             die('could not lock a mutex');
         }
 
-        return locked<T>(&$this->value, $this->impl);
+        return locked<T>($this->value, $this->impl);
     }
 
     function try_lock() : locked<T>?
@@ -65,7 +66,7 @@ public class mutex<T>
             die('could not lock a mutex');
         }
 
-        return locked<T>(&$this->value, $this->impl);
+        return locked<T>($this->value, $this->impl);
     }
 }
 
@@ -75,10 +76,10 @@ public class mutex<T>
 #[unique]
 public struct locked<T>
 {
-    public ptr<T> $value;
+    public T& $value;
     private ptr<uint8> $impl;
 
-    internal constructor(ptr<T> $value, ptr<uint8> $impl)
+    internal constructor(T& $value, ptr<uint8> $impl)
     {
         $this->value:$ = $value;
         $this->impl:$ = $impl;

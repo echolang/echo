@@ -1,0 +1,11 @@
+use std::math;
+
+echo usize::max();
+echo usize::min();
+echo int32::max();
+echo int32::min();
+echo uint8::max();
+echo uint8::min();
+echo usize::max() == math::MAX_USIZE;
+echo int32::min() == math::MIN_INT32;
+echo uint8::max() == math::MAX_UINT8;

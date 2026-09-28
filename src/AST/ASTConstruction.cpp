@@ -70,6 +70,33 @@ namespace
 
     const MethodSummary k_empty_summary;
 
+    // `$this` is filled with zeroes. that word is `null` for a `ptr`, a `weak` and a `T?`,
+    // and it is N zeroed elements for a `T[N]` and for the bound `fixed_array` wrapping one.
+    // an `int32` and any other struct still owe an assignment - forgetting `$count` is the
+    // diagnostic this check exists to give
+    bool construction_admits_zero(const AST::ValueType &type, AST::Collector &collector)
+    {
+        if (AST::destination_admits_null(type)) {
+            return true;
+        }
+
+        if (type.is_inline_array()) {
+            return true;
+        }
+
+        if (!type.has_complex_type()) {
+            return false;
+        }
+
+        AST::ComplexType *fixed = collector.core_types.declared_template(AST::CoreTypeKind::t_fixed_array);
+
+        if (fixed == nullptr) {
+            return false;
+        }
+
+        return type.get_complex_type()->template_or_self() == fixed;
+    }
+
     AST::ExprNode *peel_address(AST::ExprNode *expr)
     {
         while (expr != nullptr) {
@@ -727,13 +754,11 @@ void AST::check_construction(AST::TypeDeclNode &type, AST::Collector &collector,
                 continue;
             }
 
-            // zero is a legal value only when the type admits null. `$this` is filled with
-            // zeroes, and that word is what `null` means for a `ptr`, a `weak` and a `T?`.
-            // AST::destination_admits_null is that question. a non-nullable class has the same
-            // bits and no such value: leaving `Inner $inner` blank is a null handle the type
-            // forbids, and the first `->` through it is a segfault. `string`'s absent buffer is
-            // a `str::buf?`, which this admits, rather than a non-nullable `str::buf` left at zero
-            if (prop->has_type() && AST::destination_admits_null(prop->type())) {
+            // zero is a legal value when the type admits null, or when zero *is* the documented
+            // value: a `T[N]` local is already zero-filled storage, and `fixed_array<T, N>()` is
+            // that local moved in. AST::destination_admits_null stays the null question; this
+            // is the other. an `int32` field still owes an assignment
+            if (prop->has_type() && construction_admits_zero(prop->type(), collector)) {
                 continue;
             }
 

@@ -378,6 +378,16 @@ namespace AST
                 || operand.type.is_type_param();
         }
 
+        // bitwise not, integer-only, the unary half of the bitwise five. a float, a bool and a
+        // pointer fall through to TypeChecker's "not supported" the way `& | ^ << >>` do. a wrapped
+        // optional is an integer type, so it has to be excluded here the way the binary arm excludes
+        // one - CreateNot of an `{ i1, i32 }` pair is not the not of the payload
+        if (op->type == Token::Type::t_tilde) {
+            return (operand.type.is_integer_type() && !operand.type.is_wrapped_optional())
+                || is_undetermined_type(operand.type)
+                || operand.type.is_type_param();
+        }
+
         return false;
     }
 

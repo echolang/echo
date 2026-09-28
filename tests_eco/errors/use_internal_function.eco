@@ -1,0 +1,4 @@
+// a name that is only an internal function is still refused at the `use` - the type+constructor
+// case is the one that must not refuse a visible type because a hidden constructor shares the name
+
+use lib::{hidden};

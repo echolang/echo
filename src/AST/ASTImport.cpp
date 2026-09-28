@@ -134,10 +134,13 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
         binding.target_name = last;
 
         const DeclarationOrigin from { file.module, &file };
+        bool type_visible = false;
+        bool constant_visible = false;
 
         if (as_type) {
             auto *decl = symbol->node.unsafe_ptr<TypeDeclNode>();
             const ComplexType &layout = decl->complex_type();
+            type_visible = visible_from(layout.visibility, layout.declared_in, from);
             refuse_invisible(
                 collector, file, binding, layout.visibility, layout.declared_in,
                 decl->type_name(), decl->name_token);
@@ -145,12 +148,19 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
 
         if (as_constant) {
             auto *decl = symbol->node.unsafe_ptr<ConstDeclNode>();
+            constant_visible = visible_from(decl->visibility, decl->declared_in, from);
             refuse_invisible(
                 collector, file, binding, decl->visibility, decl->declared_in,
                 decl->name(), decl->token_name);
         }
 
-        if (as_function) {
+        // **a visible type (or constant) is enough.** constructors live in the function store
+        // under the type's name, so `public class Socket { internal constructor(); }` is both
+        // a type and a function. refusing the hidden constructor here made `use http::{Socket}`
+        // fail even though the type is public and `http::Socket` as a name already worked.
+        // constructing through the internal constructor is refused at the call, which is the
+        // site that actually names it. refuse at the `use` only when every role is invisible
+        if (as_function && !type_visible && !constant_visible) {
             bool any_visible = false;
             const FunctionDeclNode *hidden = nullptr;
             for (FunctionDeclNode *decl : collector.functions.declared_overloads(last, *parent)) {
