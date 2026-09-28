@@ -1,0 +1,3 @@
+echo bits::trailing_zeros(8 as uint64);
+echo bits::leading_zeros(1 as uint64);
+echo bits::count_ones(7 as uint64);

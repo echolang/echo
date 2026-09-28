@@ -5,6 +5,7 @@
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
+#include "AST/ASTIssue.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTDeclarationOrigin.h"
@@ -70,6 +71,13 @@ static void forget_discarded_closure_decls(AST::Module &module, AST::ExprNode &e
 
 bool Parser::publish_type_symbol(Parser::Payload &payload, AST::Namespace &ns, AST::TypeDeclNode &node)
 {
+    if (node.type_name() == "simd" && node.name_token.has_value()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(node.name_token.value()),
+            "'simd' is a type constructor, so it cannot be the name of a declared type");
+        // still published, so pass 1 and pass 2 agree about the declaration site
+    }
+
     auto *existing = payload.collector.namespaces.find_symbol(node.type_name(), ns);
 
     if (existing != nullptr) {

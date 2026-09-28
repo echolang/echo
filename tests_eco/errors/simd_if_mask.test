@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] simd_if_mask.eco:4:1
+
+  an 'if' condition has to be a 'bool', and this one is a 'simd<bool, 16>'. a vector comparison is a mask, so write simd::any or simd::all rather than branching on the vector.
+
+  3 | 
+  4 | if ($a == $b) {
+    : ^^
+  5 |     echo 1;
+
+1 error, nothing was compiled.

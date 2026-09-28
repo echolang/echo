@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] simd_shift.eco:2:26
+
+  cannot apply '<<' to 'simd<float32, 4>' and 'int32' - a vector shift takes an integer vector and an integer count
+
+  1 | simd<float32, 4> $v;
+  2 | simd<float32, 4> $w = $v << 1;
+    :                          ^^
+  3 | 
+
+1 error, nothing was compiled.

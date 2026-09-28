@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] simd_named_type.eco:1:8
+
+  'simd' is a type constructor, so it cannot be the name of a declared type
+
+  1 | struct simd
+    :        ^^^^
+  2 | {
+
+1 error, nothing was compiled.

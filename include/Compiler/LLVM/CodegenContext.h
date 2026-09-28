@@ -48,6 +48,7 @@ namespace Compiler::LLVM
     class ClassCodegen;
     class AbortCodegen;
     class AtomicCodegen;
+    class SimdCodegen;
     class MemoryCodegen;
     class StaticStorageCodegen;
     class ProcessCodegen;
@@ -295,6 +296,9 @@ namespace Compiler::LLVM
 
         // the seven `mem::atomic::` verbs. one protocol, one file - see AtomicCodegen.h
         AtomicCodegen *atomics = nullptr;
+
+        // the `simd::` verbs, the elementwise operators, and packed-vector alignment
+        SimdCodegen *simd = nullptr;
 
         // the memory subsystem: the one owner of where heap memory comes from. the class subsystem's
         // boxes and environments and the stdlib's raw buffers both go through it, which is what makes

@@ -4,6 +4,7 @@
 #include "AST/ASTCompleteness.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionEmission.h"
+#include "AST/ASTSimd.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTVariadic.h"
@@ -32,6 +33,10 @@ namespace
 
         if (type.is_primitive() || type.is_pointer() || type.is_c_function()) {
             return std::nullopt;
+        }
+
+        if (auto reason = AST::simd_crosses_c_refusal(type)) {
+            return reason;
         }
 
         if (AST::is_variadic_args(type, core)) {

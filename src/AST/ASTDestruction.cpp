@@ -30,6 +30,10 @@ bool AST::needs_destruction(const AST::ValueType &type)
         return needs_destruction(type.array_element());
     }
 
+    if (type.is_simd()) {
+        return false;
+    }
+
     // a primitive owns its own bytes and nothing else. a pointer and a borrow own nothing at all -
     // see the header, this is the leaf of the whole recursion
     if (!type.has_complex_type()) {

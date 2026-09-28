@@ -18,6 +18,16 @@ namespace AST
             return type_completeness(type.array_element());
         }
 
+        // a vector is complete exactly when N is bound and T is. a pending N is the
+        // template; an unbound T is too
+        if (type.is_simd()) {
+            if (!type.bound_simd_length().has_value()) {
+                return TypeCompleteness::t_pending;
+            }
+
+            return type_completeness(type.simd_element());
+        }
+
         // a pointer (and a borrow) is one word, whatever it names. the pointee's completeness
         // is a different question, asked of the pointee
         if (type.is_pointer() || type.is_weak() || type.is_c_function() || type.is_callable()) {
@@ -56,6 +66,10 @@ namespace AST
 
         if (type.is_inline_array()) {
             return incomplete_use_refusal(type.array_element());
+        }
+
+        if (type.is_simd()) {
+            return incomplete_use_refusal(type.simd_element());
         }
 
         if (type.is_wrapped_optional()) {

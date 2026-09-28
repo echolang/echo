@@ -1,0 +1,18 @@
+// a known bitmask: splat 0x80 across 16 lanes, compare to itself, every bit set.
+// explicit N is interned as int32 at the call and retyped to usize at bind, so
+// splat<uint8, 16> names the same vector simd<uint8, 16> the destination wrote
+simd<uint8, 16> $v = simd::splat<uint8, 16>(0x80 as uint8);
+uint64 $hits = simd::bitmask($v == $v);
+echo $hits;
+
+uint8[16] $zero;
+simd<uint8, 16> $from = simd::from_array($zero);
+uint8[16] $back = simd::to_array($from);
+echo simd::any($from == $from);
+echo simd::all($from == $from);
+
+ptr<uint8> $p = mem::alloc<uint8>(16);
+simd::store<uint8, 16>($p, $v);
+simd<uint8, 16> $loaded = simd::load<uint8, 16>($p);
+echo simd::bitmask($loaded == $v);
+mem::free<uint8>($p);

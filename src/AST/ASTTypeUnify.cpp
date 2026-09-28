@@ -83,8 +83,7 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
                     return false;
                 }
 
-                out.bind(decl, ValueType::make_const_value(
-                    decl->value_type.get_primitive_type(), arg.const_value_bits()));
+                out.bind(decl, retype_const_generic(*decl, arg));
                 return true;
             }
 
@@ -117,6 +116,11 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     if (param.is_inline_array() && arg.is_inline_array()) {
         return unify_type(param.array_element(), arg.array_element(), out, false, UnifyPosition::t_type_argument)
             && unify_type(param.array_length(), arg.array_length(), out, false, UnifyPosition::t_type_argument);
+    }
+
+    if (param.is_simd() && arg.is_simd()) {
+        return unify_type(param.simd_element(), arg.simd_element(), out, false, UnifyPosition::t_type_argument)
+            && unify_type(param.simd_length(), arg.simd_length(), out, false, UnifyPosition::t_type_argument);
     }
 
     // a generic application binds structurally, e.g. Box<T> against Box<int> binds T=int

@@ -2,4 +2,4 @@ expect: fail
 
 --- OUT --->
 fatal error: channel sender already taken
-  at channel.eco:221
+  at channel.eco:259

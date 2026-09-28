@@ -1,0 +1,52 @@
+namespace bits;
+
+/**
+ * Bit scans on a word.
+ *
+ * `llvm.cttz` and `llvm.ctlz` take an `i1` immarg that says whether zero is undef. Echo has
+ * no way to write an immarg, so each intrinsic is a private function with a `bool` parameter
+ * and the public wrapper passes the literal `false`. `count_ones` has no immarg and is the
+ * intrinsic itself.
+ */
+
+#[intrinsic: "llvm.cttz"]
+private function cttz_u64(uint64 $x, bool $zero_undef) : uint64;
+
+#[intrinsic: "llvm.cttz"]
+private function cttz_u32(uint32 $x, bool $zero_undef) : uint32;
+
+#[intrinsic: "llvm.ctlz"]
+private function ctlz_u64(uint64 $x, bool $zero_undef) : uint64;
+
+#[intrinsic: "llvm.ctlz"]
+private function ctlz_u32(uint32 $x, bool $zero_undef) : uint32;
+
+#[inline]
+public function trailing_zeros(uint64 $x) : uint64
+{
+    return cttz_u64($x, false);
+}
+
+#[inline]
+public function trailing_zeros(uint32 $x) : uint32
+{
+    return cttz_u32($x, false);
+}
+
+#[inline]
+public function leading_zeros(uint64 $x) : uint64
+{
+    return ctlz_u64($x, false);
+}
+
+#[inline]
+public function leading_zeros(uint32 $x) : uint32
+{
+    return ctlz_u32($x, false);
+}
+
+#[intrinsic: "llvm.ctpop"]
+public function count_ones(uint64 $x) : uint64;
+
+#[intrinsic: "llvm.ctpop"]
+public function count_ones(uint32 $x) : uint32;

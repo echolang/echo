@@ -113,7 +113,16 @@ namespace AST
         // (element, length), there is no declaration, LLVM already has `[N x T]`. the element
         // lives in `_pointee`; the length is a ValueType that is either a value parameter or a
         // `t_const_value`
-        t_inline_array
+        t_inline_array,
+        // **`simd<T, N>`**, a register vector of N lanes. structural like `T[N]`: identity is
+        // (element, length), there is no declaration, LLVM is `<N x T>` rather than `[N x T]`.
+        //
+        // **a kind rather than a flag on t_inline_array**, weak's argument. every `T[N]` site
+        // does GEP, per-element copy loops and literal expansion by index; a flag would let
+        // each of those emit the wrong thing, or allow `simd<string, 4>`. as a kind,
+        // `is_inline_array()` stays false and each site grows an arm on purpose. the element
+        // lives in `_pointee`; the length is a value parameter or a `t_const_value`
+        t_simd
     };
 
     // **the two properties of a tagged optional, by index.** `ComplexType::is_optional` says a layout is
@@ -357,6 +366,15 @@ namespace AST
             return type;
         }
 
+        // `simd<T, N>`. the same two slots as `T[N]`, a different kind so every array site
+        // stays an array site. shape (what T and N may be) is AST::simd_shape_refusal's
+        static ValueType make_simd(ValueType element, ValueType length) {
+            ValueType type(ValueTypeKind::t_simd, ValueTypePrimitive::t_void);
+            type._pointee = std::make_shared<const ValueType>(std::move(element));
+            type._length = std::make_shared<const ValueType>(std::move(length));
+            return type;
+        }
+
         // const applies to the level it is attached to, so make_const(make_pointer(t)) is
         // `const ptr<T>` while make_pointer(make_const(t)) is `ptr<const T>`
         static ValueType make_const(ValueType type) {
@@ -502,6 +520,10 @@ namespace AST
             return kind == ValueTypeKind::t_inline_array;
         }
 
+        bool is_simd() const {
+            return kind == ValueTypeKind::t_simd;
+        }
+
         uint64_t const_value_bits() const {
             assert(is_const_value());
             return _const_bits;
@@ -526,6 +548,25 @@ namespace AST
         // question layout, GEP and literal expansion all ask
         std::optional<uint64_t> bound_array_length() const {
             if (!is_inline_array() || _length == nullptr || !_length->is_const_value()) {
+                return std::nullopt;
+            }
+
+            return _length->const_value_bits();
+        }
+
+        const ValueType &simd_element() const {
+            assert(is_simd() && _pointee);
+            return *_pointee;
+        }
+
+        const ValueType &simd_length() const {
+            assert(is_simd() && _length);
+            return *_length;
+        }
+
+        // bound lane count of a `simd<T, N>`, or nullopt while `N` is still a parameter
+        std::optional<uint64_t> bound_simd_length() const {
+            if (!is_simd() || _length == nullptr || !_length->is_const_value()) {
                 return std::nullopt;
             }
 
@@ -832,6 +873,7 @@ namespace AST
 
                 // structural, like a pointer: same element and same length, all the way down
                 case ValueTypeKind::t_inline_array:
+                case ValueTypeKind::t_simd:
                     return *_pointee == *other._pointee && *_length == *other._length;
             }
 
@@ -1591,32 +1633,68 @@ namespace std
     template<> struct hash<AST::ValueType> {
         size_t operator()(const AST::ValueType &vt) const {
             size_t h = static_cast<size_t>(vt.get_kind()) ^ vt.get_type_flags();
-            if (vt.is_primitive()) h ^= static_cast<size_t>(vt.get_primitive_type());
-            else if (vt.has_complex_type()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
-            else if (vt.is_type_param()) h ^= reinterpret_cast<size_t>(vt.get_type_param());
-            // mixed rather than xor'd: a bare xor of the pointee hash would make ptr<int32>
-            // collide with int32, since the primitive component is identical
-            else if (vt.is_pointer()) h ^= (*this)(vt.pointee()) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            // the same mix over the class it names. the kind is already in `h`, so `weak<Foo>` and
-            // `ptr<Foo>` do not collide despite hashing one recursive level the same way
-            else if (vt.is_weak()) h ^= (*this)(vt.weak_target()) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            // structural, so the hash has to be too - mixed for the reason above, and over the
-            // return type as well as the parameters, since `function<int32()>` and
-            // `function<void()>` differ only there
-            else if (vt.has_signature()) {
-                h ^= (*this)(vt.signature().return_type) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            const auto mix = [&](size_t piece) {
+                h ^= piece + 0x9e3779b9 + (h << 6) + (h >> 2);
+            };
+
+            // one arm per kind, no tail: a kind that fell through hashed as flags only, so
+            // every value of that kind collided
+            switch (vt.get_kind()) {
+            case AST::ValueTypeKind::t_primitive:
+                h ^= static_cast<size_t>(vt.get_primitive_type());
+                break;
+
+            case AST::ValueTypeKind::t_struct:
+            case AST::ValueTypeKind::t_class:
+            case AST::ValueTypeKind::t_interface:
+            case AST::ValueTypeKind::t_enum:
+            case AST::ValueTypeKind::t_opaque:
+                h ^= reinterpret_cast<size_t>(vt.get_complex_type());
+                break;
+
+            case AST::ValueTypeKind::t_generic:
+                h ^= reinterpret_cast<size_t>(vt.get_type_param());
+                break;
+
+            case AST::ValueTypeKind::t_pointer:
+                // mixed rather than xor'd: a bare xor of the pointee hash would make ptr<int32>
+                // collide with int32, since the primitive component is identical
+                mix((*this)(vt.pointee()));
+                break;
+
+            case AST::ValueTypeKind::t_weak:
+                // the kind is already in `h`, so `weak<Foo>` and `ptr<Foo>` do not collide
+                mix((*this)(vt.weak_target()));
+                break;
+
+            case AST::ValueTypeKind::t_callable:
+            case AST::ValueTypeKind::t_c_function:
+                mix((*this)(vt.signature().return_type));
                 for (const auto &param : vt.signature().parameter_types) {
-                    h ^= (*this)(param) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                    mix((*this)(param));
                 }
-            }
-            else if (vt.is_const_value()) {
+                break;
+
+            case AST::ValueTypeKind::t_const_value:
                 h ^= static_cast<size_t>(vt.const_value_primitive());
-                h ^= std::hash<uint64_t>{}(vt.const_value_bits()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                mix(std::hash<uint64_t>{}(vt.const_value_bits()));
+                break;
+
+            case AST::ValueTypeKind::t_inline_array:
+                mix((*this)(vt.array_element()));
+                mix((*this)(vt.array_length()));
+                break;
+
+            case AST::ValueTypeKind::t_simd:
+                mix((*this)(vt.simd_element()));
+                mix((*this)(vt.simd_length()));
+                break;
+
+            case AST::ValueTypeKind::t_unknown:
+            case AST::ValueTypeKind::t_kind_class:
+                break;
             }
-            else if (vt.is_inline_array()) {
-                h ^= (*this)(vt.array_element()) + 0x9e3779b9 + (h << 6) + (h >> 2);
-                h ^= (*this)(vt.array_length()) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            }
+
             return h;
         }
     };

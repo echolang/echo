@@ -56,6 +56,17 @@ bool AST::const_generic_bits_fit(const ValueType &dest, uint64_t bits)
     return bits <= get_integer_size(dest.get_primitive_type()).get_max_positive_value();
 }
 
+AST::ValueType AST::retype_const_generic(const TypeParamDecl &param, ValueType arg)
+{
+    if (param.is_value_param() && arg.is_const_value() && param.value_type.is_integer_type()
+        && ValueType(arg.const_value_primitive()).is_integer_type()) {
+        return ValueType::make_const_value(
+            param.value_type.get_primitive_type(), arg.const_value_bits());
+    }
+
+    return arg;
+}
+
 std::string AST::const_generic_overflow_sentence(const ValueType &dest, uint64_t bits)
 {
     const IntegerSize size = get_integer_size(dest.get_primitive_type());

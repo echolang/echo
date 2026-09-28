@@ -1,0 +1,9 @@
+mode: build
+flags: -g
+
+--- OUT --->
+1
+--- UNIT_IR --->
+CHECK: #dbg_declare(
+CHECK: DIFlagVector
+CHECK: DISubrange(count: 16

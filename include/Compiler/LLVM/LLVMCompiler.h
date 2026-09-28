@@ -12,6 +12,7 @@
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
+#include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
@@ -209,6 +210,7 @@ private:
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
     Compiler::LLVM::AtomicCodegen _atomics;
+    Compiler::LLVM::SimdCodegen _simd;
     Compiler::LLVM::MemoryCodegen _memory;
     Compiler::LLVM::StaticStorageCodegen _statics;
     Compiler::LLVM::ProcessCodegen _process;

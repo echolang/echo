@@ -1,0 +1,6 @@
+simd<uint8, 16> $a;
+simd<uint8, 16> $b;
+
+if ($a == $b) {
+    echo 1;
+}

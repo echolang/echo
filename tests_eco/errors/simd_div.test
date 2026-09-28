@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] simd_div.eco:3:24
+
+  operator '/' is not supported on integer vectors
+
+  2 | simd<int32, 4> $b;
+  3 | simd<int32, 4> $c = $a / $b;
+    :                        ^
+  4 | 
+
+1 error, nothing was compiled.

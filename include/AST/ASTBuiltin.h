@@ -244,6 +244,19 @@ namespace AST
         t_atomic_exchange,
         t_atomic_compare_exchange,
         t_atomic_fence,
+
+        // the `simd::` verbs. a builtin rather than an LLVM intrinsic because splat is a
+        // shufflevector, load/store choose the element's alignment, select is CreateSelect,
+        // bitmask is a portable iN bitcast for N<=8 and two 8-lane addv of byte powers for
+        // N=16, and the array conversions are insert/extract loops. `any`/`all` stay
+        // `#[intrinsic:]` because LLVM already names those reductions
+        t_simd_splat,
+        t_simd_load,
+        t_simd_store,
+        t_simd_select,
+        t_simd_bitmask,
+        t_simd_from_array,
+        t_simd_to_array,
     };
 
     // **can this builtin be answered before codegen, and if not, why not?**

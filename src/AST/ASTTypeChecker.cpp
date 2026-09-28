@@ -5,6 +5,7 @@
 #include "AST/ASTEnumMap.h"
 #include "AST/ASTAtomics.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTSimd.h"
 #include "AST/ASTCompleteness.h"
 #include "AST/ASTVariadic.h"
 
@@ -228,6 +229,10 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
         check_c_function_type(node.get_return_type(), node.name_token.value());
         check_incomplete_use(node.get_return_type(), node.name_token.value());
         check_void_nested(node.get_return_type(), node.name_token.value());
+        check_simd_shape(node.get_return_type(), node.name_token.value());
+        if (node.is_extern()) {
+            check_simd_crosses_c(node.get_return_type(), node.name_token.value());
+        }
         // an interned constructor's name token is the template's, in whoever wrote it.
         // a `map<string, AssetRef>` that slipped through would otherwise blame map.eco
         if (!node.is_implicitly_generated) {
@@ -244,6 +249,10 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
                     check_c_function_type(arg->type(), node.name_token.value());
                     check_incomplete_use(arg->type(), node.name_token.value());
                     check_void_as_value(arg->type(), node.name_token.value());
+                    check_simd_shape(arg->type(), node.name_token.value());
+                    if (node.is_extern()) {
+                        check_simd_crosses_c(arg->type(), node.name_token.value());
+                    }
                     // a generic type's constructor is named after the type, so the name
                     // token is `Box` in `struct Box<T>`. `constructor(Box& $other)` already
                     // has its own sentence (write `Box<T>&`); reporting here would point
@@ -541,6 +550,28 @@ void TypeChecker::check_bare_generic_type(const ValueType &type, const TokenRefe
     }
 }
 
+void TypeChecker::check_simd_shape(const ValueType &type, const TokenReference &at)
+{
+    const SimdShape shape = simd_shape_refusal(type);
+
+    if (shape.kind != SimdShapeKind::t_refused) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(at),
+        shape.sentence);
+}
+
+void TypeChecker::check_simd_crosses_c(const ValueType &type, const TokenReference &at)
+{
+    if (auto refusal = simd_crosses_c_refusal(type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
+    }
+}
+
 void TypeChecker::check_void_type_args(FunctionCallExprNode &node)
 {
     if (node.decl == nullptr) {
@@ -550,6 +581,7 @@ void TypeChecker::check_void_type_args(FunctionCallExprNode &node)
     for (const ValueType &arg : node.decl->instantiation_args) {
         check_void_as_value(arg, node.token_function_name);
         check_bare_generic_type(arg, node.token_function_name);
+        check_simd_shape(arg, node.token_function_name);
     }
 }
 
@@ -703,9 +735,11 @@ void TypeChecker::check_bool_condition(ExprNode *condition, const char *kind, co
     // a T? and a ptr<T> are the two that used to reach CreateCondBr and fail the
     // verifier. the advice is the spelling that actually tests presence; an integer
     // is the comparison the language requires instead of truthiness
-    const char *advice = (type.is_nullable() || type.is_pointer())
-        ? "unwrap it with guard, or compare it against null, rather than branching on the value itself"
-        : "compare it against something rather than branching on the value itself";
+    const char *advice = type.is_simd()
+        ? "a vector comparison is a mask, so write simd::any or simd::all rather than branching on the vector"
+        : (type.is_nullable() || type.is_pointer())
+            ? "unwrap it with guard, or compare it against null, rather than branching on the value itself"
+            : "compare it against something rather than branching on the value itself";
 
     _collector.collect_issue<Issue::GenericError>(
         code_ref_for(at),
@@ -1402,6 +1436,28 @@ void TypeChecker::check_atomic_operand(FunctionCallExprNode &node)
         code_ref_for(node.token_function_name), *refusal);
 }
 
+void TypeChecker::check_simd_operand(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()) {
+        return;
+    }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (!is_simd_builtin(kind)) {
+        return;
+    }
+
+    const auto refusal = simd_operand_refusal(kind, node.decl->instantiation_args);
+
+    if (!refusal.has_value()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.token_function_name), *refusal);
+}
+
 void TypeChecker::check_layout_query(FunctionCallExprNode &node)
 {
     if (!node.decl->is_builtin()) {
@@ -1719,6 +1775,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         check_ref_count_argument(node);
         check_raw_storage_argument(node);
         check_atomic_operand(node);
+        check_simd_operand(node);
         check_layout_query(node);
         check_void_type_args(node);
         check_variadic_argument(node);
@@ -2390,6 +2447,10 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
     if (node.has_type()) {
         check_c_function_type(node.type(), node.token_varname);
         check_incomplete_use(node.type(), node.token_varname);
+        check_simd_shape(node.type(), node.token_varname);
+        if (_current_function != nullptr && _current_function->is_extern()) {
+            check_simd_crosses_c(node.type(), node.token_varname);
+        }
         // the type name, when the author wrote one: `Box $b` should point at Box, not at $b.
         // a minted type node has no token, so the variable is the fallback, matching void
         const TokenReference &type_at =

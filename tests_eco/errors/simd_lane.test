@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] simd_lane.eco:6:16
+
+  'simd<Point, 4>' is not a vector - a lane is an integer, a float or a bool, and 'Point' is none of those
+
+  5 | 
+  6 | simd<Point, 4> $bad;
+    :                ^^^^
+  7 | simd<string, 4> $also;
+
+[error] simd_lane.eco:7:17
+
+  'simd<string, 4>' is not a vector - a lane is an integer, a float or a bool, and 'string' is none of those
+
+  6 | simd<Point, 4> $bad;
+  7 | simd<string, 4> $also;
+    :                 ^^^^^
+  8 | 
+
+2 errors, nothing was compiled.

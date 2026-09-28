@@ -1,0 +1,47 @@
+namespace simd;
+
+/**
+ * Vectors: a handful of verbs the compiler owns, and LLVM intrinsics for the rest.
+ *
+ * `simd<T, N>` is a type constructor, not this namespace. The verbs live here so `simd` stays
+ * an identifier. A lane is an integer, a float or a bool; N is a power of two; the whole
+ * vector is at most 16 bytes.
+ *
+ * Elementwise `+ - * & | ^` and the comparisons are ordinary operators, not functions in
+ * this file. A comparison produces `simd<bool, N>`, so `if ($a == $b)` over two vectors is
+ * refused: write `any` or `all`.
+ *
+ * Load and store are N consecutive `T` at the element's alignment. That is what lets a packed
+ * `ptr<uint8>` never become a faulting `movdqa`. There is no implicit splat: `$v + 1` is a
+ * diagnostic, `splat` is the broadcast.
+ */
+
+#[builtin: simd_splat]
+public function splat<T, const usize N>(T $v) : simd<T, N>;
+
+#[builtin: simd_load]
+public function load<T, const usize N>(ptr<const T> $p) : simd<T, N>;
+
+#[builtin: simd_store]
+public function store<T, const usize N>(ptr<T> $p, simd<T, N> $v) : void;
+
+#[builtin: simd_select]
+public function select<T, const usize N>(simd<bool, N> $m, simd<T, N> $a, simd<T, N> $b) : simd<T, N>;
+
+/**
+ * Bit i is lane i, as a `uint64`. The portable contract a table probe reads.
+ */
+#[builtin: simd_bitmask]
+public function bitmask<const usize N>(simd<bool, N> $m) : uint64;
+
+#[builtin: simd_from_array]
+public function from_array<T, const usize N>(T[N] $a) : simd<T, N>;
+
+#[builtin: simd_to_array]
+public function to_array<T, const usize N>(simd<T, N> $v) : T[N];
+
+#[intrinsic: "llvm.vector.reduce.or"]
+public function any<const usize N>(simd<bool, N> $m) : bool;
+
+#[intrinsic: "llvm.vector.reduce.and"]
+public function all<const usize N>(simd<bool, N> $m) : bool;

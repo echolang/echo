@@ -1,0 +1,2 @@
+simd<float32, 4> $v;
+simd<float32, 4> $w = $v << 1;

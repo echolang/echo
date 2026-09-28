@@ -1,0 +1,37 @@
+// `mem::take` / `mem::init` on a field of a buffer element. AST::is_unaccounted_storage walks the
+// member chain to the pointer index, so `$p:$[0]->k` is the same storage `$p:$[0]` is - nothing
+// else accounts for it. a local `$s->k` still refuses, which `take_of_accounted_storage` pins
+
+struct Slot
+{
+    string $k;
+    int32 $v;
+}
+
+{
+    ptr<Slot> $p = mem::alloc<Slot>(1);
+
+    string $a = '';
+    $a->reserve(string::INLINE + 1);
+    $a->append('hello');
+
+    assert(mem::live_allocations() == 3, 'the buffer and one written string');
+
+    mem::init<string>($p:$[0]->k, $a);
+    mem::init<int32>($p:$[0]->v, 9);
+
+    assert(mem::live_allocations() == 3, 'init moved the owner in');
+    assert(mem::refs($a->owner) == 2, 'the local and the slot');
+
+    echo $p:$[0]->v;
+
+    string $out = mem::take<string>($p:$[0]->k);
+
+    assert(mem::refs($a->owner) == 2, 'handed over, not duplicated');
+    echo $out;
+
+    mem::free<Slot>($p);
+}
+
+assert(mem::live_allocations() == 0, 'the field was taken, the buffer freed, nothing twice');
+echo mem::live_allocations();

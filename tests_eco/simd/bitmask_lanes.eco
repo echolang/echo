@@ -1,0 +1,8 @@
+// bit i of simd::bitmask is lane i. all-true is already 65535 in verbs.eco; these pin the ends
+uint8[16] $a;
+$a[0] = 1;
+echo simd::bitmask(simd::from_array($a) == simd::splat<uint8, 16>(1 as uint8));
+
+uint8[16] $b;
+$b[15] = 1;
+echo simd::bitmask(simd::from_array($b) == simd::splat<uint8, 16>(1 as uint8));

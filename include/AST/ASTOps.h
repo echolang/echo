@@ -126,9 +126,14 @@ namespace AST
 
         // the operators that ask a question about two operands rather than combining them
         // the distinction matters for pointers: comparing an address against a non-address is
-        // a type error, while `$p:$ + 1` mixing an address and an int is ordinary offsetting
+        // a type error, while `$p:$ + 1` mixing an address and an int is ordinary offsetting.
+        // the token form is what a reader with no Operator asks — simd_lane_op_lowers is one
         inline bool is_comparison() const {
-            return is_identity_comparison()
+            return is_comparison_token(type);
+        }
+
+        static inline bool is_comparison_token(Token::Type type) {
+            return is_identity_comparison_token(type)
                 || type == Token::Type::t_open_angle
                 || type == Token::Type::t_close_angle
                 || type == Token::Type::t_logical_leq
@@ -144,6 +149,10 @@ namespace AST
         // across three passes and getting one of them wrong is silent - see
         // AST::binary_reconciles_operands, which is the question they actually ask
         inline bool is_shift() const {
+            return is_shift_token(type);
+        }
+
+        static inline bool is_shift_token(Token::Type type) {
             return type == Token::Type::t_op_shl
                 || type == Token::Type::t_op_shr;
         }
@@ -152,6 +161,10 @@ namespace AST
         // operators a class handle answers: two handles compare as addresses, and a handle compares
         // against null. every ordering operator on a class stays a type error
         inline bool is_identity_comparison() const {
+            return is_identity_comparison_token(type);
+        }
+
+        static inline bool is_identity_comparison_token(Token::Type type) {
             return type == Token::Type::t_logical_eq
                 || type == Token::Type::t_logical_neq;
         }

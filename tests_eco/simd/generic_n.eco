@@ -1,0 +1,10 @@
+function id<const usize N>(simd<uint8, N> $v) : simd<uint8, N>
+{
+    return $v;
+}
+
+simd<uint8, 16> $a;
+simd<uint8, 8> $b;
+simd<uint8, 16> $c = id($a);
+simd<uint8, 8> $d = id($b);
+echo 1;

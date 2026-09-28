@@ -1,0 +1,2 @@
+simd<uint8, 16> $v;
+simd<uint8, 16> $w = $v + 1;

@@ -1,0 +1,30 @@
+expect: fail
+
+--- OUT --->
+[error] simd_width.eco:1:16
+
+  'simd<uint8, 3>' is not a vector - the lane count is a power of two, at least 2
+
+  1 | simd<uint8, 3> $odd;
+    :                ^^^^
+  2 | simd<float64, 4> $wide;
+
+[error] simd_width.eco:2:18
+
+  'simd<float64, 4>' is 32 bytes, and a vector is at most 16 - that is both architectures' SIMD baseline and the heap allocator's alignment
+
+  1 | simd<uint8, 3> $odd;
+  2 | simd<float64, 4> $wide;
+    :                  ^^^^^
+  3 | simd<uint8, 1> $one;
+
+[error] simd_width.eco:3:16
+
+  'simd<uint8, 1>' is not a vector - the lane count is a power of two, at least 2
+
+  2 | simd<float64, 4> $wide;
+  3 | simd<uint8, 1> $one;
+    :                ^^^^
+  4 | 
+
+3 errors, nothing was compiled.

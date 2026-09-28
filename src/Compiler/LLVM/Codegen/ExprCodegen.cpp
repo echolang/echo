@@ -25,6 +25,7 @@
 #include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
+#include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
@@ -378,6 +379,13 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         }
     }
 
+    // **a vector, elementwise.** after the pointer arm and before the integer one, matching
+    // AST::binary_has_builtin_meaning. SimdCodegen owns the lowering
+    if (lhsret.is_simd() || rhsret.is_simd()) {
+        _ctx.simd->gen_binary(node, lhsret, rhsret, left, right);
+        return;
+    }
+
     if (lhsret.is_integer_type() && rhsret.is_integer_type()) {
         // **the operation's own signedness, asked of the one owner.** `/ % ** < > <= >=` all mean
         // something different over an unsigned operand, and this arm used to emit the signed spelling
@@ -626,6 +634,11 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
     _ctx.value_stack.pop();
 
     auto type = node.expr->result_type();
+
+    if (type.is_simd()) {
+        _ctx.simd->gen_unary(node, type, value);
+        return;
+    }
 
     switch (node.token_operator.type()) {
         case Token::Type::t_op_sub:
@@ -1112,6 +1125,16 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_atomic_fence:
             _ctx.atomics->gen_atomic_builtin(node, kind);
             return;
+
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
+            _ctx.simd->gen_simd_builtin(node, kind);
+            return;
     }
 }
 
@@ -1347,6 +1370,13 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_atomic_exchange:
         case AST::BuiltinKind::t_atomic_compare_exchange:
         case AST::BuiltinKind::t_atomic_fence:
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }

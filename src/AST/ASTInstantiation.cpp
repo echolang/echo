@@ -125,7 +125,9 @@ namespace AST
             }
 
             for (size_t i = 0; i < explicit_type_args.size() && i < tmpl->type_parameters.size(); i++) {
-                result.bindings.bind(tmpl->type_parameters[i], explicit_type_args[i]);
+                result.bindings.bind(
+                    tmpl->type_parameters[i],
+                    retype_const_generic(*tmpl->type_parameters[i], explicit_type_args[i]));
             }
 
             if (tmpl->args.size() != argument_types.size()) {
@@ -158,7 +160,10 @@ namespace AST
             }
 
             for (size_t i = 0; i < explicit_type_args.size(); i++) {
-                result.bindings.bind(tmpl->type_parameters[inherited + i], explicit_type_args[i]);
+                result.bindings.bind(
+                    tmpl->type_parameters[inherited + i],
+                    retype_const_generic(
+                        *tmpl->type_parameters[inherited + i], explicit_type_args[i]));
             }
 
             if (explicit_type_args.size() < own) {

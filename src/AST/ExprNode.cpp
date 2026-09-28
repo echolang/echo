@@ -18,6 +18,12 @@
 AST::ValueType AST::UnaryExprNode::result_type() const
 {
     if (token_operator.type() == Token::Type::t_exclamation) {
+        // `!` over a mask is a mask. the scalar arm below would answer bool and
+        // `if (!$m)` would type-check a vector
+        if (expr != nullptr && expr->result_type().is_simd()) {
+            return expr->result_type();
+        }
+
         return AST::ValueType(AST::ValueTypePrimitive::t_bool);
     }
 
@@ -78,6 +84,29 @@ AST::ValueType AST::BinaryExprNode::result_type() const
             || raw_left.is_nullable() || raw_right.is_nullable()
             || raw_left.is_weak() || raw_right.is_weak())) {
         return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+    }
+
+    // **a vector comparison is a mask, not a bool.** ahead of the scalar arm below, or
+    // `if ($a == $b)` over two vectors would type-check and CreateCondBr on `<N x i1>`
+    if (op_node != nullptr && op_node->op != nullptr
+        && (raw_left.is_simd() || raw_right.is_simd())) {
+        if (op_node->op->is_comparison()) {
+            const AST::ValueType &vec = raw_left.is_simd() ? raw_left : raw_right;
+
+            return AST::ValueType::make_simd(
+                AST::ValueType(AST::ValueTypePrimitive::t_bool),
+                vec.simd_length());
+        }
+
+        if (!binary_reconciles_operands(op_node->op)) {
+            return AST::ValueType::make_mutable(raw_left);
+        }
+
+        if (AST::ValueType::make_mutable(raw_left) == AST::ValueType::make_mutable(raw_right)) {
+            return AST::ValueType::make_mutable(raw_left);
+        }
+
+        return AST::ValueType::make_unknown();
     }
 
     // **a comparison is a bool, whatever it compared.** the two arms above answer this for a pointer,

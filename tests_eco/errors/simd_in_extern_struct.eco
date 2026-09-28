@@ -1,0 +1,8 @@
+struct Cols
+{
+    simd<float32, 4> $c0;
+}
+
+extern {
+    function takes(Cols $m) : void;
+}

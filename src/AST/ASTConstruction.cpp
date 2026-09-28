@@ -80,7 +80,7 @@ namespace
             return true;
         }
 
-        if (type.is_inline_array()) {
+        if (type.is_inline_array() || type.is_simd()) {
             return true;
         }
 

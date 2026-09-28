@@ -1,0 +1,7 @@
+--- OUT --->
+1
+--- IR --->
+CHECK: add <4 x i32>
+CHECK: icmp eq <4 x i32>
+CHECK: shufflevector
+CHECK: shl <16 x i8>

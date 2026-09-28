@@ -1,0 +1,9 @@
+expect: ok
+
+--- OUT --->
+1
+32768
+--- IR --->
+CHECK: simd.mask.sext
+CHECK-NOT: vector.reduce.add.v16i32
+CHECK: llvm.vector.reduce.add.v8i8

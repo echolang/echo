@@ -53,6 +53,34 @@ namespace
     }
 }
 
+TEST_CASE("is_unaccounted_storage walks a member of a pointer index", "[AST][pointer]")
+{
+    // no stdlib in this helper, so the buffer is a pointer at a local rather than mem::alloc.
+    // the e2e case `take_field_of_buffer_slot` is the one that actually takes
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Slot { int32 $k; int32 $v; }\n"
+        "Slot $s = Slot(1, 2);\n"
+        "ptr<Slot> $p = &$s;\n"
+        "echo $p:$[0]->k;\n"
+        "echo $s->k;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    bool saw_unaccounted_field = false;
+    bool saw_local_field = false;
+    auto &module = bundle->modules.find_module("test");
+
+    for (auto *node : module.nodes.of_type<MemberAccessNode>()) {
+        if (is_unaccounted_storage(*node)) {
+            saw_unaccounted_field = true;
+        } else {
+            saw_local_field = true;
+        }
+    }
+
+    REQUIRE(saw_unaccounted_field);
+    REQUIRE(saw_local_field);
+}
+
 TEST_CASE("The four place kinds denote storage", "[AST][pointer]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(

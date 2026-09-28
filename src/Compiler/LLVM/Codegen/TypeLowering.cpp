@@ -1450,6 +1450,17 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         llvm::Type *element = get_llvm_type(type.array_element(), cmp_unit);
         base_type = llvm::ArrayType::get(element, *length);
     }
+    else if (type.is_simd()) {
+        const std::optional<uint64_t> length = type.bound_simd_length();
+        if (!length.has_value()) {
+            throw _ctx.error(fmt::format(
+                "Cannot lower vector '{}' with an unbound length {}",
+                type.get_type_desciption(), _ctx.function_context()));
+        }
+
+        llvm::Type *element = get_llvm_type(type.simd_element(), cmp_unit);
+        base_type = llvm::FixedVectorType::get(element, static_cast<unsigned>(*length));
+    }
     else if (type.is_const_value()) {
         throw _ctx.error(fmt::format(
             "Cannot lower a const generic value '{}' as a machine type {}",

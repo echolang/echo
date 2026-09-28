@@ -30,6 +30,13 @@ bool value_is_an_address(const ExprNode &expr)
 namespace
 {
 
+ExprNode *member_base(ExprNode *expr)
+{
+    auto &base = static_cast<MemberAccessNode *>(expr)->get_base_node();
+
+    return base.has() && base.is_expression_node() ? base.unsafe_ptr<ExprNode>() : nullptr;
+}
+
 // the last node of a place that only re-addresses existing storage: a variable or a static
 // property. null when the expression names no lasting storage at all - a call result, a
 // field of one (`Box()->n`)
@@ -73,11 +80,8 @@ ExprNode *place_anchor(ExprNode *expr)
             }
 
             case NodeType::n_member_access:
-            {
-                auto &base = static_cast<MemberAccessNode *>(expr)->get_base_node();
-                expr = base.has() && base.is_expression_node() ? base.unsafe_ptr<ExprNode>() : nullptr;
+                expr = member_base(expr);
                 break;
-            }
 
             default:
                 return nullptr;
@@ -87,6 +91,29 @@ ExprNode *place_anchor(ExprNode *expr)
     return nullptr;
 }
 
+}
+
+bool is_unaccounted_storage(const ExprNode &expr)
+{
+    const ExprNode *cur = strip_implicit_casts(&expr);
+
+    while (cur != nullptr && cur->get_node_type() == NodeType::n_member_access) {
+        cur = strip_implicit_casts(member_base(const_cast<ExprNode *>(cur)));
+    }
+
+    if (cur == nullptr) {
+        return false;
+    }
+
+    if (cur->get_node_type() == NodeType::n_expr_deref) {
+        return true;
+    }
+
+    if (cur->get_node_type() == NodeType::n_expr_index) {
+        return static_cast<const IndexExprNode *>(cur)->indexed_base_type().is_pointer();
+    }
+
+    return false;
 }
 
 VarDeclNode *place_root_of(ExprNode *expr)

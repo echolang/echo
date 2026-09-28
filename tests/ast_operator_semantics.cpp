@@ -201,6 +201,45 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         { Token::Type::t_logical_eq, value(s.i32), value(ValueType::make_void()), false, "and no comparison" },
     };
 
+    const ValueType sixteen = ValueType::make_const_value(ValueTypePrimitive::t_usize, 16);
+    const ValueType four = ValueType::make_const_value(ValueTypePrimitive::t_usize, 4);
+    const ValueType v16u8 = ValueType::make_simd(
+        ValueType(ValueTypePrimitive::t_uint8), sixteen);
+    const ValueType v16bool = ValueType::make_simd(s.boolean, sixteen);
+    const ValueType v4f32 = ValueType::make_simd(
+        ValueType(ValueTypePrimitive::t_float32), four);
+
+    const std::vector<Row> simd_rows = {
+        { Token::Type::t_op_add, value(v16u8), value(v16u8), true, "integer vectors add" },
+        { Token::Type::t_and, value(v16u8), value(v16u8), true, "and mask" },
+        { Token::Type::t_logical_eq, value(v16u8), value(v16u8), true, "and compare to a mask" },
+        { Token::Type::t_op_shl, value(v16u8), value(s.i32), true, "and shift by a scalar" },
+        { Token::Type::t_op_div, value(v16u8), value(v16u8), true, "integer vector / is builtin so a declared operator cannot claim it" },
+        { Token::Type::t_op_mod, value(v16u8), value(v16u8), true, "and so is remainder" },
+        { Token::Type::t_op_pow, value(v16u8), value(v16u8), true, "and so is **" },
+        { Token::Type::t_logical_and, value(v16bool), value(v16bool), false, "&& stays scalar-bool" },
+        { Token::Type::t_op_add, value(v16u8), value(s.i32), true, "mixed is builtin so splat can refuse it" },
+        { Token::Type::t_op_shl, value(v16u8), value(v16u8), true, "vector << vector is builtin so the count rule can refuse it" },
+        { Token::Type::t_op_add, value(v4f32), value(v4f32), true, "float vectors add" },
+        { Token::Type::t_op_div, value(v4f32), value(v4f32), true, "and divide" },
+        { Token::Type::t_op_mod, value(v4f32), value(v4f32), true, "float remainder is builtin so the lane rule can refuse it" },
+        { Token::Type::t_op_shl, value(v4f32), value(s.i32), true, "a float vector shift is builtin so the count rule can refuse it" },
+        { Token::Type::t_and, value(v16bool), value(v16bool), true, "bool vectors mask" },
+        { Token::Type::t_logical_eq, value(v16bool), value(v16bool), true, "and agree" },
+        { Token::Type::t_open_angle, value(v16bool), value(v16bool), true, "ordering is builtin so the lane rule can refuse it" },
+    };
+
+    for (const Row &row : simd_rows) {
+        const Operator *op = op_for(registry, row.op);
+
+        INFO("simd operator " << token_lit_symbol_string(row.op) << " over '"
+             << row.lhs.type.get_type_desciption() << "' and '"
+             << row.rhs.type.get_type_desciption() << "' - " << row.why);
+
+        REQUIRE(op != nullptr);
+        REQUIRE(binary_has_builtin_meaning(op, row.lhs, row.rhs) == row.expected);
+    }
+
     for (const Row &row : rows) {
         const Operator *op = op_for(registry, row.op);
 
@@ -211,6 +250,54 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         REQUIRE(op != nullptr);
         REQUIRE(binary_has_builtin_meaning(op, row.lhs, row.rhs) == row.expected);
     }
+}
+
+TEST_CASE("a vector operator the language owns is refused in one place", "[AST][operators][simd]")
+{
+    OperatorRegistry registry;
+    Shapes s = shapes();
+
+    const ValueType four = ValueType::make_const_value(ValueTypePrimitive::t_usize, 4);
+    const ValueType v4i = ValueType::make_simd(s.i32, four);
+    const ValueType v4f = ValueType::make_simd(s.f64, four);
+    const ValueType v4b = ValueType::make_simd(s.boolean, four);
+
+    const Operator *shl = op_for(registry, Token::Type::t_op_shl);
+    const Operator *add = op_for(registry, Token::Type::t_op_add);
+    const Operator *lt = op_for(registry, Token::Type::t_open_angle);
+    const Operator *div = op_for(registry, Token::Type::t_op_div);
+    const Operator *land = op_for(registry, Token::Type::t_logical_and);
+
+    REQUIRE(shl != nullptr);
+    REQUIRE(add != nullptr);
+    REQUIRE(lt != nullptr);
+    REQUIRE(div != nullptr);
+    REQUIRE(land != nullptr);
+
+    // a legal shift has nothing operand-level to say
+    REQUIRE_FALSE(binary_operand_refusal(shl, value(v4i), value(s.i32)).has_value());
+    REQUIRE_FALSE(binary_operand_refusal(add, value(v4i), value(v4i)).has_value());
+
+    // `&&` is not builtin, and the refusal must stay silent so the unsupported-operand
+    // sentence is the only one
+    REQUIRE_FALSE(binary_has_builtin_meaning(land, value(v4b), value(v4b)));
+    REQUIRE_FALSE(binary_operand_refusal(land, value(v4b), value(v4b)).has_value());
+
+    const auto float_shift = binary_operand_refusal(shl, value(v4f), value(s.i32));
+    REQUIRE(float_shift.has_value());
+    REQUIRE(float_shift->find("integer count") != std::string::npos);
+
+    const auto both = binary_operand_refusal(shl, value(v4i), value(v4i));
+    REQUIRE(both.has_value());
+    REQUIRE(both->find("scalar count") != std::string::npos);
+
+    const auto order = binary_operand_refusal(lt, value(v4b), value(v4b));
+    REQUIRE(order.has_value());
+    REQUIRE(*order == "operator '<' is not supported on bool vectors");
+
+    const auto quot = binary_operand_refusal(div, value(v4i), value(v4i));
+    REQUIRE(quot.has_value());
+    REQUIRE(*quot == "operator '/' is not supported on integer vectors");
 }
 
 TEST_CASE("a custom symbol never has a built-in meaning", "[AST][operators]")
@@ -257,6 +344,19 @@ TEST_CASE("unary_has_builtin_meaning covers negation and both meanings of '!'", 
     REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(s.f64)));
     REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(s.boolean)));
     REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(s.structure)));
+
+    const ValueType four = ValueType::make_const_value(ValueTypePrimitive::t_usize, 4);
+    const ValueType v4i32 = ValueType::make_simd(s.i32, four);
+    const ValueType v4f = ValueType::make_simd(s.f64, four);
+    const ValueType v4b = ValueType::make_simd(s.boolean, four);
+
+    REQUIRE(unary_has_builtin_meaning(neg, value(v4i32)));
+    REQUIRE(unary_has_builtin_meaning(neg, value(v4f)));
+    REQUIRE_FALSE(unary_has_builtin_meaning(neg, value(v4b)));
+    REQUIRE(unary_has_builtin_meaning(tilde, value(v4i32)));
+    REQUIRE_FALSE(unary_has_builtin_meaning(tilde, value(v4f)));
+    REQUIRE(unary_has_builtin_meaning(bang, value(v4b)));
+    REQUIRE_FALSE(unary_has_builtin_meaning(bang, value(v4i32)));
 }
 
 // AST::binary_reconciles_operands and AST::binary_operation_type - "do these two operands meet at one

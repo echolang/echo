@@ -1,0 +1,7 @@
+struct Point
+{
+    int32 $x;
+}
+
+simd<Point, 4> $bad;
+simd<string, 4> $also;

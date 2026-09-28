@@ -1,0 +1,11 @@
+// elementwise operators on zero-init vectors. splat is a phase-3 verb; these
+// still have to lower, so the IR names the vector add and the mask compare
+simd<int32, 4> $a;
+simd<int32, 4> $b;
+simd<int32, 4> $c = $a + $b;
+simd<int32, 4> $d = -$c;
+simd<bool, 4> $m = $a == $b;
+simd<uint8, 16> $bytes;
+int32 $count = 1;
+simd<uint8, 16> $shifted = $bytes << $count;
+echo 1;

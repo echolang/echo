@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 
 #include "AST/StaticPropertyExprNode.h"
+#include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
@@ -174,10 +175,12 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
 
 llvm::Value *LValueCodegen::gen_load(const LValue &place, const char *name)
 {
-    llvm::LoadInst *load = _ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
-        place.address,
-        name);
+    llvm::Type *llvm_type = _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit);
+    llvm::LoadInst *load = _ctx.builder->CreateLoad(llvm_type, place.address, name);
+
+    if (place.storage_type.is_simd() && place.provenance == Provenance::t_raw) {
+        load->setAlignment(_ctx.simd->packed_alignment(place.storage_type));
+    }
 
     tag_access(load, place);
 
@@ -187,6 +190,10 @@ llvm::Value *LValueCodegen::gen_load(const LValue &place, const char *name)
 llvm::StoreInst *LValueCodegen::gen_store(const LValue &place, llvm::Value *value)
 {
     llvm::StoreInst *store = _ctx.builder->CreateStore(value, place.address);
+
+    if (place.storage_type.is_simd() && place.provenance == Provenance::t_raw) {
+        store->setAlignment(_ctx.simd->packed_alignment(place.storage_type));
+    }
 
     tag_access(store, place);
 

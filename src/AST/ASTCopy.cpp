@@ -102,6 +102,10 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
     // something is t_synthesizable, and one whose cases own nothing copies as bytes. a union buffer
     // would arrive here as a `[N x i8]` property and fold to t_bytes - silently, and for exactly the
     // shape that must not
+    if (type.is_simd()) {
+        return AST::CopyKind::t_bytes;
+    }
+
     if (type.is_inline_array()) {
         switch (AST::classify_copy(type.array_element())) {
         case AST::CopyKind::t_bytes:

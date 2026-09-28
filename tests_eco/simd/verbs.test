@@ -1,0 +1,10 @@
+--- OUT --->
+65535
+1
+1
+65535
+--- IR --->
+CHECK: llvm.vector.reduce.or.v16i1
+CHECK: llvm.vector.reduce.and.v16i1
+CHECK: simd.load = load <16 x i8>
+CHECK: align 1

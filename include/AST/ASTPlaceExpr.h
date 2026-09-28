@@ -299,18 +299,12 @@ namespace AST
     // kind, because that is the sole owner of "is this a pointer index". `$a[$i]` on an `array<T>`
     // reaches the element operator and is a place the array accounts for, while `$p:$[$i]` is raw
     // storage and is not
-    inline bool is_unaccounted_storage(const ExprNode &expr)
-    {
-        if (expr.get_node_type() == NodeType::n_expr_deref) {
-            return true;
-        }
-
-        if (expr.get_node_type() == NodeType::n_expr_index) {
-            return static_cast<const IndexExprNode &>(expr).indexed_base_type().is_pointer();
-        }
-
-        return false;
-    }
+    //
+    // A member of that index is the same storage: `$buf:$[$i]->key` is a field of a slot the
+    // compiler is not walking, which is what lets a table keep `(K, V)` together. The walk peels
+    // members and implicit casts to the root; `$s->field` still ends at a local and stays refused.
+    // The member peel is place_anchor's, so the two cannot disagree about a base
+    bool is_unaccounted_storage(const ExprNode &expr);
 
     // **is there anything here to mint storage for at all?** the half the two requesting arms - a member
     // access's base and an `&`'s operand - genuinely share, so `$o->get()->tag` and `$o->get()->size()`

@@ -1,5 +1,5 @@
 // **every key in one bucket.** `clash`'s `hash::of` returns a constant, so the probe walks the whole table
-// on every lookup - which is the only way to exercise linear probing, tombstone reuse and rehash under
+// on every lookup - which is the only way to exercise group probing, tombstone reuse and rehash under
 // complete collision. a map that is correct here is correct for a merely unlucky hash
 
 {
@@ -82,7 +82,7 @@
     echo $m->capacity() == $before;
 }
 
-assert(mem::live_allocations() == 0, 'the table gave its three buffers back');
+assert(mem::live_allocations() == 0, 'the table gave its two buffers back');
 
 // ---- growth over an ordinary hash: 1000 keys, and the load factor held
 
@@ -108,8 +108,8 @@ assert(mem::live_allocations() == 0, 'the table gave its three buffers back');
 
     echo $sum;
 
-    // slots stay above four thirds of the entries, which is the load factor stated as an assertion
-    echo $m->capacity() * 3 >= $m->count() * 4;
+    // slots stay above eight sevenths of the entries, which is the load factor stated as an assertion
+    echo $m->capacity() * 7 >= $m->count() * 8;
 }
 
 assert(mem::live_allocations() == 0, 'and again');
@@ -129,7 +129,7 @@ assert(mem::live_allocations() == 0, 'and again');
 
     echo $m->count();
 
-    // **8**, the floor. without the same-capacity re-seat in `grow` this is a table of thousands of slots
+    // **16**, the floor. without the same-capacity re-seat in `grow` this is a table of thousands of slots
     echo $m->capacity();
 }
 

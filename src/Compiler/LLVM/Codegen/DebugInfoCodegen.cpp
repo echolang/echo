@@ -910,6 +910,34 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
         return result;
     }
 
+    if (type.is_simd()) {
+        const std::optional<uint64_t> length = type.bound_simd_length();
+
+        if (!length.has_value()) {
+            return nullptr;
+        }
+
+        llvm::DIType *element = type_of(type.simd_element(), cmp_unit);
+
+        if (element == nullptr) {
+            return nullptr;
+        }
+
+        llvm::Type *lowered = _ctx.types->get_llvm_type(type, cmp_unit);
+        llvm::DINodeArray subscripts = unit->builder->getOrCreateArray({
+            unit->builder->getOrCreateSubrange(0, static_cast<int64_t>(*length))
+        });
+
+        llvm::DIType *result = unit->builder->createVectorType(
+            _ctx.layout().getTypeSizeInBits(lowered),
+            static_cast<uint32_t>(_ctx.layout().getABITypeAlign(lowered).value() * 8),
+            element,
+            subscripts);
+
+        unit->types[type] = result;
+        return result;
+    }
+
     // a generic parameter that reached codegen unbound, or a kind added later. not inspectable, and
     // deliberately not an error: debug info may never be the thing that fails a build
     return nullptr;

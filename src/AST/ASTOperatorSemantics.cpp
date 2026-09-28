@@ -176,6 +176,55 @@ namespace AST
         return OperandFacts{expr->result_type(), is_written_null(expr)};
     }
 
+    bool simd_lane_op_lowers(Token::Type op, const ValueType &lane)
+    {
+        const ValueType bare = ValueType::make_mutable(lane);
+
+        // integer lanes: the arithmetic and bitwise a scalar integer has, except `/` `%` `**`,
+        // which stay builtin so a declared operator cannot claim them and are refused rather
+        // than lowered. a shift's count is not a lane; the caller checks that separately
+        if (bare.is_integer_type()) {
+            switch (op) {
+                case Token::Type::t_op_add:
+                case Token::Type::t_op_sub:
+                case Token::Type::t_op_mul:
+                case Token::Type::t_and:
+                case Token::Type::t_or:
+                case Token::Type::t_xor:
+                case Token::Type::t_op_shl:
+                case Token::Type::t_op_shr:
+                case Token::Type::t_tilde:
+                    return true;
+                default:
+                    return Operator::is_comparison_token(op);
+            }
+        }
+
+        // float lanes: `+ - * /` and the six comparisons. no bitwise, no shift, no `**`
+        if (bare.is_floating_type()) {
+            switch (op) {
+                case Token::Type::t_op_add:
+                case Token::Type::t_op_sub:
+                case Token::Type::t_op_mul:
+                case Token::Type::t_op_div:
+                    return true;
+                default:
+                    return Operator::is_comparison_token(op);
+            }
+        }
+
+        // bool lanes: a mask, not a number. `& | ^` and `==` `!=`. ordering is a refusal
+        if (bare.is_boolean_type()) {
+            return op == Token::Type::t_and
+                || op == Token::Type::t_or
+                || op == Token::Type::t_xor
+                || op == Token::Type::t_exclamation
+                || Operator::is_identity_comparison_token(op);
+        }
+
+        return false;
+    }
+
     bool binary_has_builtin_meaning(
         const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs)
     {
@@ -260,6 +309,21 @@ namespace AST
 
             return op->type == Token::Type::t_op_add
                 && !(lhs.type.is_pointer() && rhs.type.is_pointer());
+        }
+
+        // **a vector, elementwise.** after the pointer arm and before the integer one, matching
+        // ExprCodegen::gen_binary_expr. a simd is not an integer type, so without this arm every
+        // vector operator would look for a declared `operator` and never reach a lowering.
+        //
+        // every symbol but `&&` / `||` is the language's, including the ones that do not lower.
+        // those stay *true* so a declared `operator /` cannot claim an integer vector, and so a
+        // float-vector shift does not go hunting for a declaration either.
+        // AST::simd_lane_op_lowers is the matrix; AST::binary_operand_refusal is the sentence.
+        // `&&` / `||` stay scalar-bool: gen_binary_expr's short-circuit lowering is type-blind,
+        // so a true here would CreateCondBr on a mask
+        if (lhs.type.is_simd() || rhs.type.is_simd()) {
+            return op->type != Token::Type::t_logical_and
+                && op->type != Token::Type::t_logical_or;
         }
 
         // **two payload-free enums compare by their discriminant, and that is a built-in meaning rather
@@ -350,6 +414,17 @@ namespace AST
     {
         if (op == nullptr || op->is_custom()) {
             return false;
+        }
+
+        // a vector asks the lane matrix, one place. a lane that is still a type parameter has
+        // not been decided, for the same reason a bare `T` is admitted below
+        if (operand.type.is_simd()) {
+            if (is_undetermined_type(operand.type)) {
+                return true;
+            }
+
+            return simd_lane_op_lowers(
+                op->type, ValueType::make_mutable(operand.type.simd_element()));
         }
 
         // negation over a number, which is the whole of gen_unary_expr - plus unary `+`, which the
@@ -470,6 +545,70 @@ namespace AST
                 lhs.get_type_desciption(), rhs.get_type_desciption());
         }
 
+        // a vector has no implicit broadcast. a literal beside one used to look like integer
+        // arithmetic on the lane type and then fail in codegen; the sentence names splat.
+        // `&&` / `||` are not this: they are not builtin, and the unsupported-operand
+        // sentence is the one that says so. a second sentence here would be two errors
+        if (lhs.is_simd() || rhs.is_simd()) {
+            if (op->type == Token::Type::t_logical_and || op->type == Token::Type::t_logical_or) {
+                return std::nullopt;
+            }
+
+            const auto applied = [&](const char *why) {
+                return fmt::format(
+                    "cannot apply '{}' to '{}' and '{}' - {}",
+                    op->spelling, lhs.get_type_desciption(), rhs.get_type_desciption(), why);
+            };
+
+            if (op->is_shift()) {
+                // legal: an integer vector and a scalar integer count. anything else is a
+                // sentence, and the position failure is named ahead of the lane failure
+                const bool position = lhs.is_simd() && !rhs.is_simd();
+                const bool count_is_integer = rhs.is_integer_type() && !rhs.is_wrapped_optional();
+                const bool lane_shifts = position
+                    && simd_lane_op_lowers(op->type, ValueType::make_mutable(lhs.simd_element()));
+
+                if (position && lane_shifts && count_is_integer) {
+                    return std::nullopt;
+                }
+
+                if (!position) {
+                    return applied("a vector shift takes a scalar count on the right");
+                }
+
+                return applied("a vector shift takes an integer vector and an integer count");
+            }
+
+            if (lhs.is_simd() != rhs.is_simd()) {
+                return applied("there is no implicit broadcast; write simd::splat");
+            }
+
+            if (ValueType::make_mutable(lhs) != ValueType::make_mutable(rhs)) {
+                return applied("both vectors have to be the same type");
+            }
+
+            const ValueType lane = ValueType::make_mutable(lhs.simd_element());
+
+            if (simd_lane_op_lowers(op->type, lane)) {
+                return std::nullopt;
+            }
+
+            // still a built-in so a declared `operator /` cannot claim the use site; the
+            // sentence is this one rather than NoMatchingOverload
+            const char *kind = lane.is_integer_type() ? "integer"
+                : lane.is_floating_type() ? "float"
+                : lane.is_boolean_type() ? "bool"
+                : nullptr;
+
+            if (kind == nullptr) {
+                return fmt::format(
+                    "operator '{}' is not supported on vectors", op->spelling);
+            }
+
+            return fmt::format(
+                "operator '{}' is not supported on {} vectors", op->spelling, kind);
+        }
+
         return std::nullopt;
     }
 
@@ -524,6 +663,10 @@ namespace AST
 
     std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count)
     {
+        if (shifted.is_simd()) {
+            return shift_count_refusal(shifted.simd_element(), count);
+        }
+
         if (!shifted.is_integer_type()) {
             return std::nullopt;
         }

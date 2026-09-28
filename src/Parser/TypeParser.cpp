@@ -39,6 +39,7 @@ static std::optional<AST::ValueType> parse_value_type(
     Parser::Payload &payload,
     std::vector<TypeNameSite> *names
 );
+static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type);
 
 AST::Symbol *Parser::find_unqualified_type(Parser::Payload &payload, const std::string &name, const AST::Namespace &from)
 {
@@ -688,6 +689,69 @@ static AST::ValueType parse_const_generic_arg(
     }
 
     return AST::ValueType::make_unknown();
+}
+
+static std::optional<AST::ValueType> parse_simd_type(
+    Parser::Payload &payload,
+    std::vector<TypeNameSite> *names,
+    bool is_const
+)
+{
+    auto &cursor = payload.cursor;
+    const TokenReference at = cursor.current();
+    cursor.skip(); // `simd`
+
+    cursor.skip(); // `<`
+
+    auto element = parse_value_type(payload, names);
+    if (!element.has_value()) {
+        return std::nullopt;
+    }
+
+    if (!cursor.is_type(Token::Type::t_comma)) {
+        payload.collect_unexpected_token(Token::Type::t_comma);
+        return std::nullopt;
+    }
+
+    cursor.skip();
+
+    AST::ValueType length = AST::ValueType::make_unknown();
+    const bool was_integer = cursor_is_integer_literal(cursor);
+    const TokenReference integer_token = was_integer ? cursor.current() : at;
+    uint64_t bits = 0;
+
+    switch (take_integer_const(payload, bits)) {
+    case IntegerConstRead::t_ok:
+        length = AST::ValueType::make_const_value(AST::ValueTypePrimitive::t_usize, bits);
+        break;
+
+    case IntegerConstRead::t_invalid:
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(integer_token),
+            "This integer is not a valid lane count");
+        return std::nullopt;
+
+    case IntegerConstRead::t_absent:
+        if (const AST::TypeParamDecl *named = take_value_param(payload)) {
+            length = AST::ValueType::make_type_param(named);
+        } else {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(at),
+                "Expected a lane count after the comma - a compile-time integer or a value parameter");
+            return std::nullopt;
+        }
+        break;
+    }
+
+    if (!cursor.is_generic_close()) {
+        payload.collect_unexpected_token(Token::Type::t_close_angle);
+        return std::nullopt;
+    }
+
+    cursor.consume_generic_close();
+
+    auto built = AST::ValueType::make_simd(element.value(), std::move(length));
+    return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(built) : built);
 }
 
 static AST::ValueType parse_array_suffix(Parser::Payload &payload, AST::ValueType type)
@@ -1458,6 +1522,15 @@ static std::optional<AST::ValueType> parse_value_type(
 
         auto weak_type = AST::ValueType::make_weak(target.value());
         return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(weak_type) : weak_type);
+    }
+
+    // `simd<T, N>` is a type constructor the compiler owns, spelled like a generic named type.
+    // claimed here, before the name lookup, so a declared type called `simd` cannot steal it.
+    // `simd::` is a namespace path: `::` is not `<`
+    if (payload.cursor.is_type(Token::Type::t_identifier)
+        && payload.cursor.current().value() == "simd"
+        && payload.cursor.peek_is_type(1, Token::Type::t_open_angle)) {
+        return parse_simd_type(payload, names, is_const);
     }
 
     // `Owner::Nested` before `a::b::Foo`: the two spellings are indistinguishable until the leading

@@ -1,0 +1,23 @@
+function id(simd<uint8, 16> $v) : simd<uint8, 16>
+{
+    return $v;
+}
+
+function hold(simd<float32, 4> $v) : simd<float32, 4>
+{
+    simd<float32, 4> $copy = $v;
+    return $copy;
+}
+
+struct Packed
+{
+    simd<float32, 4> $lanes;
+}
+
+simd<uint8, 16> $a;
+simd<uint8, 16> $b = id($a);
+Packed $p;
+simd<float32, 4> $f = hold($p->lanes);
+simd<float32, 4>[2] $pair;
+
+echo 1;

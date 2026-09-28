@@ -49,6 +49,13 @@ namespace AST
             case BuiltinKind::t_process_argv:
             case BuiltinKind::t_process_envp:
             case BuiltinKind::t_exit:
+            case BuiltinKind::t_simd_splat:
+            case BuiltinKind::t_simd_load:
+            case BuiltinKind::t_simd_store:
+            case BuiltinKind::t_simd_select:
+            case BuiltinKind::t_simd_bitmask:
+            case BuiltinKind::t_simd_from_array:
+            case BuiltinKind::t_simd_to_array:
                 return false;
         }
 

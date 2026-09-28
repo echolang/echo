@@ -225,6 +225,13 @@ namespace AST
         // (`: void` is not this)
         void check_bare_generic_type(const ValueType &type, const TokenReference &at);
 
+        // every declaration that carries a `simd<T, N>` - AST::simd_shape_refusal.
+        // pending (unbound N or T) is silence; refused is a sentence
+        void check_simd_shape(const ValueType &type, const TokenReference &at);
+
+        // an `extern { }` signature that names a vector by value - AST::simd_crosses_c_refusal
+        void check_simd_crosses_c(const ValueType &type, const TokenReference &at);
+
         // bound type arguments on a call's instance. parse already refused a written `f<void>()`;
         // this is the inferred leftover, and the same sentence. asked of every instantiation arg
         // so a `dprint` of void is not a second rule
@@ -304,6 +311,10 @@ namespace AST
         // `mem::atomic::` admits a word and nothing else. AST::atomic_operand_refusal is the
         // sentence; this is the one site that asks it, of the bound `T`, located at the call
         void check_atomic_operand(FunctionCallExprNode &node);
+
+        // `simd::` admits a legal vector and nothing else. AST::simd_operand_refusal is the
+        // sentence; this is the one site that asks it, of the bound `T` and `N`
+        void check_simd_operand(FunctionCallExprNode &node);
 
         // the one builtin whose *availability* is a question rather than its arguments: without
         // --track-allocations there is no counter for `mem::live_allocations()` to read

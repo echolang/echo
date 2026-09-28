@@ -1,0 +1,3 @@
+simd<uint8, 3> $odd;
+simd<float64, 4> $wide;
+simd<uint8, 1> $one;

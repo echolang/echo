@@ -6,8 +6,8 @@
 // the arithmetic to read the numbers against:
 //
 //   - an empty map is **0**: a null buffer is a legitimate state, so `map<K, V>()` allocates nothing
-//   - a non-empty map is **3**: `$hashes`, `$keys` and `$values`, three parallel allocations because
-//     `mem::take` can only empty storage reached through a pointer
+//   - a non-empty map is **2**: `$ctrl` and `$entries`, two allocations. take walks a field of a
+//     buffer slot, so the key and value sit in one pair
 //   - a *written* string is **2**: its `str::buf` and that buf's bytes. a string **literal** is 0, which is
 //     why the keys below never appear in the count at all
 
@@ -24,8 +24,8 @@
 
     $m->set('greet', $v);
 
-    // +3 for the table. the value was **retained**, not duplicated - which is what the count below says
-    assert(mem::live_allocations() == 5, 'the three buffers, and the string retained rather than copied');
+    // +2 for the table. the value was **retained**, not duplicated - which is what the count below says
+    assert(mem::live_allocations() == 4, 'the two buffers, and the string retained rather than copied');
     assert(mem::refs($v->owner) == 2, 'the local and the slot');
 
     echo $m->get('greet');
@@ -34,27 +34,27 @@
     $v2->reserve(string::INLINE + 1);
     $v2->append('bye');
 
-    assert(mem::live_allocations() == 7, 'a second written string');
+    assert(mem::live_allocations() == 6, 'a second written string');
 
     // **the replace.** the write is one call, so there is no assignment for the compiler to end anything at -
     // `seat` ended the
     // old value on the way - and the two counts below are the whole of the evidence: nothing was leaked
-    // (still 7, `$v` holds its own buffer) and nothing was released twice (`$v`'s count fell by exactly
+    // (still 6, `$v` holds its own buffer) and nothing was released twice (`$v`'s count fell by exactly
     // one, the slot's)
     $m->set('greet', $v2);
 
-    assert(mem::live_allocations() == 7, 'nothing allocated and nothing leaked');
+    assert(mem::live_allocations() == 6, 'nothing allocated and nothing leaked');
     assert(mem::refs($v->owner) == 1, 'the slot gave its reference back');
     assert(mem::refs($v2->owner) == 2, 'and the new value has it');
 
     echo $m->get('greet');
     echo $m->count();
 
-    // **the copy.** three more buffers for the second table, and the element retained a third time rather
-    // than bit-copied - a bitwise copy would read 10 here too, and would double-free at the end of the block
+    // **the copy.** two more buffers for the second table, and the element retained a third time rather
+    // than bit-copied - a bitwise copy would read 8 here too, and would double-free at the end of the block
     map<string, string> $c = $m;
 
-    assert(mem::live_allocations() == 10, 'a second table, and the element retained');
+    assert(mem::live_allocations() == 8, 'a second table, and the element retained');
     assert(mem::refs($v2->owner) == 3, 'the local and both maps');
 
     echo $c->get('greet');
@@ -80,7 +80,7 @@ echo mem::live_allocations();
 
     $m->set($k, 1);
 
-    assert(mem::live_allocations() == 5, 'the three buffers and the written key');
+    assert(mem::live_allocations() == 4, 'the two buffers and the written key');
     assert(mem::refs($k->owner) == 2, 'the local and the stored key');
 
     echo $m->get($k);
@@ -112,7 +112,7 @@ echo mem::live_allocations();
 
     // **unchanged**: the slot stopped being an owner at the same moment `$out` started being one
     assert(mem::refs($s->owner) == 2, 'handed over, not duplicated');
-    assert(mem::live_allocations() == 5, 'and nothing was allocated to do it');
+    assert(mem::live_allocations() == 4, 'and nothing was allocated to do it');
 
     echo $out;
     echo $m->count();

@@ -32,25 +32,41 @@ private struct buffer<T>
     bool $has_receiver;
     usize $cap;
 
+    // threads asleep on each condition, so a signal goes out only when it can wake someone
+    usize $receivers_waiting;
+    usize $senders_waiting;
+
     constructor(usize $cap)
     {
         $this->items = array<T>();
         $this->closed = false;
         $this->has_receiver = true;
         $this->cap = $cap;
+        $this->receivers_waiting = 0;
+        $this->senders_waiting = 0;
     }
 }
 
+// two conditions, not one: a receiver taking a value must wake a sender waiting for room, never
+// another receiver that would find the queue empty. one condition shared by both ends did both,
+// because signalling the senders woke every receiver too. senders sleep on `$writable`, receivers
+// on `$readable`
 #[atomic]
 private class shared<T>
 {
     mutex<buffer<T>> $lock;
-    condition $cv;
+
+    // receivers wait here for a value
+    condition $readable;
+
+    // senders wait here for room, on a bounded channel
+    condition $writable;
 
     constructor(usize $cap)
     {
         $this->lock = mutex<buffer<T>>(buffer<T>($cap));
-        $this->cv = condition();
+        $this->readable = condition();
+        $this->writable = condition();
     }
 }
 
@@ -80,7 +96,9 @@ public class sender<T>
             $g->value->closed = true;
         }
 
-        $this->core->cv->notify_all();
+        // a receiver waiting for more, and a sender waiting for room, both have their answer now
+        $this->core->readable->notify_all();
+        $this->core->writable->notify_all();
     }
 
     /**
@@ -97,7 +115,9 @@ public class sender<T>
                 return false;
             }
 
-            $this->core->cv->wait($g);
+            $g->value->senders_waiting = $g->value->senders_waiting + 1;
+            $this->core->writable->wait($g);
+            $g->value->senders_waiting = $g->value->senders_waiting - 1;
         }
 
         if ($g->value->closed || !$g->value->has_receiver) {
@@ -105,7 +125,12 @@ public class sender<T>
         }
 
         $g->value->items[] = mv $v;
-        $this->core->cv->notify();
+
+        // a receiver that is awake looks at the queue before it sleeps, so only a sleeping one needs this
+        if ($g->value->receivers_waiting > 0) {
+            $this->core->readable->notify();
+        }
+
         return true;
     }
 }
@@ -141,7 +166,9 @@ public class receiver<T>
             $g->value->has_receiver = false;
         }
 
-        $this->core->cv->notify_all();
+        // a sender blocked on a full channel answers false now
+        $this->core->writable->notify_all();
+        $this->core->readable->notify_all();
 
         handle $h = guard $this->worker else {
             return;
@@ -157,7 +184,12 @@ public class receiver<T>
         while (true) {
             if ($g->value->items->count() > 0) {
                 T $v = $g->value->items->remove(0);
-                $this->core->cv->notify();
+
+                // room for a sender blocked on a full channel, and nobody else to tell
+                if ($g->value->senders_waiting > 0) {
+                    $this->core->writable->notify();
+                }
+
                 return $v;
             }
 
@@ -165,7 +197,9 @@ public class receiver<T>
                 return null;
             }
 
-            $this->core->cv->wait($g);
+            $g->value->receivers_waiting = $g->value->receivers_waiting + 1;
+            $this->core->readable->wait($g);
+            $g->value->receivers_waiting = $g->value->receivers_waiting - 1;
         }
     }
 
@@ -175,7 +209,11 @@ public class receiver<T>
 
         if ($g->value->items->count() > 0) {
             T $v = $g->value->items->remove(0);
-            $this->core->cv->notify();
+
+            if ($g->value->senders_waiting > 0) {
+                $this->core->writable->notify();
+            }
+
             return .item(mv $v);
         }
 

@@ -14,6 +14,7 @@
 namespace AST
 {
     class FunctionDeclNode;
+    class TypeParamDecl;
 
     // which kind of declaration introduced a type parameter. derived from whichever owner
     // pointer is set, never stored, so the two can never disagree
@@ -42,6 +43,12 @@ namespace AST
     // so a `tiny<300>` over `const uint8 N` is refused at the argument rather than interned as bits
     // the body cannot hold
     bool const_generic_bits_fit(const ValueType &dest, uint64_t bits);
+
+    // **a written integer at a value parameter.** literals intern as int32; the parameter
+    // says usize. one retype so a function's explicit `splat<uint8, 16>` and a struct's
+    // `sized<16>` intern the same N the body substituted. unify, instantiation, and
+    // TypeRegistry all ask this
+    ValueType retype_const_generic(const TypeParamDecl &param, ValueType arg);
 
     // the sentence TypeParamDecl::allows' reporters use, matching AST::type_literal_at's overflow wording
     std::string const_generic_overflow_sentence(const ValueType &dest, uint64_t bits);

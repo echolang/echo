@@ -330,20 +330,32 @@ std::string AST::ValueType::get_mangled_name() const
 
     mangled_name += "L"; // lvalue
 
-    // primitive type
-    if (is_primitive()) {
-        mangled_name += "P"; // primitive type
+    // one arm per kind, no tail: a kind that fell through here used to share the unknown
+    // token `UA`, so two new types produced one LLVM symbol
+    switch (kind) {
+    case ValueTypeKind::t_primitive:
+        mangled_name += "P";
         mangled_name += get_primitive_id_char(primitive);
-    } else if (is_type_param()) {
+        break;
+
+    case ValueTypeKind::t_generic:
         // the ordinal, not the declaration's address: this feeds decorated_func_name and so the
         // LLVM symbol table, which has to stay reproducible across runs. only a template mangles
         // a type parameter at all, and a template is never emitted
-        mangled_name += "T"; // type parameter
+        mangled_name += "T";
         mangled_name += std::to_string(_type_param->ordinal);
-    } else if (has_complex_type()) {
-        mangled_name += "C"; // complex type
+        break;
+
+    case ValueTypeKind::t_struct:
+    case ValueTypeKind::t_class:
+    case ValueTypeKind::t_interface:
+    case ValueTypeKind::t_enum:
+    case ValueTypeKind::t_opaque:
+        mangled_name += "C";
         mangled_name += get_complex_type()->mangled_token();
-    } else if (is_callable()) {
+        break;
+
+    case ValueTypeKind::t_callable:
         // `F` <return> <param>... `E`, self delimiting the way mangled_token's `I...E` is: each nested
         // type mangles itself and the terminator says where the parameter list ends. without a distinct
         // form here every callable shared the `UA` unknown token, so `function<void()>` and
@@ -354,7 +366,9 @@ std::string AST::ValueType::get_mangled_name() const
             mangled_name += param.get_mangled_name();
         }
         mangled_name += "E";
-    } else if (is_c_function()) {
+        break;
+
+    case ValueTypeKind::t_c_function:
         // `K` rather than `F`, so `function<void()>` and `extern function<void()>` cannot share a
         // symbol. same self-delimiting shape, same reason
         mangled_name += "K";
@@ -363,7 +377,9 @@ std::string AST::ValueType::get_mangled_name() const
             mangled_name += param.get_mangled_name();
         }
         mangled_name += "E";
-    } else if (is_const_value()) {
+        break;
+
+    case ValueTypeKind::t_const_value:
         // `V` <primitive char> <decimal bits> `E`, self-delimiting so two adjacent const
         // arguments cannot be read back as one. the primitive is in the token because
         // `usize 4` and `int32 4` are different identities even when the bits agree
@@ -371,7 +387,9 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += get_primitive_id_char(primitive);
         mangled_name += std::to_string(_const_bits);
         mangled_name += "E";
-    } else if (is_inline_array()) {
+        break;
+
+    case ValueTypeKind::t_inline_array:
         // `A` <element> <length> `E`. length is itself a ValueType (value param or const
         // value), so the terminator is what keeps `int32[4]` from colliding with a nested
         // application that happens to start the same way
@@ -379,13 +397,31 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += array_element().get_mangled_name();
         mangled_name += array_length().get_mangled_name();
         mangled_name += "E";
-    } else {
-        assert(
-            kind != ValueTypeKind::t_kind_class
-            && "a class-kind constraint is not a type that mangles");
-        assert(kind == ValueTypeKind::t_unknown && "a ValueType kind with no mangling would share the unknown token");
-        mangled_name += "U"; // unknown type
-        mangled_name += "A";
+        break;
+
+    case ValueTypeKind::t_simd:
+        // `S` <element> <length> `E`, beside `A` for `T[N]`. a vector and an array of the
+        // same lanes must not share a symbol
+        mangled_name += "S";
+        mangled_name += simd_element().get_mangled_name();
+        mangled_name += simd_length().get_mangled_name();
+        mangled_name += "E";
+        break;
+
+    case ValueTypeKind::t_unknown:
+        mangled_name += "UA";
+        break;
+
+    case ValueTypeKind::t_kind_class:
+        assert(false && "a class-kind constraint is not a type that mangles");
+        mangled_name += "UA";
+        break;
+
+    case ValueTypeKind::t_pointer:
+    case ValueTypeKind::t_weak:
+        assert(false && "pointer and weak mangle in the prefix, before L");
+        mangled_name += "UA";
+        break;
     }
 
     return mangled_name;
@@ -431,18 +467,18 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + "weak<" + weak_target().get_type_desciption() + ">" + suffix;
     }
 
-    if (is_primitive()) {
+    switch (kind) {
+    case ValueTypeKind::t_primitive:
         return prefix + get_primitive_name(primitive) + suffix;
-    }
 
-    // the name the user wrote, unqualified: this feeds the interned name of every generic
-    // application, so qualifying it here would render Box<int> as Box<Box::T> in the template.
-    // TypeParamDecl::describe() is the qualified form, for diagnostics
-    if (is_type_param()) {
+    case ValueTypeKind::t_generic:
+        // the name the user wrote, unqualified: this feeds the interned name of every generic
+        // application, so qualifying it here would render Box<int> as Box<Box::T> in the template.
+        // TypeParamDecl::describe() is the qualified form, for diagnostics
         return prefix + _type_param->name + suffix;
-    }
 
-    if (has_signature()) {
+    case ValueTypeKind::t_callable:
+    case ValueTypeKind::t_c_function: {
         const char *ctor = is_c_function() ? "extern function<" : "function<";
         std::string buffer = prefix + ctor + _signature->return_type.get_type_desciption() + "(";
 
@@ -453,7 +489,11 @@ std::string AST::ValueType::get_type_desciption() const
         return buffer + ")>" + suffix;
     }
 
-    if (has_complex_type()) {
+    case ValueTypeKind::t_struct:
+    case ValueTypeKind::t_class:
+    case ValueTypeKind::t_interface:
+    case ValueTypeKind::t_enum:
+    case ValueTypeKind::t_opaque: {
         ComplexType *ct = get_complex_type();
         if (!ct->name.has_value()) {
             return prefix + "[unknown]" + suffix;
@@ -465,19 +505,29 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + ct->namespaced_name() + suffix;
     }
 
-    if (is_class_kind_constraint()) {
+    case ValueTypeKind::t_kind_class:
         return prefix + "class" + suffix;
-    }
 
-    if (is_const_value()) {
+    case ValueTypeKind::t_const_value:
         return prefix + std::to_string(_const_bits) + suffix;
+
+    case ValueTypeKind::t_inline_array:
+        return prefix + array_element().get_type_desciption() + "["
+            + array_length().get_type_desciption() + "]" + suffix;
+
+    case ValueTypeKind::t_simd:
+        return prefix + "simd<" + simd_element().get_type_desciption() + ", "
+            + simd_length().get_type_desciption() + ">" + suffix;
+
+    case ValueTypeKind::t_unknown:
+        return prefix + "[unknown]" + suffix;
+
+    case ValueTypeKind::t_pointer:
+    case ValueTypeKind::t_weak:
+        assert(false && "pointer and weak render in the prefix");
+        return prefix + "[unknown]" + suffix;
     }
 
-    if (is_inline_array()) {
-        return prefix + array_element().get_type_desciption() + "[" + array_length().get_type_desciption() + "]" + suffix;
-    }
-
-    // handle unknown or other types
     return prefix + "[unknown]" + suffix;
 }
 
@@ -572,12 +622,8 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     std::vector<ValueType> normalized = args;
     for (size_t i = 0; i < tmpl->type_parameters.size(); i++) {
         const TypeParamDecl *param = tmpl->type_parameters[i];
-        if (param->is_value_param()
-            && normalized[i].is_const_value()
-            && param->value_type.is_integer_type()) {
-            normalized[i] = ValueType::make_const_value(
-                param->value_type.get_primitive_type(),
-                normalized[i].const_value_bits());
+        if (param->is_value_param()) {
+            normalized[i] = retype_const_generic(*param, normalized[i]);
         }
     }
 
@@ -1023,6 +1069,11 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
             || contains_type_param(type.array_length(), param);
     }
 
+    if (type.is_simd()) {
+        return contains_type_param(type.simd_element(), param)
+            || contains_type_param(type.simd_length(), param);
+    }
+
     // structurally, like a pointer: `function<void(T)>` is as unresolved as `ptr<T>` is. answering
     // false here would make the monomorphizer stop chasing it and TypeLowering throw on the T far away.
     // a C function pointer is the same walk over the same signature
@@ -1071,6 +1122,12 @@ size_t AST::generic_application_depth(const ValueType &type)
         return std::max(
             generic_application_depth(type.array_element()),
             generic_application_depth(type.array_length())) + 1;
+    }
+
+    if (type.is_simd()) {
+        return std::max(
+            generic_application_depth(type.simd_element()),
+            generic_application_depth(type.simd_length())) + 1;
     }
 
     if (type.has_signature()) {
@@ -1207,6 +1264,12 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
         return with_level_flags(ValueType::make_inline_array(std::move(element), std::move(length)), type, registry);
     }
 
+    if (type.is_simd()) {
+        ValueType element = substitute_type(type.simd_element(), subst, registry);
+        ValueType length = substitute_type(type.simd_length(), subst, registry);
+        return with_level_flags(ValueType::make_simd(std::move(element), std::move(length)), type, registry);
+    }
+
     // the two arms that substitute *through* a layout, sharing the one pointer they both need - and
     // mutually exclusive, an optional carrying no template and an instantiation not being one. the null
     // check is the instantiation arm's own, kept rather than dropped: has_complex_type() is a kind test
@@ -1300,6 +1363,10 @@ std::optional<std::string> AST::nested_void_as_value_refusal(const ValueType &ty
         return void_as_value_refusal(bare.array_element());
     }
 
+    if (bare.is_simd()) {
+        return void_as_value_refusal(bare.simd_element());
+    }
+
     if (bare.has_complex_type()) {
         const ComplexType *ct = bare.get_complex_type();
         if (ct != nullptr) {
@@ -1363,6 +1430,14 @@ std::optional<std::string> AST::bare_generic_type_refusal(const ValueType &type)
 
     if (bare.is_inline_array()) {
         return bare_generic_type_refusal(bare.array_element());
+    }
+
+    if (bare.is_simd()) {
+        if (auto refusal = bare_generic_type_refusal(bare.simd_element())) {
+            return refusal;
+        }
+
+        return bare_generic_type_refusal(bare.simd_length());
     }
 
     if (bare.has_signature()) {

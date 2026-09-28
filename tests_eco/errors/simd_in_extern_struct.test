@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] simd_in_extern_struct.eco:7:25
+
+  'simd<float32, 4>' has no C spelling - a vector's calling convention differs per platform. Pass a 'ptr<simd<float32, 4>>' instead.
+
+  6 | extern {
+  7 |     function takes(Cols $m) : void;
+    :                         ^^
+  8 | }
+
+1 error, nothing was compiled.

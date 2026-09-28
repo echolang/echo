@@ -21,32 +21,32 @@
  *
  * A key type missing either is a located error at the call inside this file, once the key type is bound.
  *
- * ## The layout, and why it is three allocations
+ * ## The layout, and why it is two allocations
  *
- * `$hashes`, `$keys` and `$values` are parallel arrays rather than one array of entries, and the language
- * rather than performance is what decides it: `mem::take` can only empty storage reached **through a
- * pointer**, so a `K` living inside a struct inside a buffer cannot be taken out at all - and a container
- * that cannot take an element out cannot destroy one either. Parallel arrays put every key and every value
- * at `$p:$[$i]`, which is exactly the shape `take` admits.
+ * `$ctrl` is one byte per slot plus a replica of the first 16 so an unaligned 16-byte load at the last
+ * slot does not fall off the end. Empty is `0x80`, deleted is `0xFE`, and a live slot holds the top 7 bits
+ * of the hash. A probe compares 16 control bytes at once with `simd<uint8, 16>`.
  *
- * It happens to be the friendlier layout as well: a probe reads only `$hashes`, which is dense.
+ * `$entries` is the `(K, V)` pair sitting together. `mem::take` walks a member chain rooted at a pointer
+ * index, so `$entries:$[$i]->key` is storage the compiler is not accounting for - the same shape a
+ * parallel `$keys[$i]` used to be. Occupancy lives in `$ctrl`; a rehash hashes each live key again.
  *
- * **`$hashes` carries the slot state as well as the hash.** 0 is empty, 1 is a tombstone, and every live
- * slot holds its key's hash, which `slot_hash` guarantees is 2 or above. One word per slot instead of a
- * state byte beside a hash, and it buys three things rather than one: a probe reads one array, a rehash
- * needs neither the hasher nor `==`, and `==` only ever runs on a slot whose stored hash already matched.
+ * A copy at the same capacity still calls neither `hash::of` nor `==`: the entries stay in the slots
+ * they already occupy.
  *
  * ## Growth, and what it invalidates
  *
- * Linear probing over a power-of-two capacity, tombstones on removal, and a rehash whenever the live
- * entries plus the tombstones pass three quarters of the slots.
+ * Quadratic probing over groups of 16, a power-of-two capacity, a tombstone on removal only when an empty
+ * in the same window would let a later lookup stop early, and a rehash whenever the live entries plus the
+ * tombstones pass seven eighths of the slots.
  *
  * **The power of two is load-bearing rather than tidy.** It is what lets the three probe entry points bring
  * a 64-bit hash into range with `$h & ($cap - 1)` instead of `$h % $cap`, which is a hardware divide on the
  * critical path of every lookup and every insert. `rehash` is the one place that ever sets a nonzero
  * capacity and `slots_for` is the one place that computes one, so the invariant has a single owner. The
  * cost is that only the *low* bits of a hash choose a slot, which is why `hash::of` ends on a fold that
- * brings entropy down from the top.
+ * brings entropy down from the top. The same mask is the start of an unaligned group; the walk then steps
+ * `+16, +32, +48...` so `find`, `seat` and `free_slot_for` share one probe.
  *
  * `capacity()` is **slots, not entries**, so you cannot read off how much room is left - which means the
  * only safe assumption is that **every insert re-seats the table**. A `V&` from `->at($k)` or from a
@@ -57,18 +57,28 @@
  * whose cursor is `map_iterator<K, const V>` - the same cursor, with the one property that names `V`
  * substituted to `ptr<const V>`. `$k` still arrives by value and is unaffected.
  */
+
+/**
+ * One table slot. A nested type on the generic owner is refused, so this sits beside `map` the way
+ * `map_iterator` does. Occupancy lives in `$ctrl`, not here.
+ */
+private struct map_slot<K, V>
+{
+    K $key;
+    V $value;
+}
+
 #[core: map]
 public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
-    // **four of the six are `private`, and which two are not is decided by the operators below rather
+    // **three of the five are `private`, and which two are not is decided by the operators below rather
     // than by this type.** an operator is a *free* declaration and not a member of either operand, so it
-    // sits outside the type in exactly the sense `private` means - and the three brackets read `$values`
+    // sits outside the type in exactly the sense `private` means - and the three brackets read `$entries`
     // and `$cap`. that is the same seam that keeps `find` and `seat` reachable, and the same fact that
     // makes an operator take no visibility modifier of its own
-    private ptr<uint64> $hashes;
-    private ptr<K> $keys;
+    private ptr<uint8> $ctrl;
 
-    ptr<V> $values;
+    ptr<map_slot<K, V>> $entries;
 
     // live entries
     private usize $len;
@@ -87,9 +97,8 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      */
     constructor()
     {
-        $this->hashes:$ = null;
-        $this->keys:$ = null;
-        $this->values:$ = null;
+        $this->ctrl:$ = null;
+        $this->entries:$ = null;
         $this->len = 0;
         $this->tombs = 0;
         $this->cap = 0;
@@ -109,29 +118,29 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      */
     constructor(const map<K, V>& $other)
     {
-        $this->hashes:$ = null;
-        $this->keys:$ = null;
-        $this->values:$ = null;
+        $this->ctrl:$ = null;
+        $this->entries:$ = null;
         $this->len = 0;
         $this->tombs = 0;
         $this->cap = 0;
 
-        // an empty source copies to an empty map rather than to three zero-length allocations. a bare
-        // `return` in a constructor hands back the `$this` the six writes above just built
+        // an empty source copies to an empty map rather than to two zero-length allocations. a bare
+        // `return` in a constructor hands back the `$this` the five writes above just built
         if ($other->cap == 0) {
             return;
         }
 
-        $this->hashes:$ = mem::alloc<uint64>($other->cap);
-        $this->keys:$ = mem::alloc<K>($other->cap);
-        $this->values:$ = mem::alloc<V>($other->cap);
+        $this->ctrl:$ = mem::alloc<uint8>($other->cap + 16);
+        $this->entries:$ = mem::alloc<map_slot<K, V>>($other->cap);
         $this->cap = $other->cap;
         $this->len = $other->len;
         $this->tombs = $other->tombs;
 
-        // the state array is copied whole, **tombstones included**: a tombstone is part of where the live
-        // entries are, so dropping them would leave probes that stop early and lose entries
-        mem::copy<uint64>($this->hashes, $other->hashes, $other->cap);
+        // ctrl is copied whole, **tombstones included**: a tombstone is part of where the live entries
+        // are, so dropping them would leave probes that stop early and lose entries. the replica at
+        // `$ctrl[$cap .. $cap + 16)` travels with the live prefix, one copy. entries stay in the slots
+        // they already occupy, so this still calls neither `hash::of` nor `==`
+        mem::copy<uint8>($this->ctrl, $other->ctrl, $other->cap + 16);
 
         // one branch, four correct answers - both arms produce the same map, and what the condition buys
         // is the bulk copy for the parameter pairs that can take one. `const if`, so a
@@ -139,39 +148,32 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         //
         // the bulk arm copies **every slot including the dead ones**, uninitialized bytes and all, in
         // exchange for one memcpy per array instead of a walk. nothing will ever read them, because
-        // `$hashes` says which slots are live
+        // `$ctrl` says which slots are live
         //
         // and `<K>` / `<V>`, never `<map<K, V>>` or any other application: AST::const_fold's type-query
         // guard is `is_type_param()` and is not transitive, so an application as the subject folds against
         // properties whose types are still unbound and answers *false* on the template - the wrong arm,
         // spliced in before the monomorphizer ever clones the body
         const if (mem::is_trivially_copyable<K>() && mem::is_trivially_copyable<V>()) {
-            mem::copy<K>($this->keys, $other->keys, $other->cap);
-            mem::copy<V>($this->values, $other->values, $other->cap);
+            mem::copy<map_slot<K, V>>($this->entries, $other->entries, $other->cap);
         }
         else {
             usize $i = 0;
 
             while ($i < $other->cap) {
                 if ($other->slot_is_live($i)) {
-                    // **`mem::init` and not `$this->keys:$[$i] = ...`**, and the difference is the whole
-                    // reason this loop is correct. These slots are raw storage out of `mem::alloc`, so an
-                    // indexed write is a *re*-assignment and the ownership pass would end whatever bytes
-                    // the allocator happened to hand back. `array<T>`'s copy leans on `$this[] =` for the
-                    // same rule; a map's slots are not appended to, so it has to be said
+                    // **`mem::init` and not `$this->entries:$[$i]->key = ...`**, and the difference is
+                    // the whole reason this loop is correct. These slots are raw storage out of
+                    // `mem::alloc`, so an indexed write is a *re*-assignment and the ownership pass
+                    // would end whatever bytes the allocator happened to hand back
                     //
-                    // `$other->keys:$[$i]` through a `const map<K, V>&` is a `const K`, so this needs
-                    // `K`'s own copy to accept a const source. The compiler synthesizes one that does
-                    // wherever the properties allow - so a `K` whose author wrote a *mutable* copy
-                    // constructor is one this map cannot copy, which is that author's decision arriving
-                    // here rather than a limitation of this file
                     // the *reads* are promotions - `$other`'s slot is raw storage this loop has
                     // just proved live through `slot_is_live`. the writes are not: `mem::init` names
                     // storage that deliberately holds nothing yet, which is the one thing a borrow
                     // must never promise
                     unsafe {
-                        mem::init<K>($this->keys:$[$i], $other->keys:$[$i]);
-                        mem::init<V>($this->values:$[$i], $other->values:$[$i]);
+                        mem::init<K>($this->entries:$[$i]->key, $other->entries:$[$i]->key);
+                        mem::init<V>($this->entries:$[$i]->value, $other->entries:$[$i]->value);
                     }
                 }
 
@@ -181,18 +183,17 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     }
 
     /**
-     * Destroys every key and every value, then gives the three buffers back.
+     * Destroys every key and every value, then gives the two buffers back.
      *
      * Written through `clear()`, so what it means to destroy the entries has one implementation and the
-     * difference between clearing a map and destroying one is the three `mem::free`s.
+     * difference between clearing a map and destroying one is the two `mem::free`s.
      */
     destructor()
     {
         $this->clear();
 
-        mem::free<uint64>($this->hashes);
-        mem::free<K>($this->keys);
-        mem::free<V>($this->values);
+        mem::free<uint8>($this->ctrl);
+        mem::free<map_slot<K, V>>($this->entries);
     }
 
     /**
@@ -294,7 +295,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         $this->vacate($at);
 
         const if (mem::needs_destruction<V>()) {
-            V $dead_value = mem::take<V>($this->values:$[$at]);
+            V $dead_value = mem::take<V>($this->entries:$[$at]->value);
         }
 
         return true;
@@ -317,7 +318,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         // taken rather than read: a read would *copy*, and the slot this map no longer counts would keep
         // the claim it always had
-        return mem::take<V>($this->values:$[$at]);
+        return mem::take<V>($this->entries:$[$at]->value);
     }
 
     /**
@@ -342,7 +343,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
             if ($other->slot_is_live($i)) {
                 // discharged by the test above it: a live slot holds a whole `K` and a whole `V`
                 unsafe {
-                    $this[$other->keys:$[$i]] = $other->values:$[$i];
+                    $this[$other->entries:$[$i]->key] = $other->entries:$[$i]->value;
                 }
             }
 
@@ -351,9 +352,9 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     }
 
     /**
-     * Destroys every entry, keeping the three buffers.
+     * Destroys every entry, keeping the two buffers.
      *
-     * The one place the entry teardown lives - the destructor is this plus three frees.
+     * The one place the entry teardown lives - the destructor is this plus two frees.
      */
     function clear() : void
     {
@@ -364,7 +365,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         // nothing to run when neither a key nor a value owns anything, and `const if` is what makes
         // "nothing" literal rather than nearly: no guard in the emitted code and no loop behind it. so
-        // `map<int32, int32>::clear` is the `mem::zero` and two stores below, and so is its destructor
+        // `map<int32, int32>::clear` is the `fill_ctrl` and two stores below, and so is its destructor
         //
         // `||` folds, so this is one question rather than a nest
         const if (mem::needs_destruction<K>() || mem::needs_destruction<V>()) {
@@ -372,11 +373,11 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
             while ($i < $this->cap) {
                 if ($this->slot_is_live($i)) {
-                    // marked dead **first**, so `$hashes` and `$len` already agree that nothing lives here
+                    // marked dead **first**, so `$ctrl` and `$len` already agree that nothing lives here
                     // before either destructor can run. That matters if a `K`'s or a `V`'s destructor ever
                     // reaches back into this map: it sees a shorter, consistent one. `array<T>::truncate`
                     // makes the same argument one slot at a time
-                    $this->hashes:$[$i] = 0;
+                    $this->set_ctrl($i, 0x80 as uint8);
                     $this->len = $this->len - 1;
 
                     // `mem::take` and not a read: a read *copies*, which would leave the slot holding a
@@ -386,11 +387,11 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
                     // each local belongs to its own `const if` arm, so the ordinary scope rule destroys it
                     // at the end of that arm. There is no drop written here and none to keep in step
                     const if (mem::needs_destruction<K>()) {
-                        K $dead_key = mem::take<K>($this->keys:$[$i]);
+                        K $dead_key = mem::take<K>($this->entries:$[$i]->key);
                     }
 
                     const if (mem::needs_destruction<V>()) {
-                        V $dead_value = mem::take<V>($this->values:$[$i]);
+                        V $dead_value = mem::take<V>($this->entries:$[$i]->value);
                     }
                 }
 
@@ -400,7 +401,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         // **empty is 0**, so this one call is the whole of "every slot is empty again" - and it is also
         // why a freshly allocated table needs no fill loop, only this
-        mem::zero<uint64>($this->hashes, $this->cap);
+        $this->fill_ctrl(0x80 as uint8);
 
         $this->len = 0;
         $this->tombs = 0;
@@ -414,7 +415,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     function reserve(usize $count) : void
     {
         // reserving nothing must not allocate: `slots_for(0)` is the floor, so without this `reserve(0)`
-        // would buy eight slots for a call that was asked to do nothing
+        // would buy sixteen slots for a call that was asked to do nothing
         if ($count == 0) {
             return;
         }
@@ -430,19 +431,17 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * Gives back whatever slots the entries no longer need.
      *
      * The other half of what `reserve` and `remove` leave behind: nothing else here ever lowers `capacity`,
-     * so a map that grew large and then emptied holds three buffers until it is destroyed.
+     * so a map that grew large and then emptied holds two buffers until it is destroyed.
      */
     function shrink() : void
     {
         if ($this->len == 0) {
             // nothing to keep, so the buffers go rather than being re-seated to the floor
-            mem::free<uint64>($this->hashes);
-            mem::free<K>($this->keys);
-            mem::free<V>($this->values);
+            mem::free<uint8>($this->ctrl);
+            mem::free<map_slot<K, V>>($this->entries);
 
-            $this->hashes:$ = null;
-            $this->keys:$ = null;
-            $this->values:$ = null;
+            $this->ctrl:$ = null;
+            $this->entries:$ = null;
             $this->cap = 0;
             $this->tombs = 0;
 
@@ -474,7 +473,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         while ($i < $this->cap) {
             if ($this->slot_is_live($i)) {
                 unsafe {
-                    $out[] = $this->keys:$[$i];
+                    $out[] = $this->entries:$[$i]->key;
                 }
             }
 
@@ -498,7 +497,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         while ($i < $this->cap) {
             if ($this->slot_is_live($i)) {
                 unsafe {
-                    $out[] = $this->values:$[$i];
+                    $out[] = $this->entries:$[$i]->value;
                 }
             }
 
@@ -513,20 +512,23 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      */
     function iterate() : map_iterator<K, V>
     {
-        return map_iterator<K, V>($this->hashes, $this->keys, $this->values, $this->cap);
+        return map_iterator<K, V>($this->ctrl:$, $this->entries:$, $this->cap);
     }
 
     /**
      * The same cursor over a map nobody may write, yielding `const V&`.
      *
-     * `map_iterator<K, const V>` needs no declaration of its own: `V` appears in exactly one of the
-     * cursor's properties, so substitution turns `ptr<V> $values` into `ptr<const V>` and `current()`
+     * `map_iterator<K, const V>` needs no declaration of its own: `V` appears in the cursor's
+     * `map_slot<K, V>` pointer, so substitution turns the value field into `const V` and `current()`
      * into `const V&` with every body unchanged. `ordered_map` is the one that could not do this - see
      * the comment on its cursor.
      */
     const function iterate() : map_iterator<K, const V>
     {
-        return map_iterator<K, const V>($this->hashes, $this->keys, $this->values, $this->cap);
+        return map_iterator<K, const V>(
+            $this->ctrl:$,
+            $this->entries:$ as ptr<map_slot<K, const V>>,
+            $this->cap);
     }
 
     /**
@@ -550,17 +552,17 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     /**
      * True when the slot at `$at` holds a live entry.
      *
-     * `$hashes` carries the slot state, so "is this one live" is `> 1` - the predicate every walk over the
-     * table asks, and one place for it rather than the encoding restated at each. `rehash` reads the *old*
-     * array and `free_slot_for` asks the narrower "is it empty", so neither goes through this.
+     * Occupied control bytes have the high bit clear, so "is this one live" is that test - the
+     * predicate every walk over the table asks, and one place for it rather than the encoding restated
+     * at each. `rehash` reads the *old* ctrl array, so it does not go through this.
      */
     #[inline]
     private const function slot_is_live(usize $at) : bool
     {
         // spelled as a branch rather than `return <comparison>`, exactly as `empty` and `has` are: a
         // literal types at its destination, and the destination of a returned expression is the return
-        // type - so the `1` in `return ... > 1` is typed `bool`
-        if ($this->hashes:$[$at] > 1) {
+        // type
+        if (($this->ctrl:$[$at] & (0x80 as uint8)) == (0 as uint8)) {
             return true;
         }
 
@@ -574,6 +576,8 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * plainly and costs a hardware divide on the critical path of every lookup and every insert, roughly
      * the whole of the rest of those functions. All three entry points - the lookup, the insert and
      * `rehash`'s placement - start here, so the encoding lives in one place rather than at each of them.
+     * The value is also the first unaligned group: `find`, `seat` and `free_slot_for` load 16 control
+     * bytes from here and then step `+16, +32, +48...`.
      *
      * **Only sound on a nonzero capacity.** `$cap - 1` is the low bits of a slot index for a power of two
      * and *every bit set* for zero, which would index a null buffer at an arbitrary offset rather than
@@ -590,39 +594,21 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     }
 
     /**
-     * The next slot on a probe path, wrapping at the end of the table.
-     *
-     * **Wrapped with a compare rather than with arithmetic**, which is a different choice from the one
-     * `first_slot` makes: that one starts from a 64-bit hash that has to be brought into range at all,
-     * while this one already holds a valid slot and only has to notice the end. All three walks step this
-     * way, and the step itself is not what differs between them.
-     */
-    #[inline]
-    private const function next_slot(usize $at) : usize
-    {
-        if ($at + 1 == $this->cap) {
-            return 0;
-        }
-
-        return $at + 1;
-    }
-
-    /**
-     * True when `$entries` entries in `$slots` slots are past the 0.75 load factor.
+     * True when `$entries` entries in `$slots` slots are past the 7/8 load factor.
      *
      * The growth policy, once. `slots_for`, `seat` and `grow` each ask it about a different count - the
      * entries a caller wants room for, the entries plus the tombstones plus the one being inserted, and the
      * live entries alone - and the *threshold* is the part that must not differ between them: `seat` and
      * `grow` disagreeing about it is an unbounded probe, which is what `seat`'s `die` exists to catch.
      *
-     * 0.75 without a float. The multiplication is on the smaller side, so a table large enough to wrap the
+     * 7/8 without a float. The multiplication is on the smaller side, so a table large enough to wrap the
      * product ran out of address space long before.
      */
     #[inline]
     private const function over_load(usize $entries, usize $slots) : bool
     {
         // a branch and not `return <comparison>`, for `slot_is_live`'s reason
-        if ($entries * 4 > $slots * 3) {
+        if ($entries * 8 > $slots * 7) {
             return true;
         }
 
@@ -632,32 +618,117 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     /**
      * `$key`'s hash, with 0 and 1 reserved.
      *
-     * `$hashes` carries the slot state as well as the hash, so those two values mean *empty* and
-     * *tombstone*. Two of 2^64 hashes are nudged up by two, which doubles the probability of exactly the
-     * values 2 and 3 and costs a whole allocation less than a state array beside this one would.
+     * `$key`'s hash. The control byte is the top 7 bits, which is why a live slot's ctrl never
+     * collides with empty (`0x80`) or deleted (`0xFE`).
      */
     private const function slot_hash(const K& $key) : uint64
     {
-        uint64 $h = hash::of($key);
-
-        if ($h < 2) {
-            $h = $h + 2;
-        }
-
-        return $h;
+        return hash::of($key);
     }
 
     /**
-     * How many slots `$count` entries need: a power of two, at least 8, keeping the load under 0.75.
+     * The top 7 bits of a stored hash, which is what a live control byte holds.
+     */
+    #[inline]
+    private const function ctrl_h2(uint64 $h) : uint8
+    {
+        return ($h >> 57) as uint8;
+    }
+
+    /**
+     * Writes a control byte and, when the slot is in the first group, its replica past `$cap`.
      *
-     * The floor is flat rather than element-size dependent, deliberately unlike `array<T>::reserve`'s:
+     * The replica is what lets an unaligned 16-byte load at `$cap - 1` wrap without a branch on the
+     * probe path. `fill_ctrl` writes the whole prefix and the replica in one loop, so it does not go
+     * through here.
+     */
+    #[inline]
+    private function set_ctrl(usize $at, uint8 $byte) : void
+    {
+        $this->ctrl:$[$at] = $byte;
+
+        if ($at < 16) {
+            $this->ctrl:$[$this->cap + $at] = $byte;
+        }
+    }
+
+    /**
+     * Every control byte, replica included, set to `$byte`.
+     *
+     * libc `memset`, so a rehash of 64k slots is one call. A 16-byte SIMD store of empty can be sunk
+     * past the occupancy writes that follow (vector TBAA vs i8); memset and `set_ctrl` are both i8
+     * into the same allocation.
+     */
+    private function fill_ctrl(uint8 $byte) : void
+    {
+        mem::fill_bytes($this->ctrl:$, $byte, $this->cap + 16);
+    }
+
+    /**
+     * The 16 control bytes starting at `$pos`, which may wrap through the replica.
+     */
+    #[inline]
+    private const function ctrl_group(usize $pos) : simd<uint8, 16>
+    {
+        return simd::load<uint8, 16>($this->ctrl:$ + $pos);
+    }
+
+    /**
+     * Which lanes of `$group` hold `$want`.
+     *
+     * The comparison `find`, `seat`, `vacate` and `free_slot_for` all make, once.
+     */
+    #[inline]
+    private const function match_group(simd<uint8, 16> $group, simd<uint8, 16> $want) : uint64
+    {
+        return simd::bitmask($group == $want);
+    }
+
+    /**
+     * The slot a set bit of a group mask names, wrapped.
+     */
+    #[inline]
+    private const function hit_slot(usize $pos, uint64 $hits, usize $mask) : usize
+    {
+        uint64 $lane = bits::trailing_zeros($hits);
+        return ($pos + ($lane as usize)) & $mask;
+    }
+
+    /**
+     * Drops the lowest set bit of a group mask, so the next `hit_slot` names the next lane.
+     */
+    #[inline]
+    private const function drop_hit(uint64 $hits) : uint64
+    {
+        return $hits & ($hits - (1 as uint64));
+    }
+
+    /**
+     * Steps a quadratic probe to the next group of 16.
+     *
+     * The stride grows by the group width first, then the position moves by that stride and wraps.
+     * `find`, `seat` and `free_slot_for` share this step. A linear `+ 16` from `first_slot` seats
+     * past an empty that the other two still stop at.
+     */
+    #[inline]
+    private const function advance_group(inout usize& $pos, inout usize& $stride, usize $mask) : void
+    {
+        $stride = $stride + 16;
+        $pos = ($pos + $stride) & $mask;
+    }
+
+    /**
+     * How many slots `$count` entries need: a power of two, at least 16, keeping the load under 7/8.
+     *
+     * The floor is the group width, not 8: an unaligned 16-byte load needs 16 slots of real storage plus
+     * the replica. Flat rather than element-size dependent, deliberately unlike `array<T>::reserve`'s:
      * `mem::size` cannot decide a `const if`, and a slot here is a `uint64` plus a `K` plus a
-     * `V` and is never one byte - so there is nothing a size could buy, and nothing to revisit when A41
-     * lands.
+     * `V` plus a control byte and is never one byte - so there is nothing a size could buy, and nothing
+     * to revisit when A41 lands.
      */
     private const function slots_for(usize $count) : usize
     {
-        usize $slots = 8;
+        usize $slots = 16;
 
         while ($this->over_load($count, $slots)) {
             $slots = $slots * 2;
@@ -680,59 +751,87 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         }
 
         uint64 $h = $this->slot_hash($key);
+        uint8 $h2 = $this->ctrl_h2($h);
+        usize $mask = $this->cap - 1;
 
         // the empty-table return above is what establishes `first_slot`'s nonzero capacity here
-        usize $at = $this->first_slot($h);
-        usize $steps = 0;
+        usize $pos = $this->first_slot($h);
+        usize $stride = 0;
+
+        simd<uint8, 16> $want = simd::splat<uint8, 16>($h2);
+        simd<uint8, 16> $empty = simd::splat<uint8, 16>(0x80 as uint8);
 
         // bounded by the capacity rather than `while (true)`: a table with no empty slot left has nothing
         // to stop the walk, and the load factor is what makes that unreachable rather than impossible. a
-        // bound is cheaper than trusting an invariant
-        while ($steps < $this->cap) {
-            uint64 $slot = $this->hashes:$[$at];
+        // bound is cheaper than trusting an invariant. `$stride` grows by 16 each group, so this visits
+        // every group of a power-of-two table once
+        while ($stride < $this->cap) {
+            simd<uint8, 16> $group = $this->ctrl_group($pos);
+            uint64 $hits = $this->match_group($group, $want);
+
+            while ($hits != 0) {
+                usize $at = $this->hit_slot($pos, $hits, $mask);
+
+                // h2 matched, so `==` - which for a `string` key is a byte loop - runs on roughly 1 in
+                // 128 misses rather than on every occupied slot. a deleted byte never equals h2
+                unsafe {
+                    if ($this->entries:$[$at]->key == $key) {
+                        return $at;
+                    }
+                }
+
+                $hits = $this->drop_hit($hits);
+            }
 
             // an empty slot **ends** the probe: anything inserted later would have taken it, so the key
             // cannot be further along. a tombstone does not end it, and that is the entire cost of
             // tombstones - the slot was empty once, and something walked past it
-            if ($slot == 0) {
+            if ($this->match_group($group, $empty) != 0) {
                 return $this->cap;
             }
 
-            // the stored hash is compared first, so `==` - which for a `string` key is a byte loop - only
-            // ever runs on a slot that could actually match. a tombstone's 1 never equals a sealed hash,
-            // so it needs no case of its own here
-            if ($slot == $h) {
-                // the hash word *is* the proof: a slot whose hash matches is a live slot, and a live
-                // slot holds a whole `K`. that is what the sealed-hash encoding buys
-                unsafe {
-                    if ($this->keys:$[$at] == $key) {
-                        return $at;
-                    }
-                }
-            }
-
-            $at = $this->next_slot($at);
-            $steps = $steps + 1;
+            $this->advance_group($pos, $stride, $mask);
         }
 
         return $this->cap;
     }
 
     /**
-     * Marks the slot at `$at` dead: a tombstone, one fewer entry, and the key destroyed.
+     * Marks the slot at `$at` dead: empty or a tombstone, one fewer entry, and the key destroyed.
      *
      * Shared by `remove` and `take`, which differ only in what they do with the *value* - so the accounting
      * and the key's teardown have one implementation. Marks dead before destroying anything, for
      * `clear()`'s reason.
+     *
+     * **Empty when a 16-byte window through this slot already has an empty, tombstone otherwise.** A probe
+     * stops at empty, so writing empty into a run of 16 full-or-deleted bytes would hide a live entry
+     * further along the same probe. The leading/trailing-zero test is hashbrown's: if the bytes before
+     * this slot plus the bytes from it span 16 occupied slots, a group load can have seen a full window
+     * and the lookup has to keep walking.
      */
     private function vacate(usize $at) : void
     {
-        $this->hashes:$[$at] = 1;
+        usize $mask = $this->cap - 1;
+        usize $before = ($at + $this->cap - 16) & $mask;
+
+        simd<uint8, 16> $empty = simd::splat<uint8, 16>(0x80 as uint8);
+        uint64 $empty_before = $this->match_group($this->ctrl_group($before), $empty);
+        uint64 $empty_after = $this->match_group($this->ctrl_group($at), $empty);
+        uint64 $lead = bits::leading_zeros($empty_before << 48);
+        uint64 $trail = bits::trailing_zeros($empty_after);
+
+        if ($lead + $trail >= 16) {
+            $this->set_ctrl($at, 0xFE as uint8);
+            $this->tombs = $this->tombs + 1;
+        }
+        else {
+            $this->set_ctrl($at, 0x80 as uint8);
+        }
+
         $this->len = $this->len - 1;
-        $this->tombs = $this->tombs + 1;
 
         const if (mem::needs_destruction<K>()) {
-            K $dead_key = mem::take<K>($this->keys:$[$at]);
+            K $dead_key = mem::take<K>($this->entries:$[$at]->key);
         }
     }
 
@@ -755,7 +854,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         // already freed
         //
         // **`$this->cap == 0` is stated rather than derived.** it is already implied by the load test beside
-        // it - the left operand is at least 1, so `over_load(>=1, 0)` is `4 > 0` and an empty table always
+        // it - the left operand is at least 1, so `over_load(>=1, 0)` is `8 > 0` and an empty table always
         // grows - but that is an accident of the threshold rather than something this function says, and it
         // is `first_slot`'s precondition that rests on it. This is where `seat` establishes it
         if ($this->cap == 0 || $this->over_load($this->len + $this->tombs + 1, $this->cap)) {
@@ -763,74 +862,82 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         }
 
         uint64 $h = $this->slot_hash($key);
+        uint8 $h2 = $this->ctrl_h2($h);
+        usize $mask = $this->cap - 1;
 
         // the grow above is what establishes `first_slot`'s nonzero capacity here
-        usize $at = $this->first_slot($h);
+        usize $pos = $this->first_slot($h);
+        usize $stride = 0;
 
-        // the first tombstone walked past, so an insert reuses a dead slot instead of adding a live one
-        // beyond it. `$this->cap` is "none seen", for `find`'s reason
+        // the first empty or deleted slot walked past, so an insert reuses a dead slot instead of adding
+        // a live one beyond it. `$this->cap` is "none seen", for `find`'s reason
         usize $reuse = $this->cap;
-        usize $steps = 0;
 
-        while ($steps < $this->cap) {
-            uint64 $slot = $this->hashes:$[$at];
+        simd<uint8, 16> $want = simd::splat<uint8, 16>($h2);
+        simd<uint8, 16> $empty = simd::splat<uint8, 16>(0x80 as uint8);
+        simd<uint8, 16> $deleted = simd::splat<uint8, 16>(0xFE as uint8);
 
-            if ($slot == 0) {
-                // an insert. a dead slot passed on the way here is the better home: it gives a tombstone
-                // back rather than lengthening every later probe through this bucket
-                if ($reuse < $this->cap) {
-                    $at = $reuse;
+        while ($stride < $this->cap) {
+            simd<uint8, 16> $group = $this->ctrl_group($pos);
+            uint64 $hits = $this->match_group($group, $want);
+
+            while ($hits != 0) {
+                usize $at = $this->hit_slot($pos, $hits, $mask);
+
+                unsafe {
+                    if ($this->entries:$[$at]->key == $key) {
+                        // a **replace**. the stored key stays: it compares equal to the one handed
+                        // in, so swapping it is work with no observable result and one more copy
+                        // of a `K`
+                        //
+                        // and the value is destroyed *here*, because nothing else will: the write
+                        // is one call, so there is no assignment behind it for the compiler to
+                        // push a teardown onto. `$doomed` is a local of this `const if` arm, so
+                        // the ordinary scope rule destroys it at the end of the arm - which is
+                        // before this function returns, and therefore before `mem::init` fills it
+                        const if (mem::needs_destruction<V>()) {
+                            V $doomed = mem::take<V>($this->entries:$[$at]->value);
+                        }
+
+                        return $at;
+                    }
+                }
+
+                $hits = $this->drop_hit($hits);
+            }
+
+            uint64 $empties = $this->match_group($group, $empty);
+            uint64 $free = $empties | $this->match_group($group, $deleted);
+
+            if ($reuse == $this->cap && $free != 0) {
+                $reuse = $this->hit_slot($pos, $free, $mask);
+            }
+
+            if ($empties != 0) {
+                usize $at = $reuse;
+
+                if ($this->ctrl:$[$at] == (0xFE as uint8)) {
                     $this->tombs = $this->tombs - 1;
                 }
 
-                $this->hashes:$[$at] = $h;
+                $this->set_ctrl($at, $h2);
                 $this->len = $this->len + 1;
 
                 // the fresh-slot write. see the copy constructor's element loop for why this cannot be
-                // `$this->keys:$[$at] = $key` - the slot holds allocator bytes, so an assignment would
-                // run a destructor over them
+                // `$this->entries:$[$at]->key = $key` - the slot holds allocator bytes, so an assignment
+                // would run a destructor over them
                 //
                 // the by-value parameter is what copies the key: the map's entry is its own, and the
                 // caller's `$key` is still theirs afterwards
-                mem::init<K>($this->keys:$[$at], $key);
+                mem::init<K>($this->entries:$[$at]->key, $key);
 
                 return $at;
             }
 
-            if ($slot == 1) {
-                if ($reuse == $this->cap) {
-                    $reuse = $at;
-                }
-            }
-            else {
-                if ($slot == $h) {
-                    // the hash word is the proof, exactly as in `find_slot`
-                    unsafe {
-                        if ($this->keys:$[$at] == $key) {
-                            // a **replace**. the stored key stays: it compares equal to the one handed
-                            // in, so swapping it is work with no observable result and one more copy
-                            // of a `K`
-                            //
-                            // and the value is destroyed *here*, because nothing else will: the write
-                            // is one call, so there is no assignment behind it for the compiler to
-                            // push a teardown onto. `$doomed` is a local of this `const if` arm, so
-                            // the ordinary scope rule destroys it at the end of the arm - which is
-                            // before this function returns, and therefore before `mem::init` fills it
-                            const if (mem::needs_destruction<V>()) {
-                                V $doomed = mem::take<V>($this->values:$[$at]);
-                            }
-
-                            return $at;
-                        }
-                    }
-                }
-            }
-
-            $at = $this->next_slot($at);
-            $steps = $steps + 1;
+            $this->advance_group($pos, $stride, $mask);
         }
 
-        // unreachable: the growth above keeps at least a quarter of the slots empty, so the walk always
+        // unreachable: the growth above keeps at least an eighth of the slots empty, so the walk always
         // finds one. said as a `die` rather than left as a comment, because a bug in the growth policy is
         // otherwise a silent wrong answer here - and a `die` ends the block, so nothing is owed after it
         die('map probe found no free slot');
@@ -839,10 +946,12 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     /**
      * Makes room for one more entry.
      *
-     * **Tombstones are reclaimed at the same capacity.** A table churned by insert-and-remove reaches the
-     * load factor on dead slots rather than on live ones, and doubling for those leaves a table that is
-     * mostly holes twice the size it needs. So the question is asked about the live entries alone: if
-     * *they* still fit, this is a re-seat rather than a growth.
+     * **Tombstones are reclaimed at the same capacity when live entries are sparse.** A table
+     * churned by insert-and-remove of a handful of keys reaches the load factor on dead slots, and
+     * doubling for those leaves thousands of slots holding nothing - `collisions_and_growth` pins
+     * the floor at 16. When live entries already occupy more than half the table, doubling once is
+     * cheaper than reseating into a still-tight 7/8: groups keep EMPTY, `vacate` writes EMPTY, tombs
+     * accrue slower.
      */
     private function grow() : void
     {
@@ -850,6 +959,11 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         if ($slots == 0 || $this->over_load($this->len + 1, $slots)) {
             $slots = $this->slots_for($this->len + 1);
+        }
+        else {
+            if ($this->len * 2 > $slots) {
+                $slots = $slots * 2;
+            }
         }
 
         $this->rehash($slots);
@@ -863,45 +977,42 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * is no copy to run and none to skip. That makes it correct for an owning `K` and an owning `V` with no
      * branch on either, and it is `array<T>::reserve`'s argument at the scale of a table.
      *
-     * **And it calls neither `hash::of` nor `==`.** Every live entry's hash is already stored, and that is
-     * what decides its new slot; and two live entries can never be equal, so the walk below only has to
-     * find an *empty* slot. So a rehash has no dependency on `K`'s hasher or on `K`'s equality at all.
+     * **It calls `hash::of` on each live key**, because the hash is not stored. Two live entries can
+     * never be equal, so the walk below only has to find an *empty* slot, and `==` stays out of it.
      */
     private function rehash(usize $slots) : void
     {
-        ptr<uint64> $old_hashes = $this->hashes;
-        ptr<K> $old_keys = $this->keys;
-        ptr<V> $old_values = $this->values;
+        ptr<uint8> $old_ctrl = $this->ctrl;
+        ptr<map_slot<K, V>> $old_entries = $this->entries;
         usize $old_cap = $this->cap;
 
         // re-seated through `:$`, because a fresh allocation is an address rather than something to write
         // through the old one
-        $this->hashes:$ = mem::alloc<uint64>($slots);
-        $this->keys:$ = mem::alloc<K>($slots);
-        $this->values:$ = mem::alloc<V>($slots);
+        $this->ctrl:$ = mem::alloc<uint8>($slots + 16);
+        $this->entries:$ = mem::alloc<map_slot<K, V>>($slots);
         $this->cap = $slots;
         $this->tombs = 0;
 
-        // every slot empty, in one call. `$len` is untouched: the same entries are live before and after,
-        // they are only somewhere else
-        mem::zero<uint64>($this->hashes, $slots);
+        // every slot empty. `$len` is untouched: the same entries are live before and after, they are
+        // only somewhere else. the control fill is scalar so it cannot be sunk past the occupancy writes
+        $this->fill_ctrl(0x80 as uint8);
 
         usize $i = 0;
 
         while ($i < $old_cap) {
-            uint64 $h = $old_hashes:$[$i];
+            if (($old_ctrl:$[$i] & (0x80 as uint8)) == (0 as uint8)) {
+                // the *read* is a promotion: a live slot holds a whole `K`. the write is a relocation
+                unsafe {
+                    uint64 $h = $this->slot_hash($old_entries:$[$i]->key);
+                    usize $at = $this->free_slot_for($h);
 
-            if ($h > 1) {
-                usize $at = $this->free_slot_for($h);
+                    $this->set_ctrl($at, $this->ctrl_h2($h));
 
-                $this->hashes:$[$at] = $h;
-
-                // the relocation. **deliberately not `mem::init`**: that copies from a source which keeps
-                // its claim, and would leave the old slot owning a second reference that the `mem::free`
-                // below throws away without releasing. `mem::copy` moves the bytes and nothing else, which
-                // is what "relocated" means
-                mem::copy<K>($this->keys:$ + $at, $old_keys:$ + $i, 1);
-                mem::copy<V>($this->values:$ + $at, $old_values:$ + $i, 1);
+                    // **deliberately not `mem::init`**: that copies from a source which keeps its claim,
+                    // and would leave the old slot owning a second reference that the `mem::free` below
+                    // throws away without releasing. `mem::copy` moves the bytes and nothing else
+                    mem::copy<map_slot<K, V>>($this->entries:$ + $at, $old_entries:$ + $i, 1);
+                }
             }
 
             $i = $i + 1;
@@ -909,10 +1020,9 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         // the blocks, and only the blocks. every live entry above was moved out of them, and every dead
         // slot in them was already dead - so there is nothing here to destroy, which is exactly what makes
-        // this three calls rather than a teardown walk
-        mem::free<uint64>($old_hashes);
-        mem::free<K>($old_keys);
-        mem::free<V>($old_values);
+        // this two calls rather than a teardown walk
+        mem::free<uint8>($old_ctrl);
+        mem::free<map_slot<K, V>>($old_entries);
     }
 
     /**
@@ -920,17 +1030,29 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      *
      * **Only sound on a table with no tombstones**, which is the one `rehash` has just built - which is why
      * this is not `find` with a different comparison. Its one caller is inside `rehash`, past the fresh
-     * allocation, which is what establishes `first_slot`'s nonzero capacity here.
+     * allocation, which is what establishes `first_slot`'s nonzero capacity here. The walk is the same
+     * unaligned quadratic probe `find` and `seat` use: a linear wrap from `first_slot` would seat past an
+     * empty the SIMD find still stops at.
      */
     private const function free_slot_for(uint64 $h) : usize
     {
-        usize $at = $this->first_slot($h);
+        usize $mask = $this->cap - 1;
+        usize $pos = $this->first_slot($h);
+        usize $stride = 0;
 
-        while ($this->hashes:$[$at] != 0) {
-            $at = $this->next_slot($at);
+        simd<uint8, 16> $empty = simd::splat<uint8, 16>(0x80 as uint8);
+
+        while ($stride < $this->cap) {
+            uint64 $hits = $this->match_group($this->ctrl_group($pos), $empty);
+
+            if ($hits != 0) {
+                return $this->hit_slot($pos, $hits, $mask);
+            }
+
+            $this->advance_group($pos, $stride, $mask);
         }
 
-        return $at;
+        die('map probe found no free slot');
     }
 }
 
@@ -960,7 +1082,7 @@ operator<K, V> (map<K, V>& $m)[const K& $key] = (V $value) : void
 {
     usize $at = $m->seat($key);
 
-    mem::init<V>($m->values:$[$at], mv $value);
+    mem::init<V>($m->entries:$[$at]->value, mv $value);
 }
 
 /**
@@ -979,7 +1101,7 @@ operator<K, V> (map<K, V>& $m)[const K& $key] : V&
     // discharged by the probe: `find_slot` only answers an index whose slot is live, and the assert
     // above turns "not found" into a stop rather than a borrow of nothing
     unsafe {
-        return &$m->values:$[$at];
+        return &$m->entries:$[$at]->value;
     }
 }
 
@@ -998,20 +1120,20 @@ operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
     // discharged by the probe: `find_slot` only answers an index whose slot is live, and the assert
     // above turns "not found" into a stop rather than a borrow of nothing
     unsafe {
-        return &$m->values:$[$at];
+        return &$m->entries:$[$at]->value;
     }
 }
 
 /**
  * The cursor `map<K, V>` iterates through.
  *
- * Owning nothing - three addresses and two counts - so it declares no destructor and no copy constructor: a
+ * Owning nothing - two addresses and two counts - so it declares no destructor and no copy constructor: a
  * shallow copy is the correct copy, which is `slice_iterator<T>`'s argument unchanged. It lives here beside
  * `map<K, V>` rather than in `contract.eco` because it is a concrete type at the root, and because a nested
  * type inside a generic owner is refused - the same reason `slice_iterator<T>` sits beside
  * `slice<T>`.
  *
- * **It holds the three addresses and the capacity by value**, which is load-bearing rather than incidental,
+ * **It holds the two addresses and the capacity by value**, which is load-bearing rather than incidental,
  * for `slice_iterator<T>`'s reason: the capacity is then an ordinary local the optimizer can prove
  * loop-invariant. A cursor holding a `map<K, V>&` and asking it `->capacity()` each turn would reload
  * through a pointer nothing can prove unaliased.
@@ -1022,23 +1144,21 @@ operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
  */
 public struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
 {
-    // **every field `private`, where the map's own four could not be**: no operator is declared over a
+    // **every field `private`, where the map's own two could not be**: no operator is declared over a
     // cursor, so the constructor below and the three protocol methods are the whole of how one is reached.
     // the type stays `public` because a caller may name it - it is what `map<K, V>::iterate()` hands back
-    private ptr<uint64> $hashes;
-    private ptr<K> $keys;
-    private ptr<V> $values;
+    private ptr<uint8> $ctrl;
+    private ptr<map_slot<K, V>> $entries;
     private usize $cap;
 
     // the slot one *past* the entry `current()` names, so the cursor starts before the first one without
     // needing a signed type or a "have we started" flag - slice_iterator's convention
     private usize $pos;
 
-    constructor(ptr<uint64> $hashes, ptr<K> $keys, ptr<V> $values, usize $cap)
+    constructor(ptr<uint8> $ctrl, ptr<map_slot<K, V>> $entries, usize $cap)
     {
-        $this->hashes:$ = $hashes;
-        $this->keys:$ = $keys;
-        $this->values:$ = $values;
+        $this->ctrl:$ = $ctrl;
+        $this->entries:$ = $entries;
         $this->cap = $cap;
         $this->pos = 0;
     }
@@ -1052,11 +1172,11 @@ public struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
     function advance() : bool
     {
         while ($this->pos < $this->cap) {
-            uint64 $slot = $this->hashes:$[$this->pos];
+            uint8 $tag = $this->ctrl:$[$this->pos];
 
             $this->pos = $this->pos + 1;
 
-            if ($slot > 1) {
+            if (($tag & (0x80 as uint8)) == (0 as uint8)) {
                 return true;
             }
         }
@@ -1073,7 +1193,7 @@ public struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
         // discharged by the protocol: `advance()` has already walked to a live slot and left `$pos`
         // one past it, which is the whole content of "valid after a true advance"
         unsafe {
-            return &$this->values:$[$this->pos - 1];
+            return &$this->entries:$[$this->pos - 1]->value;
         }
     }
 
@@ -1084,7 +1204,7 @@ public struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
     function key() : K
     {
         unsafe {
-            return $this->keys:$[$this->pos - 1];
+            return $this->entries:$[$this->pos - 1]->key;
         }
     }
 }

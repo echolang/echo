@@ -51,6 +51,13 @@ namespace
             { "atomic_exchange", AST::BuiltinKind::t_atomic_exchange },
             { "atomic_compare_exchange", AST::BuiltinKind::t_atomic_compare_exchange },
             { "atomic_fence", AST::BuiltinKind::t_atomic_fence },
+            { "simd_splat", AST::BuiltinKind::t_simd_splat },
+            { "simd_load", AST::BuiltinKind::t_simd_load },
+            { "simd_store", AST::BuiltinKind::t_simd_store },
+            { "simd_select", AST::BuiltinKind::t_simd_select },
+            { "simd_bitmask", AST::BuiltinKind::t_simd_bitmask },
+            { "simd_from_array", AST::BuiltinKind::t_simd_from_array },
+            { "simd_to_array", AST::BuiltinKind::t_simd_to_array },
         };
         return table;
     }
@@ -123,6 +130,13 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_atomic_exchange:
         case AST::BuiltinKind::t_atomic_compare_exchange:
         case AST::BuiltinKind::t_atomic_fence:
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
             return AST::BuiltinFoldability::t_not_a_query;
     }
 
@@ -173,6 +187,13 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_atomic_exchange:
         case AST::BuiltinKind::t_atomic_compare_exchange:
         case AST::BuiltinKind::t_atomic_fence:
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
             return false;
     }
 
@@ -226,6 +247,13 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_atomic_exchange:
         case AST::BuiltinKind::t_atomic_compare_exchange:
         case AST::BuiltinKind::t_atomic_fence:
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
             return false;
     }
 
@@ -287,6 +315,13 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_atomic_exchange:
         case AST::BuiltinKind::t_atomic_compare_exchange:
         case AST::BuiltinKind::t_atomic_fence:
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
             return std::nullopt;
     }
 
@@ -337,6 +372,13 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_atomic_exchange:
         case AST::BuiltinKind::t_atomic_compare_exchange:
         case AST::BuiltinKind::t_atomic_fence:
+        case AST::BuiltinKind::t_simd_splat:
+        case AST::BuiltinKind::t_simd_load:
+        case AST::BuiltinKind::t_simd_store:
+        case AST::BuiltinKind::t_simd_select:
+        case AST::BuiltinKind::t_simd_bitmask:
+        case AST::BuiltinKind::t_simd_from_array:
+        case AST::BuiltinKind::t_simd_to_array:
             return false;
     }
 

@@ -229,6 +229,17 @@ public function zero<T>(ptr<T> $p, usize $count) : void
 }
 
 /**
+ * Fills `$bytes` with `$byte`. libc `memset`.
+ *
+ * The byte-width twin of `zero`: a table's empty tag is `0x80`, not 0, and a scalar store per
+ * byte on a 64k control array is the whole of a rehash's fill.
+ */
+public function fill_bytes(ptr<uint8> $p, uint8 $byte, usize $bytes) : void
+{
+    set_bytes($p:$, $byte as int32, $bytes);
+}
+
+/**
  * The bits of `$value`, read as a `To`.
  *
  * The **safe** way to reinterpret. `ptr<uint32>(&$f)` gives you a second typed path to a live

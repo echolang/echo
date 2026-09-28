@@ -1,0 +1,5 @@
+extern {
+    function load_v(ptr<simd<float32, 4>> $p) : void;
+}
+
+echo 1;

@@ -153,6 +153,15 @@ namespace AST
     // - the parser folds it away, since it carries no semantics
     bool unary_has_builtin_meaning(const Operator *op, const OperandFacts &operand);
 
+    // **does this symbol lower over one lane of this type?** the one matrix.
+    //
+    // `binary_operand_refusal` is the sentence. `SimdCodegen` throws if a pair this
+    // answered no for still arrives. a vector use site stays builtin when this is
+    // false — that is what keeps a declared operator from claiming it — except
+    // `&&` / `||`, which `binary_has_builtin_meaning` answers on its own because the
+    // short-circuit lowering is type-blind. unary `-` `!` `~` ask the same matrix
+    bool simd_lane_op_lowers(Token::Type op, const ValueType &lane);
+
     // **why these two operands cannot answer this operator - said about the operands, not about a
     // candidate's parameters.** nullopt when there is nothing operand-level to say.
     //

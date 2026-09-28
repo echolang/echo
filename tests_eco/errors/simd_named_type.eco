@@ -1,0 +1,4 @@
+struct simd
+{
+    int32 $n;
+}
