@@ -67,9 +67,10 @@ namespace Parser
         // header has to walk it anyway on its way to the symbol, so it keeps what that walk produced
         // rather than recording where to go back to
         //
-        // it is pass-aware underneath: the type-name pass deliberately walks a constraint's atoms
-        // without resolving them, because an atom may name a type no pass has registered yet. so a
-        // header read in that pass carries names only, which is all that pass declares
+        // the atoms are snapshotted, not resolved: T is not a declaration until parse_operatordecl
+        // calls install_type_parameters, which opens the scope and re-reads the colon. a header
+        // from the type-name pass is never resolved - that pass has not registered the types an
+        // atom names
         std::vector<ParsedTypeParam> type_params;
 
         // the `(N, assoc)` clause, when one was written. absent is not the same as defaulted: a

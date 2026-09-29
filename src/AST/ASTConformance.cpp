@@ -3,7 +3,6 @@
 #include "AST/ASTConstness.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
-#include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/FunctionDeclNode.h"
@@ -21,15 +20,6 @@ bool AST::conforms_to(const AST::ComplexType *ct, const AST::ValueType &interfac
 
     const auto &declared = ct->conformances();
     return std::find(declared.begin(), declared.end(), interface) != declared.end();
-}
-
-bool AST::conforms_to(const AST::ValueType &type, const AST::ValueType &interface)
-{
-    if (!type.has_complex_type()) {
-        return false;
-    }
-
-    return AST::conforms_to(type.get_complex_type(), interface);
 }
 
 const std::vector<AST::FunctionDeclNode *> &AST::interface_requirements(const AST::ComplexType *interface)
@@ -269,9 +259,10 @@ namespace
     // overloads on the implementor the old shape re-substituted every type k times. it is also what the
     // diagnostic renders, so the shape a message names cannot differ from the shape that was compared
     //
-    // parameters are held **from index 1**: argument 0 is the receiver, the interface's borrow on the
-    // requirement and the implementor's own borrow on the candidate, so comparing it would make every
-    // conformance fail
+    // written parameters are held from `parameter_offset`, which is `has_receiver() ? 1 : 0`.
+    // a receiver is the interface's borrow on the requirement and the implementor's own borrow
+    // on the candidate, so comparing it would make every conformance fail; an operator has no
+    // receiver, and its left operand is a parameter the author wrote
     struct WantedSignature
     {
         const AST::FunctionDeclNode *requirement = nullptr;
@@ -281,6 +272,10 @@ namespace
         // the arity as declared, receiver included - kept rather than derived from `parameters` so a
         // requirement with no arguments at all cannot read as one with a receiver
         size_t arg_count = 0;
+
+        // 1 when args[0] is a receiver, 0 when every parameter was written - an operator, whose
+        // left operand would otherwise drop out of the comparison
+        size_t parameter_offset = 1;
 
         // the one thing about argument 0 that *is* compared. the receiver's type differs by
         // construction - the interface borrows itself, the implementor borrows itself - but its
@@ -313,12 +308,16 @@ namespace
         WantedSignature wanted;
         wanted.requirement = requirement;
         wanted.arg_count = requirement->args.size();
-        wanted.receiver_is_const = AST::receiver_is_const(*requirement);
+        wanted.parameter_offset = requirement->has_receiver() ? 1 : 0;
+        wanted.receiver_is_const = requirement->has_receiver() && AST::receiver_is_const(*requirement);
         wanted.return_type = wanted_type(requirement->get_return_type(), subst, registry);
 
-        wanted.parameters.reserve(requirement->args.size() > 0 ? requirement->args.size() - 1 : 0);
+        wanted.parameters.reserve(
+            requirement->args.size() > wanted.parameter_offset
+                ? requirement->args.size() - wanted.parameter_offset
+                : 0);
 
-        for (size_t i = 1; i < requirement->args.size(); i++) {
+        for (size_t i = wanted.parameter_offset; i < requirement->args.size(); i++) {
             wanted.parameters.push_back(wanted_type(requirement->parameter_type(i), subst, registry));
         }
 
@@ -326,7 +325,8 @@ namespace
     }
 
     // **the half of "does this candidate answer" that is settled before a single type is compared** -
-    // arity, the candidate's own generic parameters, and the receiver's const-ness.
+    // arity, the candidate's own generic parameters (methods; operators instantiate later), and the
+    // receiver's const-ness.
     //
     // one predicate because it has two readers that cannot compare types the same way. candidate_answers
     // below compares them exactly; conformance_bindings' trial loop *unifies* them instead, because it is
@@ -340,10 +340,16 @@ namespace
             return false;
         }
 
-        // a generic requirement of its own (`function map<U>(...)`) is not something a conformance check
-        // can compare: U is bound at the call, not by the conformance. refused at the declaration would
-        // be better, and until then this simply never matches
-        if (candidate->own_type_param_count() != wanted.requirement->own_type_param_count()) {
+        // a generic requirement of its own (`function map<U>(...)`) is not something a conformance
+        // check can compare: U is bound at the call, not by the conformance. refused at the
+        // declaration would be better, and until then this simply never matches
+        //
+        // an operator is a free function, so it cannot inherit the implementor's type parameters.
+        // `operator<E> (const Box<E>&, const Box<E>&)` is the only spelling of `<` for a generic
+        // struct, and the own-parameter counts then differ on purpose: the requirement's T belongs
+        // to the interface, the candidate's E to the operator. candidate_answers unifies them
+        if (!candidate->is_operator()
+            && candidate->own_type_param_count() != wanted.requirement->own_type_param_count()) {
             return false;
         }
 
@@ -358,7 +364,9 @@ namespace
 
         // labels are part of the external shape, same as on a free function. an implementor that
         // dropped one would let a call through the interface use a name the vtable slot does not have
-        for (size_t i = 1; i < candidate->args.size() && i < wanted.requirement->args.size(); i++) {
+        for (size_t i = wanted.parameter_offset;
+             i < candidate->args.size() && i < wanted.requirement->args.size();
+             i++) {
             const AST::VarDeclNode *have = candidate->args[i];
             const AST::VarDeclNode *need = wanted.requirement->args[i];
             const std::string have_label = have != nullptr ? have->label() : "";
@@ -388,16 +396,40 @@ namespace
             return false;
         }
 
+        AST::TypeSubstitution subst = impl_subst;
+
+        if (candidate->is_operator() && candidate->own_type_param_count() > 0) {
+            // the requirement has no own parameters (T is the interface's). an operator
+            // redeclares the implementor's, so unify its written operands against the
+            // already-substituted wanted ones: Box<E_op> against Box<E_struct> binds E_op
+            // onto E_struct. can_instantiate would skip this because Box<E> is still
+            // undetermined, which is the right answer for a call and the wrong one for a
+            // template check. the exact compare below is still the contract: unify may
+            // succeed with no opinion
+            //
+            // allow_decay off: a conformance is not a call boundary, same as
+            // conformance_bindings' trial
+            for (size_t i = 0; i < wanted.parameters.size(); i++) {
+                if (!AST::unify_type(
+                        candidate->parameter_type(wanted.parameter_offset + i),
+                        wanted.parameters[i],
+                        subst,
+                        /*allow_decay=*/false)) {
+                    return false;
+                }
+            }
+        }
+
         for (size_t i = 0; i < wanted.parameters.size(); i++) {
-            const AST::ValueType have =
-                wanted_type(candidate->parameter_type(i + 1), impl_subst, types);
+            const AST::ValueType have = wanted_type(
+                candidate->parameter_type(wanted.parameter_offset + i), subst, types);
 
             if (!(have == wanted.parameters[i])) {
                 return false;
             }
         }
 
-        return wanted_type(candidate->get_return_type(), impl_subst, types) == wanted.return_type;
+        return wanted_type(candidate->get_return_type(), subst, types) == wanted.return_type;
     }
 
     // the implementor's substitution when `ct` is an instantiation: `Bag<int32>`'s `E` is int32, so
@@ -527,7 +559,10 @@ AST::ConformanceBinding AST::conformance_bindings(
 
             for (size_t i = 0; unified && i < wanted.parameters.size(); i++) {
                 unified = AST::unify_type(
-                    wanted.parameters[i], candidate->parameter_type(i + 1), trial, /*allow_decay=*/false);
+                    wanted.parameters[i],
+                    candidate->parameter_type(wanted.parameter_offset + i),
+                    trial,
+                    /*allow_decay=*/false);
             }
 
             if (!unified) {
@@ -629,10 +664,12 @@ std::optional<AST::UnmetRequirement> AST::first_unmet_requirement(
             }
 
             bool answered = false;
+            const AST::TypeSubstitution impl_subst = implementor_substitution(ct);
+
             for (const AST::FunctionDeclNode *candidate :
                  functions->overloads(requirement->func_name(), *requirement->ast_namespace)) {
                 if (candidate != requirement
-                    && candidate_answers(candidate, wanted, AST::TypeSubstitution{}, types)) {
+                    && candidate_answers(candidate, wanted, impl_subst, types)) {
                     answered = true;
                     break;
                 }

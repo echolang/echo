@@ -264,6 +264,188 @@ TEST_CASE("constrained generic struct rejects a disallowed argument", "[generics
     REQUIRE(has_issue_containing(*bad, "Type parameter 'T' of 'Box' is constrained to 'numeric'"));
 }
 
+TEST_CASE("a constraint may name the parameter it constrains", "[generics]")
+{
+    // `T : Cmp<T>` is resolved after the list's names exist. a generic caller stays
+    // pending until its own T is bound, and the concrete call is where the constraint is judged
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Cmp<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Gate : Cmp<Gate> {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "operator (const Gate& $a) < (const Gate& $b) : bool {\n"
+        "    return $a->n < $b->n;\n"
+        "}\n"
+        "function lighter<T : Cmp<T>>(const T& $a, const T& $b) : bool {\n"
+        "    return $a < $b;\n"
+        "}\n"
+        "function hold<T : Cmp<T>>(const T& $a, const T& $b) : bool {\n"
+        "    return lighter($a, $b);\n"
+        "}\n"
+        "echo lighter(Gate(1), Gate(2));\n"
+        "echo hold(Gate(1), Gate(2));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    const FunctionDeclNode *tmpl = nullptr;
+    for (auto *decl : EchoTests::decls_named(m, "lighter")) {
+        if (decl->is_generic()) {
+            tmpl = decl;
+        }
+    }
+    REQUIRE(tmpl != nullptr);
+    REQUIRE(tmpl->type_parameters[0]->constraint_spelling == "Cmp<T>");
+    REQUIRE(tmpl->type_parameters[0]->constraint.size() == 1);
+    REQUIRE(tmpl->type_parameters[0]->constraint[0].is_interface());
+}
+
+TEST_CASE("a self constraint is refused at the call", "[generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Cmp<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Rock {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "function lighter<T : Cmp<T>>(const T& $a, const T& $b) : bool {\n"
+        "    return $a < $b;\n"
+        "}\n"
+        "echo lighter(Rock(1), Rock(2));\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "Type parameter 'T' of 'lighter' is constrained to 'Cmp<T>'"));
+    REQUIRE(has_issue_containing(*bundle, "Rock"));
+}
+
+TEST_CASE("a constraint may name a parameter declared later in the list", "[generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Cmp<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Gate : Cmp<Gate> {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "operator (const Gate& $a) < (const Gate& $b) : bool {\n"
+        "    return $a->n < $b->n;\n"
+        "}\n"
+        "function pick<B : Cmp<A>, A>(const A& $a, const B& $b) : bool {\n"
+        "    return $a < $b;\n"
+        "}\n"
+        "echo pick(Gate(1), Gate(2));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("a struct constraint may name its own parameter", "[generics]")
+{
+    auto ok = EchoTests::tests_make_parsed_bundle(
+        "interface Cmp<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Gate : Cmp<Gate> {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "operator (const Gate& $a) < (const Gate& $b) : bool {\n"
+        "    return $a->n < $b->n;\n"
+        "}\n"
+        "struct Box<T : Cmp<T>> {\n"
+        "    T $value;\n"
+        "}\n"
+        "$b = Box<Gate>(Gate(1));\n");
+    REQUIRE_FALSE(ok->collector.has_critical_issues());
+
+    auto bad = EchoTests::tests_make_parsed_bundle(
+        "interface Cmp<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Rock {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "struct Box<T : Cmp<T>> {\n"
+        "    T $value;\n"
+        "}\n"
+        "$b = Box<Rock>(Rock(1));\n");
+    REQUIRE(bad->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bad, "Type parameter 'T' of 'Box' is constrained to 'Cmp<T>'"));
+}
+
+TEST_CASE("where constrains a call and not the owner", "[generics]")
+{
+    auto ok = EchoTests::tests_make_parsed_bundle(
+        "function id<T>(T $x) : T where T : integer { return $x; }\n"
+        "function where() : int32 { return 1; }\n"
+        "echo id(4);\n"
+        "echo where();\n"
+        "struct Box<T> { T $value; function take() : T where T : integer { return $this->value; } }\n"
+        "$b = Box<int32>(7);\n"
+        "echo $b->take();\n");
+    REQUIRE_FALSE(ok->collector.has_critical_issues());
+
+    auto bad = EchoTests::tests_make_parsed_bundle(
+        "function id<T>(T $x) : T where T : integer { return $x; }\n"
+        "echo id(1.5);\n");
+    REQUIRE(bad->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bad, "constrained to 'integer'"));
+    REQUIRE(has_issue_containing(*bad, "float64"));
+
+    auto open = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> { T $value; }\n"
+        "$b = Box<float64>(1.5);\n"
+        "echo $b->value;\n");
+    REQUIRE_FALSE(open->collector.has_critical_issues());
+
+    const FunctionDeclNode *id = nullptr;
+    for (auto *decl : EchoTests::decls_named(ok->modules.find_module("test"), "id")) {
+        if (decl->is_generic()) {
+            id = decl;
+        }
+    }
+    REQUIRE(id != nullptr);
+    REQUIRE(id->where_clauses.size() == 1);
+    REQUIRE(id->where_clauses[0].index == 0);
+    REQUIRE(id->where_clauses[0].param == id->type_parameters[0]);
+}
+
+TEST_CASE("where on a lone bind survivor is not NoMatchingOverload", "[generics]")
+{
+    // labeled overloads of the same name must not swallow the where clause of the
+    // no-arg candidate. `$b->take()` binds only take(), and the constraint is the
+    // type checker's even though take(by:) sits in the same set
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> {\n"
+        "    T $value;\n"
+        "    function take() : T where T : integer { return $this->value; }\n"
+        "    function take(by: T $other) : T { return $other; }\n"
+        "}\n"
+        "$b = Box<float64>(1.5);\n"
+        "echo $b->take();\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "constrained to 'integer'"));
+    REQUIRE(has_issue_containing(*bundle, "float64"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "No overload"));
+}
+
+TEST_CASE("where only names a type parameter of this function", "[generics]")
+{
+    // Iter is in scope — an associated type — and it is not a parameter of next.
+    // a clause on it would parse and then never be judged
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Stepper<V> { function current() : V; }\n"
+        "interface Walkable<V> {\n"
+        "    type Iter : Stepper<V>;\n"
+        "    function next<T>(T $v) : T where Iter : Stepper<V>;\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "is not a type parameter of 'next'"));
+}
+
 TEST_CASE("prefix unary negation resolves in a generic function", "[generics]")
 {
     // a generic body using prefix '-' used to hand the shunting yard a null lhs

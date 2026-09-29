@@ -110,6 +110,26 @@ namespace AST
         // list binds the same parameters. cleared on a clone, which is concrete by definition
         std::vector<TypeParamDecl *> type_parameters;
 
+        // one `where` clause: a constraint on a parameter already in scope, judged at the call
+        // once that parameter is bound. stored here rather than on the TypeParamDecl, because a
+        // method's `T` belongs to the owner and a constraint on `sort` must not become a
+        // constraint on every use of the owner
+        struct WhereClause
+        {
+            const TypeParamDecl *param = nullptr;
+
+            // index into this function's type_parameters. the parser stores a clause only
+            // when the name is in that list, so the checker does not search and a name that
+            // merely happens to be in scope (an associated type, an outer parameter) is
+            // refused at the declaration rather than dropped at the call
+            size_t index = 0;
+
+            std::vector<ValueType> atoms;
+            std::string spelling;
+        };
+
+        std::vector<WhereClause> where_clauses;
+
         // set when this declaration is a *member* function: the type it was declared inside. a
         // method is an ordinary function whose first parameter is `$this`, so this pointer is the
         // only thing that tells the three consumers that need to know:
@@ -195,7 +215,13 @@ namespace AST
         // deliberately not folded into implicit_arg_count(), which counts a closure's environment too -
         // see the note at AST::access_effect_of, whose receiver rule must not fire for one
         inline bool has_receiver() const {
-            return owner_type != nullptr && member_kind != MemberKind::t_static_method;
+            // an operator requirement lives on its interface, so it has an owner, and its left
+            // operand is still a parameter the author wrote. a receiver is the parameter the
+            // caller did not write. reading args[0] as one made `const T&` look like a const
+            // method and no file-scope operator could answer it
+            return owner_type != nullptr
+                && member_kind != MemberKind::t_static_method
+                && member_kind != MemberKind::t_operator;
         }
 
         // **who may call this**, and where it was written to answer that against.

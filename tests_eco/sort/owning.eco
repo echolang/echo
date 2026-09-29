@@ -1,0 +1,20 @@
+// owning strings: sort relocates the handles, then everything is given back
+
+function run() : void
+{
+    array<string> $names = [
+        'zzzzzzzzzzzzzzzz',
+        'aaaaaaaaaaaaaaaa',
+        'mmmmmmmmmmmmmmmm',
+        'aaaaaaaaaaaaaaaa',
+    ];
+    $names->sort();
+    echo $names[0];
+    echo $names[1];
+    echo $names[3];
+    echo sort::is_sorted($names->data(), $names->count());
+    echo mem::live_allocations() > 0;
+}
+
+run();
+echo mem::live_allocations();

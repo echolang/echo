@@ -133,6 +133,78 @@ public struct slice<T> : contract::iterable<T>, contract::const_iterable<const T
 
         return slice<const T>($this->data:$ + $from, $count);
     }
+
+    /**
+     * Order the elements by `<`. Unstable: equal elements may trade places.
+     *
+     * In place, and it allocates nothing. `T` has to be `contract::comparable<T>`: an
+     * integer or a float already is, a struct has to say so. One pass when the window
+     * is already ordered or strictly reversed.
+     */
+    public function sort_unstable() : void where T : contract::comparable<T>
+    {
+        sort::unstable_natural<T>($this->data, $this->len);
+    }
+
+    /**
+     * Unstable, ordered by `$c`. A `contract::comparator<T>` inlines into the kernel.
+     */
+    public function sort_unstable<C : contract::comparator<T>>(by: C $c) : void
+    {
+        sort::unstable_comparing<T, C>($this->data, $this->len, $c);
+    }
+
+    /**
+     * Unstable, ordered by a closure. One indirect call per compare.
+     */
+    public function sort_unstable(by: function<ordering(const T&, const T&)> $c) : void
+    {
+        sort::unstable_with<T>($this->data, $this->len, $c);
+    }
+
+    /**
+     * Unstable, ordered by `$k` of each element. `K` has to be comparable.
+     */
+    public function sort_unstable<K : contract::comparable<K>>(key: function<K(const T&)> $k) : void
+    {
+        sort::unstable_keyed<T, K>($this->data, $this->len, $k);
+    }
+
+    /**
+     * Order the elements by `<`. Stable: equal elements keep their relative positions.
+     *
+     * Integers skip the merge and use the unstable kernel, because their order is total
+     * and a copy is a copy. A float stays on this path (`-0.0 == 0.0`). Allocates a
+     * scratch buffer of `$n` elements when `$n` is above 20, nothing below.
+     */
+    public function sort() : void where T : contract::comparable<T>
+    {
+        sort::stable_natural<T>($this->data, $this->len);
+    }
+
+    /**
+     * Stable, ordered by `$c`. A `contract::comparator<T>` inlines into the kernel.
+     */
+    public function sort<C : contract::comparator<T>>(by: C $c) : void
+    {
+        sort::stable_comparing<T, C>($this->data, $this->len, $c);
+    }
+
+    /**
+     * Stable, ordered by a closure. One indirect call per compare.
+     */
+    public function sort(by: function<ordering(const T&, const T&)> $c) : void
+    {
+        sort::stable_with<T>($this->data, $this->len, $c);
+    }
+
+    /**
+     * Stable, ordered by `$k` of each element. `K` has to be comparable.
+     */
+    public function sort<K : contract::comparable<K>>(key: function<K(const T&)> $k) : void
+    {
+        sort::stable_keyed<T, K>($this->data, $this->len, $k);
+    }
 }
 
 /**

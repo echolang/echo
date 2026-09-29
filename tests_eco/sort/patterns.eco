@@ -1,0 +1,176 @@
+// integer patterns the kernel has to finish: insertion, reverse, partition,
+// equal-run, sawtooth, organ pipe. large n prints a checksum, not the buffer.
+
+function xorshift(uint64& $state) : uint64
+{
+    uint64 $x = $state;
+    $x = $x ^ ($x << 13);
+    $x = $x ^ ($x >> 7);
+    $x = $x ^ ($x << 17);
+    $state = $x;
+    return $x;
+}
+
+function mix(uint64 $fold, int32 $sample, int32 $first, int32 $last) : uint64
+{
+    int64 $sample_wide = $sample;
+    int64 $first_wide = $first;
+    int64 $last_wide = $last;
+    uint64 $bits = ($sample_wide as uint64) ^ (($first_wide as uint64) << 1) ^ (($last_wide as uint64) << 2);
+    uint64 $golden = 0x9E3779B97F4A7C15;
+
+    return ($fold * $golden) ^ $bits;
+}
+
+function report(string $name, array<int32> $a) : void
+{
+    usize $n = $a->count();
+    echo $name;
+    echo $n;
+    echo sort::is_sorted($a->data(), $n);
+
+    if ($n == 0) {
+        echo 0;
+        return;
+    }
+
+    echo $a[0];
+    echo $a[$n - 1];
+
+    uint64 $fold = 0x123456789ABCDEF0;
+    usize $at = $n / 2;
+    $fold = mix($fold, $a[$at], $a[0], $a[$n - 1]);
+    echo $fold;
+}
+
+function fill_random(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    uint64 $state = 0x9E3779B97F4A7C15;
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint64 $raw = xorshift($state);
+        int32 $value = ($raw >> 32) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function fill_sorted(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = $i as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function fill_reversed(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = ($n - 1 - $i) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function fill_equal(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        $a[] = 7;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function fill_few(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    uint64 $state = 0x9E3779B97F4A7C15;
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint64 $raw = xorshift($state);
+        int32 $value = (($raw >> 32) & 15) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function fill_pipe(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $half = $n / 2;
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = $i as int32;
+
+        if ($i >= $half) {
+            $value = ($n - 1 - $i) as int32;
+        }
+
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function fill_saw(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = ($i % 64) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function run(string $name, array<int32> $a) : void
+{
+    $a->sort_unstable();
+    report($name, $a);
+}
+
+run("random 1000", fill_random(1000));
+run("sorted 1000", fill_sorted(1000));
+run("reversed 1000", fill_reversed(1000));
+run("equal 1000", fill_equal(1000));
+run("few 1000", fill_few(1000));
+run("pipe 1000", fill_pipe(1000));
+run("saw 1000", fill_saw(1000));
+run("random 100000", fill_random(100000));
+run("reversed 100000", fill_reversed(100000));
+run("pipe 64", fill_pipe(64));
+run("saw 64", fill_saw(64));

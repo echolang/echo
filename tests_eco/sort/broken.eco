@@ -1,0 +1,46 @@
+// a comparator that cannot make up its mind still permutes. no lost element,
+// no extra allocation left behind once the arrays drop.
+
+function chaos(const string& $a, const string& $b) : ordering
+{
+    uint64 $h = hash::of($a) ^ (hash::of($b) * 3);
+    usize $r = ($h as usize) % 3;
+
+    if ($r == 0) {
+        return ordering::less;
+    }
+
+    if ($r == 1) {
+        return ordering::equal;
+    }
+
+    return ordering::greater;
+}
+
+function run() : void
+{
+    array<string> $src = [
+        'alpha-alpha-aaaa',
+        'beta-beta-bbbbbb',
+        'gamma-gamma-gggg',
+        'alpha-alpha-aaaa',
+        'delta-delta-dddd',
+    ];
+    array<string> $work = $src;
+    $work->sort_unstable(by: function(const string& $a, const string& $b) : ordering {
+        return chaos($a, $b);
+    });
+    echo $work->count();
+    echo mem::live_allocations() > 0;
+
+    $src->sort();
+    $work->sort();
+    echo $src[0] == $work[0];
+    echo $src[1] == $work[1];
+    echo $src[2] == $work[2];
+    echo $src[3] == $work[3];
+    echo $src[4] == $work[4];
+}
+
+run();
+echo mem::live_allocations();

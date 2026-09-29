@@ -359,6 +359,24 @@ TEST_CASE("unary_has_builtin_meaning covers negation and both meanings of '!'", 
     REQUIRE_FALSE(unary_has_builtin_meaning(bang, value(v4i32)));
 }
 
+TEST_CASE("a builtin comparison over a vector is a mask, not the operand vector", "[AST][operators]")
+{
+    OperatorRegistry registry;
+    Shapes s = shapes();
+    const ValueType four = ValueType::make_const_value(ValueTypePrimitive::t_usize, 4);
+    const ValueType v4i32 = ValueType::make_simd(s.i32, four);
+    const ValueType mask = ValueType::make_simd(s.boolean, four);
+    const Operator *lt = op_for(registry, Token::Type::t_open_angle);
+    const Operator *bang = op_for(registry, Token::Type::t_exclamation);
+
+    REQUIRE(lt != nullptr);
+    REQUIRE(bang != nullptr);
+    REQUIRE(builtin_binary_result(lt, v4i32, v4i32) == mask);
+    REQUIRE(builtin_binary_result(lt, s.i32, s.i32) == s.boolean);
+    REQUIRE(builtin_unary_result(Token::Type::t_exclamation, mask) == mask);
+    REQUIRE(builtin_unary_result(Token::Type::t_exclamation, s.i32) == s.boolean);
+}
+
 // AST::binary_reconciles_operands and AST::binary_operation_type - "do these two operands meet at one
 // type, and which type is the operation performed at?"
 //

@@ -245,6 +245,15 @@ namespace AST
     // from "already agree" to report the first. one rule, and only one of its callers needs the failure
     ValueType binary_operation_type(const Operator *op, const ValueType &lhs, const ValueType &rhs);
 
+    // **the value a builtin operator produces for these peeled operands.** one owner, asked
+    // by UnaryExprNode / BinaryExprNode and by structural conformance, so a vector comparison
+    // cannot answer bool in one place and the operand vector in another.
+    //
+    // `!` is a mask over a simd and bool otherwise. a comparison is `simd<bool, N>` over a
+    // vector and bool otherwise. arithmetic is binary_operation_type
+    ValueType builtin_unary_result(Token::Type op, const ValueType &operand);
+    ValueType builtin_binary_result(const Operator *op, const ValueType &lhs, const ValueType &rhs);
+
     // **why this shift count has no answer**, or nullopt when it has one.
     //
     // at or above the shifted type's width LLVM's `shl`/`lshr`/`ashr` are **poison** rather than a

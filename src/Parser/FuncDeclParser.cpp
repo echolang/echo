@@ -889,12 +889,11 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         inherited_params = owner_struct->type_parameters();
     }
 
-    // declare the type parameters, then make them resolvable while the signature and body are
-    // parsed. the scope is pushed unconditionally, even when empty, so that a non-generic
-    // function nested in a generic owner leaves the owner's parameters visible
-    declare_type_parameters(payload, *funcdecl, parsed_type_params, inherited_params);
-
-    AST::TypeParamScope type_param_scope(payload.context, funcdecl->type_parameters);
+    // declare, open the scope, re-read each colon with the names visible. the scope is
+    // pushed unconditionally, even when empty, so that a non-generic function nested in
+    // a generic owner leaves the owner's parameters visible. a method's `U : Cmp<T>`
+    // resolves T because the inherited prefix is in the same list
+    AST::TypeParamScope type_param_scope = install_type_parameters(payload, *funcdecl, parsed_type_params, inherited_params);
 
     // skip the open parenthesis
     cursor.skip();
@@ -946,6 +945,13 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     }
 
     funcdecl->return_type = parse_type(payload);
+
+    // `where` is an ordinary identifier, recognised only after the return type. the scan
+    // itself lives in TypeParamParser so this function does not grow another loop
+    if (!parse_where_clauses(payload, *funcdecl)) {
+        Parser::skip_refused_function(payload);
+        return nullptr;
+    }
 
     // **here rather than after the body**: the return type one line
     // up is the last thing an attribute could have something to say about, and `#[implicit]` below

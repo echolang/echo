@@ -726,6 +726,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // still names the template - the declarations themselves stay owned by the registry arena,
     // so dropping the pointers frees nothing and dangles nothing
     c->type_parameters.clear();
+    c->where_clauses.clear();
 
     // and with them the owner/own split, for the same reason: cc.shallow copy-constructs, so an
     // instance would otherwise claim inherited parameters it no longer carries. owner_type does

@@ -661,6 +661,35 @@ namespace AST
         return common_numeric_type(lhs, rhs).value_or(lhs);
     }
 
+    ValueType builtin_unary_result(Token::Type op, const ValueType &operand)
+    {
+        if (op == Token::Type::t_exclamation) {
+            if (operand.is_simd()) {
+                return operand;
+            }
+
+            return ValueType(ValueTypePrimitive::t_bool);
+        }
+
+        return operand;
+    }
+
+    ValueType builtin_binary_result(const Operator *op, const ValueType &lhs, const ValueType &rhs)
+    {
+        if (op != nullptr && op->is_comparison()) {
+            if (lhs.is_simd() || rhs.is_simd()) {
+                const ValueType &vec = lhs.is_simd() ? lhs : rhs;
+
+                return ValueType::make_simd(
+                    ValueType(ValueTypePrimitive::t_bool), vec.simd_length());
+            }
+
+            return ValueType(ValueTypePrimitive::t_bool);
+        }
+
+        return binary_operation_type(op, lhs, rhs);
+    }
+
     std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count)
     {
         if (shifted.is_simd()) {

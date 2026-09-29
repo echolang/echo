@@ -261,18 +261,30 @@ namespace AST
     struct TypeParamScope
     {
         Context &context;
+        bool armed = true;
 
         TypeParamScope(Context &context, const std::vector<TypeParamDecl *> &params) :
-            context(context)
+            context(context),
+            armed(true)
         {
             context.push_type_param_scope(params);
         }
 
+        TypeParamScope(TypeParamScope &&other) :
+            context(other.context),
+            armed(other.armed)
+        {
+            other.armed = false;
+        }
+
         TypeParamScope(const TypeParamScope &) = delete;
         TypeParamScope &operator=(const TypeParamScope &) = delete;
+        TypeParamScope &operator=(TypeParamScope &&) = delete;
 
         ~TypeParamScope() {
-            context.pop_type_param_scope();
+            if (armed) {
+                context.pop_type_param_scope();
+            }
         }
     };
 

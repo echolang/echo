@@ -63,7 +63,7 @@ namespace AST
         // candidates with. everything below is the half the parser must *not* do: a template that
         // cannot take a call is an overload filter there and a diagnostic here, and this is the only
         // place that difference lives
-        const Instantiation inst = can_instantiate(tmpl, *call);
+        const Instantiation inst = can_instantiate(tmpl, *call, _collector.type_registry);
 
         switch (inst.blame) {
         case InstantiationBlame::t_type_argument_count:
@@ -104,7 +104,7 @@ namespace AST
                 _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(
                     code_ref_for(mod, call->token_function_name),
                     "Type parameter '" + inst.param->name + "' of '" + tmpl->func_name() +
-                    "' is constrained to '" + inst.param->constraint_spelling +
+                    "' is constrained to '" + inst.constraint_label() +
                     "' but was given '" + inst.bound.get_type_desciption() + "'");
             }
             is_error = true;

@@ -1,0 +1,39 @@
+// stable sort keeps equal keys in their original order. strings share a prefix;
+// the payload-bearing struct uses address as the order and id as the witness.
+
+public struct Gate : contract::comparable<Gate>
+{
+    public int32 $address;
+    public int32 $id;
+}
+
+operator (const Gate& $a) < (const Gate& $b) : bool
+{
+    return $a->address < $b->address;
+}
+
+array<string> $names = ['b', 'a', 'b'];
+$names->sort();
+echo $names[0];
+echo $names[1];
+echo $names[2];
+echo sort::is_sorted($names->data(), $names->count());
+
+array<Gate> $gates = [Gate(3, 2), Gate(1, 1), Gate(3, 0)];
+$gates->sort();
+echo $gates[0]->id;
+echo $gates[1]->id;
+echo $gates[2]->id;
+
+array<int32> $ints = [3, 1, 2];
+$ints->sort();
+echo $ints[0];
+echo $ints[2];
+echo sort::is_sorted($ints->data(), $ints->count());
+
+array<string> $window = ['z', 'c', 'a', 'b', 'y'];
+$window->sub(1, 3)->sort();
+echo $window[0];
+echo $window[1];
+echo $window[3];
+echo $window[4];

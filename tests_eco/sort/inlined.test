@@ -1,0 +1,17 @@
+mode: build
+flags: --optimize whole
+expect: ok
+
+--- OUT --->
+0
+31
+0
+31
+--- IR --->
+// integer sort_unstable and sort_unstable(by: struct) share quick_by. both compare with icmp,
+// not a call to operator < / ByAddr::compare
+CHECK: icmp slt i32
+CHECK-NOT: _operatorx20x3c
+CHECK: define linkonce_odr void @_sort_quick_byZZMRNMLC4Gate
+CHECK-NOT: call void @_M6ByAddr_compare
+CHECK: icmp slt i32

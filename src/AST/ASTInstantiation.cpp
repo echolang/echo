@@ -12,6 +12,7 @@
 #include "AST/VarDeclNode.h"
 
 #include <algorithm>
+#include <cassert>
 
 namespace AST
 {
@@ -26,31 +27,232 @@ namespace AST
         }
     }
 
-    std::optional<size_t> first_constraint_violation(
-        const std::vector<TypeParamDecl *> &params,
-        const std::vector<ValueType> &args)
+    // how a union of atoms answers one argument, after substitution
+    enum class AtomHold
     {
-        const size_t count = std::min(params.size(), args.size());
+        // one atom admitted the argument, or the list was empty
+        t_holds,
 
-        for (size_t i = 0; i < count; i++) {
-            // a bare type parameter is the one argument whose answer genuinely is not knowable yet:
-            // it stands for whatever the enclosing template will be instantiated with, and is judged
-            // then. `Box<T>` is deliberately not that case - it will be a Box whatever T becomes, so
-            // its answer is already decided
-            //
-            // unknown carries no information at all, and a program that got one here has already been
-            // told why - a constraint error on top would blame one typo twice. void is a real type
-            // argument and is judged like any other
-            if (args[i].is_type_param() || args[i].is_unknown()) {
-                continue;
-            }
+        // nothing admitted it, and an atom still names a type parameter. not a refusal:
+        // `B : Cmp<A>` stays open while A is unbound. also not an admission
+        t_pending,
 
-            if (!params[i]->allows(args[i])) {
-                return i;
+        // every atom was concrete and missed
+        t_violates,
+    };
+
+    // one atom of a union, after substitution. true when it admits `arg`. an atom that still
+    // names a type parameter sets `pending` and does not admit, so `B : Cmp<A>` does not
+    // refuse B while A is still unbound and does not count as a hold either
+    static bool atom_admits(
+        const ValueType &atom,
+        const ValueType &arg,
+        const TypeSubstitution &subst,
+        TypeRegistry &registry,
+        bool &pending
+    )
+    {
+        ValueType concrete = atom;
+
+        if (contains_type_param(atom)) {
+            concrete = substitute_type(atom, subst, registry);
+        }
+
+        if (contains_type_param(concrete)) {
+            pending = true;
+            return false;
+        }
+
+        std::vector<ValueType> one { concrete };
+        return constraint_admits(one, arg);
+    }
+
+    static AtomHold atoms_hold(
+        const std::vector<ValueType> &atoms,
+        const ValueType &arg,
+        const TypeSubstitution &subst,
+        TypeRegistry &registry
+    )
+    {
+        if (atoms.empty()) {
+            return AtomHold::t_holds;
+        }
+
+        bool pending = false;
+
+        for (const ValueType &atom : atoms) {
+            if (atom_admits(atom, arg, subst, registry, pending)) {
+                return AtomHold::t_holds;
             }
         }
 
-        return std::nullopt;
+        return pending ? AtomHold::t_pending : AtomHold::t_violates;
+    }
+
+    static TypeSubstitution substitution_of(
+        const std::vector<TypeParamDecl *> &params,
+        const std::vector<ValueType> &args
+    )
+    {
+        TypeSubstitution subst;
+        const size_t count = std::min(params.size(), args.size());
+
+        for (size_t i = 0; i < count; i++) {
+            // an unknown slot left in the substitution would rebuild `Cmp<T>` as
+            // `Cmp<unknown>`, and that is a different question from "A is not bound yet"
+            if (!args[i].is_unknown()) {
+                subst.bind(params[i], args[i]);
+            }
+        }
+
+        return subst;
+    }
+
+    // true when this argument is a concrete miss or a pending atom, and a miss should stop
+    // the walk. `where_spelling` is the clause's spelling; null is the parameter's own constraint
+    static bool judge_constraint(
+        ConstraintJudgement &result,
+        size_t index,
+        const TypeParamDecl *param,
+        const ValueType &arg,
+        const std::vector<ValueType> &atoms,
+        const TypeSubstitution &subst,
+        TypeRegistry &registry,
+        const std::string *where_spelling
+    )
+    {
+        // a bare type parameter is the one argument whose answer genuinely is not knowable yet:
+        // it stands for whatever the enclosing template will be instantiated with, and is judged
+        // then. `Box<T>` is deliberately not that case - it will be a Box whatever T becomes, so
+        // its answer is already decided
+        //
+        // unknown carries no information at all, and a program that got one here has already been
+        // told why - a constraint error on top would blame one typo twice. void is a real type
+        // argument and is judged like any other
+        if (arg.is_type_param() || arg.is_unknown()) {
+            return false;
+        }
+
+        auto violate = [&]() {
+            result.violation = index;
+
+            if (where_spelling != nullptr) {
+                result.spelling = *where_spelling;
+            }
+
+            return true;
+        };
+
+        // a value parameter is constrained by the integer type it was declared with, which
+        // allows() owns. a `where` clause is atoms on top of that, not a replacement for it
+        if (param->is_value_param()) {
+            if (!param->allows(arg)) {
+                return violate();
+            }
+
+            if (where_spelling == nullptr) {
+                return false;
+            }
+        } else if (arg.is_const_value()) {
+            // a number where a type was required. allows() refuses this ahead of the atoms;
+            // an empty constraint would otherwise admit it
+            return violate();
+        }
+
+        switch (atoms_hold(atoms, arg, subst, registry)) {
+        case AtomHold::t_holds:
+            return false;
+
+        case AtomHold::t_pending:
+            if (!result.pending.has_value()) {
+                result.pending = index;
+
+                if (where_spelling != nullptr) {
+                    result.spelling = *where_spelling;
+                }
+            }
+
+            return false;
+
+        case AtomHold::t_violates:
+            return violate();
+        }
+
+        assert(false);
+        return violate();
+    }
+
+    static bool arguments_are_concrete(
+        const std::vector<TypeParamDecl *> &params,
+        const std::vector<ValueType> &args
+    )
+    {
+        if (args.size() < params.size()) {
+            return false;
+        }
+
+        const size_t count = params.size();
+
+        for (size_t i = 0; i < count; i++) {
+            if (is_undetermined_type(args[i])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    ConstraintJudgement first_constraint_violation(
+        const std::vector<TypeParamDecl *> &params,
+        const std::vector<ValueType> &args,
+        TypeRegistry &registry,
+        const std::vector<FunctionDeclNode::WhereClause> &where_clauses)
+    {
+        ConstraintJudgement result;
+        const size_t count = std::min(params.size(), args.size());
+        const TypeSubstitution subst = substitution_of(params, args);
+
+        for (size_t i = 0; i < count; i++) {
+            if (judge_constraint(
+                    result, i, params[i], args[i], params[i]->constraint, subst, registry, nullptr)) {
+                return result;
+            }
+        }
+
+        for (const FunctionDeclNode::WhereClause &clause : where_clauses) {
+            // the parser refuses a name that is not one of this function's parameters,
+            // so a miss here is a broken declaration rather than a clause to skip
+            assert(clause.index < params.size());
+            assert(params[clause.index] == clause.param);
+
+            if (clause.index >= args.size()) {
+                continue;
+            }
+
+            if (judge_constraint(
+                    result,
+                    clause.index,
+                    clause.param,
+                    args[clause.index],
+                    clause.atoms,
+                    subst,
+                    registry,
+                    &clause.spelling)) {
+                return result;
+            }
+        }
+
+        // every argument is concrete and an atom still names a parameter. substitution
+        // had its chance — the parameter the atom names is not one of these bindings —
+        // so the constraint does not hold. leaving it pending would admit the call
+        if (!result.violation.has_value()
+            && result.pending.has_value()
+            && arguments_are_concrete(params, args)) {
+            result.violation = result.pending;
+            result.pending.reset();
+        }
+
+        return result;
     }
 
     TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner)
@@ -93,6 +295,7 @@ namespace AST
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,
+        TypeRegistry &registry,
         const std::vector<ValueType> &explicit_type_args,
         const ValueType &static_owner,
         const std::vector<bool> &argument_defers)
@@ -345,7 +548,13 @@ namespace AST
             }
         }
 
-        const std::optional<size_t> violation = first_constraint_violation(tmpl->type_parameters, bound_types);
+        // parameter constraints and `where` clauses, one walk. a pending atom is not a
+        // hold: while a binding is still open the instantiation stays undecided, and once
+        // every argument is concrete the same atom is a violation
+        const ConstraintJudgement judged = first_constraint_violation(
+            tmpl->type_parameters, bound_types, registry, tmpl->where_clauses);
+        const std::optional<size_t> violation = judged.violation;
+        const bool held_back = judged.pending.has_value() && !violation.has_value();
 
         // the fit, which is all overload resolution reads. an argument whose shape cannot be
         // reconciled is a definite no - no substitution will ever make it fit - while a parameter
@@ -360,7 +569,7 @@ namespace AST
 
         if (mismatched_argument.has_value() || constraint_first) {
             result.fit = InstantiationFit::t_no;
-        } else if (unresolved_index.has_value()) {
+        } else if (unresolved_index.has_value() || held_back) {
             result.fit = InstantiationFit::t_maybe;
         } else {
             result.fit = InstantiationFit::t_yes;
@@ -371,19 +580,22 @@ namespace AST
         if (unbound != nullptr) {
             result.blame = InstantiationBlame::t_unbound_parameter;
             result.param = unbound;
-        } else if (undecided != nullptr) {
+        } else if (undecided != nullptr || held_back) {
             result.blame = InstantiationBlame::t_undecided_parameter;
-            result.param = undecided;
+            result.param = undecided != nullptr
+                ? undecided
+                : tmpl->type_parameters[*judged.pending];
         } else if (violation.has_value()) {
             result.blame = InstantiationBlame::t_constraint;
             result.param = tmpl->type_parameters[*violation];
             result.bound = bound_types[*violation];
+            result.constraint_spelling = judged.spelling;
         } else if (mismatched_argument.has_value()) {
             result.blame = InstantiationBlame::t_argument_shape;
             result.argument = *mismatched_argument;
         }
 
-        result.decided = !unresolved_index.has_value();
+        result.decided = !unresolved_index.has_value() && !held_back;
 
         if (result.decided) {
             result.type_arguments = std::move(bound_types);
@@ -428,7 +640,10 @@ namespace AST
         return explicit_type_args;
     }
 
-    Instantiation can_instantiate(const FunctionDeclNode *tmpl, const FunctionCallExprNode &call)
+    Instantiation can_instantiate(
+        const FunctionDeclNode *tmpl,
+        const FunctionCallExprNode &call,
+        TypeRegistry &registry)
     {
         // a static names its owner; a constructor names the type it builds. they are mutually
         // exclusive on the node, and either is the seed static_owner_bindings reads
@@ -448,6 +663,7 @@ namespace AST
         return can_instantiate(
             tmpl,
             slots.types,
+            registry,
             explicit_type_args_of(call),
             owner,
             slots.defers);

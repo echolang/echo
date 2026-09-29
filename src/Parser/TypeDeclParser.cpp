@@ -201,7 +201,7 @@ static void parse_associated_type(
 
     Parser::ParsedTypeParam parsed{ name_token, {}, "" };
 
-    if (!Parser::parse_constraint_atoms(payload, parsed)) {
+    if (!Parser::parse_constraint_atoms(payload, parsed, payload.pass != Parser::Pass::t_type_names)) {
         // parse_constraint_atoms has reported
         finish();
         return;
@@ -580,11 +580,10 @@ static void parse_constructor(
     ctor_decl->visibility = visibility.value;
     ctor_decl->declared_in = AST::origin_at(payload.context);
 
-    // the struct's parameters inherited. declare_type_parameters shares the struct's T rather than
-    // copying it, so one substitution binds the T the return type Foo<T> mentions
-    Parser::declare_type_parameters(payload, *ctor_decl, {}, struct_node->type_parameters());
-
-    AST::TypeParamScope type_param_scope(payload.context, ctor_decl->type_parameters);
+    // the struct's parameters inherited. install_type_parameters shares the struct's T rather than
+    // copying it, so one substitution binds the T the return type Foo<T> mentions. parsed is empty:
+    // a constructor has no own parameters, and the inherited ones were already resolved on the type
+    AST::TypeParamScope type_param_scope = Parser::install_type_parameters(payload, *ctor_decl, {}, struct_node->type_parameters());
 
     // the return type is the one thing *not* rebuilt per pass: it is the struct's interned self type,
     // so the second pass would only emplace a node equal to the one already here
@@ -1257,10 +1256,10 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     }
 
     // declare the generic type parameters (idempotent across the parse passes) and, when the struct
-    // is generic, make them resolvable while parsing its property types
-    declare_type_parameters(payload, struct_node->complex_type(), parsed_type_params);
-    const std::vector<AST::TypeParamDecl *> &type_parameters = struct_node->type_parameters();
-    AST::TypeParamScope type_param_scope(payload.context, type_parameters);
+    // is generic, make them resolvable while parsing its property types. `T : Cmp<T>` names T,
+    // which the scope this opens is what makes resolvable. the conformance clause below re-reads
+    // for the same reason; this is that re-read for the parameter list
+    AST::TypeParamScope type_param_scope = Parser::install_type_parameters(payload, struct_node->complex_type(), parsed_type_params);
 
     // only the first pass to walk this body keeps what it parsed - see TypeDeclNode's
     // members_collected(). the second walks the same code, rather than skipping to each member's end,

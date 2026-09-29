@@ -1,0 +1,13 @@
+// bool has no ordering builtin, so it does not structurally conform to an operator-only `<`
+
+interface Comparable<T>
+{
+    operator (const T& $a) < (const T& $b) : bool;
+}
+
+function lighter<T : Comparable<T>>(T $a, T $b) : bool
+{
+    return $a < $b;
+}
+
+echo lighter(true, false);

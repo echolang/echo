@@ -424,11 +424,11 @@ namespace AST
 
         const std::vector<ValueType> argument_types = argument_types_of(call);
 
-        // `choosing` is about the overload *set*, not the bind survivors. a unique name is taken
-        // without types so a bad argument stays the type checker's. an operator's set is the whole
-        // program's, so a lone bind survivor still has to be instantiation-filtered or a generic
-        // `operator []<T>` wins `$s[] = 2` and the failure is UnresolvedTypeParameter
-        const bool choosing = candidates.size() > 1;
+        // a non-operator lone bind survivor is a unique name even when other overloads were in
+        // the set; an operator set is still filtered because it is the whole program
+        const bool operator_set = candidates.size() > 1 && candidates.front()->is_operator();
+        const bool lone_bind_survivor = bound.size() == 1;
+        const bool filter_instantiation = operator_set || !lone_bind_survivor;
 
         std::vector<FunctionCandidate> match_candidates;
         match_candidates.reserve(bound.size());
@@ -438,7 +438,7 @@ namespace AST
             auto parameter_types = candidate->parameter_types();
             const BoundSlots slots = bound_slots(entry.binding);
 
-            if (choosing && candidate->is_generic()) {
+            if (filter_instantiation && candidate->is_generic()) {
                 // score a template against the parameters it would actually be instantiated with,
                 // not against the bare `T`. an unsubstituted parameter is undetermined, which the
                 // matcher treats as neutral - so `pick<T>(T)` would tie with `pick(int32)` for a
@@ -456,7 +456,12 @@ namespace AST
                 // rank undetermined and tie, and the call never resolves
                 const ValueType &owner = call.static_owner.is_unknown() ? call.constructed_type : call.static_owner;
                 const Instantiation inst = can_instantiate(
-                    candidate, slots.types, explicit_type_args_of(call), owner, slots.defers);
+                    candidate,
+                    slots.types,
+                    _collector.type_registry,
+                    explicit_type_args_of(call),
+                    owner,
+                    slots.defers);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
                 // candidate. this is also how a type constraint filters an overload set

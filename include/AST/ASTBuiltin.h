@@ -46,6 +46,11 @@ namespace AST
         t_is_trivially_copyable,
         t_needs_destruction,
 
+        // **is this an integer primitive?** the same shape as the two above, folded from
+        // ValueType::is_integer_type. what lets `sort()` skip stability where stability cannot
+        // be observed, and what a later radix sort would ask. an unbound T stays "not yet"
+        t_is_integer,
+
         // **`T::min()` / `T::max()` on an integer primitive.** AST facts about the width, the
         // same table a literal's range check reads (IntegerSize). interned by
         // AST::integer_bound_decl rather than written in the stdlib: a primitive has no

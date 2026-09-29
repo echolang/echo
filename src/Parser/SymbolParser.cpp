@@ -289,6 +289,15 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // Box<T> would intern twice and the two would compare unequal
         Parser::declare_type_parameters(payload, type_node.complex_type(), parse_type_param_list(payload));
 
+        // skip `: Drawable, contract::iterable<E>` the way parse_typedecl does, leaving the cursor
+        // on the body's `{`. without this, the colon is an ordinary token the loop skips, and that
+        // skip zeros `pending.body` - so `struct string : comparable<string> { struct view {} }`
+        // never registered `view` on `string`. parse_typedecl already snapshots the clause and
+        // skip_until's the brace; this pass only needs the body still attributed to this type
+        if (cursor.is_type(Token::Type::t_colon)) {
+            cursor.skip_until({ Token::Type::t_open_brace });
+        }
+
         // a nested type goes on the owner and *not* into the namespace, so a bare `view` never
         // resolves at file scope. parse_typedecl reaches the same node in both later passes by asking
         // the owner, exactly as it reaches a top-level one by asking the namespace

@@ -61,6 +61,7 @@ private extern {
     function memcpy as copy_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
     function memmove as move_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
     function memset as set_bytes(ptr<uint8> $p, int32 $value, usize $bytes) : ptr<uint8>;
+    function memcmp as compare_bytes_raw(ptr<const uint8> $a, ptr<const uint8> $b, usize $bytes) : int32;
 }
 
 /**
@@ -95,6 +96,20 @@ public function align<T>() : usize;
  */
 #[builtin: is_trivially_copyable]
 public function is_trivially_copyable<T>() : bool;
+
+/**
+ * True when `T` is an integer primitive, as a compile-time constant.
+ *
+ * Signed and unsigned of every width, `usize` and `isize`. False for a float, a bool, a pointer,
+ * a simd vector, and every declared type. The compiler already knows this for `<` and for
+ * integer literals; this is that same answer, said out loud, so a container can branch on it.
+ *
+ * What it is for: an integer's order is total and assignment is a copy, so `sort()` can take the
+ * unstable kernel and skip a stability it cannot observe. A float has `<` and still has `-0.0 == 0.0`,
+ * so it stays on the stable path.
+ */
+#[builtin: is_integer]
+public function is_integer<T>() : bool;
 
 /**
  * True when a `T` going out of scope has something to give back, as a compile-time constant.
@@ -237,6 +252,18 @@ public function zero<T>(ptr<T> $p, usize $count) : void
 public function fill_bytes(ptr<uint8> $p, uint8 $byte, usize $bytes) : void
 {
     set_bytes($p:$, $byte as int32, $bytes);
+}
+
+/**
+ * Lexicographic compare of two byte runs of length `$bytes`. libc `memcmp`.
+ *
+ * Negative when `$a` is less, zero when they match, positive when `$a` is greater. The sign is
+ * the whole of the answer: do not assume `-1` / `0` / `1`. A shorter string is compared by
+ * handing this the shared prefix and then comparing the lengths, which is what `string` does.
+ */
+public function compare_bytes(ptr<const uint8> $a, ptr<const uint8> $b, usize $bytes) : int32
+{
+    return compare_bytes_raw($a:$, $b:$, $bytes);
 }
 
 /**

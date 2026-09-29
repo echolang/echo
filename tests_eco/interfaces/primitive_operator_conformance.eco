@@ -1,0 +1,26 @@
+// a primitive answers an operator-only interface through builtin meaning, so a self-constraint
+// T : Comparable<T> admits int32 and float64. bool has no `<` and is refused elsewhere
+
+interface Comparable<T>
+{
+    operator (const T& $a) < (const T& $b) : bool;
+}
+
+interface Addable<T>
+{
+    operator (T $a) + (T $b) : T;
+}
+
+function lighter<T : Comparable<T>>(T $a, T $b) : bool
+{
+    return $a < $b;
+}
+
+function twice<T : Addable<T>>(T $x) : T
+{
+    return $x + $x;
+}
+
+echo lighter(1, 2);
+echo twice(3);
+echo lighter(1.5, 2.5);

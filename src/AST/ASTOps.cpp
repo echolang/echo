@@ -107,6 +107,12 @@ const char *AST::op_fixity_name(AST::OpFixity fixity)
     return "unknown";
 }
 
+const AST::OperatorRegistry &AST::OperatorRegistry::predefined()
+{
+    static const OperatorRegistry table;
+    return table;
+}
+
 AST::OperatorRegistry::OperatorRegistry()
 {
     _predefined_operator_map.fill(nullptr);

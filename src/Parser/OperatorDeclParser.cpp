@@ -4,6 +4,7 @@
 #include "AST/ASTIssue.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTOperatorSemantics.h"
+#include "AST/ASTTypeParam.h"
 #include "AST/ASTValueType.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/TypeNode.h"
@@ -502,15 +503,13 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
 
     // the type parameters, declared and made visible before a single operand type is read - a
     // parameter mentioned in `(array<T>& $a)` has to resolve while that list is parsed.
-    // parse_funcdecl's order exactly, and the same two calls: declare_type_parameters owns the shape
-    // of FunctionDeclNode::type_parameters, TypeParamScope owns their visibility
+    // install_type_parameters is parse_funcdecl's door: declare, open the scope, re-read the colons
     //
     // no inherited parameters are passed: an operator is never a member, so there is no owner whose
     // list would sit ahead of its own. the list itself was parsed by read_operator_header, which had
-    // to walk it to reach the symbol
-    declare_type_parameters(payload, *funcdecl, header.type_params);
-
-    AST::TypeParamScope type_param_scope(payload.context, funcdecl->type_parameters);
+    // to walk it to reach the symbol. `operator<T : Cmp<T>>` walked the clause before T existed;
+    // the operands below mention T, and so may the constraint, so both reads happen inside this scope
+    AST::TypeParamScope type_param_scope = install_type_parameters(payload, *funcdecl, header.type_params);
 
     auto &funcscope = payload.context.emplace_node<AST::ScopeNode>();
     std::vector<AST::VarDeclNode *> rebuilt;
@@ -597,6 +596,13 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     }
 
     funcdecl->return_type = parse_type(payload);
+
+    // `where` after the return type, same position and same grammar as parse_funcdecl. recovery
+    // stays here: skip_operator_remainder is this file's, not skip_refused_function
+    if (!parse_where_clauses(payload, *funcdecl)) {
+        skip_operator_remainder(payload);
+        return nullptr;
+    }
 
     // after the return type, for parse_funcdecl's reason: the return type is the last thing an
     // attribute could have something to say about, and leaving them staged lets the next `struct`
@@ -777,26 +783,72 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
             // **a bare type parameter is the same refusal with a different reason.** the predicate
             // admits an undeterminable operand deliberately - it says nothing either way - so
             // `operator<T> (T $a) + (T $b)` lands here, and "built in for these operand types" is
-            // not what a reader wrote. an operator over a type parameter would have to be chosen
-            // per instantiation, and the symbol is one global set with no receiver to key on
+            // not what a reader wrote. an unconstrained operator over a type parameter would have
+            // to be chosen per instantiation, and the symbol is one global set with no receiver
+            // to key on
             const bool over_bare_param = std::any_of(operands.begin(), operands.end(),
                 [](const AST::OperandFacts &facts) { return facts.type.is_type_param(); });
 
+            // **a generic application of a named type is the spelling that refusal already
+            // recommends.** `binary_has_builtin_meaning` answers true for any type that still
+            // mentions a parameter, so `operator<E> (const Box<E>& $a) < (const Box<E>& $b)` would
+            // otherwise be refused as stealing a builtin even though that is exactly
+            // `operator (Vec<T> $a) + (Vec<T> $b)`. a `ptr<T>` or `simd<T, N>` is not this: those
+            // are not a named type, and their builtin meaning really does win
+            const bool named_generic = std::any_of(operands.begin(), operands.end(),
+                [](const AST::OperandFacts &facts) {
+                    return facts.type.has_complex_type() && AST::contains_type_param(facts.type);
+                });
+
             if (over_bare_param) {
+                // a *constrained* template is not a claim on a primitive site. builtin meaning
+                // still wins those; this declaration is for types the constraint admits that
+                // have no built-in meaning. `operator<T : comparable<T>>` and
+                // `operator<T> ... where T : comparable<T>` are the same constraint.
+                // unconstrained `operator<T> (T) + (T)` stays refused
+                bool constrained = !funcdecl->type_parameters.empty();
+
+                for (size_t i = 0; i < funcdecl->type_parameters.size(); i++) {
+                    const AST::TypeParamDecl *param = funcdecl->type_parameters[i];
+                    if (param == nullptr) {
+                        constrained = false;
+                        break;
+                    }
+
+                    if (!param->constraint.empty()) {
+                        continue;
+                    }
+
+                    bool from_where = false;
+                    for (const AST::FunctionDeclNode::WhereClause &clause : funcdecl->where_clauses) {
+                        if (clause.index == i && !clause.atoms.empty()) {
+                            from_where = true;
+                            break;
+                        }
+                    }
+
+                    if (!from_where) {
+                        constrained = false;
+                        break;
+                    }
+                }
+
+                if (!constrained) {
+                    return refuse(*header.symbol_token,
+                        fmt::format(
+                            "operator '{}' cannot be declared over a bare type parameter - the language "
+                            "already spells a meaning for '{}' over the primitives a parameter may be "
+                            "bound to. Declare it for the type itself, e.g. 'operator (Vec<T> $a) {} "
+                            "(Vec<T> $b)'.",
+                            header.spelling, header.spelling, header.spelling));
+                }
+            } else if (!named_generic) {
                 return refuse(*header.symbol_token,
                     fmt::format(
-                        "operator '{}' cannot be declared over a bare type parameter - the language "
-                        "already spells a meaning for '{}' over the primitives a parameter may be "
-                        "bound to. Declare it for the type itself, e.g. 'operator (Vec<T> $a) {} "
-                        "(Vec<T> $b)'.",
-                        header.spelling, header.spelling, header.spelling));
+                        "operator '{}' is built in for these operand types, so this declaration would "
+                        "never be used - where the language spells a meaning, the built-in one wins.",
+                        header.spelling));
             }
-
-            return refuse(*header.symbol_token,
-                fmt::format(
-                    "operator '{}' is built in for these operand types, so this declaration would "
-                    "never be used - where the language spells a meaning, the built-in one wins.",
-                    header.spelling));
         }
     }
 

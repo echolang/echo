@@ -429,6 +429,9 @@ namespace
             case AST::BuiltinKind::t_is_trivially_copyable:
                 return fold_bool(AST::classify_copy(subject) == AST::CopyKind::t_bytes);
 
+            case AST::BuiltinKind::t_is_integer:
+                return fold_bool(subject.is_integer_type());
+
             case AST::BuiltinKind::t_needs_destruction:
                 return fold_bool(AST::needs_destruction(subject));
 

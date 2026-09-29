@@ -1,0 +1,25 @@
+// a nested type stays registered when its owner has a conformance clause. pass 1 used to
+// treat the colon as an ordinary token and drop the pending type before the body brace
+
+interface Named
+{
+    const function name() : string;
+}
+
+struct Vessel : Named
+{
+    struct bay
+    {
+        int32 $gliders;
+    }
+
+    string $name;
+
+    const function name() : string
+    {
+        return $this->name;
+    }
+}
+
+Vessel::bay $hangar = Vessel::bay(8);
+echo $hangar->gliders;

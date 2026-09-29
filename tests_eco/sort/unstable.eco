@@ -1,0 +1,211 @@
+// the integer kernel: insertion under 20, quicksort from 21, the 4-byte vector reverse,
+// and the scalar reverse on int64. each line is one sorted span.
+
+function xorshift(uint64& $state) : uint64
+{
+    uint64 $x = $state;
+    $x = $x ^ ($x << 13);
+    $x = $x ^ ($x >> 7);
+    $x = $x ^ ($x << 17);
+    $state = $x;
+    return $x;
+}
+
+function show32(string $name, array<int32> $a) : void
+{
+    string $line = $name;
+    usize $i = 0;
+
+    while ($i < $a->count()) {
+        $line->append(" ");
+        $line->append(str::from($a[$i]));
+        $i = $i + 1;
+    }
+
+    echo $line;
+}
+
+function show64(string $name, array<int64> $a) : void
+{
+    string $line = $name;
+    usize $i = 0;
+
+    while ($i < $a->count()) {
+        $line->append(" ");
+        $line->append(str::from($a[$i]));
+        $i = $i + 1;
+    }
+
+    echo $line;
+}
+
+function random32(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    uint64 $state = 0x9E3779B97F4A7C15;
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint64 $raw = xorshift($state);
+        int32 $value = ($raw >> 32) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function random64(usize $n) : array<int64>
+{
+    array<int64> $a = array<int64>();
+    $a->fit($n);
+    uint64 $state = 0x9E3779B97F4A7C15;
+    usize $i = 0;
+
+    while ($i < $n) {
+        int64 $value = xorshift($state) as int64;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function sorted32(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = $i as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function reversed32(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = ($n - 1 - $i) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function reversed64(usize $n) : array<int64>
+{
+    array<int64> $a = array<int64>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int64 $value = ($n - 1 - $i) as int64;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function equal32(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        $a[] = 7;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function dupes32(usize $n) : array<int32>
+{
+    array<int32> $a = array<int32>();
+    $a->fit($n);
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $value = ($i % 3) as int32;
+        $a[] = $value;
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+array<int32> $empty = array<int32>();
+$empty->sort_unstable();
+show32("i32 empty", $empty);
+
+array<int32> $one = array<int32>();
+$one[] = -3;
+$one->sort_unstable();
+show32("i32 one", $one);
+
+array<int32> $pair = array<int32>();
+$pair[] = 4;
+$pair[] = -1;
+$pair->sort_unstable();
+show32("i32 pair", $pair);
+
+array<int32> $n19 = random32(19);
+$n19->sort_unstable();
+show32("i32 random 19", $n19);
+
+array<int32> $n20 = sorted32(20);
+$n20->sort_unstable();
+show32("i32 sorted 20", $n20);
+
+array<int32> $n21 = reversed32(21);
+$n21->sort_unstable();
+show32("i32 reversed 21", $n21);
+
+array<int32> $n32 = equal32(32);
+$n32->sort_unstable();
+show32("i32 equal 32", $n32);
+
+array<int32> $n64 = dupes32(64);
+$n64->sort_unstable();
+show32("i32 dupes 64", $n64);
+
+array<int32> $wide = random32(64);
+$wide->sort_unstable();
+show32("i32 random 64", $wide);
+
+array<int64> $r64 = reversed64(30);
+$r64->sort_unstable();
+show64("i64 reversed 30", $r64);
+
+array<int64> $mix = random64(24);
+$mix->sort_unstable();
+show64("i64 random 24", $mix);
+
+fixed_array<int32, 5> $fixed = [4, 1, 4, 0, 2];
+$fixed->sort_unstable();
+string $fixed_line = "i32 fixed";
+usize $f = 0;
+
+while ($f < 5) {
+    $fixed_line->append(" ");
+    $fixed_line->append(str::from($fixed[$f]));
+    $f = $f + 1;
+}
+
+echo $fixed_line;
+
+array<int32> $window = [9, 3, 8, 1, 7, 0];
+$window->sub(1, 4)->sort_unstable();
+show32("i32 window", $window);

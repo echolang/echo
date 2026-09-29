@@ -1,0 +1,47 @@
+// integer sort_unstable and sort_unstable(by: struct) compare inline: icmp, not a call to < / compare / less
+
+public struct Gate : contract::comparable<Gate>
+{
+    public int32 $address;
+}
+
+operator (const Gate& $a) < (const Gate& $b) : bool
+{
+    return $a->address < $b->address;
+}
+
+public struct ByAddr : contract::comparator<Gate>
+{
+    public const function compare(const Gate& $a, const Gate& $b) : ordering
+    {
+        return $a->address <=> $b->address;
+    }
+}
+
+array<int32> $nums = array<int32>();
+$nums->fit(32);
+usize $i = 0;
+
+while ($i < 32) {
+    int32 $value = (31 - $i) as int32;
+    $nums[] = $value;
+    $i = $i + 1;
+}
+
+$nums->sort_unstable();
+echo $nums[0];
+echo $nums[31];
+
+array<Gate> $gates = array<Gate>();
+$gates->fit(32);
+$i = 0;
+
+while ($i < 32) {
+    int32 $address = (31 - $i) as int32;
+    $gates[] = Gate($address);
+    $i = $i + 1;
+}
+
+$gates->sort_unstable(by: ByAddr());
+echo $gates[0]->address;
+echo $gates[31]->address;

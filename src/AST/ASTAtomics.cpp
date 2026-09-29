@@ -22,6 +22,7 @@ namespace AST
             case BuiltinKind::t_size_of:
             case BuiltinKind::t_align_of:
             case BuiltinKind::t_is_trivially_copyable:
+            case BuiltinKind::t_is_integer:
             case BuiltinKind::t_needs_destruction:
             case BuiltinKind::t_integer_min:
             case BuiltinKind::t_integer_max:

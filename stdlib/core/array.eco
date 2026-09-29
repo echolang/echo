@@ -712,6 +712,47 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         return $this->sub(0, $this->len);
     }
 
+    // sort / sort_unstable: the window does the work, see slice
+    public function sort_unstable() : void where T : contract::comparable<T>
+    {
+        $this->sub()->sort_unstable();
+    }
+
+    public function sort_unstable<C : contract::comparator<T>>(by: C $c) : void
+    {
+        $this->sub()->sort_unstable(by: $c);
+    }
+
+    public function sort_unstable(by: function<ordering(const T&, const T&)> $c) : void
+    {
+        $this->sub()->sort_unstable(by: $c);
+    }
+
+    public function sort_unstable<K : contract::comparable<K>>(key: function<K(const T&)> $k) : void
+    {
+        $this->sub()->sort_unstable(key: $k);
+    }
+
+    public function sort() : void where T : contract::comparable<T>
+    {
+        $this->sub()->sort();
+    }
+
+    public function sort<C : contract::comparator<T>>(by: C $c) : void
+    {
+        $this->sub()->sort(by: $c);
+    }
+
+    public function sort(by: function<ordering(const T&, const T&)> $c) : void
+    {
+        $this->sub()->sort(by: $c);
+    }
+
+    public function sort<K : contract::comparable<K>>(key: function<K(const T&)> $k) : void
+    {
+        $this->sub()->sort(key: $k);
+    }
+
     /**
      * The same window over a `const` array: read-only, and said in the window's own type.
      */

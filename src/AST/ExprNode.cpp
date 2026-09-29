@@ -18,13 +18,11 @@
 AST::ValueType AST::UnaryExprNode::result_type() const
 {
     if (token_operator.type() == Token::Type::t_exclamation) {
-        // `!` over a mask is a mask. the scalar arm below would answer bool and
-        // `if (!$m)` would type-check a vector
-        if (expr != nullptr && expr->result_type().is_simd()) {
-            return expr->result_type();
+        if (expr == nullptr) {
+            return AST::ValueType(AST::ValueTypePrimitive::t_bool);
         }
 
-        return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+        return AST::builtin_unary_result(token_operator.type(), expr->result_type());
     }
 
     if (expr == nullptr) {
@@ -91,11 +89,7 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     if (op_node != nullptr && op_node->op != nullptr
         && (raw_left.is_simd() || raw_right.is_simd())) {
         if (op_node->op->is_comparison()) {
-            const AST::ValueType &vec = raw_left.is_simd() ? raw_left : raw_right;
-
-            return AST::ValueType::make_simd(
-                AST::ValueType(AST::ValueTypePrimitive::t_bool),
-                vec.simd_length());
+            return AST::builtin_binary_result(op_node->op, raw_left, raw_right);
         }
 
         if (!binary_reconciles_operands(op_node->op)) {
@@ -123,7 +117,7 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     // asked of AST::Operator::is_comparison, which is the one owner of "which symbols are these" - the
     // six of them, and deliberately not `&&`/`||`, whose bool-ness comes from their operands being bools
     if (op_node != nullptr && op_node->op != nullptr && op_node->op->is_comparison()) {
-        return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+        return AST::builtin_binary_result(op_node->op, raw_left, raw_right);
     }
 
     // operands are read in value position, so a pointer contributes its pointee: `$ref + 1`

@@ -1,0 +1,71 @@
+// then, reverse, ordering::total over NaN, and a generic caller of sort()
+
+public struct Gate : contract::comparable<Gate>
+{
+    public int32 $address;
+    public int32 $id;
+}
+
+operator (const Gate& $a) < (const Gate& $b) : bool
+{
+    return $a->address < $b->address;
+}
+
+function order<T : contract::comparable<T>>(array<T>& $a) : void
+{
+    $a->sort();
+}
+
+array<Gate> $gates = [Gate(2, 9), Gate(1, 8), Gate(2, 1)];
+$gates->sort(by: function(const Gate& $a, const Gate& $b) : ordering {
+    return ($a->address <=> $b->address)->then($a->id <=> $b->id);
+});
+echo $gates[0]->id;
+echo $gates[1]->id;
+echo $gates[2]->id;
+echo sort::is_sorted($gates->data(), $gates->count(), by: function(const Gate& $a, const Gate& $b) : ordering {
+    return ($a->address <=> $b->address)->then($a->id <=> $b->id);
+});
+
+array<int32> $desc = [1, 3, 2];
+$desc->sort(by: function(const int32& $a, const int32& $b) : ordering {
+    return ($a <=> $b)->reverse();
+});
+echo $desc[0];
+echo $desc[2];
+echo sort::is_sorted($desc->data(), $desc->count(), by: function(const int32& $a, const int32& $b) : ordering {
+    return ($a <=> $b)->reverse();
+});
+
+float64 $nan = mem::bit_cast<float64, uint64>(0x7FF8000000000000);
+float64 $nzero = mem::bit_cast<float64, uint64>(0x8000000000000000);
+float64 $pzero = 0.0;
+
+echo (ordering::total($nzero, $pzero) == ordering::less);
+echo (ordering::total($pzero, 1.0) == ordering::less);
+echo (ordering::total(1.0, $nan) == ordering::less);
+echo (ordering::total($nan, $nan) == ordering::equal);
+echo (ordering::total($nan, $pzero) == ordering::greater);
+
+array<float64> $floats = [1.0, $nan, $nzero, $pzero, -1.0];
+$floats->sort(by: function(const float64& $a, const float64& $b) : ordering {
+    return ordering::total($a, $b);
+});
+echo $floats[0];
+echo $floats[1];
+echo $floats[2];
+echo $floats[3];
+echo $floats[4];
+echo sort::is_sorted($floats->data(), $floats->count(), by: function(const float64& $a, const float64& $b) : ordering {
+    return ordering::total($a, $b);
+});
+
+array<int32> $nums = [3, 1, 2];
+order($nums);
+echo $nums[0];
+echo $nums[2];
+
+array<string> $names = ['c', 'a', 'b'];
+order($names);
+echo $names[0];
+echo $names[2];

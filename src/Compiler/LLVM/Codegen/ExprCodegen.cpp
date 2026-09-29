@@ -1011,6 +1011,7 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:
@@ -1290,13 +1291,13 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
 
     const AST::ValueType &subject = decl->instantiation_args[0];
 
-    // the result is whatever the declaration promised - usize for the two sizes, bool for the two
+    // the result is whatever the declaration promised - usize for the two sizes, bool for the
     // predicates - so the constant lands with the type the caller already expects, and an i1 needs no
     // arm of its own here
     llvm::Type *result_type = _ctx.types->get_llvm_type(decl->get_return_type(), *_ctx.current_cmp_unit);
 
-    // no tail: the four kinds this is routed for are the four answered here, and a fifth added to the
-    // dispatch above without one is a compile error rather than a constant zero nothing would notice
+    // no tail: the kinds this is routed for are the ones answered here, and one added to the
+    // dispatch above without an arm is a compile error rather than a constant zero nothing would notice
     uint64_t value = 0;
 
     switch (kind) {
@@ -1322,6 +1323,7 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         // fixpoint round gets `t_pending`, because it has more rounds, and this throws, because an
         // un-instantiated template reaching codegen is a compiler bug rather than a source error
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max: {

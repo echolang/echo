@@ -63,7 +63,7 @@ TEST_CASE("Arguments that decide every parameter name an instance", "[instantiat
     auto *tmpl = template_named(*bundle, "pair");
     REQUIRE(tmpl != nullptr);
 
-    const auto inst = can_instantiate(tmpl, {int32, float64});
+    const auto inst = can_instantiate(tmpl, {int32, float64}, bundle->collector.type_registry);
 
     REQUIRE(inst.fit == InstantiationFit::t_yes);
     REQUIRE(inst.blame == InstantiationBlame::n_none);
@@ -78,7 +78,8 @@ TEST_CASE("A different argument count is not a candidate at all", "[instantiatio
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function pair<A, B>(A $a, B $b) : A { return $a; }\n");
 
-    const auto inst = can_instantiate(template_named(*bundle, "pair"), {int32});
+    const auto inst = can_instantiate(
+        template_named(*bundle, "pair"), {int32}, bundle->collector.type_registry);
 
     REQUIRE(inst.fit == InstantiationFit::t_no);
     REQUIRE(inst.blame == InstantiationBlame::t_argument_count);
@@ -92,7 +93,8 @@ TEST_CASE("A parameter no argument mentions is a cannot-infer", "[instantiation]
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function pick<T, U>(T $x) : T { return $x; }\n");
 
-    const auto inst = can_instantiate(template_named(*bundle, "pick"), {int32});
+    const auto inst = can_instantiate(
+        template_named(*bundle, "pick"), {int32}, bundle->collector.type_registry);
 
     REQUIRE(inst.fit == InstantiationFit::t_maybe);
     REQUIRE(inst.blame == InstantiationBlame::t_unbound_parameter);
@@ -109,7 +111,8 @@ TEST_CASE("An argument with no type yet binds nothing and is retryable", "[insta
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function id<T>(T $v) : T { return $v; }\n");
 
-    const auto inst = can_instantiate(template_named(*bundle, "id"), {ValueType::make_unknown()});
+    const auto inst = can_instantiate(
+        template_named(*bundle, "id"), {ValueType::make_unknown()}, bundle->collector.type_registry);
 
     REQUIRE(inst.fit == InstantiationFit::t_maybe);
     REQUIRE(inst.blame == InstantiationBlame::t_undecided_parameter);
@@ -127,10 +130,10 @@ TEST_CASE("A constraint the binding violates rejects the template and names both
 
     auto *tmpl = template_named(*bundle, "only");
 
-    const auto allowed = can_instantiate(tmpl, {int32});
+    const auto allowed = can_instantiate(tmpl, {int32}, bundle->collector.type_registry);
     REQUIRE(allowed.fit == InstantiationFit::t_yes);
 
-    const auto rejected = can_instantiate(tmpl, {boolean});
+    const auto rejected = can_instantiate(tmpl, {boolean}, bundle->collector.type_registry);
 
     REQUIRE(rejected.fit == InstantiationFit::t_no);
     REQUIRE(rejected.blame == InstantiationBlame::t_constraint);
@@ -151,7 +154,8 @@ TEST_CASE("An argument whose shape cannot be reconciled still leaves the instanc
         "struct Box<T> { T $value; }\n"
         "function unwrap<T>(Box<T> $b, T $fallback) : T { return $fallback; }\n");
 
-    const auto inst = can_instantiate(template_named(*bundle, "unwrap"), {int32, int32});
+    const auto inst = can_instantiate(
+        template_named(*bundle, "unwrap"), {int32, int32}, bundle->collector.type_registry);
 
     REQUIRE(inst.fit == InstantiationFit::t_no);
     REQUIRE(inst.blame == InstantiationBlame::t_argument_shape);
@@ -168,14 +172,15 @@ TEST_CASE("Explicit type arguments win over what the arguments would have inferr
 
     auto *tmpl = template_named(*bundle, "id");
 
-    const auto inst = can_instantiate(tmpl, {int32}, {float64});
+    const auto inst = can_instantiate(tmpl, {int32}, bundle->collector.type_registry, {float64});
 
     REQUIRE(inst.fit == InstantiationFit::t_yes);
     REQUIRE(inst.decided);
     REQUIRE(inst.type_arguments == std::vector<ValueType>{float64});
 
     // and they are counted before anything is inferred
-    const auto too_many = can_instantiate(tmpl, {int32}, {int32, float64});
+    const auto too_many = can_instantiate(
+        tmpl, {int32}, bundle->collector.type_registry, {int32, float64});
 
     REQUIRE(too_many.fit == InstantiationFit::t_no);
     REQUIRE(too_many.blame == InstantiationBlame::t_type_argument_count);
@@ -195,7 +200,7 @@ TEST_CASE("A prefix of explicit type arguments binds and the rest is inferred", 
     REQUIRE(handle != nullptr);
 
     const ValueType handle_ty = handle->value_type();
-    const auto inst = can_instantiate(tmpl, {int32}, {handle_ty});
+    const auto inst = can_instantiate(tmpl, {int32}, bundle->collector.type_registry, {handle_ty});
 
     REQUIRE(inst.fit == InstantiationFit::t_yes);
     REQUIRE(inst.decided);
@@ -211,7 +216,8 @@ TEST_CASE("A borrow parameter binds through the borrow", "[instantiation][generi
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function bump<T>(T &$v) : void { $v = $v + 1; }\n");
 
-    const auto inst = can_instantiate(template_named(*bundle, "bump"), {int32});
+    const auto inst = can_instantiate(
+        template_named(*bundle, "bump"), {int32}, bundle->collector.type_registry);
 
     REQUIRE(inst.fit == InstantiationFit::t_yes);
     REQUIRE(inst.type_arguments == std::vector<ValueType>{int32});
@@ -223,7 +229,8 @@ TEST_CASE("A nullable pointer parameter binds nothing from a value argument", "[
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function hold<T>(ptr<T> $v) : void { }\n");
 
-    const auto inst = can_instantiate(template_named(*bundle, "hold"), {int32});
+    const auto inst = can_instantiate(
+        template_named(*bundle, "hold"), {int32}, bundle->collector.type_registry);
 
     // the parameter still mentions `T`, so this is a shape that no substitution reconciles rather
     // than a binding nobody has made yet - out of an overload set, not waiting for a later round
@@ -253,14 +260,15 @@ TEST_CASE("A method's inherited parameters come from the receiver, its own from 
     // the receiver as the parser builds it: a non-nullable borrow of the instance
     const ValueType receiver = ValueType::make_pointer(decl_type(*bundle, "$b"), false);
 
-    const auto inst = can_instantiate(method, {receiver}, {float64});
+    const auto inst = can_instantiate(method, {receiver}, bundle->collector.type_registry, {float64});
 
     REQUIRE(inst.fit == InstantiationFit::t_yes);
     REQUIRE(inst.type_arguments == std::vector<ValueType>{int32, float64});
 
     // an unresolved receiver is a not-yet, never a "cannot infer": an owner's parameter cannot be
     // spelled at a call site, so there is nothing the user could do about it
-    const auto pending = can_instantiate(method, {ValueType::make_unknown()}, {float64});
+    const auto pending = can_instantiate(
+        method, {ValueType::make_unknown()}, bundle->collector.type_registry, {float64});
 
     REQUIRE(pending.fit == InstantiationFit::t_maybe);
     REQUIRE(pending.blame == InstantiationBlame::t_undecided_parameter);
@@ -277,15 +285,16 @@ TEST_CASE("The constraint rule judges everything except a bare type parameter", 
     auto *tmpl = template_named(*bundle, "only");
     const auto &params = tmpl->type_parameters;
 
-    REQUIRE(first_constraint_violation(params, {int32, boolean}) == std::nullopt);
-    REQUIRE(first_constraint_violation(params, {boolean, int32}) == 0);
+    TypeRegistry &types = bundle->collector.type_registry;
+    REQUIRE(first_constraint_violation(params, {int32, boolean}, types).violation == std::nullopt);
+    REQUIRE(first_constraint_violation(params, {boolean, int32}, types).violation == 0);
 
     // a bare `T` stands for whatever is substituted for it later, so it is judged then
     const ValueType bare = ValueType::make_type_param(params[1]);
-    REQUIRE(first_constraint_violation(params, {bare, int32}) == std::nullopt);
+    REQUIRE(first_constraint_violation(params, {bare, int32}, types).violation == std::nullopt);
 
     // an unconstrained parameter allows anything, and a missing argument is not judged at all
-    REQUIRE(first_constraint_violation(params, {int32}) == std::nullopt);
+    REQUIRE(first_constraint_violation(params, {int32}, types).violation == std::nullopt);
 }
 
 TEST_CASE("A class-kind constraint admits classes and refuses everything else", "[instantiation][generics]")
@@ -315,10 +324,11 @@ TEST_CASE("A class-kind constraint admits classes and refuses everything else", 
     REQUIRE(point.is_struct());
     REQUIRE(boxed.is_class());
 
-    REQUIRE(first_constraint_violation(tmpl->type_parameters, {handle}) == std::nullopt);
-    REQUIRE(first_constraint_violation(tmpl->type_parameters, {boxed}) == std::nullopt);
-    REQUIRE(first_constraint_violation(tmpl->type_parameters, {point}) == 0);
-    REQUIRE(first_constraint_violation(tmpl->type_parameters, {int32}) == 0);
+    TypeRegistry &types = bundle->collector.type_registry;
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {handle}, types).violation == std::nullopt);
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {boxed}, types).violation == std::nullopt);
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {point}, types).violation == 0);
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {int32}, types).violation == 0);
 }
 
 TEST_CASE("a nullable generic application stays nullable after substitution", "[instantiation][generics]")

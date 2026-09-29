@@ -1,0 +1,10 @@
+// sort_unstable requires T : contract::comparable<T>. a struct that did
+// not declare the conformance is refused at the call
+
+struct Gate
+{
+    int32 $address;
+}
+
+array<Gate> $gates = [Gate(1), Gate(2)];
+$gates->sort_unstable();

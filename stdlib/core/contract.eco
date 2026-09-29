@@ -6,6 +6,12 @@
  * else, and there is no arm anywhere in the compiler that knows what an `array<T>` is. A type of your own
  * conforms exactly the way `array<T>` does, and loops exactly as well. See docs/collections/iteration.md.
  *
+ * The next two are the **ordering** protocol, which is to `sort` what iteration is to `foreach`.
+ * `comparable<T>` is one operator, `<`, because a primitive can only ever answer an operator, and
+ * `int32` has to sort. A declared type stays nominal: having a `<` is not enough, the type has to
+ * say so. `comparator<T>` is the other half, a `compare` that returns `ordering`, so a sort can take
+ * a struct or a closure without the element type changing.
+ *
  * The last three are the **unwrapping** protocol, which is to `guard` what iteration is to `foreach`. It
  * has one asymmetry worth knowing: a `T?` is answered by the compiler directly, so `guard` over a
  * nullable never consults `unwrappable` at all and keeps working under `--no-stdlib`. What these are
@@ -185,4 +191,43 @@ public interface failable<E>
      * Why there was no value. Only valid after `has_value()` answered false.
      */
     function failure() : E&;
+}
+
+/**
+ * A total-enough order: `$a < $b` is a bool.
+ *
+ * One requirement, and it is an operator, because a primitive cannot declare a method and
+ * `int32` has to be sortable. A type with no declaration - an integer, a float, a pointer -
+ * conforms **structurally** when the language already spells `<` for it. A struct or a class
+ * stays **nominal**: write `: contract::comparable<Self>` and declare the operator, or
+ * `sort()` refuses at the call. A `<` you happened to write is not an opt-in.
+ *
+ * `bool` has no `<`. A float does, including NaN, so `comparable` means "has `<`" rather than
+ * "is a mathematical total order". `ordering::total` is the IEEE path when you need one.
+ *
+ * Only `<`. `>`, `<=`, `>=` and `<=>` are derived from it (the last in `ordering.eco`), so a
+ * type answers one question and the rest follow.
+ */
+public interface comparable<T>
+{
+    /**
+     * True when `$a` precedes `$b`.
+     */
+    operator (const T& $a) < (const T& $b) : bool;
+}
+
+/**
+ * An order over `T` that is not `T`'s own.
+ *
+ * `compare` returns `ordering` rather than a bool, so a caller can chain (`then`) and reverse
+ * without running the comparison twice. A sort takes one of these by a `by:` label, or a
+ * closure of the same shape. The struct form inlines; a closure is an indirect call per
+ * compare.
+ */
+public interface comparator<T>
+{
+    /**
+     * How `$a` sits relative to `$b`.
+     */
+    const function compare(const T& $a, const T& $b) : ordering;
 }

@@ -44,7 +44,7 @@
  * `str::buf?` so that null is a value of the type, not a zero word the constructor forgot.
  */
 #[core: string]
-public struct string
+public struct string : contract::comparable<string>
 {
     /**
      * A window over bytes someone else owns.
@@ -61,7 +61,7 @@ public struct string
      * method because its count lives one level down, in the window.
      */
     #[core: string_view]
-    struct view
+    struct view : contract::comparable<string::view>
     {
         ptr<const uint8> $bytes;
         usize $size;
@@ -1027,5 +1027,77 @@ operator (const string::view& $a) != (const string::view& $b) : bool
     }
 
     return true;
+}
+
+/**
+ * Byte-lexicographic `<`. Shared prefix via `mem::compare_bytes`, then the lengths.
+ *
+ * No normalization, no case folding, no encoding check: `'B' < 'a'` because 66 < 97, and a
+ * shorter string that matches a prefix of a longer one comes first (`'ab' < 'abc'`). The
+ * view pair is the real comparison; the string pair below delegates through `view()`.
+ *
+ * **The same rank story as `==`.** A `string` place scores a borrow against `const string&`
+ * and a declared conversion against `const string::view&`, so `$s < 'hello'` resolves to
+ * the string pair. Two views only ever reach this one.
+ */
+operator (const string::view& $a) < (const string::view& $b) : bool
+{
+    usize $n = $a->size;
+
+    if ($b->size < $n) {
+        $n = $b->size;
+    }
+
+    int32 $c = mem::compare_bytes($a->bytes, $b->bytes, $n);
+
+    if ($c != 0) {
+        return $c < 0;
+    }
+
+    return $a->size < $b->size;
+}
+
+/**
+ * Three-way form of the view comparison. One `memcmp` of the shared prefix, then the
+ * lengths. Concrete, so it beats the generic `<=>` derived from `<` (which would memcmp
+ * twice).
+ */
+operator (const string::view& $a) <=> (const string::view& $b) : ordering
+{
+    usize $n = $a->size;
+
+    if ($b->size < $n) {
+        $n = $b->size;
+    }
+
+    int32 $c = mem::compare_bytes($a->bytes, $b->bytes, $n);
+
+    if ($c < 0) {
+        return ordering::less;
+    }
+
+    if ($c > 0) {
+        return ordering::greater;
+    }
+
+    if ($a->size < $b->size) {
+        return ordering::less;
+    }
+
+    if ($a->size > $b->size) {
+        return ordering::greater;
+    }
+
+    return ordering::equal;
+}
+
+operator (const string& $a) < (const string& $b) : bool
+{
+    return $a->view() < $b->view();
+}
+
+operator (const string& $a) <=> (const string& $b) : ordering
+{
+    return $a->view() <=> $b->view();
 }
 

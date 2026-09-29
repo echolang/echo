@@ -132,12 +132,15 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
     // an `int32`. the declaration's own `const` is put back on top by the caller
     const std::vector<AST::ValueType> args { AST::ValueType::make_mutable(element) };
 
-    if (const auto violation = AST::first_constraint_violation(array_tmpl->type_parameters, args)) {
-        const auto *param = array_tmpl->type_parameters[*violation];
+    const AST::ConstraintJudgement judged =
+        AST::first_constraint_violation(array_tmpl->type_parameters, args, types);
+
+    if (judged.violation.has_value()) {
+        const auto *param = array_tmpl->type_parameters[*judged.violation];
 
         return refuse(fmt::format(
             "'{}' cannot hold a '{}' - its element type is constrained to '{}'.",
-            array_tmpl->name.value_or("the core array type"), args[*violation].get_type_desciption(),
+            array_tmpl->name.value_or("the core array type"), args[*judged.violation].get_type_desciption(),
             param->constraint_spelling));
     }
 

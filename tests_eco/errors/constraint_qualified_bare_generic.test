@@ -1,7 +1,7 @@
 expect: fail
 
-# the second issue is parse recovery, not a second mistake: the constraint list gave up and skipped to
-# the next statement, which lands past the signature. the unqualified spelling cascades identically
+# the clause is re-read after the parameter names exist, so a bad atom is reported on its own.
+# the signature stays parsed: abandoning it used to invent a second error at the closing brace
 
 --- OUT --->
 [error] constraint_qualified_bare_generic.eco:4:18
@@ -13,13 +13,4 @@ expect: fail
     :                  ^^^^^^^^
   5 | {
 
-[error] UnexpectedToken  constraint_qualified_bare_generic.eco:7:1
-
-  Unexpected token 'close_brace '}'' found. Expected 'open_paren '(''
-
-  6 |     return;
-  7 | }
-    : ^ expected open_paren '('
-  8 | 
-
-2 errors, nothing was compiled.
+1 error, nothing was compiled.

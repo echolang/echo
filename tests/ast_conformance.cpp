@@ -102,6 +102,8 @@ TEST_CASE("conforms_to is total", "[conformance]")
     const ValueType iface = sized->value_type();
 
     REQUIRE_FALSE(AST::conforms_to(nullptr, iface));
+    // Sized requires a method, so a primitive still answers false: structural conformance is
+    // operator-only. the cases below pin that the total-false path is this refusal, not a crash
     REQUIRE_FALSE(AST::conforms_to(prim(ValueTypePrimitive::t_int32), iface));
     REQUIRE_FALSE(AST::conforms_to(ValueType::make_unknown(), iface));
     REQUIRE_FALSE(AST::conforms_to(ValueType::make_pointer(prim(ValueTypePrimitive::t_int32), true), iface));
@@ -112,6 +114,139 @@ TEST_CASE("conforms_to is total", "[conformance]")
     REQUIRE(bag != nullptr);
     REQUIRE_FALSE(AST::conforms_to(&bag->complex_type(), bag->value_type()));
     REQUIRE_FALSE(AST::conforms_to(&bag->complex_type(), prim(ValueTypePrimitive::t_int32)));
+}
+
+// a primitive has no declaration to opt in with, so an operator-only interface is answered by
+// builtin meaning on the peeled operands. a declared type stays nominal: Gate below has `<` and
+// still does not conform until it writes the clause
+TEST_CASE("a type with no declaration conforms structurally to an operator-only interface", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Comparable<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "interface Addable<T> {\n"
+        "    operator (T $a) + (T $b) : T;\n"
+        "}\n"
+        "interface Marker {}\n"
+        "struct Gate {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "operator (const Gate& $a) < (const Gate& $b) : bool {\n"
+        "    return $a->n < $b->n;\n"
+        "}\n"
+        "function lighter<T : Comparable<T>>(T $a, T $b) : bool {\n"
+        "    return $a < $b;\n"
+        "}\n"
+        "function twice<T : Addable<T>>(T $x) : T {\n"
+        "    return $x + $x;\n"
+        "}\n"
+        "echo lighter(1, 2);\n"
+        "echo twice(3);\n"
+        "echo lighter(1.5, 2.5);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *comparable = type_named(m, "Comparable");
+    auto *addable = type_named(m, "Addable");
+    auto *marker = type_named(m, "Marker");
+    auto *gate = type_named(m, "Gate");
+    REQUIRE(comparable != nullptr);
+    REQUIRE(addable != nullptr);
+    REQUIRE(marker != nullptr);
+    REQUIRE(gate != nullptr);
+
+    auto intern = [&](TypeDeclNode *iface, ValueType arg) {
+        return ValueType::make_complex(
+            bundle->collector.type_registry.get_or_create_instantiation(
+                &iface->complex_type(), { arg }));
+    };
+
+    const ValueType int32 = prim(ValueTypePrimitive::t_int32);
+    const ValueType float64 = prim(ValueTypePrimitive::t_float64);
+    const ValueType boolean = prim(ValueTypePrimitive::t_bool);
+    const ValueType ptr_int = ValueType::make_pointer(int32, false);
+
+    REQUIRE(AST::conforms_to(int32, intern(comparable, int32)));
+    REQUIRE(AST::conforms_to(float64, intern(comparable, float64)));
+    REQUIRE_FALSE(AST::conforms_to(int32, intern(comparable, float64)));
+    REQUIRE_FALSE(AST::conforms_to(boolean, intern(comparable, boolean)));
+
+    REQUIRE(AST::conforms_to(int32, intern(addable, int32)));
+    REQUIRE_FALSE(AST::conforms_to(boolean, intern(addable, boolean)));
+
+    REQUIRE(AST::conforms_to(ptr_int, intern(comparable, ptr_int)));
+
+    // an empty marker is something to opt into, so a primitive does not answer one
+    REQUIRE_FALSE(AST::conforms_to(int32, marker->value_type()));
+
+    // a struct stays nominal even when it already has `<`
+    REQUIRE_FALSE(AST::conforms_to(gate->value_type(), intern(comparable, gate->value_type())));
+}
+
+// operators cannot live in a struct body and cannot inherit the implementor's type parameters, so
+// `operator<E>` is the only spelling of `<` for a generic struct. the requirement has no own
+// parameters (T belongs to the interface); the candidate has one. that used to drop the operator
+// before types were compared
+TEST_CASE("a generic struct opts into an operator interface with operator<E>", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Comparable<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Box<E> : Comparable<Box<E>> {\n"
+        "    E $item;\n"
+        "}\n"
+        "operator<E> (const Box<E>& $a) < (const Box<E>& $b) : bool {\n"
+        "    return $a->item < $b->item;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *box = type_named(m, "Box");
+    REQUIRE(box != nullptr);
+    REQUIRE(box->complex_type().conformances().size() == 1);
+
+    REQUIRE_FALSE(AST::first_unmet_requirement(
+        &box->complex_type(),
+        box->complex_type().conformances()[0],
+        bundle->collector.type_registry,
+        &bundle->collector.functions).has_value());
+}
+
+TEST_CASE("a generic struct is refused when its operator is over a different type", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Comparable<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "struct Box<E> : Comparable<Box<E>> {\n"
+        "    E $item;\n"
+        "}\n"
+        "struct Gate {\n"
+        "    int32 $n;\n"
+        "}\n"
+        "operator (const Gate& $a) < (const Gate& $b) : bool {\n"
+        "    return $a->n < $b->n;\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "says it conforms to"));
+}
+
+TEST_CASE("a primitive is refused when an operator-only constraint does not hold", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Comparable<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "function lighter<T : Comparable<T>>(T $a, T $b) : bool {\n"
+        "    return $a < $b;\n"
+        "}\n"
+        "echo lighter(true, false);\n");
+
+    REQUIRE(has_issue_containing(*bundle, "constrained to 'Comparable<T>'"));
 }
 
 // the receiver is `Drawable&` on the requirement and `Square&` on the implementor **by construction** -
@@ -230,9 +365,11 @@ TEST_CASE("an interface constraint admits every conforming type and no other", "
 
     // ...and first_constraint_violation, the one predicate over `allows`, needed no arm of its own
     REQUIRE_FALSE(AST::first_constraint_violation(
-        decls[0]->type_parameters, { square->value_type() }).has_value());
+        decls[0]->type_parameters, { square->value_type() }, bundle->collector.type_registry)
+        .violation.has_value());
     REQUIRE(AST::first_constraint_violation(
-        decls[0]->type_parameters, { rock->value_type() }) == 0u);
+        decls[0]->type_parameters, { rock->value_type() }, bundle->collector.type_registry)
+        .violation == 0u);
 }
 
 TEST_CASE("a bare generic interface is refused as a constraint atom", "[conformance]")

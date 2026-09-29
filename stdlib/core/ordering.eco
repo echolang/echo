@@ -1,0 +1,204 @@
+/**
+ * The three-way answer a comparison can give, and the operator that produces it.
+ *
+ * `less`, `equal`, `greater`. Payload-free, so a match is a switch on the tag and `==` is the
+ * language's own. Nothing in the compiler knows what an ordering is. There is no `#[core:]`
+ * binding and there is deliberately none. `<=>` is a declared infix operator, the same shape
+ * `..` is: under `--no-stdlib` the symbol is simply not there.
+ *
+ * Why an enum and not an int32: a comparator that returns `-1 / 0 / 1` invites you to write
+ * `$c < 0`, and then a function that returned `2` is a sort that walks off the end. Three
+ * cases is the whole of the answer, and `less()` / `equal()` / `greater()` are the questions
+ * you actually ask.
+ *
+ * The generic `<=>` is derived from `<`, so a type that answers `comparable<T>` gets the
+ * three-way form for free. A concrete overload (string, a view) wins the tie against that
+ * template and can do the work in one pass instead of two.
+ */
+
+/**
+ * How two values sit: before, the same, or after.
+ *
+ * Built with `.less` / `.equal` / `.greater` wherever the destination already names the type.
+ * `then` is how a comparison chains: equal on the first key falls through to the next.
+ * `reverse` flips less and greater and leaves equal alone.
+ */
+public enum ordering
+{
+    case less;
+    case equal;
+    case greater;
+
+    /**
+     * True when this is `.less`.
+     */
+    public const function less() : bool
+    {
+        return $this == ordering::less;
+    }
+
+    /**
+     * True when this is `.equal`.
+     */
+    public const function equal() : bool
+    {
+        return $this == ordering::equal;
+    }
+
+    /**
+     * True when this is `.greater`.
+     */
+    public const function greater() : bool
+    {
+        return $this == ordering::greater;
+    }
+
+    /**
+     * less and greater swapped. equal is unchanged.
+     */
+    public const function reverse() : ordering
+    {
+        return match ($this) {
+            ordering::less    => ordering::greater,
+            ordering::equal   => ordering::equal,
+            ordering::greater => ordering::less,
+        };
+    }
+
+    /**
+     * This ordering, or `$other` when this is equal. The way two keys compose:
+     * `($a->age <=> $b->age)->then($a->name <=> $b->name)`.
+     */
+    public const function then(ordering $other) : ordering
+    {
+        if ($this == ordering::equal) {
+            return $other;
+        }
+
+        return $this;
+    }
+
+    /**
+     * IEEE-ish total order on `float64`. NaN is last and two NaNs are equal.
+     * `-0.0` precedes `+0.0`. Everything else is `<`.
+     *
+     * `comparable<float64>` uses language `<`, which is not this: `NaN < x` is false
+     * for every `x`, including NaN, so a sort of floats with NaN in them is a permutation
+     * of a broken order. Reach for this when you want the NaNs to land somewhere.
+     *
+     * NaN is detected from the exponent and fraction bits. Language `!=` is an ordered
+     * compare (`fcmp one`), so `$x != $x` is false for a NaN and cannot be the test.
+     */
+    public static function total(float64 $a, float64 $b) : ordering
+    {
+        return total_from_bits<uint64>(
+            mem::bit_cast<uint64, float64>($a),
+            mem::bit_cast<uint64, float64>($b),
+            0x7FFFFFFFFFFFFFFF,
+            0x7FF0000000000000,
+            $a < $b,
+            $b < $a
+        );
+    }
+
+    /**
+     * The `float32` twin of `total(float64, float64)`.
+     */
+    public static function total(float32 $a, float32 $b) : ordering
+    {
+        return total_from_bits<uint32>(
+            mem::bit_cast<uint32, float32>($a),
+            mem::bit_cast<uint32, float32>($b),
+            0x7FFFFFFF,
+            0x7F800000,
+            $a < $b,
+            $b < $a
+        );
+    }
+}
+
+/**
+ * Shared body of `total`. `$a_lt` / `$b_lt` are language `<` on the original floats;
+ * the bit words decide NaN and the sign of zero.
+ */
+private function total_from_bits<B>(
+    B $ba,
+    B $bb,
+    B $abs_mask,
+    B $inf_bits,
+    bool $a_lt,
+    bool $b_lt
+) : ordering
+{
+    bool $a_nan = ($ba & $abs_mask) > $inf_bits;
+    bool $b_nan = ($bb & $abs_mask) > $inf_bits;
+
+    if ($a_nan) {
+        if ($b_nan) {
+            return ordering::equal;
+        }
+
+        return ordering::greater;
+    }
+
+    if ($b_nan) {
+        return ordering::less;
+    }
+
+    if ($a_lt) {
+        return ordering::less;
+    }
+
+    if ($b_lt) {
+        return ordering::greater;
+    }
+
+    // ±0 compare equal. the sign bit of `-0.0` is set, so as unsigned it is the larger word
+    if ($ba > $bb) {
+        return ordering::less;
+    }
+
+    if ($ba < $bb) {
+        return ordering::greater;
+    }
+
+    return ordering::equal;
+}
+
+/**
+ * Three-way comparison, derived from `<`. Comparison tier, left-associative.
+ *
+ * `$a <=> $b` is `.less` when `$a < $b`, `.greater` when `$b < $a`, `.equal` otherwise.
+ * A type with a better spelling (string's one `memcmp`) declares its own overload and
+ * wins the tie against this template.
+ */
+operator<T : contract::comparable<T>>(100, left) (const T& $a) <=> (const T& $b) : ordering
+{
+    if ($a < $b) {
+        return ordering::less;
+    }
+
+    if ($b < $a) {
+        return ordering::greater;
+    }
+
+    return ordering::equal;
+}
+
+/**
+ * Derived from `<`. A concrete overload (string, a view) still wins the tie.
+ */
+operator<T : contract::comparable<T>> (const T& $a) > (const T& $b) : bool
+{
+    return $b < $a;
+}
+
+operator<T : contract::comparable<T>> (const T& $a) <= (const T& $b) : bool
+{
+    return !($b < $a);
+}
+
+operator<T : contract::comparable<T>> (const T& $a) >= (const T& $b) : bool
+{
+    return !($a < $b);
+}

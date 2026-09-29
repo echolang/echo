@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnsatisfiedTypeConstraint  bool_not_comparable.eco:13:6
+
+  Type parameter 'T' of 'lighter' is constrained to 'Comparable<T>' but was given 'bool'
+
+  12 | 
+  13 | echo lighter(true, false);
+     :      ^^^^^^^
+  14 | 
+
+1 error, nothing was compiled.

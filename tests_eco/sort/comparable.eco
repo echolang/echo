@@ -1,0 +1,124 @@
+// comparable T: float, string, a declared struct, by:, key:, is_sorted
+
+function show32(string $name, array<int32> $a) : void
+{
+    string $line = $name;
+    usize $i = 0;
+
+    while ($i < $a->count()) {
+        $line->append(" ");
+        $line->append(str::from($a[$i]));
+        $i = $i + 1;
+    }
+
+    echo $line;
+}
+
+function show_s(string $name, array<string> $a) : void
+{
+    string $line = $name;
+    usize $i = 0;
+
+    while ($i < $a->count()) {
+        $line->append(" ");
+        $line->append($a[$i]);
+        $i = $i + 1;
+    }
+
+    echo $line;
+}
+
+public struct Gate : contract::comparable<Gate>
+{
+    public int32 $address;
+    public int32 $id;
+}
+
+operator (const Gate& $a) < (const Gate& $b) : bool
+{
+    return $a->address < $b->address;
+}
+
+public struct ById : contract::comparator<Gate>
+{
+    public const function compare(const Gate& $a, const Gate& $b) : ordering
+    {
+        return $a->id <=> $b->id;
+    }
+}
+
+array<float64> $floats = [3.0, -0.5, 2.25, 1.5];
+$floats->sort_unstable();
+echo $floats[0];
+echo $floats[3];
+echo sort::is_sorted($floats->data(), $floats->count());
+
+array<string> $names = ['chulak', 'abydos', 'dakara', 'abydos'];
+$names->sort_unstable();
+show_s("str", $names);
+echo sort::is_sorted($names->data(), $names->count());
+
+array<string> $rev = ['e', 'd', 'c', 'b', 'a'];
+$rev->sort_unstable();
+show_s("rev", $rev);
+
+array<Gate> $gates = [Gate(9, 2), Gate(3, 1), Gate(1, 4)];
+$gates->sort_unstable();
+echo $gates[0]->address;
+echo $gates[2]->address;
+echo sort::is_sorted($gates->data(), $gates->count());
+echo $gates[0] < $gates[2];
+echo $gates[0] > $gates[2];
+echo $gates[0] <= $gates[2];
+echo $gates[2] >= $gates[0];
+
+array<Gate> $by_id = [Gate(9, 2), Gate(3, 1), Gate(1, 4)];
+$by_id->sort_unstable(by: ById());
+echo $by_id[0]->id;
+echo $by_id[2]->id;
+echo sort::is_sorted($by_id->data(), $by_id->count(), by: ById());
+
+array<Gate> $by_fn = [Gate(9, 2), Gate(3, 1), Gate(1, 4)];
+$by_fn->sort_unstable(by: function(const Gate& $a, const Gate& $b) : ordering {
+    return $a->id <=> $b->id;
+});
+echo $by_fn[0]->id;
+
+array<Gate> $by_key = [Gate(9, 2), Gate(3, 1), Gate(1, 4)];
+$by_key->sort_unstable(key: function(const Gate& $g) : int32 {
+    return $g->id;
+});
+echo $by_key[0]->id;
+echo sort::is_sorted($by_key->data(), $by_key->count(), key: function(const Gate& $g) : int32 {
+    return $g->id;
+});
+
+array<int32> $desc = [1, 4, 2, 3];
+$desc->sort_unstable(by: function(const int32& $a, const int32& $b) : ordering {
+    return $b <=> $a;
+});
+show32("desc", $desc);
+
+fixed_array<string, 3> $fixed = ['c', 'a', 'b'];
+$fixed->sort_unstable();
+echo $fixed[0];
+echo $fixed[2];
+echo sort::is_sorted($fixed->data(), $fixed->count());
+
+array<string> $empty = [];
+echo sort::is_sorted($empty->data(), $empty->count());
+$empty->sort_unstable();
+echo $empty->count();
+
+array<string> $one = ['only'];
+$one->sort_unstable();
+echo $one[0];
+echo sort::is_sorted($one->data(), $one->count());
+
+array<string> $eq = ['x', 'x', 'x'];
+$eq->sort_unstable();
+echo $eq[0];
+echo sort::is_sorted($eq->data(), $eq->count());
+
+array<int32> $mixed = [1, 3, 2];
+echo sort::is_sorted($mixed->data(), $mixed->count());

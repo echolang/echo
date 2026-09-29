@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnsatisfiedTypeConstraint  sort_unstable_needs_comparable.eco:10:9
+
+  Type parameter 'T' of 'sort_unstable' is constrained to 'contract::comparable<T>' but was given 'Gate'
+
+   9 | array<Gate> $gates = [Gate(1), Gate(2)];
+  10 | $gates->sort_unstable();
+     :         ^^^^^^^^^^^^^
+  11 | 
+
+1 error, nothing was compiled.

@@ -17,6 +17,7 @@ namespace
             { "size_of", AST::BuiltinKind::t_size_of },
             { "align_of", AST::BuiltinKind::t_align_of },
             { "is_trivially_copyable", AST::BuiltinKind::t_is_trivially_copyable },
+            { "is_integer", AST::BuiltinKind::t_is_integer },
             { "needs_destruction", AST::BuiltinKind::t_needs_destruction },
             { "integer_min", AST::BuiltinKind::t_integer_min },
             { "integer_max", AST::BuiltinKind::t_integer_max },
@@ -82,6 +83,7 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         // the two AST facts. AST::const_fold owns them now and ExprCodegen asks it, so the answer has
         // one spelling rather than two held in step by nothing
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:
@@ -160,6 +162,7 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:
@@ -225,6 +228,7 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:
@@ -283,6 +287,7 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:
@@ -345,6 +350,7 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:

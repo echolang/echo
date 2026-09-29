@@ -249,7 +249,7 @@ TEST_CASE("a declaration that could never be reached is refused", "[operator_dec
     SECTION("...and so is an operator over a concrete instantiation")
     {
         // an operator over a *concrete* instantiation needs no type-parameter list at all - there is
-        // nothing left generic to bind. `operator<T>` is the other spelling, tested above
+        // nothing left generic to bind. `operator<T> (Vec<T> ...)` is the other spelling, tested next
         auto bundle = EchoTests::tests_make_parsed_bundle(
             "struct Vec<T> { T $first; }\n"
             "operator (Vec<int32> $a) + (Vec<int32> $b): Vec<int32> {\n"
@@ -257,6 +257,28 @@ TEST_CASE("a declaration that could never be reached is refused", "[operator_dec
             "}\n");
 
         REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("...and so is an operator over a generic application of a named type")
+    {
+        // the spelling the bare-parameter refusal already recommends. binary_has_builtin_meaning
+        // answers true for any type that still mentions a parameter, so without this gate
+        // `operator<T> (Vec<T> $a) + (Vec<T> $b)` is refused as "built in for these operand types"
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Vec<T> { T $first; }\n"
+            "operator<T> (Vec<T> $a) + (Vec<T> $b): Vec<T> {\n"
+            "    return Vec<T>($a->first + $b->first);\n"
+            "}\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("an unconstrained operator over a bare type parameter")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "operator<T> (T $a) + (T $b): T { return $a; }\n");
+
+        REQUIRE(has_issue_containing(*bundle, "cannot be declared over a bare type parameter"));
     }
 
     SECTION("a suffix increment, which is a statement")
@@ -317,6 +339,30 @@ TEST_CASE("a declaration that could never be reached is refused", "[operator_dec
             "operator(30, left) (S $a) + (S $b): S { return $a; }\n");
 
         REQUIRE(has_issue_containing(*bundle, "already has a precedence"));
+    }
+
+    SECTION("a constrained generic may overload a built-in symbol")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "interface Cmp<T> { operator (const T& $a) < (const T& $b) : bool; }\n"
+            "operator<T : Cmp<T>> (const T& $a) > (const T& $b) : bool { return $b < $a; }\n"
+            "struct Gate : Cmp<Gate> { int32 $n; }\n"
+            "operator (const Gate& $a) < (const Gate& $b) : bool { return $a->n < $b->n; }\n"
+            "echo Gate(1) > Gate(2);\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("a where clause is the same constraint as a colon")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "interface Cmp<T> { operator (const T& $a) < (const T& $b) : bool; }\n"
+            "operator<T> (const T& $a) > (const T& $b) : bool where T : Cmp<T> { return $b < $a; }\n"
+            "struct Gate : Cmp<Gate> { int32 $n; }\n"
+            "operator (const Gate& $a) < (const Gate& $b) : bool { return $a->n < $b->n; }\n"
+            "echo Gate(1) > Gate(2);\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
     }
 }
 

@@ -235,6 +235,10 @@ namespace AST
         OperatorRegistry();
         ~OperatorRegistry() = default;
 
+        // the language-spelled operators, one table. structural conformance looks a
+        // requirement's symbol up here rather than minting a second registry
+        static const OperatorRegistry &predefined();
+
         void register_predefined_token_op(const Token::Type &type);
 
         // the operator a declaration names, minted if this is the first declaration of it.

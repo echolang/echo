@@ -1,0 +1,20 @@
+// a generic struct opts into comparable with operator<E> — the operator cannot
+// inherit the struct's E, so the own-parameter counts differ on purpose
+
+public struct Box<E> : contract::comparable<Box<E>>
+{
+    public E $item;
+}
+
+operator<E> (const Box<E>& $a) < (const Box<E>& $b) : bool
+{
+    return $a->item < $b->item;
+}
+
+array<Box<int32>> $boxes = [Box<int32>(3), Box<int32>(1), Box<int32>(2)];
+$boxes->sort_unstable();
+echo $boxes[0]->item;
+echo $boxes[2]->item;
+echo sort::is_sorted($boxes->data(), $boxes->count());
+echo $boxes[0] < $boxes[2];
+echo $boxes[2] > $boxes[0];

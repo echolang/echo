@@ -913,22 +913,28 @@ static AST::ValueType parse_generic_application(
     // enforce any type-parameter constraints on the explicit arguments (e.g. `Vec<bool>` where
     // `Vec<T: numeric>`), by the same rule that judges a generic *call*'s inferred arguments - only
     // the message differs, because this one names a type rather than a function
-    if (const auto violation = AST::first_constraint_violation(template_ct->type_parameters, args)) {
-        const auto *param = template_ct->type_parameters[*violation];
+    // the registry substitutes an atom that names one of these parameters (`T : Cmp<T>`),
+    // which is still the parameter until this application binds it
+    const AST::ConstraintJudgement judged = AST::first_constraint_violation(
+        template_ct->type_parameters, args, payload.collector.type_registry);
+
+    if (judged.violation.has_value()) {
+        const size_t violation = *judged.violation;
+        const auto *param = template_ct->type_parameters[violation];
 
         if (param->is_value_param()
-            && args[*violation].is_const_value()
-            && !AST::const_generic_bits_fit(param->value_type, args[*violation].const_value_bits())) {
+            && args[violation].is_const_value()
+            && !AST::const_generic_bits_fit(param->value_type, args[violation].const_value_bits())) {
             payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
                 payload.context.code_ref(name_token),
                 AST::const_generic_overflow_sentence(
-                    param->value_type, args[*violation].const_value_bits()));
+                    param->value_type, args[violation].const_value_bits()));
         } else {
             payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
                 payload.context.code_ref(name_token),
                 "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
                 "' is constrained to '" + param->constraint_spelling +
-                "' but was given '" + args[*violation].get_type_desciption() + "'"
+                "' but was given '" + args[violation].get_type_desciption() + "'"
             );
         }
         return AST::ValueType::make_unknown();
@@ -980,13 +986,26 @@ static void append_constraint_spelling(Parser::ParsedTypeParam &param, const std
 // `class` is an atom too — a keyword, not an identifier, which is why the walk claims
 // `t_class` ahead of the identifier arm. `numeric` is an identifier alias; this one is not.
 //
-// two callers: a type parameter's constraint in parse_type_param_list, and an interface's associated
-// type in parse_typedecl. one grammar, so the `>>` split, the deferred resolution in the type-name
-// pass and the bare-generic refusal cannot drift between the two spellings
+// three callers: a type parameter's constraint in parse_type_param_list, an interface's
+// associated type in parse_typedecl, and a `where` clause. one grammar, so the `>>` split,
+// the deferred resolution in the type-name pass and the bare-generic refusal cannot drift
+// between the spellings
 //
 // hands back false when it reported and gave up, so the caller can abandon whatever list it was
 // building. does nothing and answers true when the cursor is not on a ':'
-bool Parser::parse_constraint_atoms(Parser::Payload &payload, ParsedTypeParam &param)
+//
+// `resolve_atoms` false stores nothing and still consumes the clause. two of the callers
+// need that, for different reasons: the type-name pass has not registered the types an atom
+// names, and the parameter-list scan has not declared the names the clause itself mentions
+// (`T : Cmp<T>`). both re-read later — the declaration pass, through install_type_parameters
+// — through this same function with resolution on. a `where` clause resolves on the first
+// read: the names are already in scope. a second shape walk would be a second answer to
+// where `contract::iterable<Box<int32>>` ends
+bool Parser::parse_constraint_atoms(
+    Parser::Payload &payload,
+    ParsedTypeParam &param,
+    bool resolve_atoms
+)
 {
     auto &cursor = payload.cursor;
 
@@ -995,14 +1014,6 @@ bool Parser::parse_constraint_atoms(Parser::Payload &payload, ParsedTypeParam &p
     }
 
     cursor.skip(); // skip ':'
-
-    // the type-name pass reads this list for the one thing it owns - a generic type's arity
-    // and its parameter names - and a constraint atom may name a type no pass has registered
-    // yet, so resolving one here would report an unknown type for a well formed program. the
-    // atoms are still walked, to leave the cursor after the list, and the declaration pass
-    // fills the constraint in: declare_params refreshes it on every pass precisely so this
-    // can be deferred
-    const bool resolve_atoms = payload.pass != Pass::t_type_names;
 
     while (true) {
         // `class` is a keyword, so it is not an identifier. `numeric` is. this atom is the
@@ -1038,10 +1049,9 @@ bool Parser::parse_constraint_atoms(Parser::Payload &payload, ParsedTypeParam &p
 
             if (!resolve_atoms) {
                 // walked with skip_type_shape, the one owner of "how far does a written type
-                // extend" - a second scanner counting angle brackets is a second answer to where
-                // `contract::iterable<Box<int32>>` ends, and the cursor's `>>` split is exactly what the
-                // resolving arm below reaches through parse_type. this pass validates nothing, so a
-                // shape it cannot walk is left for the declaration pass to report
+                // extend". the resolving arm below reaches the same end through parse_type,
+                // `>>` split included. an unresolved walk validates nothing, so a shape it
+                // cannot walk is left for the resolving re-read to report
                 skip_type_shape(cursor);
             }
             else if (is_qualified || is_application) {
@@ -1188,7 +1198,16 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
             ParsedTypeParam param { cursor.current(), {}, "" };
             cursor.skip();
 
-            if (!parse_constraint_atoms(payload, param)) {
+            // snapshot the colon, then walk the atoms without resolving them. the names
+            // in this list are not declarations yet, so `T : Cmp<T>` cannot be resolved
+            // here. install_type_parameters re-reads the same colon, through the same
+            // function, once they are
+            if (cursor.is_type(Token::Type::t_colon)) {
+                param.constraint_written = true;
+                param.constraint_at = cursor.snapshot();
+            }
+
+            if (!parse_constraint_atoms(payload, param, /*resolve_atoms=*/false)) {
                 return type_parameters;
             }
 
@@ -1215,86 +1234,6 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
 
     cursor.consume_generic_close();
     return type_parameters;
-}
-
-// mints (or reuses) the owned declarations for a freshly parsed parameter list
-//
-// reuse matters for correctness, not just allocation: a module is parsed twice, a symbol pass
-// then a full pass, each with a fresh Context, and both reach this point for the same list
-// minting new declarations the second time would give the two passes distinct parameters, so a
-// generic struct's self-application Foo<T> would intern twice and the two Foo<T> would compare
-// unequal. reusing whenever the shape is unchanged keeps a single declaration per parameter
-static std::vector<AST::TypeParamDecl *> declare_params(
-    Parser::Payload &payload,
-    const std::vector<AST::TypeParamDecl *> &existing,
-    const std::vector<Parser::ParsedTypeParam> &parsed
-)
-{
-    bool reusable = existing.size() == parsed.size();
-    for (size_t i = 0; reusable && i < parsed.size(); i++) {
-        reusable = existing[i]->name == parsed[i].name();
-    }
-
-    std::vector<AST::TypeParamDecl *> result;
-    result.reserve(parsed.size());
-
-    for (size_t i = 0; i < parsed.size(); i++) {
-        AST::TypeParamDecl *decl = reusable
-            ? existing[i]
-            : payload.collector.type_params.declare(parsed[i].name(), i, parsed[i].name_token);
-
-        // constraints are refreshed either way: the symbol pass may have parsed the list before
-        // the types a constraint atom names were resolvable
-        decl->constraint = parsed[i].constraint;
-        decl->constraint_spelling = parsed[i].constraint_spelling;
-        decl->param_kind = parsed[i].param_kind;
-        decl->value_type = parsed[i].value_type;
-        result.push_back(decl);
-    }
-
-    return result;
-}
-
-void Parser::declare_type_parameters(Payload &payload, AST::ComplexType &owner, const std::vector<ParsedTypeParam> &parsed)
-{
-    auto declared = declare_params(payload, owner.type_parameters, parsed);
-
-    owner.type_parameters.clear();
-    for (auto *decl : declared) {
-        owner.add_type_parameter(decl);
-    }
-}
-
-void Parser::declare_type_parameters(
-    Payload &payload,
-    AST::FunctionDeclNode &owner,
-    const std::vector<ParsedTypeParam> &parsed,
-    const std::vector<AST::TypeParamDecl *> &inherited
-)
-{
-    // the function's *own* parameters, with any inherited prefix taken off first. it has to come off:
-    // declare_params decides whether it can reuse the existing declarations by comparing list
-    // *sizes*, and the second parse pass reaches this node with the prefix already in place - left
-    // there the sizes would mismatch and the own parameters would be re-minted, giving the two
-    // passes distinct declarations, which is exactly what the reuse rule exists to prevent
-    std::vector<AST::TypeParamDecl *> own(
-        owner.type_parameters.begin() + owner.inherited_type_param_count,
-        owner.type_parameters.end()
-    );
-
-    own = declare_params(payload, own, parsed);
-    for (auto *decl : own) {
-        decl->set_owner(&owner);
-    }
-
-    // a method carries [owner params..., own params...] in one list, so that one TypeSubstitution
-    // binds both: the owner's T from the receiver argument, its own U from the rest. the inherited
-    // declarations are *shared* rather than re-declared - the same sharing a constructor does -
-    // because a TypeParamDecl has exactly one owner, and re-owning the struct's T would trip
-    // set_owner's single-owner assert
-    owner.type_parameters = inherited;
-    owner.type_parameters.insert(owner.type_parameters.end(), own.begin(), own.end());
-    owner.inherited_type_param_count = inherited.size();
 }
 
 // consumes an optional trailing `&`, turning `T` into the non-nullable borrow `T&`

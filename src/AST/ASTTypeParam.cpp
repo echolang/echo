@@ -27,11 +27,10 @@ bool AST::constraint_admits(const std::vector<ValueType> &constraint, const Valu
         // by identity - it names a capability, and the set of types answering it is open, which is
         // exactly what a concrete-set constraint could never express
         //
-        // this is the whole of it: first_constraint_violation, can_instantiate, unify_type,
-        // match_function and Monomorphizer::determine_type_args are unchanged, because "does this
-        // argument satisfy this parameter's constraint" already had one owner and this is it. a
-        // violation still reports through Issue::UnsatisfiedTypeConstraint, naming
-        // constraint_spelling - which for an interface reads as the interface's own name
+        // this is the concrete question. an atom that still names a parameter is substituted
+        // first, by first_constraint_violation, and only then asked here - so Cmp<T> at
+        // T = Gate is conforms_to(Gate, Cmp<Gate>) and not a second rule. a violation still
+        // reports through Issue::UnsatisfiedTypeConstraint, naming constraint_spelling
         if (allowed.is_interface() && AST::conforms_to(bare, allowed)) {
             return true;
         }

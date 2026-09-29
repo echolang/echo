@@ -3,14 +3,16 @@
 
 #pragma once
 
+#include "AST/ASTTypeParam.h"
 #include "AST/ASTValueType.h"
+#include "AST/FunctionDeclNode.h"
 
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace AST
 {
-    class FunctionDeclNode;
     class FunctionCallExprNode;
 
     // how a template answers a call. declaration order is best to worst
@@ -95,6 +97,19 @@ namespace AST
         // t_constraint: what the parameter was bound to
         ValueType bound;
 
+        // set when the refusal came from a `where` clause rather than the parameter's own
+        // constraint. empty means the diagnostic names `param->constraint_spelling`
+        std::string constraint_spelling;
+
+        const std::string &constraint_label() const {
+            if (!constraint_spelling.empty()) {
+                return constraint_spelling;
+            }
+
+            static const std::string empty;
+            return param != nullptr ? param->constraint_spelling : empty;
+        }
+
         // t_argument_shape: which argument, indexed into the call's argument list
         size_t argument = 0;
 
@@ -149,9 +164,15 @@ namespace AST
     // not - `pick(0, $n)` over a `usize $n` named `pick<int32>` and truncated `$n`. positional and
     // parallel to `argument_types`; empty means "every argument has an opinion", which is what the
     // type-only callers get and is the pre-existing rule
+    //
+    // `registry` substitutes a constraint atom that names one of the template's parameters
+    // (`T : Cmp<T>`) before the atom is judged. it is not optional: without the substitution
+    // that atom still names `T` after `T` was bound, and admitting it instantiates a call
+    // whose constraint was never checked
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,
+        TypeRegistry &registry,
         const std::vector<ValueType> &explicit_type_args = {},
         const ValueType &static_owner = ValueType::make_unknown(),
         const std::vector<bool> &argument_defers = {});
@@ -159,7 +180,10 @@ namespace AST
     // the same question asked of a call node: argument types are read off the arguments, type
     // arguments off `explicit_type_args`. for a caller that has not already got the argument types
     // in hand - AST::CallResolver has, since the matcher needs them too
-    Instantiation can_instantiate(const FunctionDeclNode *tmpl, const FunctionCallExprNode &call);
+    Instantiation can_instantiate(
+        const FunctionDeclNode *tmpl,
+        const FunctionCallExprNode &call,
+        TypeRegistry &registry);
 
     // how a call's types are read, in one place: an argument slot or type node left null by a failed
     // parse counts as unknown rather than as absent, so the vectors stay positional and every reader
@@ -172,15 +196,35 @@ namespace AST
     // here rather than at each caller so the two that ask can_instantiate cannot disagree about it
     std::vector<bool> argument_defers_of(const FunctionCallExprNode &call);
 
-    // **the** constraint rule: the first (parameter, argument) pair the parameter's constraint
-    // rejects, as an index into both vectors, or nothing when none does
+    // one ask of the constraint rule. `violation` is the first parameter a concrete argument
+    // missed. `pending` is a parameter whose atom still names a type parameter after
+    // substitution, which is not an admission: the instantiation stays undecided while a
+    // binding is still open, and becomes `violation` once every argument is concrete.
+    // `spelling` is set when the miss came from a `where` clause; empty means the diagnostic
+    // names `param->constraint_spelling`
+    struct ConstraintJudgement
+    {
+        std::optional<size_t> violation;
+        std::optional<size_t> pending;
+        std::string spelling;
+    };
+
+    // **the** constraint rule, for a parameter's own constraint and for a function's `where`
+    // clauses. one substitution, one notion of pending.
     //
     // a bare type parameter is not a violation - it is judged once something is substituted for it.
     // shared with the struct-template mirror in Parser::parse_type, so `Vec<bool>` and
-    // `only_numbers(true)` are rejected by one rule and differ only in the message they get
-    std::optional<size_t> first_constraint_violation(
+    // `only_numbers(true)` are rejected by one rule and differ only in the message they get.
+    //
+    // `where_clauses` is the function's `where` list, judged against the same `params`. empty
+    // is a type with no `where` — a struct application, an array literal — not a request to
+    // skip a clause the function has. pass `tmpl->where_clauses`, never a pointer to the
+    // function: a forgotten argument used to drop every clause
+    ConstraintJudgement first_constraint_violation(
         const std::vector<TypeParamDecl *> &params,
-        const std::vector<ValueType> &args);
+        const std::vector<ValueType> &args,
+        TypeRegistry &registry,
+        const std::vector<FunctionDeclNode::WhereClause> &where_clauses = {});
 };
 
 #endif

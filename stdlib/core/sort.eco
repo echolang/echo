@@ -1,0 +1,964 @@
+/**
+ * Ordering of a raw run of elements.
+ *
+ * `slice<T>::sort` and `sort_unstable` are the surface a program writes; they are
+ * one line over the kernels below. `is_sorted` is the one function here a program
+ * calls itself: a run of elements, already in order?
+ *
+ * One kernel. `const if (mem::is_integer<T>())` picks assignment and cyclic Lomuto; every
+ * other T uses `mem::take` / `mem::init` and a swap partition. Compare always goes through
+ * `$less->less`. `natural<T>` inlines to language `<`, so an integer still lowers to `icmp`.
+ *
+ * `stable<T, L>` is a top-down merge. Integers skip it: their order is total and assignment
+ * is a copy, so stability cannot be observed. A float has `<` and still has `-0.0 == 0.0`,
+ * so it stays on this path.
+ *
+ * The integer shape is ipnsort's. A run that is already ordered, or strictly reversed, is
+ * finished in one pass. When the pivot equals the pivot of the side to the left, the next
+ * partition keeps only the elements that are not greater. A slice full of one value then
+ * shrinks in a single pass instead of being partitioned log(n) times.
+ */
+
+namespace sort;
+
+/**
+ * Floor of log2(`$n`). Zero when `$n` is 0 or 1. The depth budget of a span is twice this,
+ * which is the same allowance ipnsort gives a partition before it stops trusting quicksort.
+ */
+internal function log2_floor(usize $n) : usize
+{
+    usize $log = 0;
+
+    while ($n > 1) {
+        $n = $n / 2;
+        $log = $log + 1;
+    }
+
+    return $log;
+}
+
+/**
+ * `$a < $b`, as a zero-size adapter. The default path, and it is one comparison rather than
+ * a `<=>` and a tag test.
+ */
+internal struct natural<T>
+{
+    #[inline]
+    public const function less(const T& $a, const T& $b) : bool
+    {
+        return $a < $b;
+    }
+}
+
+/**
+ * `compare(...) == .less`. The struct form of `by:`, inlined into the kernel.
+ */
+internal struct comparing<T, C>
+{
+    public C $c;
+
+    #[inline]
+    public const function less(const T& $a, const T& $b) : bool
+    {
+        return $this->c->compare($a, $b) == ordering::less;
+    }
+}
+
+/**
+ * A closure comparator. One indirect call per compare.
+ */
+internal struct with<T>
+{
+    public function<ordering(const T&, const T&)> $c;
+
+    #[inline]
+    public const function less(const T& $a, const T& $b) : bool
+    {
+        return $this->c($a, $b) == ordering::less;
+    }
+}
+
+/**
+ * `$key($a) < $key($b)`. The key is computed twice per compare.
+ */
+internal struct keyed<T, K>
+{
+    public function<K(const T&)> $key;
+
+    #[inline]
+    public const function less(const T& $a, const T& $b) : bool
+    {
+        return $this->key($a) < $this->key($b);
+    }
+}
+
+#[intrinsic: "llvm.vector.reverse"]
+private function reverse_lanes(simd<int32, 4> $v) : simd<int32, 4>;
+
+/**
+ * Reverse `$n` elements of 4 bytes each. Blocks of four words come off each end, the
+ * lanes inside a block are reversed, and the two blocks trade places. A short middle
+ * that is not a whole block falls through to scalar swaps.
+ */
+private function reverse_words(ptr<int32> $data, usize $n) : void
+{
+    unsafe {
+        usize $left = 0;
+        usize $right = $n;
+
+        while ($right - $left >= 8) {
+            $right = $right - 4;
+
+            simd<int32, 4> $lo = simd::load<int32, 4>($data:$ + $left);
+            simd<int32, 4> $hi = simd::load<int32, 4>($data:$ + $right);
+            simd::store<int32, 4>($data:$ + $left, reverse_lanes($hi));
+            simd::store<int32, 4>($data:$ + $right, reverse_lanes($lo));
+
+            $left = $left + 4;
+        }
+
+        while ($left < $right) {
+            $right = $right - 1;
+
+            int32 $tmp = $data:$[$left];
+            $data:$[$left] = $data:$[$right];
+            $data:$[$right] = $tmp;
+            $left = $left + 1;
+        }
+    }
+}
+
+/**
+ * Lift the value out of `$data[$i]`. Integers copy; everything else takes, leaving the
+ * slot empty for `init_at`.
+ */
+#[inline]
+private function take_at<T>(ptr<T> $data, usize $i) : T
+{
+    const if (mem::is_integer<T>()) {
+        unsafe {
+            return $data:$[$i];
+        }
+    }
+    else {
+        unsafe {
+            return mem::take<T>($data:$[$i]);
+        }
+    }
+}
+
+/**
+ * Seat `$value` at `$data[$i]`. Integers assign; everything else inits into an empty slot.
+ */
+#[inline]
+private function init_at<T>(ptr<T> $data, usize $i, T $value) : void
+{
+    const if (mem::is_integer<T>()) {
+        unsafe {
+            $data:$[$i] = $value;
+        }
+    }
+    else {
+        unsafe {
+            mem::init<T>($data:$[$i], mv $value);
+        }
+    }
+}
+
+/**
+ * Move `$data[$src]` onto `$data[$dst]`. Integers assign; everything else takes then inits.
+ */
+#[inline]
+private function relocate_at<T>(ptr<T> $data, usize $dst, usize $src) : void
+{
+    const if (mem::is_integer<T>()) {
+        unsafe {
+            $data:$[$dst] = $data:$[$src];
+        }
+    }
+    else {
+        unsafe {
+            mem::init<T>($data:$[$dst], mem::take<T>($data:$[$src]));
+        }
+    }
+}
+
+/**
+ * Swap two slots. Integers assign through a temporary; everything else takes then inits.
+ */
+#[inline]
+private function swap_at<T>(ptr<T> $data, usize $a, usize $b) : void
+{
+    if ($a == $b) {
+        return;
+    }
+
+    const if (mem::is_integer<T>()) {
+        unsafe {
+            T $tmp = $data:$[$a];
+            $data:$[$a] = $data:$[$b];
+            $data:$[$b] = $tmp;
+        }
+    }
+    else {
+        unsafe {
+            T $tmp = mem::take<T>($data:$[$a]);
+            mem::init<T>($data:$[$a], mem::take<T>($data:$[$b]));
+            mem::init<T>($data:$[$b], mv $tmp);
+        }
+    }
+}
+
+/**
+ * Insertion over the inclusive span, comparing through `$less`.
+ */
+#[inline]
+private function insertion_by<T, L>(ptr<T> $data, usize $lo, usize $hi, const L& $less) : void
+{
+    unsafe {
+        usize $i = $lo + 1;
+
+        while ($i <= $hi) {
+            T $held = take_at<T>($data, $i);
+            usize $j = $i;
+
+            while ($j > $lo && $less->less($held, $data:$[$j - 1])) {
+                relocate_at<T>($data, $j, $j - 1);
+                $j = $j - 1;
+            }
+
+            init_at<T>($data, $j, mv $held);
+            $i = $i + 1;
+        }
+    }
+}
+
+/**
+ * Sift `$root` down inside the inclusive window.
+ */
+#[inline]
+private function sift_down_by<T, L>(
+    ptr<T> $data,
+    usize $start,
+    usize $end,
+    usize $root,
+    const L& $less
+) : void
+{
+    unsafe {
+        while (true) {
+            usize $offset = $root - $start;
+            usize $child = $start + $offset * 2 + 1;
+
+            if ($child > $end) {
+                return;
+            }
+
+            usize $swap = $root;
+
+            if ($less->less($data:$[$swap], $data:$[$child])) {
+                $swap = $child;
+            }
+
+            usize $right = $child + 1;
+
+            if ($right <= $end && $less->less($data:$[$swap], $data:$[$right])) {
+                $swap = $right;
+            }
+
+            if ($swap == $root) {
+                return;
+            }
+
+            swap_at<T>($data, $root, $swap);
+            $root = $swap;
+        }
+    }
+}
+
+/**
+ * Heapsort of the inclusive span. The fallback once quicksort has spent its depth budget.
+ */
+private function heap_by<T, L>(ptr<T> $data, usize $lo, usize $hi, const L& $less) : void
+{
+    if ($hi <= $lo) {
+        return;
+    }
+
+    usize $count = $hi - $lo + 1;
+    usize $i = $count / 2;
+
+    while ($i > 0) {
+        $i = $i - 1;
+        sift_down_by<T, L>($data, $lo, $hi, $lo + $i, $less);
+    }
+
+    usize $end = $hi;
+
+    while ($end > $lo) {
+        swap_at<T>($data, $lo, $end);
+        $end = $end - 1;
+        sift_down_by<T, L>($data, $lo, $end, $lo, $less);
+    }
+}
+
+/**
+ * Median of three, compared through `$less`. Returns whichever index holds it.
+ */
+#[inline]
+private function median3_by<T, L>(
+    ptr<T> $data,
+    usize $a,
+    usize $b,
+    usize $c,
+    const L& $less
+) : usize
+{
+    unsafe {
+        bool $ab = $less->less($data:$[$a], $data:$[$b]);
+        bool $ac = $less->less($data:$[$a], $data:$[$c]);
+
+        if ($ab == $ac) {
+            bool $bc = $less->less($data:$[$b], $data:$[$c]);
+
+            if ($bc != $ab) {
+                return $c;
+            }
+
+            return $b;
+        }
+
+        return $a;
+    }
+}
+
+private function median3_rec_by<T, L>(
+    ptr<T> $data,
+    usize $a,
+    usize $b,
+    usize $c,
+    usize $region,
+    const L& $less
+) : usize
+{
+    if ($region >= 8) {
+        usize $inner = $region / 8;
+        $a = median3_rec_by<T, L>($data, $a, $a + $inner * 4, $a + $inner * 7, $inner, $less);
+        $b = median3_rec_by<T, L>($data, $b, $b + $inner * 4, $b + $inner * 7, $inner, $less);
+        $c = median3_rec_by<T, L>($data, $c, $c + $inner * 4, $c + $inner * 7, $inner, $less);
+    }
+
+    return median3_by<T, L>($data, $a, $b, $c, $less);
+}
+
+#[inline]
+private function choose_pivot_by<T, L>(ptr<T> $data, usize $n, const L& $less) : usize
+{
+    usize $step = $n / 8;
+
+    if ($n < 64) {
+        return median3_by<T, L>($data, 0, $step * 4, $step * 7, $less);
+    }
+
+    return median3_rec_by<T, L>($data, 0, $step * 4, $step * 7, $step, $less);
+}
+
+/**
+ * One cyclic Lomuto placement. Integers only: the copies are unconditional assignment.
+ */
+#[inline]
+private function lomuto_place<T>(
+    ptr<T> $data,
+    T $elem,
+    usize $from,
+    usize& $gap,
+    usize& $num_lt,
+    bool $take
+) : void
+{
+    unsafe {
+        $data:$[$gap] = $data:$[$num_lt];
+        $data:$[$num_lt] = $elem;
+    }
+
+    $gap = $from;
+    $num_lt = $num_lt + ($take as usize);
+}
+
+/**
+ * Cyclic Lomuto over `$data[0, $len)`, keeping `$less->less($elem, $pivot)` on the left.
+ *
+ * Instantiated only from the integer arm of `partition_by`. Assignment of a generic T
+ * type-checks on the template; owning types never reach this function.
+ */
+#[inline]
+private function lomuto_lt<T, L>(ptr<T> $data, usize $len, T $pivot, const L& $less) : usize
+{
+    if ($len == 0) {
+        return 0;
+    }
+
+    unsafe {
+        T $gap_value = $data:$[0];
+        usize $gap = 0;
+        usize $num_lt = 0;
+        usize $right = 1;
+
+        while ($right + 1 < $len) {
+            T $elem = $data:$[$right];
+            lomuto_place<T>($data, $elem, $right, $gap, $num_lt, $less->less($elem, $pivot));
+            $right = $right + 1;
+
+            $elem = $data:$[$right];
+            lomuto_place<T>($data, $elem, $right, $gap, $num_lt, $less->less($elem, $pivot));
+            $right = $right + 1;
+        }
+
+        while ($right < $len) {
+            T $elem = $data:$[$right];
+            lomuto_place<T>($data, $elem, $right, $gap, $num_lt, $less->less($elem, $pivot));
+            $right = $right + 1;
+        }
+
+        lomuto_place<T>($data, $gap_value, $gap, $gap, $num_lt, $less->less($gap_value, $pivot));
+        return $num_lt;
+    }
+}
+
+/**
+ * The same scan as `lomuto_lt`, with `!less(pivot, elem)` as the predicate.
+ */
+#[inline]
+private function lomuto_le<T, L>(ptr<T> $data, usize $len, T $pivot, const L& $less) : usize
+{
+    if ($len == 0) {
+        return 0;
+    }
+
+    unsafe {
+        T $gap_value = $data:$[0];
+        usize $gap = 0;
+        usize $num_lt = 0;
+        usize $right = 1;
+
+        while ($right + 1 < $len) {
+            T $elem = $data:$[$right];
+            lomuto_place<T>($data, $elem, $right, $gap, $num_lt, !$less->less($pivot, $elem));
+            $right = $right + 1;
+
+            $elem = $data:$[$right];
+            lomuto_place<T>($data, $elem, $right, $gap, $num_lt, !$less->less($pivot, $elem));
+            $right = $right + 1;
+        }
+
+        while ($right < $len) {
+            T $elem = $data:$[$right];
+            lomuto_place<T>($data, $elem, $right, $gap, $num_lt, !$less->less($pivot, $elem));
+            $right = $right + 1;
+        }
+
+        lomuto_place<T>($data, $gap_value, $gap, $gap, $num_lt, !$less->less($pivot, $gap_value));
+        return $num_lt;
+    }
+}
+
+#[inline]
+private function park_pivot<T>(ptr<T> $data, usize $pivot_pos) : T
+{
+    unsafe {
+        T $pivot = $data:$[$pivot_pos];
+        $data:$[$pivot_pos] = $data:$[0];
+        $data:$[0] = $pivot;
+        return $pivot;
+    }
+}
+
+#[inline]
+private function seat_pivot<T>(ptr<T> $data, usize $num_lt) : usize
+{
+    unsafe {
+        T $tmp = $data:$[0];
+        $data:$[0] = $data:$[$num_lt];
+        $data:$[$num_lt] = $tmp;
+    }
+
+    return $num_lt;
+}
+
+#[inline]
+private function partition_cyclic_lt<T, L>(ptr<T> $data, usize $n, usize $pivot_pos, const L& $less) : usize
+{
+    T $pivot = park_pivot<T>($data, $pivot_pos);
+    usize $num_lt = 0;
+
+    if ($n > 1) {
+        $num_lt = lomuto_lt<T, L>($data:$ + 1, $n - 1, $pivot, $less);
+    }
+
+    return seat_pivot<T>($data, $num_lt);
+}
+
+#[inline]
+private function partition_cyclic_le<T, L>(ptr<T> $data, usize $n, usize $pivot_pos, const L& $less) : usize
+{
+    T $pivot = park_pivot<T>($data, $pivot_pos);
+    usize $num_lt = 0;
+
+    if ($n > 1) {
+        $num_lt = lomuto_le<T, L>($data:$ + 1, $n - 1, $pivot, $less);
+    }
+
+    return seat_pivot<T>($data, $num_lt);
+}
+
+/**
+ * Swap-based Lomuto. Pivot parked at the end, then each smaller element swapped
+ * onto the write cursor. `$i` runs to `$n - 1` and no further, so a broken `$less`
+ * still finishes: the result is an unspecified permutation, never a walk off the end.
+ */
+#[inline]
+private function partition_swap_by<T, L>(ptr<T> $data, usize $n, usize $pivot_pos, const L& $less) : usize
+{
+    usize $last = $n - 1;
+    swap_at<T>($data, $pivot_pos, $last);
+
+    unsafe {
+        T $pivot = $data:$[$last];
+        usize $store = 0;
+        usize $i = 0;
+
+        while ($i < $last) {
+            if ($less->less($data:$[$i], $pivot)) {
+                swap_at<T>($data, $store, $i);
+                $store = $store + 1;
+            }
+
+            $i = $i + 1;
+        }
+
+        swap_at<T>($data, $store, $last);
+        return $store;
+    }
+}
+
+#[inline]
+private function partition_swap_le_by<T, L>(ptr<T> $data, usize $n, usize $pivot_pos, const L& $less) : usize
+{
+    usize $last = $n - 1;
+    swap_at<T>($data, $pivot_pos, $last);
+
+    unsafe {
+        T $pivot = $data:$[$last];
+        usize $store = 0;
+        usize $i = 0;
+
+        while ($i < $last) {
+            if (!$less->less($pivot, $data:$[$i])) {
+                swap_at<T>($data, $store, $i);
+                $store = $store + 1;
+            }
+
+            $i = $i + 1;
+        }
+
+        swap_at<T>($data, $store, $last);
+        return $store;
+    }
+}
+
+#[inline]
+private function partition_by<T, L>(ptr<T> $data, usize $n, usize $pivot_pos, const L& $less) : usize
+{
+    const if (mem::is_integer<T>()) {
+        return partition_cyclic_lt<T, L>($data, $n, $pivot_pos, $less);
+    }
+    else {
+        return partition_swap_by<T, L>($data, $n, $pivot_pos, $less);
+    }
+}
+
+#[inline]
+private function partition_le_by<T, L>(ptr<T> $data, usize $n, usize $pivot_pos, const L& $less) : usize
+{
+    const if (mem::is_integer<T>()) {
+        return partition_cyclic_le<T, L>($data, $n, $pivot_pos, $less);
+    }
+    else {
+        return partition_swap_le_by<T, L>($data, $n, $pivot_pos, $less);
+    }
+}
+
+#[inline]
+private function ancestor_is_pivot_by<T, L>(T? $ancestor, const T& $pivot, const L& $less) : bool
+{
+    if ($ancestor == null) {
+        return false;
+    }
+
+    T $known = $ancestor ?? $pivot;
+    return !$less->less($known, $pivot);
+}
+
+private function quick_by<T, L>(ptr<T> $data, usize $n, T? $ancestor, usize $limit, const L& $less) : void
+{
+    while ($n > 20) {
+        if ($limit == 0) {
+            heap_by<T, L>($data, 0, $n - 1, $less);
+            return;
+        }
+
+        $limit = $limit - 1;
+
+        unsafe {
+            usize $pivot_pos = choose_pivot_by<T, L>($data, $n, $less);
+            T $pivot = $data:$[$pivot_pos];
+
+            if (ancestor_is_pivot_by<T, L>($ancestor, $pivot, $less)) {
+                usize $equal_end = partition_le_by<T, L>($data, $n, $pivot_pos, $less);
+                usize $next = $equal_end + 1;
+
+                if ($next >= $n) {
+                    return;
+                }
+
+                $data:$ = $data:$ + $next;
+                $n = $n - $next;
+                $ancestor = null;
+                continue;
+            }
+
+            usize $num_lt = partition_by<T, L>($data, $n, $pivot_pos, $less);
+
+            if ($num_lt > 1) {
+                quick_by<T, L>($data, $num_lt, $ancestor, $limit, $less);
+            }
+
+            usize $right = $num_lt + 1;
+
+            if ($right >= $n) {
+                return;
+            }
+
+            T $placed = $data:$[$num_lt];
+            $data:$ = $data:$ + $right;
+            $n = $n - $right;
+            $ancestor = $placed;
+        }
+    }
+
+    if ($n > 1) {
+        insertion_by<T, L>($data, 0, $n - 1, $less);
+    }
+}
+
+/**
+ * Reverse `$n` elements. Four-byte integers use a vector reverse; everything else swaps.
+ */
+private function reverse_run<T>(ptr<T> $data, usize $n) : void
+{
+    const if (mem::is_integer<T>()) {
+        if (mem::size<T>() == 4) {
+            reverse_words($data:$ as ptr<int32>, $n);
+            return;
+        }
+    }
+
+    usize $a = 0;
+    usize $b = $n - 1;
+
+    while ($a < $b) {
+        swap_at<T>($data, $a, $b);
+        $a = $a + 1;
+        $b = $b - 1;
+    }
+}
+
+/**
+ * True when the run is ordered, or was strictly reversed and has been reversed back.
+ */
+private function consume_run_by<T, L>(ptr<T> $data, usize $n, const L& $less) : bool
+{
+    if ($n < 2) {
+        return true;
+    }
+
+    unsafe {
+        if ($less->less($data:$[1], $data:$[0])) {
+            usize $i = 2;
+
+            while ($i < $n) {
+                if (!$less->less($data:$[$i], $data:$[$i - 1])) {
+                    return false;
+                }
+
+                $i = $i + 1;
+            }
+
+            reverse_run<T>($data, $n);
+            return true;
+        }
+
+        usize $i = 2;
+
+        while ($i < $n) {
+            if ($less->less($data:$[$i], $data:$[$i - 1])) {
+                return false;
+            }
+
+            $i = $i + 1;
+        }
+
+        return true;
+    }
+}
+
+/**
+ * Unstable sort of `$n` elements at `$data`, ordered by `$less`. Allocates nothing.
+ */
+internal function unstable<T, L>(ptr<T> $data, usize $n, const L& $less) : void
+{
+    if ($n <= 1) {
+        return;
+    }
+
+    if (consume_run_by<T, L>($data, $n, $less)) {
+        return;
+    }
+
+    usize $budget = log2_floor($n) * 2;
+
+    if ($budget < 1) {
+        $budget = 1;
+    }
+
+    quick_by<T, L>($data, $n, null, $budget, $less);
+}
+
+/**
+ * Merge `$na` elements at `$a` with `$nb` at `$b` into empty `$dst` slots, taking from
+ * each source. `$dst` must not overlap either run.
+ */
+private function merge_into<T, L>(
+    ptr<T> $dst,
+    ptr<T> $a,
+    usize $na,
+    ptr<T> $b,
+    usize $nb,
+    const L& $less
+) : void
+{
+    usize $i = 0;
+    usize $j = 0;
+    usize $k = 0;
+
+    unsafe {
+        while ($i < $na && $j < $nb) {
+            if ($less->less($b:$[$j], $a:$[$i])) {
+                mem::init<T>($dst:$[$k], mem::take<T>($b:$[$j]));
+                $j = $j + 1;
+            }
+            else {
+                mem::init<T>($dst:$[$k], mem::take<T>($a:$[$i]));
+                $i = $i + 1;
+            }
+
+            $k = $k + 1;
+        }
+
+        while ($i < $na) {
+            mem::init<T>($dst:$[$k], mem::take<T>($a:$[$i]));
+            $i = $i + 1;
+            $k = $k + 1;
+        }
+
+        while ($j < $nb) {
+            mem::init<T>($dst:$[$k], mem::take<T>($b:$[$j]));
+            $j = $j + 1;
+            $k = $k + 1;
+        }
+    }
+}
+
+private function stable_rec<T, L>(ptr<T> $data, ptr<T> $tmp, usize $n, const L& $less) : void
+{
+    if ($n <= 20) {
+        if ($n > 1) {
+            insertion_by<T, L>($data, 0, $n - 1, $less);
+        }
+
+        return;
+    }
+
+    usize $mid = $n / 2;
+    stable_rec<T, L>($data, $tmp, $mid, $less);
+    stable_rec<T, L>($data:$ + $mid, $tmp, $n - $mid, $less);
+    merge_into<T, L>($tmp, $data, $mid, $data:$ + $mid, $n - $mid, $less);
+
+    // bitwise relocation back. `$tmp` is then abandoned: `free` does not destroy, and
+    // `$data` holds the only owners
+    mem::move<T>($data, $tmp, $n);
+}
+
+/**
+ * Stable sort of `$n` elements at `$data`, ordered by `$less`. Allocates `$n` elements of
+ * scratch when `$n` is above 20, nothing below. A null `$data` with `$n` of 0 is left alone.
+ */
+internal function stable<T, L>(ptr<T> $data, usize $n, const L& $less) : void
+{
+    if ($n <= 1) {
+        return;
+    }
+
+    if ($n <= 20) {
+        insertion_by<T, L>($data, 0, $n - 1, $less);
+        return;
+    }
+
+    ptr<T> $tmp = mem::alloc<T>($n);
+
+    if ($tmp:$ == null) {
+        die('sort: out of memory');
+    }
+
+    stable_rec<T, L>($data, $tmp, $n, $less);
+    mem::free<T>($tmp);
+}
+
+/**
+ * Unstable by `<`. Integers take assignment and cyclic Lomuto inside the kernel;
+ * everything else takes `natural<T>` and the owning moves.
+ */
+internal function unstable_natural<T>(ptr<T> $data, usize $n) : void
+{
+    natural<T> $order = natural<T>();
+    unstable<T, natural<T>>($data, $n, $order);
+}
+
+/**
+ * Stable by `<`. Integers skip stability: the order is total and a copy is a copy.
+ */
+internal function stable_natural<T>(ptr<T> $data, usize $n) : void
+{
+    const if (mem::is_integer<T>()) {
+        natural<T> $order = natural<T>();
+        unstable<T, natural<T>>($data, $n, $order);
+    }
+    else {
+        natural<T> $order = natural<T>();
+        stable<T, natural<T>>($data, $n, $order);
+    }
+}
+
+internal function unstable_comparing<T, C>(ptr<T> $data, usize $n, const C& $c) : void
+{
+    comparing<T, C> $order = comparing<T, C>($c);
+    unstable<T, comparing<T, C>>($data, $n, $order);
+}
+
+internal function unstable_with<T>(ptr<T> $data, usize $n, function<ordering(const T&, const T&)> $c) : void
+{
+    with<T> $order = with<T>($c);
+    unstable<T, with<T>>($data, $n, $order);
+}
+
+internal function unstable_keyed<T, K>(ptr<T> $data, usize $n, function<K(const T&)> $key) : void
+{
+    keyed<T, K> $order = keyed<T, K>($key);
+    unstable<T, keyed<T, K>>($data, $n, $order);
+}
+
+internal function stable_comparing<T, C>(ptr<T> $data, usize $n, const C& $c) : void
+{
+    comparing<T, C> $order = comparing<T, C>($c);
+    stable<T, comparing<T, C>>($data, $n, $order);
+}
+
+internal function stable_with<T>(ptr<T> $data, usize $n, function<ordering(const T&, const T&)> $c) : void
+{
+    with<T> $order = with<T>($c);
+    stable<T, with<T>>($data, $n, $order);
+}
+
+internal function stable_keyed<T, K>(ptr<T> $data, usize $n, function<K(const T&)> $key) : void
+{
+    keyed<T, K> $order = keyed<T, K>($key);
+    stable<T, keyed<T, K>>($data, $n, $order);
+}
+
+/**
+ * True when `$n` elements at `$data` are already in non-decreasing `<` order.
+ *
+ * `ptr<const T>` keeps T as T. A `slice<const T>` would ask `comparable<const T>`
+ * and fail. Empty and a single element are sorted.
+ */
+public function is_sorted<T>(ptr<const T> $data, usize $n) : bool where T : contract::comparable<T>
+{
+    usize $i = 1;
+
+    unsafe {
+        while ($i < $n) {
+            if ($data:$[$i] < $data:$[$i - 1]) {
+                return false;
+            }
+
+            $i = $i + 1;
+        }
+    }
+
+    return true;
+}
+
+internal function is_sorted<T, L>(ptr<const T> $data, usize $n, const L& $less) : bool
+{
+    usize $i = 1;
+
+    unsafe {
+        while ($i < $n) {
+            if ($less->less($data:$[$i], $data:$[$i - 1])) {
+                return false;
+            }
+
+            $i = $i + 1;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * True when the run is already in non-decreasing `$c` order. A
+ * `contract::comparator<T>` inlines.
+ */
+public function is_sorted<T, C : contract::comparator<T>>(ptr<const T> $data, usize $n, by: C $c) : bool
+{
+    comparing<T, C> $order = comparing<T, C>($c);
+    return is_sorted<T, comparing<T, C>>($data, $n, $order);
+}
+
+/**
+ * True when the run is already in non-decreasing closure order. One
+ * indirect call per compare.
+ */
+public function is_sorted<T>(
+    ptr<const T> $data,
+    usize $n,
+    by: function<ordering(const T&, const T&)> $c
+) : bool
+{
+    with<T> $order = with<T>($c);
+    return is_sorted<T, with<T>>($data, $n, $order);
+}
+
+/**
+ * True when the run is already in non-decreasing `$k` order. `K` has to
+ * be comparable.
+ */
+public function is_sorted<T, K : contract::comparable<K>>(
+    ptr<const T> $data,
+    usize $n,
+    key: function<K(const T&)> $k
+) : bool
+{
+    keyed<T, K> $order = keyed<T, K>($k);
+    return is_sorted<T, keyed<T, K>>($data, $n, $order);
+}

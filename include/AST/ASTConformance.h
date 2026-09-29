@@ -44,8 +44,21 @@ namespace AST
     bool conforms_to(const ComplexType *ct, const ValueType &interface);
 
     // the same question asked of a type rather than a layout, so a caller with a ValueType in hand does
-    // not have to unwrap it and guard the null. a primitive, a pointer, a callable or a C
-    // function pointer conforms to nothing
+    // not have to unwrap it and guard the null.
+    //
+    // a type with a declaration stays **nominal**: `conforms_to` is membership in that layout's
+    // conformance list, and a struct that happens to have `<` is not `comparable` until it says so.
+    // a type with no declaration - a primitive, a pointer, a simd vector, a callable - has nothing
+    // to opt into except the operators the language already spells, so it conforms **structurally**
+    // when every requirement is an operator, there are no associated types, and each operator is
+    // answered by builtin meaning on the *peeled* operand types. the peel is the load-bearing half:
+    // a requirement written `const T&` is a pointer, and asking builtin meaning of the borrow would
+    // make every type comparable via the address-comparison arm. the first peeled operand has to
+    // equal the type being asked, or `int32` would vacuously conform to `comparable<float64>`
+    //
+    // the structural arm lives in ASTStructuralConformance.cpp. requirement signatures walk
+    // pointers and type parameters without intern: an operator requirement is `const T&`,
+    // and first_constraint_violation substitutes a generic application before it asks here
     bool conforms_to(const ValueType &type, const ValueType &interface);
 
     // the requirements `interface` declares, in **declaration order** - which is also vtable slot order,
@@ -210,13 +223,12 @@ namespace AST
 
     // the first requirement of `interface` that `ct` does not satisfy, in declaration order.
     //
-    // A candidate matches when its parameters **from index 1** and its return type equal the
-    // requirement's, after substitution.
-    //
-    // **index 1, not 0.** argument 0 is the receiver, and it is `Drawable&` on the requirement and
-    // `Circle&` on the implementor by construction, so comparing it would make every conformance fail.
-    // That is the one asymmetry in the comparison, and it is the same one
-    // FunctionDeclNode::implicit_arg_count() already exists for.
+    // A candidate matches when its written parameters and its return type equal the
+    // requirement's, after substitution. `WantedSignature::parameter_offset` is
+    // `has_receiver() ? 1 : 0`: a receiver is `Drawable&` on the requirement and
+    // `Circle&` on the implementor by construction, so comparing it would make every
+    // conformance fail; an operator has no receiver, and its left operand is a
+    // parameter the author wrote.
     //
     // An **operator** requirement is not looked up on the type at all. An operator is registered in the
     // root namespace under a decorated name, never on either operand's method table, so `functions` is
