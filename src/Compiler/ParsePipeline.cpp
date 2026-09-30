@@ -185,6 +185,7 @@ void Compiler::run_semantic_pipeline(
 {
     {
         Compiler::ScopedPhase phase("constants");
+        Compiler::ProgressReporter::instance().tick("constants");
         AST::ConstantExpander(bundle).run();
     }
 
@@ -192,6 +193,7 @@ void Compiler::run_semantic_pipeline(
 
     {
         Compiler::ScopedPhase phase("instances");
+        Compiler::ProgressReporter::instance().tick("instances");
         monomorphizer.run();
     }
 
@@ -201,16 +203,19 @@ void Compiler::run_semantic_pipeline(
 
     {
         Compiler::ScopedPhase phase("pointers");
+        Compiler::ProgressReporter::instance().tick("pointers");
         AST::PointerAdjuster(bundle).run();
     }
 
     {
         Compiler::ScopedPhase phase("access");
+        Compiler::ProgressReporter::instance().tick("access");
         AST::AccessPass(bundle).run();
     }
 
     {
         Compiler::ScopedPhase phase("types");
+        Compiler::ProgressReporter::instance().tick("types");
         AST::TypeChecker(bundle, options).run();
     }
 }

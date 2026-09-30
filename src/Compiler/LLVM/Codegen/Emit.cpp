@@ -51,14 +51,15 @@ static bool run_isolated_emits(std::vector<IsolatedEmitRequest> &requests, unsig
     Compiler::PhaseTimings &clock = Compiler::PhaseTimings::instance();
     std::vector<IsolatedEmitResult> results(requests.size());
 
-    Compiler::ProgressReporter::instance().suspend();
-
+    // isolated workers parse their own bitcode and never write this stream, so the live row stays
+    // drawn through ISel. a failed unit suspends below before the dump
     Compiler::run_jobs(jobs, requests.size(), [&](size_t i) {
         results[i] = emit_isolated_unit(requests[i]);
     });
 
     for (size_t i = 0; i < results.size(); i++) {
         if (!results[i].ok) {
+            Compiler::ProgressReporter::instance().suspend();
             llvm::errs() << results[i].error << "\n";
             return false;
         }

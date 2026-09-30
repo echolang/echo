@@ -2561,7 +2561,7 @@ int main(int argc, char *argv[], char *envp[])
         && !driver.silent
         && !diagnostics.is_machine_readable()
         && driver.subcommand != Compiler::Subcommand::t_lsp) {
-        Compiler::ProgressReporter::instance().enable(std::cerr, capabilities);
+        Compiler::ProgressReporter::instance().enable(std::cerr, capabilities, true);
     }
 
     if (driver.prints(Compiler::PrintKind::t_manifest)) {

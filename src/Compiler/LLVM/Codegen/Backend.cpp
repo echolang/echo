@@ -341,6 +341,33 @@ void append_objects(
     }
 }
 
+#if defined(__APPLE__)
+struct DarwinPlatformVersion
+{
+    std::string minos;
+    std::string sdk;
+};
+
+// minos from the triple, sdk from SDKSettings.json (falling back to minos).
+// empty when the triple has no macOS version: the caller then takes clang
+std::optional<DarwinPlatformVersion> darwin_ld_platform_version(const std::string &triple)
+{
+    llvm::VersionTuple macos;
+    if (!llvm::Triple(triple).getMacOSXVersion(macos) || macos.empty()) {
+        return std::nullopt;
+    }
+
+    DarwinPlatformVersion version;
+    version.minos = fmt::format("{}.{}", macos.getMajor(), macos.getMinor().value_or(0));
+    version.sdk = Compiler::darwin_sdk_version();
+    if (version.sdk.empty()) {
+        version.sdk = version.minos;
+    }
+
+    return version;
+}
+#endif
+
 // the linker to invoke, as an argv. `std::nullopt` means "we do not know how to spell this platform" and
 // the caller falls back to the clang driver.
 //
@@ -351,7 +378,8 @@ std::optional<std::vector<std::string>> host_linker_command(
     const std::string &executable_name,
     const std::vector<std::filesystem::path> &objects,
     const std::vector<std::filesystem::path> &link_objects,
-    const std::vector<std::string> &link_words
+    const std::vector<std::string> &link_words,
+    const std::string &triple
 )
 {
 #if defined(__APPLE__)
@@ -370,6 +398,11 @@ std::optional<std::vector<std::string>> host_linker_command(
         return std::nullopt;
     }
 
+    const std::optional<DarwinPlatformVersion> platform = darwin_ld_platform_version(triple);
+    if (!platform.has_value()) {
+        return std::nullopt;
+    }
+
     std::vector<std::string> command = { "ld", "-o", executable_name };
     append_objects(command, objects);
 
@@ -383,6 +416,13 @@ std::optional<std::vector<std::string>> host_linker_command(
     command.push_back("-arch");
     command.push_back(arch);
 
+    // without -platform_version ld copies the objects' LC_BUILD_VERSION, whose sdk is 0.
+    // AppKit treats that as predating dark mode and forces the light appearance
+    command.push_back("-platform_version");
+    command.push_back("macos");
+    command.push_back(platform->minos);
+    command.push_back(platform->sdk);
+
     command.insert(command.end(), link_words.begin(), link_words.end());
 
     return command;
@@ -392,6 +432,8 @@ std::optional<std::vector<std::string>> host_linker_command(
     // own, so we only take this path when a bundled sysroot is sitting
     // next to echoc or the environment already has LIB (vcvars / CI).
     // Otherwise the clang driver is the one that knows how to find VS.
+    (void)triple;
+
     const std::filesystem::path sysroot = Compiler::windows_sysroot();
     const char *libenv = std::getenv("LIB");
     if (sysroot.empty() && (libenv == nullptr || *libenv == '\0')) {
@@ -460,6 +502,7 @@ std::optional<std::vector<std::string>> host_linker_command(
     (void)objects;
     (void)link_objects;
     (void)link_words;
+    (void)triple;
     return std::nullopt;
 #endif
 }
@@ -534,7 +577,7 @@ bool Backend::link_executable(
     // a cross-compile is not a Darwin ld -syslibroot of the Mac SDK. the clang
     // driver below is the one that knows `-target` / `-isysroot` for the row
     if (!_ctx.options.codegen.is_cross()) {
-        if (const auto command = host_linker_command(output, objects, link_objects, link_words)) {
+        if (const auto command = host_linker_command(output, objects, link_objects, link_words, _ctx.target_triple)) {
             if (Compiler::run_tool(command.value())) {
                 gen_debug_symbols(output);
                 return true;

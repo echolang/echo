@@ -61,6 +61,12 @@ namespace Compiler
     // is this
     std::filesystem::path darwin_sdk_root();
 
+    // `"Version"` from `<darwin_sdk_root()>/SDKSettings.json`, the file clang
+    // reads. empty off Darwin, and empty when the file is missing or unreadable.
+    // asked once: the path cannot change during a compile, and a `$SDKROOT`
+    // override is already what darwin_sdk_root followed
+    std::string darwin_sdk_version();
+
     // `xcrun --sdk <name> --show-sdk-path`. empty `sdk` is darwin_sdk_root().
     // empty off Darwin or when xcrun does not know the name. asked once per
     // name: xcrun is the same cost darwin_sdk_root already paid once for macosx

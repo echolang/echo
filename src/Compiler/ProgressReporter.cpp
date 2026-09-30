@@ -5,6 +5,16 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <condition_variable>
+#include <cstring>
+#include <mutex>
+#include <thread>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace
 {
@@ -27,6 +37,58 @@ namespace
     // rather than SGR, and `--color=never` on a terminal must not turn a redraw into a stream of
     // half-overwritten rows
     constexpr const char *ERASE_ROW = "\r\x1b[K";
+    constexpr size_t ERASE_ROW_SIZE = 4;
+
+    // how often the clock overwrites the glyph and the elapsed digits. Short enough to read as motion,
+    // long enough that a redraw is not the thing the compile is waiting on
+    constexpr auto CLOCK_INTERVAL = std::chrono::milliseconds(80);
+
+    // pre-sized on the driver at enable, so the clock never grows a string. A live row is one terminal
+    // line plus SGR around the mark; 4 KiB is far past that
+    constexpr size_t CLOCK_SCRATCH = 4096;
+
+    // `{:>6} ms` as render_row spells it - six digits, a space, `ms`. The clock overwrites only the
+    // digits, so this width is load-bearing
+    constexpr unsigned int ELAPSED_CAP = 999999;
+
+#ifndef STDERR_FILENO
+#define STDERR_FILENO 2
+#endif
+
+    void write_fd(int fd, const char *data, size_t n)
+    {
+#if defined(_WIN32)
+        _write(fd, data, static_cast<unsigned int>(n));
+#else
+        const ssize_t written = write(fd, data, n);
+        (void)written;
+#endif
+    }
+
+    // right-aligned decimal into six ASCII bytes, spaces on the left. The clock's paint, so no
+    // `fmt` and no temporaries
+    void write_digits6(char *at, unsigned int value)
+    {
+        if (value > ELAPSED_CAP) {
+            value = ELAPSED_CAP;
+        }
+
+        char digits[MILLISECONDS_WIDTH];
+        size_t n = 0;
+        unsigned int rest = value;
+        do {
+            digits[n++] = static_cast<char>('0' + (rest % 10));
+            rest /= 10;
+        } while (rest != 0 && n < MILLISECONDS_WIDTH);
+
+        const size_t spaces = MILLISECONDS_WIDTH - n;
+        for (size_t i = 0; i < spaces; i++) {
+            at[i] = ' ';
+        }
+        for (size_t i = 0; i < n; i++) {
+            at[spaces + i] = digits[n - 1 - i];
+        }
+    }
 
     // how many columns a string occupies, counting a UTF-8 sequence once. Every glyph either theme draws
     // is single-column, so leading bytes are the whole of the arithmetic - and doing it in bytes instead
@@ -127,9 +189,165 @@ Compiler::ProgressTheme Compiler::ProgressTheme::ascii()
     return ProgressTheme { "+", "x", "-", { "|", "/", "-", "\\" } };
 }
 
+struct Compiler::ProgressReporter::Clock
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::thread thread;
+    bool stop = false;
+    bool abandoned = false;
+    int fd = -1;
+    std::string scratch;
+    size_t length = 0;
+    size_t glyph_offset = 0;
+    size_t glyph_bytes = 0;
+    size_t ms_offset = 0;
+    size_t frame = 0;
+    std::chrono::steady_clock::time_point started;
+    std::vector<const char *> spinner;
+
+    std::unique_lock<std::mutex> lock();
+    void halt();
+    void start();
+    void present(const RenderedRow &rendered);
+    void pulse();
+    void clear();
+
+private:
+
+    void run();
+};
+
+std::unique_lock<std::mutex> Compiler::ProgressReporter::Clock::lock()
+{
+    return std::unique_lock<std::mutex>(mutex);
+}
+
+void Compiler::ProgressReporter::Clock::halt()
+{
+    if (!thread.joinable()) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> held(mutex);
+        stop = true;
+    }
+
+    cv.notify_one();
+
+    try {
+        thread.join();
+    }
+    catch (...) {
+        // throwing here would terminate from ProgressStep's destructor. a joinable
+        // thread's destructor also terminates, so detach if the join did not take
+        // ownership - and then this Clock must not be destroyed while the thread
+        // may still touch it
+        if (thread.joinable()) {
+            try {
+                thread.detach();
+            }
+            catch (...) {
+            }
+        }
+
+        abandoned = true;
+    }
+}
+
+void Compiler::ProgressReporter::Clock::start()
+{
+    if (thread.joinable()) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> held(mutex);
+        stop = false;
+    }
+
+    thread = std::thread([this] {
+        run();
+    });
+}
+
+void Compiler::ProgressReporter::Clock::present(const RenderedRow &rendered)
+{
+    const size_t need = ERASE_ROW_SIZE + rendered.text.size();
+    if (scratch.size() < need) {
+        scratch.resize(need);
+    }
+
+    std::memcpy(scratch.data(), ERASE_ROW, ERASE_ROW_SIZE);
+    std::memcpy(scratch.data() + ERASE_ROW_SIZE, rendered.text.data(), rendered.text.size());
+    length = need;
+    glyph_bytes = rendered.glyph_bytes;
+    glyph_offset = rendered.glyph_bytes == 0
+        ? 0
+        : ERASE_ROW_SIZE + rendered.glyph_offset;
+    // 0 is "no slot". pulse must not paint at offset 0: that is ERASE_ROW
+    ms_offset = rendered.ms_offset == 0
+        ? 0
+        : ERASE_ROW_SIZE + rendered.ms_offset;
+}
+
+void Compiler::ProgressReporter::Clock::clear()
+{
+    length = 0;
+}
+
+void Compiler::ProgressReporter::Clock::pulse()
+{
+    if (length == 0) {
+        return;
+    }
+
+    if (!spinner.empty()
+        && glyph_bytes > 0
+        && glyph_offset + glyph_bytes <= length) {
+        const char *glyph = spinner[frame % spinner.size()];
+        if (std::strlen(glyph) == glyph_bytes) {
+            std::memcpy(scratch.data() + glyph_offset, glyph, glyph_bytes);
+        }
+    }
+
+    if (ms_offset != 0 && ms_offset + MILLISECONDS_WIDTH <= length) {
+        write_digits6(scratch.data() + ms_offset, progress_elapsed_ms(started));
+    }
+
+    write_fd(fd, scratch.data(), length);
+}
+
+void Compiler::ProgressReporter::Clock::run()
+{
+    while (true) {
+        std::unique_lock<std::mutex> held(mutex);
+        if (cv.wait_for(held, CLOCK_INTERVAL, [this] {
+            return stop;
+        })) {
+            return;
+        }
+
+        if (length == 0) {
+            continue;
+        }
+
+        frame++;
+        pulse();
+    }
+}
+
+Compiler::ProgressReporter::ProgressReporter() = default;
+
 Compiler::ProgressReporter::ProgressReporter(std::ostream &out, TerminalCapabilities capabilities)
 {
     enable(out, capabilities);
+}
+
+Compiler::ProgressReporter::~ProgressReporter()
+{
+    halt_spinner();
 }
 
 Compiler::ProgressReporter &Compiler::ProgressReporter::instance()
@@ -138,18 +356,36 @@ Compiler::ProgressReporter &Compiler::ProgressReporter::instance()
     return reporter;
 }
 
-void Compiler::ProgressReporter::enable(std::ostream &out, TerminalCapabilities capabilities)
+void Compiler::ProgressReporter::enable(
+    std::ostream &out,
+    TerminalCapabilities capabilities,
+    bool animate,
+    int clock_fd
+)
 {
+    halt_spinner();
+
     _out = &out;
     _capabilities = capabilities;
+    _animate = animate;
 
     // the theme is derived once, here, rather than per row - the rule AST::DiagnosticRenderer already
     // follows, and for its reason: three sites re-asking `unicode` are three chances to answer it
     // differently
     _theme = capabilities.unicode ? ProgressTheme::pretty() : ProgressTheme::ascii();
+
+    if (!animate) {
+        _clock.reset();
+        return;
+    }
+
+    _clock = std::make_unique<Clock>();
+    _clock->fd = clock_fd >= 0 ? clock_fd : STDERR_FILENO;
+    _clock->scratch.assign(CLOCK_SCRATCH, '\0');
+    _clock->spinner = _theme.spinner;
 }
 
-std::string Compiler::ProgressReporter::render_row(
+Compiler::ProgressReporter::RenderedRow Compiler::ProgressReporter::render_row(
     ProgressPhase phase,
     const std::string &subject,
     const std::string &detail,
@@ -179,28 +415,39 @@ std::string Compiler::ProgressReporter::render_row(
     const size_t budget = limit > fixed ? limit - fixed : 0;
 
     const std::string fitted = truncate_from_the_left(detail, budget, ellipsis);
+    const std::string padded_detail = pad_to(fitted, std::min(DETAIL_WIDTH, budget));
 
-    std::string row = head + pad_to(fitted, std::min(DETAIL_WIDTH, budget)) + elapsed;
+    std::string row = head + padded_detail + elapsed;
+
+    RenderedRow rendered;
+    rendered.glyph_offset = 2;
+    rendered.glyph_bytes = mark.size();
+    rendered.ms_offset = elapsed.empty() ? 0 : head.size() + padded_detail.size();
 
     // a last resort, and it fires only on a terminal too narrow for the columns at all. Trimming the
-    // trailing padding first is what keeps it from ever firing on an ordinary row
+    // trailing padding first is what keeps it from ever firing on an ordinary row. The layout is gone
+    // after that cut, so the clock must not paint slots that no longer exist
     row = right_trimmed(row);
     if (display_width(row) > limit) {
         row = truncate_from_the_left(row, limit, ellipsis);
+        rendered.glyph_offset = 0;
+        rendered.glyph_bytes = 0;
+        rendered.ms_offset = 0;
+    } else if (mark_sgr != nullptr && _capabilities.color) {
+        // the mark is coloured after the arithmetic, never before - an SGR sequence has no width and
+        // measuring one is how a row that fits becomes a row that wraps
+        const std::string wrapped = styled(mark, mark_sgr, true);
+        const size_t extra = wrapped.size() - mark.size();
+        row = row.substr(0, rendered.glyph_offset) + wrapped
+            + row.substr(rendered.glyph_offset + rendered.glyph_bytes);
+        rendered.glyph_offset += std::strlen(mark_sgr);
+        if (rendered.ms_offset != 0) {
+            rendered.ms_offset += extra;
+        }
     }
 
-    if (mark_sgr == nullptr || !_capabilities.color) {
-        return row;
-    }
-
-    // the mark is coloured after the arithmetic, never before - an SGR sequence has no width and
-    // measuring one is how a row that fits becomes a row that wraps
-    const size_t at = row.find(mark);
-    if (at == std::string::npos) {
-        return row;
-    }
-
-    return row.substr(0, at) + styled(mark, mark_sgr, true) + row.substr(at + mark.size());
+    rendered.text = std::move(row);
+    return rendered;
 }
 
 void Compiler::ProgressReporter::erase_live_row()
@@ -213,17 +460,75 @@ void Compiler::ProgressReporter::erase_live_row()
     _drawn = false;
 }
 
-void Compiler::ProgressReporter::draw_live_row()
+void Compiler::ProgressReporter::halt_spinner()
 {
-    const std::string frame = _theme.spinner.empty()
+    if (_clock == nullptr) {
+        return;
+    }
+
+    _clock->halt();
+    if (_clock->abandoned) {
+        _clock.release();
+    }
+}
+
+void Compiler::ProgressReporter::continue_spinner()
+{
+    if (!_animate || _clock == nullptr || !_drawn || !_live_phase.has_value()) {
+        return;
+    }
+
+    _clock->start();
+}
+
+Compiler::ProgressReporter::ClockPause::ClockPause(ProgressReporter &reporter) :
+    _reporter(reporter)
+{
+    _reporter.halt_spinner();
+}
+
+Compiler::ProgressReporter::ClockPause::~ClockPause()
+{
+    try {
+        _reporter.continue_spinner();
+    }
+    catch (...) {
+    }
+}
+
+std::unique_lock<std::mutex> Compiler::ProgressReporter::lock_clock()
+{
+    if (_clock == nullptr) {
+        return std::unique_lock<std::mutex>();
+    }
+
+    return _clock->lock();
+}
+
+void Compiler::ProgressReporter::write_live_row()
+{
+    const size_t spinner_frame = _clock != nullptr ? _clock->frame : _frame;
+    const std::string mark = _theme.spinner.empty()
         ? _theme.skipped
-        : _theme.spinner[_frame % _theme.spinner.size()];
+        : _theme.spinner[spinner_frame % _theme.spinner.size()];
 
-    *_out << ERASE_ROW
-          << render_row(_live_phase.value(), _live_subject, _live_detail, frame, sgr::dim, std::nullopt)
-          << std::flush;
+    std::optional<unsigned int> elapsed;
+    if (_animate) {
+        unsigned int ms = progress_elapsed_ms(_live_started);
+        if (ms > ELAPSED_CAP) {
+            ms = ELAPSED_CAP;
+        }
+        elapsed = ms;
+    }
 
+    const RenderedRow rendered = render_row(_live_phase.value(), _live_subject, _live_detail, mark, sgr::dim, elapsed);
+
+    *_out << ERASE_ROW << rendered.text << std::flush;
     _drawn = true;
+
+    if (_clock != nullptr) {
+        _clock->present(rendered);
+    }
 }
 
 void Compiler::ProgressReporter::open(ProgressPhase phase, const std::string &subject)
@@ -238,12 +543,22 @@ void Compiler::ProgressReporter::open(ProgressPhase phase, const std::string &su
         commit(ProgressState::t_failed, 0);
     }
 
-    _live_phase = phase;
-    _live_subject = subject;
-    _live_detail.clear();
-    _frame = 0;
+    {
+        std::unique_lock<std::mutex> lock = lock_clock();
+        _live_phase = phase;
+        _live_subject = subject;
+        _live_detail.clear();
+        _live_started = std::chrono::steady_clock::now();
+        if (_clock != nullptr) {
+            _clock->frame = 0;
+            _clock->started = _live_started;
+        } else {
+            _frame = 0;
+        }
+        write_live_row();
+    }
 
-    draw_live_row();
+    continue_spinner();
 }
 
 void Compiler::ProgressReporter::tick(const std::string &detail)
@@ -252,10 +567,18 @@ void Compiler::ProgressReporter::tick(const std::string &detail)
         return;
     }
 
-    _live_detail = detail;
-    _frame++;
+    {
+        std::unique_lock<std::mutex> lock = lock_clock();
+        _live_detail = detail;
+        if (_clock != nullptr) {
+            _clock->frame++;
+        } else {
+            _frame++;
+        }
+        write_live_row();
+    }
 
-    draw_live_row();
+    continue_spinner();
 }
 
 void Compiler::ProgressReporter::set_detail(const std::string &detail)
@@ -277,15 +600,20 @@ void Compiler::ProgressReporter::commit(
         return;
     }
 
+    std::unique_lock<std::mutex> lock = lock_clock();
+    if (_clock != nullptr) {
+        _clock->clear();
+    }
+
     const bool failed = state == ProgressState::t_failed;
     const std::string mark = failed ? _theme.failed : _theme.done;
     const char *mark_sgr = failed ? sgr::error : sgr::success;
 
     // the erase is written whether or not a row is on screen, so the bytes a commit produces do not
     // depend on whether somebody suspended in between
-    *_out << ERASE_ROW
-          << render_row(_live_phase.value(), _live_subject, _live_detail, mark, mark_sgr, milliseconds)
-          << "\n";
+    const RenderedRow finished = render_row(_live_phase.value(), _live_subject, _live_detail, mark, mark_sgr, milliseconds);
+
+    *_out << ERASE_ROW << finished.text << "\n";
 
     // **a failed row lists nothing.** The files under a row are what it *did*, and a step that failed did
     // not do them - the diagnostic that follows on this same stream is what names the one that mattered.
@@ -316,25 +644,34 @@ void Compiler::ProgressReporter::row(
         return;
     }
 
-    erase_live_row();
+    {
+        std::unique_lock<std::mutex> lock = lock_clock();
+        if (_clock != nullptr) {
+            _clock->clear();
+        }
 
-    const bool failed = state == ProgressState::t_failed;
-    const std::string mark = state == ProgressState::t_skipped
-        ? _theme.skipped
-        : (failed ? _theme.failed : _theme.done);
+        erase_live_row();
 
-    const char *mark_sgr = state == ProgressState::t_skipped
-        ? sgr::dim
-        : (failed ? sgr::error : sgr::success);
+        const bool failed = state == ProgressState::t_failed;
+        const std::string mark = state == ProgressState::t_skipped
+            ? _theme.skipped
+            : (failed ? _theme.failed : _theme.done);
 
-    *_out << ERASE_ROW << render_row(phase, subject, detail, mark, mark_sgr, std::nullopt) << "\n"
-          << std::flush;
+        const char *mark_sgr = state == ProgressState::t_skipped
+            ? sgr::dim
+            : (failed ? sgr::error : sgr::success);
 
-    // a standalone row is written *between* steps, but nothing enforces that - so a live one is put back
-    // rather than lost
-    if (_live_phase.has_value()) {
-        draw_live_row();
+        *_out << ERASE_ROW << render_row(phase, subject, detail, mark, mark_sgr, std::nullopt).text
+              << "\n" << std::flush;
+
+        // a standalone row is written *between* steps, but nothing enforces that - so a live one is put
+        // back rather than lost
+        if (_live_phase.has_value()) {
+            write_live_row();
+        }
     }
+
+    continue_spinner();
 }
 
 void Compiler::ProgressReporter::suspend()
@@ -344,6 +681,7 @@ void Compiler::ProgressReporter::suspend()
     }
 
     std::lock_guard<std::mutex> lock(_suspend);
+    halt_spinner();
     erase_live_row();
 }
 
@@ -356,6 +694,8 @@ void Compiler::ProgressReporter::close(
     if (!enabled()) {
         return;
     }
+
+    halt_spinner();
 
     if (_live_phase.has_value()) {
         commit(ProgressState::t_failed, milliseconds);
@@ -389,8 +729,14 @@ Compiler::ProgressStep::ProgressStep(
 Compiler::ProgressStep::~ProgressStep()
 {
     // nobody said it worked, so it did not. That is what covers every early return and every throw in the
-    // driver without one of them naming this object
-    finish(false);
+    // driver without one of them naming this object. A destructor must not throw: the clock's join and
+    // the iostream write both sit in `finish`, and an exception already in flight would then terminate
+    // with the live row still on the line
+    try {
+        finish(false);
+    }
+    catch (...) {
+    }
 }
 
 void Compiler::ProgressStep::tick(const std::string &detail)

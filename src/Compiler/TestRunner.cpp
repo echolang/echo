@@ -199,35 +199,44 @@ Compiler::TestResult Compiler::run_test_isolated(
         return failed("echoc could not open a pipe to capture this test's output.\n");
     }
 
-    // **before the fork, and this is not a nicety.** Anything still buffered in this process is copied into
-    // the child by fork() and written a second time when the child flushes - so the compiler's own output
-    // would appear once per test
-    std::fflush(nullptr);
+    pid_t child = -1;
 
-    const pid_t child = fork();
+    {
+        // **join the clock before the fork.** fork copies only this thread; a lock the spinner held
+        // in the C library stays locked in the child with nobody to release it. ClockPause leaves
+        // the test row on screen. The child `_exit`s and must not run the destructor that would
+        // start a clock
+        ProgressReporter::ClockPause pause(ProgressReporter::instance());
 
-    if (child < 0) {
-        close(pipe_ends[0]);
-        close(pipe_ends[1]);
-
-        return failed("echoc could not fork a process to run this test in.\n");
-    }
-
-    if (child == 0) {
-        // the child. both streams go down the pipe, so a `die`'s message on fd 2 and an `echo`'s on fd 1
-        // arrive in the order the test wrote them and belong to this test alone
-        close(pipe_ends[0]);
-        dup2(pipe_ends[1], STDOUT_FILENO);
-        dup2(pipe_ends[1], STDERR_FILENO);
-        close(pipe_ends[1]);
-
-        call();
-
-        // **`_exit` and never `exit`.** An atexit handler registered in the parent - LLVM installs several -
-        // would run here too, in a process that owns none of what they are about to tear down. The buffers
-        // are flushed by hand first, which is the one thing `exit` would have done that is wanted
+        // **before the fork, and this is not a nicety.** Anything still buffered in this process is copied into
+        // the child by fork() and written a second time when the child flushes - so the compiler's own output
+        // would appear once per test
         std::fflush(nullptr);
-        _exit(0);
+
+        child = fork();
+
+        if (child < 0) {
+            close(pipe_ends[0]);
+            close(pipe_ends[1]);
+            return failed("echoc could not fork a process to run this test in.\n");
+        }
+
+        if (child == 0) {
+            // the child. both streams go down the pipe, so a `die`'s message on fd 2 and an `echo`'s on fd 1
+            // arrive in the order the test wrote them and belong to this test alone
+            close(pipe_ends[0]);
+            dup2(pipe_ends[1], STDOUT_FILENO);
+            dup2(pipe_ends[1], STDERR_FILENO);
+            close(pipe_ends[1]);
+
+            call();
+
+            // **`_exit` and never `exit`.** An atexit handler registered in the parent - LLVM installs several -
+            // would run here too, in a process that owns none of what they are about to tear down. The buffers
+            // are flushed by hand first, which is the one thing `exit` would have done that is wanted
+            std::fflush(nullptr);
+            _exit(0);
+        }
     }
 
     close(pipe_ends[1]);
