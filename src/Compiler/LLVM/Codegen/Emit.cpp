@@ -172,7 +172,11 @@ bool emit_unit_objects(
 
     // a single live module, or `ECO_JOBS=1`, stays in this LLVMContext. the bitcode
     // round-trip is the cost; run_jobs would keep one item on this thread either way
+#if defined(_WIN32)
+    const bool in_memory = true;
+#else
     const bool in_memory = live.size() <= 1 || jobs <= 1;
+#endif
 
     if (in_memory) {
         for (Output *output : live) {
