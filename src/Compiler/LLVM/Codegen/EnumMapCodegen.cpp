@@ -59,8 +59,15 @@ llvm::Value *load_arg(Compiler::LLVM::CodegenContext &ctx, AST::VarDeclNode *dec
             decl != nullptr ? decl->name() : "?", ctx.function_context()));
     }
 
-    llvm::Type *stored = found->second->getAllocatedType();
-    return ctx.builder->CreateLoad(stored, found->second, name);
+    auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(found->second);
+    if (alloca == nullptr) {
+        throw ctx.error(fmt::format(
+            "parameter '{}' is not a stack slot in an enum map body {}",
+            decl != nullptr ? decl->name() : "?", ctx.function_context()));
+    }
+
+    llvm::Type *stored = alloca->getAllocatedType();
+    return ctx.builder->CreateLoad(stored, alloca, name);
 }
 
 llvm::Value *load_enum_tag(
@@ -79,7 +86,7 @@ llvm::Value *load_enum_tag(
             AST::k_enum_tag_index,
             ct->get_property_type(AST::k_enum_tag_index),
             "enum.tag_ptr"),
-        "enum.tag");
+        "enum.tag").scalar();
 }
 
 struct FoldedMap
@@ -411,8 +418,8 @@ bool emit_forward(
         ctx.builder->CreateCondBr(has, found, miss);
 
         ctx.set_insert_point(found);
-        ctx.types->emit_returned_value(
-            assemble_present_optional(ctx, assemble_range_value(ctx, loaded, range), result));
+        ctx.types->emit_returned_value(Compiler::LLVM::CodegenValue::scalar(
+            assemble_present_optional(ctx, assemble_range_value(ctx, loaded, range), result)));
 
         ctx.set_insert_point(miss);
         ctx.types->emit_returned_value(
@@ -420,7 +427,7 @@ bool emit_forward(
         return true;
     }
 
-    ctx.types->emit_returned_value(assemble_range_value(ctx, loaded, range));
+    ctx.types->emit_returned_value(Compiler::LLVM::CodegenValue::scalar(assemble_range_value(ctx, loaded, range)));
     return true;
 }
 
@@ -515,8 +522,8 @@ bool emit_reverse(
 
     ctx.set_insert_point(found);
     llvm::Value *disc = gep_load(ctx, disc_table, disc_array_ty, tag_ty, ordinal, "map.disc");
-    ctx.types->emit_returned_value(
-        assemble_present_optional(ctx, assemble_enum(ctx, disc, enum_type), optional));
+    ctx.types->emit_returned_value(Compiler::LLVM::CodegenValue::scalar(
+        assemble_present_optional(ctx, assemble_enum(ctx, disc, enum_type), optional)));
 
     ctx.set_insert_point(miss);
     ctx.types->emit_returned_value(

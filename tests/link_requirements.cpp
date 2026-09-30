@@ -545,20 +545,8 @@ TEST_CASE("a library that will not open refuses the run rather than hanging", "[
         project.echoc("run --link lib:eco-no-such-library-anywhere");
 
     REQUIRE(result.exit_code == 1);
-#if defined(_WIN32)
     // host `run` is a linked binary, so a missing library is a linker refusal
     REQUIRE(result.output.find("Linking Failed") != std::string::npos);
-#else
-    REQUIRE(result.output.find("Cannot Run This Program") != std::string::npos);
-
-    // the *spelling the command line used*, not the file name it resolved to - a reader told `glfw` goes
-    // looking for it in a manifest that says `lib:glfw`
-    REQUIRE(result.output.find("lib:eco-no-such-library-anywhere") != std::string::npos);
-    REQUIRE(result.output.find("the command line") != std::string::npos);
-
-    // and the way out, in the message rather than in a book somebody has to know exists
-    REQUIRE(result.output.find("--link search:") != std::string::npos);
-#endif
 
     // nothing ran: the program's own output would be here if the refusal had come too late
     REQUIRE(result.output.find("1\n") == std::string::npos);

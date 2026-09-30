@@ -2,6 +2,7 @@
 
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTCast.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTRegion.h"
@@ -2689,18 +2690,33 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 {
     const ValueType type = place->result_type();
 
+    auto mint_strip = [this](ValueType dest, ExprNode *operand) -> TypeCastNode & {
+        auto &cast = _current_module->nodes.emplace_back<TypeCastNode>(dest, operand, false);
+        const CastLookup lookup = cast_plan_for(*operand, dest);
+
+        if (lookup.result == CastLookup::Result::t_ok) {
+            cast.plan_decided = true;
+        }
+
+        return cast;
+    };
+
     // an address is the deinit's `$this`, already the borrow its parameter wants. **stripped of const
     // there too**, and that is not defensive: the exemption in AST::const_receiver_refusal is spelled for
     // `is_destructor()`, and a synthesized deinit is an ordinary method - so what keeps a teardown out of
     // that rule is this function never handing one a const borrow, and it can only claim that by being
-    // total
+    // total.
+    //
+    // planted as a written TypeCastNode (implicit=false): const T& to T& is not an implicit
+    // conversion. classified here so CastResolution does not have to punch t_owned for a
+    // node this mint already knows the plan of
     if (type.is_pointer()) {
         if (!type.pointee().is_const()) {
             return place;
         }
 
-        return &_current_module->nodes.emplace_back<TypeCastNode>(
-            ValueType::make_pointer(ValueType::make_mutable(type.pointee()), false), place, false);
+        return &mint_strip(
+            ValueType::make_pointer(ValueType::make_mutable(type.pointee()), false), place);
     }
 
     // a mutable place is what every other drop hands over
@@ -2710,8 +2726,8 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 
     auto &address = _current_module->nodes.emplace_back<AddrOfExprNode>(place);
 
-    return &_current_module->nodes.emplace_back<TypeCastNode>(
-        ValueType::make_pointer(ValueType::make_mutable(type), false), &address, false);
+    return &mint_strip(
+        ValueType::make_pointer(ValueType::make_mutable(type), false), &address);
 }
 
 void OwnershipPass::emit_teardown_call(

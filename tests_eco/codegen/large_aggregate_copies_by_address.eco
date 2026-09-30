@@ -1,0 +1,25 @@
+// a 512-element inline array is well above the 64-byte SSA cutoff. copies of it must be
+// memcpy of an address, never a first-class load of the whole aggregate
+struct Vec4
+{
+    float32 $x;
+    float32 $y;
+    float32 $z;
+    float32 $w;
+}
+
+struct Blob
+{
+    Vec4[512] $cells;
+}
+
+function make() : Blob
+{
+    Blob $b;
+    $b->cells[0]->x = 1.0;
+    return $b;
+}
+
+Blob $a = make();
+Blob $c = $a;
+echo $c->cells[0]->x as int32;

@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -159,7 +160,10 @@ namespace Compiler
         // erases the live row and leaves the cursor at column 0. **Sticky and idempotent**: there is no
         // resume() to forget, because the next open/tick/commit/row redraws from the state this object
         // still holds. So a caller about to write into this stream owes exactly one call and no pairing,
-        // and a forgotten one costs one garbled line rather than a lost row
+        // and a forgotten one costs one garbled line rather than a lost row.
+        //
+        // thread-safe with itself: C compiles and LLVM unit emission may each call this from a worker
+        // whose driver already erased the row, and two no-ops racing on `_drawn` is a data race
         void suspend();
 
         // the closing line, and the end of the checklist. After this the stream belongs to whatever comes
@@ -178,6 +182,10 @@ namespace Compiler
         std::ostream *_out = nullptr;
         TerminalCapabilities _capabilities;
         ProgressTheme _theme = ProgressTheme::ascii();
+
+        // only `suspend()` takes this, because that is the one entry a worker calls. Drawing the
+        // live row stays on the driver
+        std::mutex _suspend;
 
         // what the live row says, kept so suspend() can be undone by the next write with no caller
         // co-operation. No phase means nothing is live

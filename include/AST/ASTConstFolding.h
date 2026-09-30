@@ -76,8 +76,7 @@ namespace AST
         // condition asks about is exactly what is not known there. **this is the arm that keeps
         // `array<T>` compilable at all**: its own `const if (mem::is_trivially_copyable<T>())` can never
         // fold against an unbound `T`, so without the skip finalize() would refuse the template rather
-        // than each instance deciding for itself. AST::ForeachLowering's rule, and PointerAdjuster's
-        // before it
+        // than each instance deciding for itself. a t_owned body is finished. AST::function_is_fixpoint_open
         void visitFunctionDecl(FunctionDeclNode &node) override;
 
         // the expression rule. descends first, then folds whatever came back if it is a `const(...)` -

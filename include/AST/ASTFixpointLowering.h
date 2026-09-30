@@ -29,9 +29,9 @@ namespace AST
     // breaks loudly**: forgetting one is a golden diff or a round that stalls, never a compile error.
     //
     //   - **finalize() is one more round, not a sweep.** a round inherits visitFunctionDecl's
-    //     generic-body skip and walks scope children, which is the tree walk these passes are required
-    //     to use: NodeCollection owns a detached node forever, so an `of_type` arena sweep would reach
-    //     nodes the pass already lowered away and blame them.
+    //     generic-body and t_owned skip and walks scope children, which is the tree walk these
+    //     passes are required to use: NodeCollection owns a detached node forever, so an `of_type`
+    //     arena sweep would reach nodes the pass already lowered away and blame them.
     //   - **a hoist counter is per file**, so a golden's `$__guard0` does not move when an unrelated
     //     file above it grows one. owned here rather than left as a rule to remember - a pass asks
     //     next_hoist_index() and there is no reset to forget.
@@ -78,9 +78,13 @@ namespace AST
         // by run_round, which is the whole of the second invariant above
         size_t next_hoist_index();
 
-        // a template's body is only meaningful once cloned into a concrete instance, and the type every
-        // one of these passes needs is exactly what is not known there. AST::PointerAdjuster's rule
+        // a template's body is only meaningful once cloned into a concrete instance, and a t_owned
+        // body is finished: the type every one of these passes needs is exactly what is not known
+        // in a template, and minting into t_owned is an assert. AST::function_is_fixpoint_open
         void visitFunctionDecl(FunctionDeclNode &node) override;
+
+        // save `_current_function`, descend, restore. the skip policy is the caller's
+        void walk_function(FunctionDeclNode &node);
 
         Bundle &_bundle;
         Collector &_collector;

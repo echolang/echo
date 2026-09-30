@@ -42,7 +42,7 @@ namespace Compiler::LLVM
 
         node.arguments[0]->accept(*_ctx.visitor);
 
-        return LValue{ _ctx.pop(), AST::value_type_of(place_type) };
+        return LValue{ _ctx.pop_scalar(), AST::value_type_of(place_type) };
     }
 
     void AtomicCodegen::gen_atomic_builtin(
@@ -135,10 +135,10 @@ namespace Compiler::LLVM
         auto eval_value = [&](size_t index) -> llvm::Value * {
             node.arguments[index]->accept(*_ctx.visitor);
             return _ctx.types->coerce_value(
-                _ctx.pop(),
+                _ctx.pop_value(),
                 node.arguments[index]->result_type(),
                 subject,
-                *_ctx.current_cmp_unit);
+                *_ctx.current_cmp_unit).scalar();
         };
 
         switch (kind) {
@@ -147,7 +147,7 @@ namespace Compiler::LLVM
                     _ctx.builder->CreateLoad(access_type, place.address, "atomic.load");
                 load->setAtomic(order);
                 load->setAlignment(align);
-                _ctx.push(narrow(load, "atomic.load.bool"));
+                _ctx.push_scalar(narrow(load, "atomic.load.bool"));
                 return;
             }
 
@@ -170,7 +170,7 @@ namespace Compiler::LLVM
                 llvm::Value *prev = _ctx.builder->CreateAtomicRMW(
                     op, place.address, widen(eval_value(1)), align, order);
                 prev->setName(name);
-                _ctx.push(narrow(prev, "atomic.prev.bool"));
+                _ctx.push_scalar(narrow(prev, "atomic.prev.bool"));
                 return;
             }
 
@@ -183,7 +183,7 @@ namespace Compiler::LLVM
                     order,
                     order);
                 cas->setName("atomic.cas");
-                _ctx.push(_ctx.builder->CreateExtractValue(cas, 1, "atomic.cas.ok"));
+                _ctx.push_scalar(_ctx.builder->CreateExtractValue(cas, 1, "atomic.cas.ok"));
                 return;
             }
 

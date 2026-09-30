@@ -12,6 +12,7 @@
 #include "AST/ASTOps.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
+#include "AST/ASTRegion.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -663,7 +664,7 @@ namespace AST
 
         void visitFunctionDecl(FunctionDeclNode &node) override
         {
-            if (node.is_generic()) {
+            if (!function_needs_typing(node)) {
                 return;
             }
 
@@ -819,13 +820,10 @@ namespace AST
         for (auto &module_ptr : bundle.modules) {
             DestinationLiteralTyping walker(*module_ptr, bundle.collector);
 
-            for (auto &file : module_ptr->files()) {
+            for_each_semantic_root(*module_ptr, [&](File &file, ScopeNode &root) {
                 walker.file = &file;
-
-                if (file.root != nullptr) {
-                    file.root->accept(walker);
-                }
-            }
+                root.accept(walker);
+            });
 
             progressed |= walker.changed;
         }

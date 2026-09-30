@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/LLVMCompiler.h"
 
+#include "Compiler/LLVM/Codegen/Emit.h"
 #include "Compiler/LLVM/OdrComparison.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TestRunner.h"
@@ -16,14 +17,19 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Linker/Linker.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <fmt/core.h>
 
+#include <filesystem>
 #include <optional>
 #include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
@@ -740,36 +746,12 @@ void LLVMCompiler::visitAttribute(AST::AttributeNode &node) {}
 
 // -- backend forwarders -------------------------------------------------------
 
-// deliberately not "for each unit": a unit whose module was already consumed - by a merge, or because a
-// cache supplied its object - has nothing to emit, and asking is how you find out
 bool LLVMCompiler::emit_objects(
     const std::function<std::filesystem::path(const std::string &)> &object_for,
     std::vector<std::filesystem::path> &out_objects
 )
 {
-    Compiler::ScopedPhase phase("emit objects");
-
-    for (auto &cmp_unit : _ctx.cmp_units) {
-        if (!cmp_unit->llvm_module) {
-            continue;
-        }
-
-        // **what the unit's module holds by the time it is an object** - the unreferenced shared
-        // definitions dropped, then the baseline pipeline unless the invocation refused it. Here and
-        // not inside emit_object because `--print ir-units` has to reach the same answer, and it dumps
-        // rather than emits; the whole-program module arrives already marked optimized
-        _backend.prepare_unit_for_emission(*cmp_unit);
-
-        const std::filesystem::path object_path = object_for(cmp_unit->ast_module->name);
-
-        if (!_backend.emit_object(*cmp_unit, object_path)) {
-            return false;
-        }
-
-        out_objects.push_back(object_path);
-    }
-
-    return true;
+    return Compiler::LLVM::emit_unit_objects(_ctx, _backend, object_for, out_objects);
 }
 
 bool LLVMCompiler::link_executable(

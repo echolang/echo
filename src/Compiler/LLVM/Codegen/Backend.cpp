@@ -1,4 +1,7 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
+#include "Compiler/LLVM/Codegen/IsolatedEmit.h"
+#include "Compiler/LLVM/Codegen/ModulePasses.h"
+#include "Compiler/LLVM/Codegen/TargetMachine.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/CodegenTarget.h"
@@ -7,6 +10,7 @@
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
 
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
@@ -21,13 +25,13 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Triple.h>
-#include <llvm/IR/Comdat.h>
-#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Function.h>
 #include <llvm/Passes/PassBuilder.h>
-#include <llvm/Transforms/IPO/Inliner.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/JSON.h>
+#include <llvm/Support/TimeProfiler.h>
 #include <llvm/Transforms/IPO/GlobalDCE.h>
 #include <llvm/Transforms/IPO/Internalize.h>
-#include <llvm/Analysis/InlineCost.h>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -45,16 +49,21 @@
 #include <fmt/core.h>
 
 #include <cstdio>
+#include <functional>
 #include <cstdlib>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Compiler::LLVM
 {
+
 Backend::Backend(CodegenContext &ctx) : _ctx(ctx)
 {
 }
@@ -80,9 +89,8 @@ void Backend::print_ir(bool to_file)
 // each unit is optimized first, deliberately: a dump of what the emitter is about to be handed is worth
 // having, and a dump of something else is a check that pins nothing. `--no-optimize` is how to see the raw IR
 //
-// what it dumps is what the object will hold, which is only true while this and LLVMCompiler::emit_objects
-// ask the same thing of the same source - so both call prepare_unit_for_emission and neither reads
-// `no_optimize` itself. It is idempotent, so the emit that follows this dump repeats nothing
+// prepare is idempotent. emit snapshots this module as bitcode and skips the worker's
+// prepare when `optimized` is already set, so the dump and the object are the same IR
 void Backend::print_unit_ir()
 {
     for (auto &cmp_unit : _ctx.cmp_units) {
@@ -223,22 +231,30 @@ bool Backend::prepare_execution()
 
     std::string errorStr;
     const llvm::TargetOptions opts;
-    _engine = llvm::EngineBuilder(std::move(_ctx.main_cmp_unit()->llvm_module))
-        .setErrorStr(&errorStr)
-        .setEngineKind(llvm::EngineKind::JIT)
-        .setTargetOptions(opts)
-        .setMCPU(sub.cpu)
-        .setMAttrs(attributes)
-        .create();
 
-    _ctx.main_cmp_unit()->llvm_module = nullptr;
+    {
+        Compiler::ScopedPhase engine("engine");
+        _engine = llvm::EngineBuilder(std::move(_ctx.main_cmp_unit()->llvm_module))
+            .setErrorStr(&errorStr)
+            .setEngineKind(llvm::EngineKind::JIT)
+            .setTargetOptions(opts)
+            .setMCPU(sub.cpu)
+            .setMAttrs(attributes)
+            .create();
+
+        _ctx.main_cmp_unit()->llvm_module = nullptr;
+    }
 
     if (!_engine) {
         llvm::errs() << "Failed to create ExecutionEngine: " << errorStr << '\n';
         return false;
     }
 
-    _engine->finalizeObject();
+    {
+        // MCJIT instruction-selects here, on one core, from whatever IR the engine was handed
+        Compiler::ScopedPhase machine_code("machine code");
+        _engine->finalizeObject();
+    }
 
     return true;
 }
@@ -294,16 +310,7 @@ Compiler::Subtarget Backend::subtarget() const
 
 void Backend::init_target()
 {
-    Compiler::ensure_native_target_registered();
-
     _ctx.target_triple = _ctx.options.codegen.effective_triple();
-
-    std::string error;
-    auto *target = llvm::TargetRegistry::lookupTarget(_ctx.target_triple, error);
-    if (!target) {
-        throw Compiler::InternalCompilerException(fmt::format(
-            "Could not resolve the target '{}': {}", _ctx.target_triple, error));
-    }
 
     // **the subtarget is not a detail of this line.** every cost model in the compiler reads the machine
     // built here - both PassBuilder pipelines through their TargetTransformInfo, and instruction
@@ -312,34 +319,12 @@ void Backend::init_target()
     // default is, and it is a table rather than a policy in here
     const Compiler::Subtarget sub = subtarget();
 
-    // **and the machine's own optimization level, which is not the IR pipeline's.** createTargetMachine
-    // defaults to CodeGenOptLevel::Default - O2 - so instruction selection, machine scheduling, stack
-    // slot colouring and the peephole passes all ran even under `--no-optimize`, which turns off only
-    // the baseline pipeline. That is invisible in an IR dump and fatal to a debugger: an unoptimized
-    // body still came out with its stores merged and its frame folded into a post-indexed `stp`, so
-    // every local's DWARF location named a stack slot the function had already given back, and
-    // `frame variable` printed whatever was there.
-    //
-    // read off no_optimize rather than off debug_info, because "do not optimize" is what the flag says
-    // and a machine level that contradicts it is a second answer. `-g` reaches it by implying that flag,
-    // which is settled once in resolve_options
-    const llvm::CodeGenOptLevel opt_level =
-        _ctx.options.no_optimize ? llvm::CodeGenOptLevel::None : llvm::CodeGenOptLevel::Default;
+    std::string error;
+    _target_machine = make_target_machine(
+        _ctx.target_triple, sub.cpu, sub.features, _ctx.options.no_optimize, error);
 
-    llvm::TargetOptions opt;
-    // LLVM 21 made Triple's string constructor explicit and createTargetMachine
-    // takes the Triple itself. CI still builds against 20, which takes the string.
-#if LLVM_VERSION_MAJOR >= 21
-    _target_machine.reset(target->createTargetMachine(
-        llvm::Triple(_ctx.target_triple), sub.cpu, sub.features, opt, llvm::Reloc::PIC_,
-        std::nullopt, opt_level));
-#else
-    _target_machine.reset(target->createTargetMachine(
-        _ctx.target_triple, sub.cpu, sub.features, opt, llvm::Reloc::PIC_, std::nullopt, opt_level));
-#endif
     if (!_target_machine) {
-        throw Compiler::InternalCompilerException(fmt::format(
-            "Could not create a target machine for '{}'", _ctx.target_triple));
+        throw Compiler::InternalCompilerException(error);
     }
 
     _ctx.data_layout = _target_machine->createDataLayout();
@@ -481,23 +466,13 @@ std::optional<std::vector<std::string>> host_linker_command(
 
 };
 
-// COFF does not merge `linkonce_odr` unless the symbol is in a COMDAT.
-// Without one, two units that both emit `__eco_argc` (or `__eco_abort`, ...)
-// fail at link with a duplicate symbol. Mach-O rejects COMDATs outright
-// (`LLVM ERROR: MachO doesn't support COMDATs`), so this is Windows only.
-// ELF would accept a group, but does not need one.
-static void assign_odr_comdats(llvm::Module &module)
+static void record_slowest(
+    std::string_view kind,
+    const std::vector<std::pair<std::string, double>> &times
+)
 {
-    for (llvm::GlobalVariable &global : module.globals()) {
-        if (global.hasLinkOnceODRLinkage() && !global.hasComdat()) {
-            global.setComdat(module.getOrInsertComdat(global.getName()));
-        }
-    }
-
-    for (llvm::Function &fn : module) {
-        if (fn.hasLinkOnceODRLinkage() && !fn.hasComdat()) {
-            fn.setComdat(module.getOrInsertComdat(fn.getName()));
-        }
+    for (const auto &[name, milliseconds] : times) {
+        Compiler::PhaseTimings::instance().record_slowest(kind, name, milliseconds);
     }
 }
 
@@ -516,33 +491,18 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
         return false;
     }
 
-    if (_ctx.targeting_windows()) {
-        assign_odr_comdats(*cmp_unit.llvm_module);
-    }
+    std::vector<std::pair<std::string, double>> isel_times;
+    const bool timings = Compiler::PhaseTimings::instance().enabled();
+    std::string error;
 
-    // the directory is the driver's - it prepared one before it decided to emit here at all. Creating one
-    // on the way past would be a second answer to where a build artifact goes, in the layer furthest from
-    // the question
-    std::error_code ec;
-
-    llvm::raw_fd_ostream dest(object_path.string(), ec, llvm::sys::fs::OF_None);
-
-    if (ec) {
-        llvm::errs() << "Could not open file: " << ec.message();
+    if (!Compiler::LLVM::emit_module_object(
+            *cmp_unit.llvm_module, *_target_machine, object_path, _ctx.targeting_windows(),
+            timings ? &isel_times : nullptr, error)) {
+        llvm::errs() << error << "\n";
         return false;
     }
 
-    llvm::legacy::PassManager pass;
-    auto FileType = llvm::CodeGenFileType::ObjectFile;
-
-    if (_target_machine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-        llvm::errs() << "TargetMachine can't emit a file of this type";
-        return false;
-    }
-
-    pass.run(*cmp_unit.llvm_module);
-    dest.flush();
-
+    record_slowest("machine code", isel_times);
     return true;
 }
 
@@ -649,44 +609,96 @@ void Backend::gen_debug_symbols(const std::string &executable_name)
 }
 
 
-// guards the module, builds the four analysis managers and cross-registers the proxies, then runs
-// whatever pipeline `build` filled in. Every module-pass entry point below goes through here, so how
-// analyses are registered is decided once - two spellings of it drift silently, and a pass that then
-// asks for an analysis nobody registered aborts inside LLVM rather than here.
-//
-// file-local rather than a member: llvm::ModulePassManager is a template alias, so a declaration in
-// Backend.h would drag the whole pass infrastructure into every translation unit that includes it -
-// which is also why the TargetMachine arrives as a parameter rather than being read off `this`
-//
-// **the machine is what makes the pipeline know what it is compiling for.** a default-constructed
-// PassBuilder gets a no-op TargetTransformInfo, whose answer to "how wide is a vector register" is
-// *one* - so LoopVectorize and SLPVectorize are in every pipeline below and can never fire, and the
-// inliner and unroller cost models are generic guesses rather than this target's. It is not a
-// tuning knob: without it an `int32` reduction over an `array<int32>` emits a four-instruction
-// scalar loop at `-O`, which is what `entry_alloca`'s careful slot placement was buying nothing for
-static void run_module_passes(
-    llvm::Module &module,
-    llvm::TargetMachine *target_machine,
-    const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build
-)
+// Chrome-trace JSON from llvm::timeTraceProfilerWrite. NewPM names a function's whole pipeline
+// `OptFunction`; the pass names (`InstCombinePass`) sit inside that and must not be summed again
+static void ingest_opt_function_times(std::vector<std::pair<std::string, double>> &out)
 {
-    llvm::PassBuilder passBuilder(target_machine);
-    llvm::LoopAnalysisManager loopAM;
-    llvm::FunctionAnalysisManager functionAM;
-    llvm::CGSCCAnalysisManager cgsccAM;
-    llvm::ModuleAnalysisManager moduleAM;
+    if (!llvm::timeTraceProfilerEnabled()) {
+        return;
+    }
 
-    passBuilder.registerModuleAnalyses(moduleAM);
-    passBuilder.registerCGSCCAnalyses(cgsccAM);
-    passBuilder.registerFunctionAnalyses(functionAM);
-    passBuilder.registerLoopAnalyses(loopAM);
-    passBuilder.crossRegisterProxies(loopAM, functionAM, cgsccAM, moduleAM);
+    llvm::SmallString<0> json;
+    llvm::raw_svector_ostream stream(json);
+    llvm::timeTraceProfilerWrite(stream);
 
-    llvm::ModulePassManager modulePM;
-    build(passBuilder, modulePM);
+    llvm::Expected<llvm::json::Value> parsed = llvm::json::parse(json.str());
 
-    modulePM.run(module, moduleAM);
+    if (!parsed) {
+        llvm::consumeError(parsed.takeError());
+        return;
+    }
+
+    const llvm::json::Object *root = parsed->getAsObject();
+
+    if (root == nullptr) {
+        return;
+    }
+
+    const llvm::json::Array *events = root->getArray("traceEvents");
+
+    if (events == nullptr) {
+        return;
+    }
+
+    for (const llvm::json::Value &event : *events) {
+        const llvm::json::Object *row = event.getAsObject();
+
+        if (row == nullptr) {
+            continue;
+        }
+
+        const std::optional<llvm::StringRef> name = row->getString("name");
+
+        if (!name.has_value() || name.value() != "OptFunction") {
+            continue;
+        }
+
+        const std::optional<double> microseconds = row->getNumber("dur");
+
+        if (!microseconds.has_value()) {
+            continue;
+        }
+
+        const llvm::json::Object *args = row->getObject("args");
+        const std::optional<llvm::StringRef> detail
+            = args != nullptr ? args->getString("detail") : std::nullopt;
+
+        if (!detail.has_value() || detail->empty()) {
+            continue;
+        }
+
+        out.push_back({ Compiler::display_function_name(detail->str()), microseconds.value() / 1000.0 });
+    }
 }
+
+// NewPM already emits time-trace events when the profiler is live. initialized around one pipeline
+// so a unit's functions land in `--explain time` without changing what the pipeline does.
+// `_out` is where a worker collects; the driver records them after the pool joins
+struct OptimizeTrace
+{
+    explicit OptimizeTrace(std::vector<std::pair<std::string, double>> *out) : _out(out)
+    {
+        if (_out == nullptr || llvm::timeTraceProfilerEnabled()) {
+            return;
+        }
+
+        llvm::timeTraceProfilerInitialize(500, "echoc");
+        _live = true;
+    }
+
+    ~OptimizeTrace()
+    {
+        if (!_live) {
+            return;
+        }
+
+        ingest_opt_function_times(*_out);
+        llvm::timeTraceProfilerCleanup();
+    }
+
+    std::vector<std::pair<std::string, double>> *_out = nullptr;
+    bool _live = false;
+};
 
 void Backend::optimize()
 {
@@ -702,7 +714,10 @@ void Backend::optimize()
         main_unit->optimized = true;
     }
 
-    run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+    std::vector<std::pair<std::string, double>> opt_times;
+    const bool timings = Compiler::PhaseTimings::instance().enabled();
+    OptimizeTrace trace(timings ? &opt_times : nullptr);
+    Compiler::LLVM::run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
         // **the O3 pipeline and nothing after it.** this used to append a second ModuleInlinerPass once
         // the pipeline had already finished, which is a shape worth naming so it is not added back:
         // whatever that pass inlined was never simplified again. the O3 pipeline interleaves its inliner
@@ -715,6 +730,7 @@ void Backend::optimize()
         // not buying them
         modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
     });
+    record_slowest("optimize", opt_times);
 }
 
 void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
@@ -767,14 +783,8 @@ void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
     // pins byte for byte. Whole-program `-O` is still merge-then-O3 and still bypasses the cache; the two
     // are no longer all or nothing, which is the actual change here
     const bool optimize = !_ctx.options.no_optimize;
-
-    run_module_passes(*cmp_unit.llvm_module, _target_machine.get(), [optimize](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
-        modulePM.addPass(llvm::GlobalDCEPass());
-
-        if (optimize) {
-            modulePM.addPass(passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
-        }
-    });
+    Compiler::LLVM::prepare_module(
+        *cmp_unit.llvm_module, _target_machine.get(), optimize);
 }
 
 // the module's own function definitions, by symbol name.
@@ -840,7 +850,7 @@ void Backend::prune_to_entry()
         roots.insert(name);
     }
 
-    run_module_passes(*_ctx.current_module(), _target_machine.get(), [&roots](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
+    Compiler::LLVM::run_module_passes(*_ctx.current_module(), _target_machine.get(), [&roots](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
         //

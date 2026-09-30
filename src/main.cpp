@@ -1610,8 +1610,8 @@ static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompile
     step.finish(true);
 }
 
-// C objects, codegen, optional whole-program merge, emit, link. **one path**, so `build`, a
-// Windows `run`, and a linked test runner cannot drift on `--print ir` or `-O`.
+// C objects, codegen, optional whole-program merge, emit, link. **one path**, so `build`,
+// `run`, and a linked test runner cannot drift on `--print ir` or `-O`.
 //
 // nullopt is success; anything else is the exit status the subcommand owes its caller
 static std::optional<int> compile_and_link_executable(
@@ -1792,33 +1792,12 @@ int main_run(
     const AST::DiagnosticRenderer &diagnostics,
     const char *const *environment)
 {
-    // **said rather than ignored, and said before anything else.** `-g` is declared on both subcommands so
-    // that resolve_options stays one reader of one flag set, but only `build` writes an object a debugger
-    // can open - the JIT keeps its module in memory and MCJIT registers nothing a debugger reads. A flag
-    // that silently does nothing is the worse failure here: the metadata really is emitted, so nothing
-    // downstream is wrong, and the person is left concluding the feature is broken.
-    //
-    // read off the CLI rather than off the resolved options, for two reasons that agree: this is a
-    // question about the *invocation* rather than about the program being compiled, and the options are
-    // not resolved until run_front_end has already printed the summary - under json a diagnostic after
-    // that one breaks the "diagnostics, then one summary" shape of the stream
-    if (driver.options.emitting_debug_info()) {
-        diagnostics.render_untyped(
-            "Debug Info Ignored",
-            "'-g' produces no artifact a debugger can open on 'run': the JIT emits no object file. "
-            "Use 'echoc build -g' and open the resulting executable instead.",
-            AST::IssueSeverity::Warning);
-    }
-
     // the one number the checklist's closing line reports, and the only clock in this function.
     // Deliberately not Compiler::PhaseTimings, which measures nothing unless `-t` asked it to
     const auto started = std::chrono::steady_clock::now();
 
     auto bundle = AST::Bundle();
 
-    // `run` reuses nothing: the JIT is handed one module, so every unit is merged and there are no per-module
-    // objects to store or load. Feeding it stored objects instead would mean handing the JIT one per cached
-    // module beside main's, which is a question about duplicate weak symbols rather than about caching
     Invocation invocation;
     if (!resolve_invocation(driver, diagnostics, invocation)) {
         return 1;
@@ -1837,33 +1816,39 @@ int main_run(
     LLVMCompiler compiler(front.options);
     int status = 0;
 
-#if defined(_WIN32)
     const Compiler::TargetFacts &facts = front.target_facts();
     const Compiler::TargetFacts host = Compiler::TargetFacts::host();
-    // a host Windows binary. `--target-os darwin` still has to JIT: native-linking
-    // Darwin IR asks for pthread.lib that this machine does not have
+    // a host binary we can exec. `--explain prune` still JITs, because prune_to_entry is a JIT
+    // question. a foreign `--target-os` cannot exec here either
     const bool native_run =
         facts.operating_system == host.operating_system
         && facts.architecture == host.architecture
-        && !driver.explains(Compiler::ExplainKind::t_prune)
-        && !front.layout().scratch_is_temporary();
-#else
-    const bool native_run = false;
-#endif
+        && !driver.explains(Compiler::ExplainKind::t_prune);
 
     if (native_run) {
         compiler.set_entry(entry_module, front.entry_file());
 
-        report_cache_plan(
-            driver, front.manifests(), front.cache_keys, ModulePlan{}, entry_module,
-            /*bypassed=*/true);
+        const bool whole_program = driver.whole_program;
+        const ModulePlan plan = whole_program
+            ? ModulePlan{}
+            : plan_module_artifacts(front.layout(), front.manifests(), front.cache_keys, entry_module);
 
+        report_cache_plan(
+            driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
+
+#if defined(_WIN32)
         const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run.exe";
+#else
+        const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run";
+#endif
 
         if (const std::optional<int> failed = compile_and_link_executable(
-                driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
-                driver.whole_program)) {
+                driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program)) {
             return failed.value();
+        }
+
+        if (!whole_program) {
+            store_module_records(plan, front.cache_keys);
         }
 
         std::vector<std::string> argv = { program_name(driver, program) };
@@ -1874,33 +1859,34 @@ int main_run(
 
         status = Compiler::run_wait(runner.string(), argv);
         (void)environment;
-    }
-    else {
-    if (const std::optional<int> failed = prepare_jit(
-            driver, diagnostics, front, bundle, /*test_mode=*/false, compiler)) {
-        return failed.value();
-    }
+    } else {
+        if (const std::optional<int> failed = prepare_jit(
+                driver, diagnostics, front, bundle, /*test_mode=*/false, compiler)) {
+            return failed.value();
+        }
 
-    // `argv[0]` is the program's own name, and under `run` the honest answer is the source file the
-    // entry module was read from - not `echoc`, which is the process but not the program. So the tail
-    // the driver split off a `--` is prepended with it rather than used as-is
-    std::vector<std::string> argv = { program_name(driver, program) };
-    argv.insert(argv.end(), driver.program_arguments.begin(), driver.program_arguments.end());
+        // `argv[0]` is the program's own name, and under `run` the honest answer is the source file the
+        // entry module was read from - not `echoc`, which is the process but not the program. So the tail
+        // the driver split off a `--` is prepended with it rather than used as-is
+        std::vector<std::string> argv = { program_name(driver, program) };
+        argv.insert(argv.end(), driver.program_arguments.begin(), driver.program_arguments.end());
 
-    // the JIT prunes the module to what the entry point reaches before it runs anything - see
-    // Backend::prune_to_entry, which is where that has to live to be sound and is why `-p` above still
-    // prints the whole of what codegen emitted
-    // **the checklist ends here, and `jit` gets no row.** The compile is over the moment the program
-    // starts: a row completing after the program's own output would put the compiler's summary inside
-    // the program's conversation, which is the thing "stdout under run belongs to the program" exists to
-    // prevent. The cost is that a slow finalizeObject shows nothing, and it is the right trade
-    Compiler::ProgressReporter::instance().close(
-        fmt::format("compiled '{}'", entry_module), Compiler::progress_elapsed_ms(started));
+        // the JIT prunes the module to what the entry point reaches before it runs anything - see
+        // Backend::prune_to_entry, which is where that has to live to be sound and is why `-p` above still
+        // prints the whole of what codegen emitted
+        // **the checklist ends here, and `jit` gets no row.** The compile is over the moment the program
+        // starts: a row completing after the program's own output would put the compiler's summary inside
+        // the program's conversation, which is the thing "stdout under run belongs to the program" exists to
+        // prevent. The cost is that a slow finalizeObject shows nothing, and it is the right trade
+        Compiler::ProgressReporter::instance().close(
+            fmt::format("compiled '{}'", entry_module), Compiler::progress_elapsed_ms(started));
 
-    {
-        Compiler::ScopedPhase phase("jit");
-        status = compiler.prepare_execution() ? compiler.run_main(argv, environment) : 1;
-    }
+        if (!compiler.prepare_execution()) {
+            status = 1;
+        } else {
+            Compiler::ScopedPhase running("program");
+            status = compiler.run_main(argv, environment);
+        }
     }
 
     // after the program, because the prune happened inside the run - the same position `[timings]` takes,
@@ -2094,7 +2080,7 @@ int main_test(
     // the prologue, once, so `std::env::args()` inside a test reads the process the tests were started from.
     // `main` in test mode is that capture and a `ret 0`, so this runs no statement anybody wrote
     {
-        Compiler::ScopedPhase phase("jit");
+        Compiler::ScopedPhase running("program");
 
         std::vector<std::string> argv = { program_name(driver, program) };
 

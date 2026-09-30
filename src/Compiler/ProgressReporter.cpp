@@ -343,6 +343,7 @@ void Compiler::ProgressReporter::suspend()
         return;
     }
 
+    std::lock_guard<std::mutex> lock(_suspend);
     erase_live_row();
 }
 

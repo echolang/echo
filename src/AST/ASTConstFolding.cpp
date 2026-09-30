@@ -69,7 +69,7 @@ void ConstFolding::finalize()
 
 void ConstFolding::visitFunctionDecl(FunctionDeclNode &node)
 {
-    if (!node.is_generic()) {
+    if (function_is_fixpoint_open(node)) {
         RecursiveVisitor::visitFunctionDecl(node);
     }
 }

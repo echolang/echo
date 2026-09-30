@@ -51,7 +51,7 @@ test that quietly asserts less than its author wrote.
 | `modules` | space-separated paths | module manifests to build alongside the case, each passed as `-m`. Paths are relative to `tests_eco/` |
 | `stdlib` | `on` (default) / `off` | `off` passes `--no-stdlib`: `die`, `assert` and `mem::` / `std::` become undeclared names |
 | `expect` | `ok` (default) / `fail` / an exit status like `3` | the exit status the case must produce |
-| `mode` | `run` (default) / `build` / `test` | JIT the module, link a native binary and execute it, or run the case's `test` blocks |
+| `mode` | `run` (default) / `build` / `test` | compile, link and execute; link a native binary and execute it; or run the case's `test` blocks |
 | `env` | space-separated `KEY=VALUE` pairs | set in the environment of everything the case spawns |
 | `args` | space-separated words | the program's own arguments — `argv[1]` onwards |
 | `stdin` | space-separated words | fed to the program on standard input, **one line per word** |

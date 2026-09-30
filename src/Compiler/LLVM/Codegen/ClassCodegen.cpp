@@ -50,7 +50,7 @@ static const char *count_name(unsigned index)
 
 void ClassCodegen::gen_class_alloc(AST::ClassAllocExprNode &node)
 {
-    _ctx.push(gen_class_box_alloc(node.class_type));
+    _ctx.push_scalar(gen_class_box_alloc(node.class_type));
 }
 
 llvm::Value *ClassCodegen::gen_class_box_alloc(const AST::ValueType &class_type)
@@ -262,11 +262,11 @@ void ClassCodegen::gen_retain_expr(AST::RetainExprNode &node)
 {
     node.operand->accept(*_ctx.visitor);
 
-    llvm::Value *handle = _ctx.pop();
+    llvm::Value *handle = _ctx.pop_scalar();
 
     // the handle flows straight through - the retain is a side effect on the block, so the value this
     // expression hands its consumer is the one the operand produced
-    _ctx.push(gen_retain_value(handle, node.result_type()));
+    _ctx.push_scalar(gen_retain_value(handle, node.result_type()));
 }
 
 void ClassCodegen::gen_release_stmt(AST::ReleaseNode &node)
@@ -276,7 +276,7 @@ void ClassCodegen::gen_release_stmt(AST::ReleaseNode &node)
     // scope owes
     LValue place = _ctx.lvalues->gen_lvalue(*node.target);
 
-    gen_release_value(_ctx.lvalues->gen_load(place, "obj"), place.storage_type);
+    gen_release_value(_ctx.lvalues->gen_load(place, "obj").scalar(), place.storage_type);
 }
 
 llvm::Value *ClassCodegen::gen_retain_value(llvm::Value *value, const AST::ValueType &type)
@@ -383,8 +383,8 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
 
     if (!node.queried_type.is_class() && !against_interface) {
         node.operand->accept(*_ctx.visitor);
-        _ctx.pop();
-        _ctx.push(llvm::ConstantInt::get(i1, 0));
+        _ctx.pop_scalar();
+        _ctx.push_scalar(llvm::ConstantInt::get(i1, 0));
         return;
     }
 
@@ -400,7 +400,7 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
             operand_type.get_complex_type(), *_ctx.current_cmp_unit).box;
 
     node.operand->accept(*_ctx.visitor);
-    llvm::Value *handle = _ctx.pop();
+    llvm::Value *handle = _ctx.pop_scalar();
 
     // the object the erased value holds is what carries the identity; the vtable slot beside it says
     // nothing about which class is inside
@@ -453,7 +453,7 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
     result->addIncoming(llvm::ConstantInt::get(i1, 0), entry_block);
     result->addIncoming(answer, answer_block);
 
-    _ctx.push(result);
+    _ctx.push_scalar(result);
 }
 
 llvm::Value *ClassCodegen::gen_conformance_scan(
@@ -645,7 +645,7 @@ llvm::Value *ClassCodegen::gen_iface_recast(
     llvm::BasicBlock *ok_end = _ctx.builder->GetInsertBlock();
 
     _ctx.set_insert_point(miss_block);
-    llvm::Value *absent = _ctx.types->gen_absent(to, *_ctx.current_cmp_unit);
+    llvm::Value *absent = _ctx.types->gen_absent(to, *_ctx.current_cmp_unit).scalar();
     _ctx.builder->CreateBr(done_block);
     llvm::BasicBlock *miss_end = _ctx.builder->GetInsertBlock();
 

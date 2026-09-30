@@ -13,6 +13,7 @@ namespace AST
 {
     class Bundle;
     class ExprNode;
+    class FunctionDeclNode;
     class TypeCastNode;
 
     // **classifies a written `$x as T` (or `T(...)`) and rewrites a declared conversion to a call.**
@@ -28,7 +29,10 @@ namespace AST
     // false while an explicit TypeCastNode is still undecided, so the walk waits.
     //
     // **reports and keeps** on a refusal, AST::GuardLowering's rule: the operand may still be read
-    // after this node
+    // after this node.
+    //
+    // **walks t_owned bodies** via AST::function_needs_typing. a user `as` can settle after
+    // ownership marks t_owned; a teardown const-strip is classified at mint
     class CastResolution : private FixpointLowering
     {
     public:
@@ -38,6 +42,8 @@ namespace AST
         using FixpointLowering::finalize;
 
     private:
+        void visitFunctionDecl(FunctionDeclNode &node) override;
+
         ExprNode *rewrite_value_edge(ExprNode *expr) override;
 
         ExprNode *resolve(TypeCastNode &node);

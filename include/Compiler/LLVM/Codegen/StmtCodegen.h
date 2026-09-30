@@ -5,7 +5,6 @@
 
 namespace llvm
 {
-    class AllocaInst;
     class Type;
     class Value;
 };
@@ -42,7 +41,7 @@ namespace Compiler::LLVM
         // the storage half of a declaration, idempotent: the slot and the zero-init a value needs before
         // anything can legitimately read it. gen_scope calls it for every declaration in a scope before
         // the first statement, so *where* a declaration sits among its siblings decides nothing
-        llvm::AllocaInst *ensure_var_slot(AST::VarDeclNode &node);
+        llvm::Value *ensure_var_slot(AST::VarDeclNode &node);
 
         void gen_function_decl(AST::FunctionDeclNode &node);
         void gen_return(AST::ReturnNode &node);

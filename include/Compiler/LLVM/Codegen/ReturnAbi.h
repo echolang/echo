@@ -75,6 +75,22 @@ namespace Compiler::LLVM
         return ReturnAbi{ lowered_return };
     }
 
+    // **does this aggregate live in memory rather than as an SSA value?** a different question from
+    // return_abi_for. every sized aggregate already comes back through sret; this is about copies
+    // *inside* a function. a 16-byte cut is what walked `result<int64, E>` back onto a first-class
+    // phi (notes/codegen.md). 64 bytes is four pointers: `string`, a packed result, an interface
+    // pair and a `Vec4` stay SSA. `Vec4[512]` does not.
+    constexpr uint64_t k_memory_aggregate_bytes = 64;
+
+    inline bool aggregate_lives_in_memory(llvm::Type *type, const llvm::DataLayout &layout)
+    {
+        if (type == nullptr || !type->isAggregateType() || !type->isSized()) {
+            return false;
+        }
+
+        return layout.getTypeAllocSize(type) > k_memory_aggregate_bytes;
+    }
+
     // **the attributes argument zero carries, and they go on the *call* as well as on the function.**
     // that is not belt and braces - it is the whole of what decides which register the hidden pointer
     // travels in, and LLVM lets the two disagree in silence.

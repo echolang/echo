@@ -342,7 +342,17 @@ namespace
         }
     };
 
-    // the worklist. skip generic bodies; collect every call; a const if is condition plus taken arm
+    // bind and settle still owe a call that is not terminal, or one whose decl is still a template.
+    // a settled non-generic call is finished; collecting it every round is the walk live_calls
+    // used to do for free
+    bool call_needs_fixpoint(const FunctionCallExprNode &node)
+    {
+        return !call_is_terminal(node.settlement)
+            || (node.decl != nullptr && node.decl->is_generic());
+    }
+
+    // the worklist. skip generic bodies and t_owned bodies whose pending calls are gone; collect
+    // only calls bind or settle still owe; a const if is condition plus taken arm
     class LiveCalls : public RecursiveVisitor
     {
     public:
@@ -351,11 +361,20 @@ namespace
 
         void visitFunctionDecl(FunctionDeclNode &node) override
         {
-            if (node.is_generic()) {
+            if (!function_needs_typing(node)) {
                 return;
             }
 
+            if (node.region_state == RegionState::t_owned && !node.live_calls_pending) {
+                return;
+            }
+
+            const size_t before = calls.size();
             RecursiveVisitor::visitFunctionDecl(node);
+
+            if (node.region_state == RegionState::t_owned) {
+                node.live_calls_pending = calls.size() > before;
+            }
         }
 
         void visit_type_decl(TypeDeclNode &) override
@@ -364,7 +383,10 @@ namespace
 
         void visitFunctionCallExpr(FunctionCallExprNode &node) override
         {
-            calls.push_back({&node, module});
+            if (call_needs_fixpoint(node)) {
+                calls.push_back({&node, module});
+            }
+
             RecursiveVisitor::visitFunctionCallExpr(node);
         }
 
@@ -374,6 +396,16 @@ namespace
             statement_edge(taken_const_if_arm(node));
         }
     };
+}
+
+bool function_is_fixpoint_open(const FunctionDeclNode &fn)
+{
+    return !fn.is_generic() && region_accepts_mutation(fn.region_state);
+}
+
+bool function_needs_typing(const FunctionDeclNode &fn)
+{
+    return !fn.is_generic();
 }
 
 bool body_is_pending(ScopeNode &scope)

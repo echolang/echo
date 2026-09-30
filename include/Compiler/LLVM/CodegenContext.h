@@ -7,6 +7,7 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CompilationUnit.h"
+#include "Compiler/LLVM/Codegen/CodegenValue.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/TbaaTree.h"
 #include "AST/ASTCoreTypes.h"
@@ -235,8 +236,8 @@ namespace Compiler::LLVM
         llvm::Value *sret_pointer = nullptr;
         llvm::Type *sret_type = nullptr;
 
-        std::stack<llvm::Value *> value_stack;
-        std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
+        std::stack<CodegenValue> value_stack;
+        std::unordered_map<AST::VarDeclNode *, llvm::Value *> var_map;
 
         // **the slot each `?->` currently being lowered spilled its unwrapped base into**, innermost last.
         // an AST::ChainBaseNode names the top one - it is the marker standing for that base inside the
@@ -508,11 +509,15 @@ namespace Compiler::LLVM
             return at_entry.CreateAlloca(type, nullptr, name);
         }
 
-        void push(llvm::Value *value) {
+        void push(CodegenValue value) {
             value_stack.push(value);
         }
 
-        llvm::Value *pop() {
+        void push_scalar(llvm::Value *ssa) {
+            push(CodegenValue::scalar(ssa));
+        }
+
+        CodegenValue pop_value() {
             // a void call pushes nothing. TypeChecker refuses that in a value position; this is
             // the seam if that gate is bypassed, so the failure is a located ICE rather than
             // top() on an empty stack (exit 139, no message)
@@ -520,10 +525,19 @@ namespace Compiler::LLVM
                 throw error("value stack empty - a void expression was used as a value");
             }
 
-            auto value = value_stack.top();
+            CodegenValue value = value_stack.top();
             value_stack.pop();
             return value;
         }
+
+        // SSA only. a memory aggregate is `materialize` or `pop_value`
+        llvm::Value *pop_scalar() {
+            return pop_value().scalar();
+        }
+
+        // an SSA value for a destination that cannot take an aggregate address: a by-value
+        // argument, a phi, a comparison. a large aggregate is loaded here and nowhere else
+        llvm::Value *materialize(const CodegenValue &value, const char *name);
 
         // the module whose file-scope statements become the C `main`. Defaults to ECO_MAIN_MODULE_NAME,
         // which is what loose sources on the command line are collected into.

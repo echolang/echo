@@ -5,12 +5,16 @@
 #include "Compiler/BuildLayout.h"
 #include "Compiler/CodegenTarget.h"
 #include "Compiler/HostTool.h"
+#include "Compiler/JobCount.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
+#include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
 #include "Compiler/TargetFacts.h"
 
 #include <fmt/core.h>
+
+
 
 #include <fstream>
 #include <map>
@@ -486,14 +490,30 @@ bool Compiler::build_c_sources(
     // one per module, so the header set every source in it shares is read once
     HeaderDigests seen;
 
+    struct Planned
+    {
+        std::filesystem::path source;
+        std::filesystem::path object;
+        std::filesystem::path depfile;
+        std::filesystem::path sidecar;
+        uint64_t source_digest = 0;
+        bool miss = false;
+        std::vector<std::string> argv;
+    };
+
+    std::vector<Planned> planned;
+    planned.reserve(spec.sources.size());
+
     for (const std::filesystem::path &source : spec.sources) {
         const uint64_t source_settings = fnv1a64(source.string(), settings);
         const std::string stem =
             fmt::format("{}.{}", artifact_stem(module_digest, source), to_hex(source_settings));
 
-        const std::filesystem::path object = directory / (stem + ".o");
-        const std::filesystem::path depfile = directory / (stem + ".d");
-        const std::filesystem::path sidecar = directory / (stem + ".key");
+        Planned job;
+        job.source = source;
+        job.object = directory / (stem + ".o");
+        job.depfile = directory / (stem + ".d");
+        job.sidecar = directory / (stem + ".key");
 
         // **read once**, and folded into the settings half here so the key can be recomputed against the
         // depfile this build is about to write without touching the file again
@@ -504,65 +524,94 @@ bool Compiler::build_c_sources(
             return false;
         }
 
-        const uint64_t source_digest = fnv1a64(source_bytes.value(), source_settings);
-        const std::string key = c_content_key(source, source_digest, depfile, seen);
+        job.source_digest = fnv1a64(source_bytes.value(), source_settings);
+        const std::string key = c_content_key(source, job.source_digest, job.depfile, seen);
 
         out.content_digest = fnv1a64(key, out.content_digest);
 
         // a hit is the object being there *and* the sidecar agreeing about what it was built from. Either
         // one alone is not enough: an object with no sidecar is one an interrupted build left behind
         if (keeping
-            && std::filesystem::is_regular_file(object, ec)
-            && read_whole_file(sidecar).value_or(std::string()) == key) {
+            && std::filesystem::is_regular_file(job.object, ec)
+            && read_whole_file(job.sidecar).value_or(std::string()) == key) {
             out_explain.push_back(fmt::format("  {}  {}  hit", source.filename().string(), key));
-            out.objects.push_back(object);
+            planned.push_back(std::move(job));
             continue;
         }
 
         out_explain.push_back(fmt::format("  {}  {}  miss", source.filename().string(), key));
 
-        std::vector<std::string> argv = {
-            "clang",
-            "-c",
-        };
+        job.miss = true;
+        job.argv = { "clang", "-c" };
 
         // PIC is the Unix loadable-object rule. Windows objects are already relocatable;
         // clang-cl rejects `-fPIC`
         if (TargetFacts::host().operating_system != "windows") {
-            argv.push_back("-fPIC");
+            job.argv.push_back("-fPIC");
         }
 
-        Compiler::append_windows_sysroot_cc_args(argv);
-        if (!Compiler::append_apple_target_args(argv, options.codegen, out_error)) {
+        Compiler::append_windows_sysroot_cc_args(job.argv);
+        if (!Compiler::append_apple_target_args(job.argv, options.codegen, out_error)) {
             return false;
         }
 
-        argv.push_back("-o");
-        argv.push_back(object.string());
-        argv.push_back(source.string());
+        job.argv.push_back("-o");
+        job.argv.push_back(job.object.string());
+        job.argv.push_back(source.string());
 
         // what lets the key above see this translation unit's headers, from the next build onward
-        argv.push_back("-MD");
-        argv.push_back("-MF");
-        argv.push_back(depfile.string());
+        job.argv.push_back("-MD");
+        job.argv.push_back("-MF");
+        job.argv.push_back(job.depfile.string());
 
-        append_common_arguments(spec, options, argv);
+        append_common_arguments(spec, options, job.argv);
+        planned.push_back(std::move(job));
+    }
 
-        if (!run_tool(argv)) {
-            out_error = fmt::format(
-                "compiling '{}' for module '{}' failed.", source.string(), spec.module_name);
-            return false;
+    std::vector<Planned *> misses;
+
+    for (Planned &job : planned) {
+        if (job.miss) {
+            misses.push_back(&job);
+        }
+    }
+
+    if (!misses.empty()) {
+        std::vector<int> statuses(misses.size(), 1);
+        const unsigned jobs = Compiler::job_count();
+
+        // one clang, or `ECO_JOBS=1`, stays on this thread so a test that pins serial spawn order
+        // still sees one process. several misses share a pool; the driver erases the live row first
+        // so workers' `run_tool` suspends are no-ops
+        if (misses.size() > 1 && jobs > 1) {
+            ProgressReporter::instance().suspend();
         }
 
-        // **recomputed against the depfile this compile just wrote**, which is the whole point of the
-        // sidecar: the key stored is the one the *next* build will compute, so a fresh store settles after
-        // one build rather than compiling every source twice. The source's own bytes are the ones already
-        // folded into source_digest - the compile did not change them
-        if (keeping) {
-            std::ofstream(sidecar, std::ios::binary) << c_content_key(source, source_digest, depfile, seen);
+        run_jobs(jobs, misses.size(), [&](size_t i) {
+            statuses[i] = run_tool(misses[i]->argv) ? 0 : 1;
+        });
+
+        for (size_t i = 0; i < misses.size(); i++) {
+            if (statuses[i] != 0) {
+                out_error = fmt::format(
+                    "compiling '{}' for module '{}' failed.",
+                    misses[i]->source.string(), spec.module_name);
+                return false;
+            }
+        }
+    }
+
+    for (Planned &job : planned) {
+        if (job.miss && keeping) {
+            // **recomputed against the depfile this compile just wrote**, which is the whole point of the
+            // sidecar: the key stored is the one the *next* build will compute, so a fresh store settles after
+            // one build rather than compiling every source twice. The source's own bytes are the ones already
+            // folded into source_digest - the compile did not change them
+            std::ofstream(job.sidecar, std::ios::binary)
+                << c_content_key(job.source, job.source_digest, job.depfile, seen);
         }
 
-        out.objects.push_back(object);
+        out.objects.push_back(job.object);
     }
 
     return true;

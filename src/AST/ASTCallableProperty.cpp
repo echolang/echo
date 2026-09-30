@@ -70,7 +70,7 @@ namespace AST
 
             void visitFunctionDecl(FunctionDeclNode &node) override
             {
-                if (node.is_generic()) {
+                if (!function_is_fixpoint_open(node)) {
                     return;
                 }
 

@@ -126,6 +126,23 @@ TEST_CASE("a scope's owning locals are dropped in reverse declaration order", "[
     REQUIRE(dropped_variable(drops[1])->name_full() == "$a");
 }
 
+TEST_CASE("a const owning local's teardown still classifies", "[ownership][region]")
+{
+    // ownership mints a written const-strip TypeCast after desugar, then marks the body t_owned.
+    // CastResolution walks t_owned so TypeChecker does not report `a written cast was not classified`
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "function f() : void {\n"
+        "    const Buffer $b = Buffer(1, null);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto drops = drops_in(body_of(m, "f"));
+    REQUIRE(drops.size() == 1);
+}
+
 TEST_CASE("a returned local is not dropped", "[ownership]")
 {
     // the rule the whole feature rests on. a constructor's `$this` is a body-local of value type with

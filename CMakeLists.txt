@@ -222,6 +222,8 @@ set(LLVM_COMPONENTS
     Core
     ExecutionEngine
     IRReader
+    BitWriter
+    TransformUtils
     MCJIT
     Support
     Target

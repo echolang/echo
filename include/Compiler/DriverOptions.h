@@ -22,15 +22,16 @@ namespace Compiler
     //
     // **stated versus settled is the whole of the split** with Compiler::CommandLine, and it is the same
     // rule Compiler::CompilerOptions already states about target_cpu: what was asked for is one fact and
-    // what it resolved to is another. Four implications live here and nowhere else -
+    // what it resolved to is another. These implications live here and nowhere else -
     //
     //   `-g` means `--optimize none` unless --optimize was stated
     //   `--explain memory` implies `--track-allocations`
     //   `run` defaults to --debug and `build` to --release
     //   `--print ir` or `--optimize whole` means one merged module and no object cache
+    //   `test` still JITs, so it still merges; `run` is a cached build plus exec
     //
-    // - and splitting three of those into resolve_options while the fourth sat in
-    // wants_whole_program_module would be two owners for one question
+    // - and splitting them into resolve_options while one sat in wants_whole_program_module would
+    // be two owners for one question
     struct DriverOptions
     {
         Subcommand subcommand = Subcommand::t_none;

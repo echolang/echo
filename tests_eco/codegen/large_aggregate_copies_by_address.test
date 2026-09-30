@@ -1,0 +1,9 @@
+mode: build
+stdlib: off
+
+--- OUT --->
+1
+--- IR --->
+CHECK: llvm.memcpy
+CHECK-NOT: load [512
+CHECK-NOT: extractvalue [512

@@ -3,10 +3,13 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTCast.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTModule.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTSourceToken.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
 
 namespace AST
@@ -14,6 +17,15 @@ namespace AST
     CastResolution::CastResolution(Bundle &bundle)
         : FixpointLowering(bundle)
     {
+    }
+
+    void CastResolution::visitFunctionDecl(FunctionDeclNode &node)
+    {
+        if (!function_needs_typing(node)) {
+            return;
+        }
+
+        walk_function(node);
     }
 
     void CastResolution::refuse(TypeCastNode &node, const TokenReference &at, std::string why)

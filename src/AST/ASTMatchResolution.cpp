@@ -9,6 +9,7 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/ExprNode.h"
@@ -30,7 +31,7 @@ MatchResolution::MatchResolution(Bundle &bundle)
 
 void MatchResolution::visitFunctionDecl(FunctionDeclNode &node)
 {
-    if (node.is_generic()) {
+    if (!function_is_fixpoint_open(node)) {
         return;
     }
 

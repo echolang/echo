@@ -10,6 +10,7 @@
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeChecker.h"
+#include "Compiler/PhaseTimings.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
 
@@ -182,18 +183,36 @@ void Compiler::run_semantic_pipeline(
     std::function<void(AST::Monomorphizer &)> after_monomorphize
 )
 {
-    AST::ConstantExpander(bundle).run();
+    {
+        Compiler::ScopedPhase phase("constants");
+        AST::ConstantExpander(bundle).run();
+    }
 
     AST::Monomorphizer monomorphizer(bundle);
-    monomorphizer.run();
+
+    {
+        Compiler::ScopedPhase phase("instances");
+        monomorphizer.run();
+    }
 
     if (after_monomorphize) {
         after_monomorphize(monomorphizer);
     }
 
-    AST::PointerAdjuster(bundle).run();
-    AST::AccessPass(bundle).run();
-    AST::TypeChecker(bundle, options).run();
+    {
+        Compiler::ScopedPhase phase("pointers");
+        AST::PointerAdjuster(bundle).run();
+    }
+
+    {
+        Compiler::ScopedPhase phase("access");
+        AST::AccessPass(bundle).run();
+    }
+
+    {
+        Compiler::ScopedPhase phase("types");
+        AST::TypeChecker(bundle, options).run();
+    }
 }
 
 std::optional<std::filesystem::path> Compiler::discover_project_manifest(

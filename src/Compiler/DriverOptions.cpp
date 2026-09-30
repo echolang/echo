@@ -121,12 +121,9 @@ bool Compiler::resolve_driver_options(
     // dump can each only look at one module, so both force the merge - but a dump changes no emitted
     // byte, and letting it reach compute_module_keys would make every module's key react to a `--print`.
     //
-    // the JIT is the third and is unconditional: it holds one module in memory and emits no object, so
-    // there is never a per-module artifact for it to store or reuse. It used to be a `true` written at
-    // the one call site, which is the same fact with nowhere to be asked. `test` is the second subcommand
-    // that JITs and answers here for exactly that reason rather than as a second rule
-    out.whole_program = out.subcommand == Subcommand::t_run
-        || out.subcommand == Subcommand::t_test
+    // `test` still JITs, so it still merges. `run` is a cached build plus exec and follows `build`:
+    // only `--optimize whole` or `--print ir` fold the program
+    out.whole_program = out.subcommand == Subcommand::t_test
         || out.optimize_is_whole_program()
         || out.prints(PrintKind::t_ir);
 

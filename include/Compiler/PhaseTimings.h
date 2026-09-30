@@ -37,6 +37,10 @@ namespace Compiler
         // this one was entered, and the report indents by it
         void record(std::string_view phase, size_t depth, double milliseconds);
 
+        // against the current nesting. isolated workers fill this after they join, while a
+        // ScopedPhase is still open on this thread
+        void record(std::string_view phase, double milliseconds);
+
         // a phase is opening: claims its row and answers how deeply it is nested. The depth is *derived* from
         // that nesting rather than written into each name, because a ScopedPhase already nests lexically -
         // spelling the indentation into ~15 call sites made the tree a whitespace convention every one of
@@ -51,6 +55,11 @@ namespace Compiler
         // the phases in the order they were first entered, so the report reads as the pipeline does
         std::string report() const;
 
+        // a function that dominated `kind` (`optimize` or `machine code`). accumulated by name, so two
+        // units that both spent time in one `linkonce_odr` body report as one row. printed after the
+        // tree, never mixed into it: a mangled symbol is not a phase
+        void record_slowest(std::string_view kind, std::string_view name, double milliseconds);
+
     private:
         struct Phase
         {
@@ -59,10 +68,22 @@ namespace Compiler
             double milliseconds = 0.0;
         };
 
+        struct Slowest
+        {
+            std::string kind;
+            std::string name;
+            double milliseconds = 0.0;
+        };
+
         bool _enabled = false;
         size_t _depth = 0;
         std::vector<Phase> _phases;
+        std::vector<Slowest> _slowest;
     };
+
+    // a mangled Echo symbol as `--explain time` prints it: strip the `_` prefix and the `Z...`
+    // suffix, and turn `TypeMmethod` into `Type::method`
+    std::string display_function_name(std::string_view mangled);
 
     // times a phase for as long as it is in scope, so an early return cannot lose it
     class ScopedPhase

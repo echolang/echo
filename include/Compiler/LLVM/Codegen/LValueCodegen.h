@@ -4,6 +4,9 @@
 #pragma once
 
 #include "AST/ASTValueType.h"
+#include "Compiler/LLVM/Codegen/CodegenValue.h"
+
+#include <cassert>
 
 namespace AST
 {
@@ -14,6 +17,7 @@ namespace llvm
 {
     class Instruction;
     class StoreInst;
+    class Type;
     class Value;
 };
 
@@ -27,28 +31,6 @@ namespace Compiler::LLVM
     // the type has to travel with the address. under llvm's opaque pointers every pointer is
     // the same `ptr`, so an llvm::Value alone says nothing about what it points at - and every
     // load needs its element type spelled out
-    // **where an address came from, which decides whether an access through it may be tagged.**
-    //
-    // a *typed* place was reached without ever leaving the compiler's own accounting: a local, a
-    // field of one, an element a container handed back. its storage is the type it says it is,
-    // because the only way to make that false is a reinterpretation, and that now needs `unsafe`.
-    //
-    // a *raw* place went through a `ptr<T>` - the pointer that a reinterpretation produces, the one
-    // `mem::copy` walks bytes through, the one an FFI call hands back. an access through it is
-    // emitted with no `!tbaa` at all, and an untagged instruction may alias anything: the
-    // conservative answer, said by omission
-    //
-    // an *overlapping* place is an enum payload field (or a member reached through one). the bytes
-    // are typed for the live case, but another case's field sits at the same offset, so a per-type
-    // `!tbaa` tag would be C's union lie. omission again, and not `t_raw`: the address never left
-    // the compiler's accounting
-    enum class Provenance
-    {
-        t_typed,
-        t_raw,
-        t_overlapping,
-    };
-
     struct LValue
     {
         llvm::Value *address = nullptr;
@@ -79,17 +61,24 @@ namespace Compiler::LLVM
 
         // reads the value out of a place. every read in the compiler goes through here, so the
         // "which llvm type do I load" question - the one opaque pointers make unanswerable from
-        // the address alone - is answered from storage_type in exactly one place
-        llvm::Value *gen_load(const LValue &place, const char *name);
+        // the address alone - is answered from storage_type in exactly one place.
+        // a large aggregate is the place itself, never a `load` of the whole type
+        CodegenValue gen_load(const LValue &place, const char *name);
 
         // **the store half of the seam, and the mirror of gen_load above.** it existed only as
         // fifteen scattered `CreateStore` calls, which was survivable while a store was just a
         // store - and stopped being once an access had to carry metadata, because a fact attached
-        // at one of fifteen sites is a fact missing from fourteen
-        llvm::StoreInst *gen_store(const LValue &place, llvm::Value *value);
+        // at one of fifteen sites is a fact missing from fourteen.
+        // a large aggregate is memcpy. a scalar (and a small SSA aggregate) is still a store
+        void gen_store(const LValue &place, CodegenValue value);
+
+        // zero a slot: memset when the type lives in memory, a null store otherwise.
+        // `store zeroinitializer` of a large aggregate is the same SSA pathology gen_load
+        // refuses
+        void gen_zero(const LValue &place);
 
         // gen_lvalue followed by gen_load: the ordinary "read this expression" path
-        llvm::Value *gen_load(AST::ExprNode &expr, const char *name);
+        CodegenValue gen_load(AST::ExprNode &expr, const char *name);
 
         // gen_lvalue with one auto-deref applied when the storage holds a pointer, so the
         // result addresses the pointee. that is what a plain read or write of a transparent
