@@ -128,8 +128,10 @@ IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
     const auto started = std::chrono::steady_clock::now();
 
     llvm::LLVMContext context;
-    auto buffer = llvm::MemoryBuffer::getMemBuffer(
-        llvm::StringRef(request.bitcode.data(), request.bitcode.size()), "unit", false);
+    // a copy, not a view: parseBitcodeFile's bitstream reader can look past the
+    // payload, and getMemBuffer does not pad
+    std::unique_ptr<llvm::MemoryBuffer> buffer =
+        llvm::MemoryBuffer::getMemBufferCopy(request.bitcode, "unit");
     llvm::Expected<std::unique_ptr<llvm::Module>> parsed =
         llvm::parseBitcodeFile(buffer->getMemBufferRef(), context);
 

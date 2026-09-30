@@ -1004,6 +1004,94 @@ TEST_CASE("an owning field initialized twice in one constructor is reported", "[
     REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
 }
 
+TEST_CASE("an owning field initialized once in each arm of an if is initialized once", "[ownership]")
+{
+    // the arms are exclusive, so every path writes the field exactly once
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(bool $big) {\n"
+        "        if ($big) { $this->inner = Box(2, null); } else { $this->inner = Box(1, null); }\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("an owning field initialized in an if arm and again after it is reported", "[ownership]")
+{
+    // the arm that initialized it reaches the second write, which would leak what the arm built
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(bool $big) {\n"
+        "        if ($big) { $this->inner = Box(2, null); }\n"
+        "        $this->inner = Box(1, null);\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
+}
+
+TEST_CASE("an owning field initialized once in each arm of a match is initialized once", "[ownership]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "enum Size { case small; case big; }\n"
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(Size $s) {\n"
+        "        match ($s) {\n"
+        "            Size::small => { $this->inner = Box(1, null); },\n"
+        "            Size::big => { $this->inner = Box(2, null); },\n"
+        "        };\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("an owning field initialized in a match arm and again after it is reported", "[ownership]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "enum Size { case small; case big; }\n"
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(Size $s) {\n"
+        "        match ($s) {\n"
+        "            Size::small => { $this->inner = Box(1, null); },\n"
+        "            Size::big => { },\n"
+        "        };\n"
+        "        $this->inner = Box(2, null);\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
+}
+
+TEST_CASE("an owning field initialized in a break arm is initialized after the loop", "[ownership]")
+{
+    // the if-arm that inits then breaks does not join after the if, so the init has to travel
+    // with the break onto the loop frame or the write after the loop leaks what the arm built
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(bool $ready) {\n"
+        "        while (true) {\n"
+        "            if ($ready) { $this->inner = Box(1, null); break; }\n"
+        "            break;\n"
+        "        }\n"
+        "        $this->inner = Box(2, null);\n"
+        "    }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
+}
+
 TEST_CASE("an owning field default is skipped when the constructor assigns it", "[ownership]")
 {
     // the body's write is the one initialization, so the default is not cloned and nothing leaks

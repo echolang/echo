@@ -1,0 +1,67 @@
+// a constructor may build an owning field in either arm of an `if`, or in each arm of a `match`:
+// the arms are exclusive, so the field is initialized once on every path, and destroyed once
+
+class Res
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    destructor()
+    {
+        echo "freed {$this->n}";
+    }
+}
+
+enum Pick
+{
+    case one;
+    case two;
+}
+
+class ByIf
+{
+    public Res $res;
+
+    public constructor(bool $big)
+    {
+        if ($big) {
+            $this->res = Res(2);
+        } else {
+            $this->res = Res(1);
+        }
+    }
+}
+
+class ByMatch
+{
+    public Res $res;
+
+    public constructor(Pick $p)
+    {
+        match ($p) {
+            Pick::one => {
+                $this->res = Res(10);
+            },
+            Pick::two => {
+                $this->res = Res(20);
+            },
+        };
+    }
+}
+
+function show() : void
+{
+    $a = ByIf(true);
+    $b = ByIf(false);
+    $c = ByMatch(Pick::two);
+    echo $a->res->n;
+    echo $b->res->n;
+    echo $c->res->n;
+}
+
+show();
+echo 'done';

@@ -1,0 +1,33 @@
+// an `if` arm that initializes an owning field and a write after the `if` meet: the arm
+// that initialized it reaches the second write, which would leak what the arm built
+
+struct Inner
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Outer
+{
+    Inner $inner;
+
+    constructor(bool $big)
+    {
+        if ($big) {
+            $this->inner = Inner(2);
+        }
+
+        $this->inner = Inner(1);
+    }
+}
+
+$a = Outer(true);

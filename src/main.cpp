@@ -617,13 +617,22 @@ static void store_module_records(
 // objects for one that may be null or only partly linked. the e2e corpus' `expect:` asserts it
 static int report_compiler_exception(
     const AST::DiagnosticRenderer &diagnostics,
-    const Compiler::ASTCompilerException &e
+    const Compiler::CompilerException &e
 )
 {
     std::cout.flush();
 
-    // the same renderer Collector::print_issues uses, so the two cannot drift on how an issue reads
-    diagnostics.render_issue(e.issue());
+    // InternalCompilerException is a sibling of ASTCompilerException, not a subclass, so the
+    // catch beside compile_bundle names the common base. left uncaught an ICE is std::terminate,
+    // abort, and on Darwin CrashReporter holding the e2e worker until the deadline SIGKILLs it -
+    // with the verifier text sitting in the exception and never on the captured stream
+    if (const AST::IssueRecord *issue = e.as_issue()) {
+        // the same renderer Collector::print_issues uses, so the two cannot drift on how an issue reads
+        diagnostics.render_issue(*issue);
+    } else {
+        diagnostics.render_untyped("Internal Compiler Error", e.what());
+    }
+
     diagnostics.render_summary(1, 0, /*compiled=*/false);
 
     return 1;
@@ -1659,7 +1668,7 @@ static std::optional<int> compile_and_link_executable(
         }
 
         step.finish(true);
-    } catch (Compiler::ASTCompilerException &e) {
+    } catch (Compiler::CompilerException &e) {
         return report_compiler_exception(diagnostics, e);
     }
 
@@ -1766,7 +1775,7 @@ static std::optional<int> prepare_jit(
         // the JIT can only be handed one module, so both of these paths always merge
         compiler.link_into_main();
         step.finish(true);
-    } catch (Compiler::ASTCompilerException &e) {
+    } catch (Compiler::CompilerException &e) {
         return report_compiler_exception(diagnostics, e);
     }
 
