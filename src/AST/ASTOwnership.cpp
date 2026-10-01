@@ -119,6 +119,26 @@ namespace
         return root;
     }
 
+    // **an explicit `as I` / `as C` copies the object's reference.** a cast is materializable, so
+    // the place test below would move it and plant no retain. `$s as Other` is a new owner of the
+    // same object - the implicit widening already copies via place_under_implicit_cast, and this
+    // is that rule for the written form. `$s as Other?` retains only on the hit path, which is
+    // codegen's: a miss owns nothing
+    bool explicit_interface_cast_copies_source(const TypeCastNode &cast)
+    {
+        if (cast.is_implcit || cast.expr == nullptr || cast.result_type().is_wrapped_optional()) {
+            return false;
+        }
+
+        const CastLookup lookup = cast_plan_for(*cast.expr, cast.result_type());
+        if (lookup.result != CastLookup::Result::t_ok) {
+            return false;
+        }
+
+        return lookup.plan.kind == CastKind::t_interface
+            || lookup.plan.kind == CastKind::t_interface_recast;
+    }
+
 }
 
 OwnershipPass::OwnershipPass(Bundle &bundle)
@@ -2058,6 +2078,18 @@ ExprNode *OwnershipPass::arrive_value(
             nullptr, destination);
 
         return expr;
+    }
+
+    if (expr->get_node_type() == NodeType::n_type_cast) {
+        auto *cast = static_cast<TypeCastNode *>(expr);
+
+        if (explicit_interface_cast_copies_source(*cast)) {
+            cast->expr = arrive_value(
+                cast->expr, ValueType::make_mutable(value_result_type(*cast->expr)),
+                nullptr, destination);
+
+            return expr;
+        }
     }
 
     expr = walk_expression(expr);

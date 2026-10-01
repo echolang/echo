@@ -632,6 +632,11 @@ llvm::Value *ClassCodegen::gen_iface_recast(
         ok_payload = handle;
     }
 
+    // a hit is a new owner of the same object. the miss path plants an absent optional and
+    // must not increment: OwnershipPass cannot copy the operand unconditionally when the
+    // result may own nothing
+    ok_payload = gen_retain_value(ok_payload, dest);
+
     llvm::StructType *opt_ty = _ctx.types->optional_llvm_type(to, *_ctx.current_cmp_unit);
     llvm::Value *ok_wrapped = llvm::UndefValue::get(opt_ty);
     ok_wrapped = _ctx.builder->CreateInsertValue(
