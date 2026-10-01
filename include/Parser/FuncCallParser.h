@@ -90,7 +90,9 @@ namespace Parser
     // the argument list of a call through a *value*: `$f(1, 2)`. the cursor sits on the `(`.
     //
     // no overload set and nothing to look up, so unlike parse_funccall there is no settlement to drive -
-    // the callee's type says what the parameters are, and the type checker validates against it
+    // the callee's type says what the parameters are. a determined non-callable is refused here:
+    // `$x(1)` on an int32 is not a call at all. an undetermined callee is planted, and TypeChecker
+    // owns arity (and the shape of a callee that settles later) once a signature is in hand
     AST::IndirectCallExprNode *parse_indirect_call(
         Parser::Payload &payload,
         AST::ExprNode *callee,

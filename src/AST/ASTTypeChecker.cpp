@@ -1870,18 +1870,27 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
     const TokenReference *prev = _context_token;
     _context_token = &node.token;
 
-    // the callee's *signature* is the parameter list here - there is no declaration to walk. the shape
-    // ("this is not callable") and the arity are the parser's, reported where the call was written; what
-    // is left is whether each argument reaches its parameter, which is the same question a direct call
-    // asks and the same one answer
+    // the callee's *signature* is the parameter list here - there is no declaration to walk.
+    // arity is this walk's, whether the signature was known at parse or arrived later (a
+    // foreach binding, an index). a determined non-callable is the parser's; one that settles
+    // as non-callable after a pending callee lands here. undetermined stays silent: a generic
+    // body, or another diagnostic already owns the miss
     if (callee_type.has_signature()) {
         const auto &signature = callee_type.signature();
+        const std::string callee_name = callee_type.get_type_desciption();
 
-        if (node.arguments.size() == signature.parameter_types.size()) {
+        if (node.arguments.size() != signature.parameter_types.size()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token),
+                fmt::format(
+                    "'{}' takes {} argument(s), but {} were given.",
+                    callee_name,
+                    signature.parameter_types.size(),
+                    node.arguments.size()));
+        }
+        else {
             // the callee is named by its *type* - there is no declaration to take a name from. built
             // once: a callable's description recurses through its return and every parameter
-            const std::string callee_name = callee_type.get_type_desciption();
-
             for (size_t i = 0; i < node.arguments.size(); i++) {
                 if (node.arguments[i] == nullptr) {
                     continue;
@@ -1900,6 +1909,13 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
                     node.token);
             }
         }
+    }
+    else if (!is_undetermined_type(callee_type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token),
+            fmt::format(
+                "'{}' is a '{}', which cannot be called.",
+                node.token.value(), callee_type.get_type_desciption()));
     }
 
     RecursiveVisitor::visit_indirect_call_expr(node);

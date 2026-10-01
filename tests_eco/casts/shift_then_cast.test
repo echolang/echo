@@ -1,0 +1,8 @@
+# 0x12345678 >> 8 is 0x123456 = 1193046, exact in float32 (under 2^23).
+# divided by 2^24 it is the hash's unit-interval value
+
+--- OUT --->
+0.071111
+1193046.000000
+1193046
+4.000000

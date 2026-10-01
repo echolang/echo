@@ -256,6 +256,21 @@ namespace
             RecursiveVisitor::visitFunctionCallExpr(node);
         }
 
+        // **an undetermined callee has no signature yet**, so there is nothing to fit arguments
+        // against. walking now would arrive a class handle as unknown and skip the retain, the
+        // same hole visitFunctionCallExpr waits on for an unsettled direct call. a determined
+        // non-callable is TypeChecker's; waiting for it would stall a body that already has
+        // its diagnostic
+        void visit_indirect_call_expr(IndirectCallExprNode &node) override
+        {
+            if (is_undetermined_type(node.callee_type())) {
+                pending = true;
+                return;
+            }
+
+            RecursiveVisitor::visit_indirect_call_expr(node);
+        }
+
         // **an unlowered `const if` is never answerable**, and this is the arm whose absence is silent.
         // which of its two arms exists at all is not decided yet, and this pass walks a body exactly
         // once - so a walk now would resolve the ownership of statements about to be thrown away, and

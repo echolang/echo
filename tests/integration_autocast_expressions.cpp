@@ -45,6 +45,13 @@ TEST_CASE( "implicit casting rules", "[Integration][Autocast][Expressions]" )
         "vardecl<type<float32>>($b) = binexp<float32>(cast<float32>(varref<int32>(var($a))) * literal<float32>(3.14f [3.14]))"
     );
 
+    // grouping forwards dest; a shift's left operand is not a value of it.
+    // dest-typing `8` as float32 refused the operator
+    REQUIRE_NODE_DESC(
+        "float32 $f = (8 >> 1) as float32;",
+        "vardecl<type<float32>>($f) = cast<float32>(binexp<int32>(literal<int32>(8) >> literal<int32>(1)))"
+    );
+
     // auto cast to larger float
     REQUIRE_NODE_DESC(
         "$a = 2.0f + 3.14;",

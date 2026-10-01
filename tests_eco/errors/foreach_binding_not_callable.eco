@@ -1,0 +1,9 @@
+// `$x` is untyped at parse, so the call is kept; once ForeachLowering fills int32 the
+// shape is the same as `$x(1)` on a typed local
+
+array<int32> $xs = array<int32>();
+$xs[] = 1;
+
+foreach ($xs as $x) {
+    echo $x(1);
+}

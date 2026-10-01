@@ -185,7 +185,12 @@ namespace AST
     // three written destinations: a declaration's initializer, an assignment's right-hand side, a
     // return. plus the two wrappers that are themselves a destination: a `??` RHS at the unwrapped
     // left type, and a `match` arm at the unified type. and a written `$x as T`, whose operand is
-    // typed against the type the author named. AST::function_needs_typing is the skip:
+    // typed against the type the author named. an indirect call whose callee has a signature is
+    // the same walk for arguments that were untyped at parse (a foreach binding, an index).
+    // a written `null` at any of those slots is bound here too (`AST::bind_null_to`): an
+    // assignment through a `T&` the parser could not yet name (`$a[] = null`) is the one
+    // that had no earlier chance.
+    // AST::function_needs_typing is the skip:
     // a template is meaningless until cloned, and a t_owned body is still walked because
     // settle can type a neighbouring call in the same round ownership marks t_owned.
     // of_type is deliberately not this: a detached assign stays in the arena forever

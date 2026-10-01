@@ -281,6 +281,8 @@ TEST_CASE("calling a non-callable is rejected", "[callable]")
 
 TEST_CASE("an indirect call checks its arity", "[callable]")
 {
+    // planted even when the signature is known at parse: TypeChecker owns arity, so a
+    // mismatch is the same sentence a pending callee gets once its type arrives
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function<int32(int32)> $f = function(int32 $a) : int32 { return $a; };\n"
         "echo $f(1, 2);\n");
@@ -332,6 +334,74 @@ TEST_CASE("an indirect call retains a class argument the way a direct call does"
         "Handle $h = Handle(7);\n"
         "function<int32(Handle)> $f = function(Handle $x) : int32 { return $x->n; };\n"
         "echo $f($h);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    IndirectCallExprNode *call = first_indirect_call(m);
+    REQUIRE(call != nullptr);
+    REQUIRE(call->arguments.size() == 1);
+    REQUIRE(call->arguments[0]->get_node_type() == NodeType::n_expr_retain);
+}
+
+TEST_CASE("a match binding of a callable is callable", "[callable]")
+{
+    // `$f` is declared unknown& until MatchResolution, so parse_indirect_call used to refuse
+    // the call as '[unknown]'. a foreach binding is the same hole; this bundle has no stdlib
+    // so that case lives in tests_eco/functions/foreach_callable
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Box { case op(function<int32(int32)> $f); }\n"
+        "Box $b = Box::op(function(int32 $a) : int32 { return $a + 1; });\n"
+        "echo match ($b) {\n"
+        "    Box::op($f) => $f(41)\n"
+        "};\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    IndirectCallExprNode *call = first_indirect_call(m);
+    REQUIRE(call != nullptr);
+    REQUIRE(call->result_type() == int32_type());
+}
+
+TEST_CASE("calling through a match binding of a non-callable is rejected", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Box { case n(int32 $v); }\n"
+        "Box $b = Box::n(1);\n"
+        "echo match ($b) {\n"
+        "    Box::n($x) => $x(1)\n"
+        "};\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "which cannot be called"));
+}
+
+TEST_CASE("an indirect call through a pending callee checks its arity once typed", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Box { case op(function<int32(int32)> $f); }\n"
+        "Box $b = Box::op(function(int32 $a) : int32 { return $a; });\n"
+        "echo match ($b) {\n"
+        "    Box::op($f) => $f(1, 2)\n"
+        "};\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "argument(s), but 2 were given"));
+}
+
+TEST_CASE("a pending indirect call retains a class argument once the callee is typed", "[callable][ownership]")
+{
+    // body_is_pending must wait on the undetermined callee; walking `$f($h)` with no signature
+    // skips the retain, the same hole the typed-callee test above already pinned
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Handle { int32 $n; constructor(int32 $n) { $this->n = $n; } }\n"
+        "enum Box { case op(function<int32(Handle)> $f); }\n"
+        "Handle $h = Handle(7);\n"
+        "Box $b = Box::op(function(Handle $x) : int32 { return $x->n; });\n"
+        "echo match ($b) {\n"
+        "    Box::op($f) => $f($h)\n"
+        "};\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 

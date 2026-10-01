@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] foreach_binding_not_callable.eco:8:10
+
+  '$x' is a 'const int32', which cannot be called.
+
+  7 | foreach ($xs as $x) {
+  8 |     echo $x(1);
+    :          ^^
+  9 | }
+
+1 error, nothing was compiled.
