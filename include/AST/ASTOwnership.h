@@ -219,6 +219,36 @@ namespace AST
 
         std::vector<Frame> _frames;
 
+        // **the facts this body has accumulated so far**, snapshotted and restored as one value at
+        // every exclusive arm, and recorded whole on a loop exit. three sets that travelled
+        // separately is how an `if` arm's initialization was visible to the other arm, and how an
+        // init that left by `break` vanished after the loop. a fourth fact is a field here, or it
+        // does not exist
+        struct FlowFacts
+        {
+            // declarations whose value has been moved out. a moved local is neither readable nor
+            // dropped - "its destructor travelled with the value"
+            std::unordered_set<const VarDeclNode *> moved;
+
+            // locals moved inside a branch that did not certainly run. read a second time, so the
+            // diagnostic can say "may have been moved" rather than claiming it definitely was
+            std::unordered_set<const VarDeclNode *> maybe_moved;
+
+            // the storage this body has already *initialized* - a declaration and the member names
+            // below it, as one key. an initialization owes the old value no teardown because there
+            // is no old value, and this is what keeps that claim honest: a second write to the same
+            // owning field would leak what the first one built, with nothing further down able to
+            // notice
+            std::unordered_set<std::string> initialized;
+
+            void merge(const FlowFacts &other)
+            {
+                moved.insert(other.moved.begin(), other.moved.end());
+                maybe_moved.insert(other.maybe_moved.begin(), other.maybe_moved.end());
+                initialized.insert(other.initialized.begin(), other.initialized.end());
+            }
+        };
+
         // one enclosing loop body, and what its two exits carry out of it.
         //
         // `frame_floor` is the index into _frames of the body's own frame. this is the *bound* on a
@@ -226,17 +256,18 @@ namespace AST
         // innermost frame down to **and including** frame_floor and no further, because the frames
         // outside the loop are still live on the other side of the branch.
         //
-        // the two sets are the moved state each exit *reaches its destination with*. a branch that
-        // leaves does not reach the join after the statement it sits in - an `if` arm ending in `break`
-        // continues after the loop, not after the `if` - so its moves are recorded here and merged by
-        // whoever owns that destination. without them an exit-aware `if` merge would drop them, which is
-        // a use-after-move with no diagnostic rather than an over-approximation
+        // the two FlowFacts are what each exit *reaches its destination with*. a branch that leaves
+        // does not reach the join after the statement it sits in - an `if` arm ending in `break`
+        // continues after the loop, not after the `if` - so its facts are recorded here and merged by
+        // whoever owns that destination. without them an exit-aware `if` merge would drop them: a
+        // move is a use-after-move with no diagnostic, an initialization is a second write after the
+        // loop that leaks what the break built
         struct LoopFrame
         {
             size_t frame_floor = 0;
 
-            std::unordered_set<const VarDeclNode *> break_moved;
-            std::unordered_set<const VarDeclNode *> continue_moved;
+            FlowFacts break_facts;
+            FlowFacts continue_facts;
         };
 
         // the enclosing loop bodies, innermost last. a vector and not a single frame, so a labelled
@@ -246,13 +277,7 @@ namespace AST
         // answer is never revisited
         std::vector<LoopFrame> _loop_frames;
 
-        // declarations whose value has been moved out. a moved local is neither readable nor
-        // dropped - "its destructor travelled with the value"
-        std::unordered_set<const VarDeclNode *> _moved;
-
-        // locals moved inside a branch that did not certainly run. read a second time, so the
-        // diagnostic can say "may have been moved" rather than claiming it definitely was
-        std::unordered_set<const VarDeclNode *> _maybe_moved;
+        FlowFacts _flow;
 
         // **the reads at which this body hands an owner over**, from AST::handover_reads_in - answered
         // once per body, before the walk, and looked up by arrive_value at every by-value argument.
@@ -262,12 +287,6 @@ namespace AST
         // parser wrote, and the walk replaces none of them: a read is a VarRefNode on the way in and
         // on the way out, whatever this pass wraps around it
         std::unordered_set<const ExprNode *> _handover_reads;
-
-        // the storage this body has already *initialized* - a declaration and the member names below
-        // it, as one key. an initialization owes the old value no teardown because there is no old
-        // value, and this is what keeps that claim honest: a second write to the same owning field
-        // would leak what the first one built, with nothing further down able to notice
-        std::unordered_set<std::string> _initialized_storage;
 
         // how many temporaries this body has minted, so their names are distinct. reset per body by
         // both entry points - see make_temporary for why they are numbered at all
@@ -321,6 +340,14 @@ namespace AST
         // the condition is a *reference* to the edge, because walking one may replace it - a temporary
         // materialized in a loop's condition is bound and destroyed inside the block that evaluates it
         void walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *step);
+
+        // **the one exclusive-arm join**, which `if` and `match` both go through. each joining arm is
+        // a path that reaches the code after the statement; a leaving arm has already recorded what
+        // it carries onto a return's unwind or the enclosing loop's frame
+        //
+        // 0 joining: the tail is unreachable, `_flow` stays `before`. 1 joining: that arm *is* the
+        // join. several: `initialized` and `maybe_moved` union, `moved` only where every arm moved it
+        void join_exclusive(const FlowFacts &before, std::vector<FlowFacts> joining);
 
         // binds a discarded owning value to a synthesized local of the enclosing frame, so the scope
         // destroys it. the frame's ordinary reverse-order drop then covers it with no special case

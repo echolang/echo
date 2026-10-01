@@ -78,7 +78,7 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
         return;
     }
 
-    auto value = _ctx.pop();
+    CodegenValue value = _ctx.pop_value();
 
     // asked once each rather than five times: result_type() builds its answer, and for a pointer
     // it heap-allocates the pointee
@@ -90,8 +90,9 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     const AST::CastLookup recast = AST::cast_plan_for(*node.expr, to);
     if (recast.result == AST::CastLookup::Result::t_ok
         && recast.plan.kind == AST::CastKind::t_interface_recast) {
-        _ctx.value_stack.push(_ctx.classes->gen_iface_recast(
-            value, from, to, to.is_wrapped_optional(), AST::location_of_expression(&node)));
+        _ctx.push_scalar(_ctx.classes->gen_iface_recast(
+            _ctx.materialize(value, "recast"), from, to, to.is_wrapped_optional(),
+            AST::location_of_expression(&node)));
         return;
     }
 
@@ -102,12 +103,12 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     // same conjunction decides whether the author is asked to write `unsafe`, and a copy here lets a
     // cast emit the assert and hand back a trusted borrow that nobody was asked to promise
     if (AST::narrowing_promotes_raw_storage(from, to)) {
-        gen_null_assert(value, AST::location_of_expression(node.expr));
+        gen_null_assert(_ctx.materialize(value, "narrow"), AST::location_of_expression(node.expr));
     }
 
     // the conversion table lives on TypeLowering, shared with every declaration, assignment
     // and member write, so all of them agree on signedness
-    _ctx.value_stack.push(_ctx.types->coerce_value(value, from, to, *_ctx.current_cmp_unit));
+    _ctx.push(_ctx.types->coerce_value(value, from, to, *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
@@ -115,20 +116,20 @@ void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
     // gen_lvalue, not gen_place: any auto-deref this read needs is already an explicit
     // DerefExprNode above it, put there by the pointer adjustment pass. so a bare pointer
     // variable here means the pointer itself was asked for - which is what `$p:$` compiles to
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, node.is_var() ? node.get_var().decl().name().c_str() : "load"));
+    _ctx.push(_ctx.lvalues->gen_load(node, node.is_var() ? node.get_var().decl().name().c_str() : "load"));
 }
 
 void ExprCodegen::gen_static_property(AST::StaticPropertyExprNode &node)
 {
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, node.token_name.value().c_str()));
+    _ctx.push(_ctx.lvalues->gen_load(node, node.token_name.value().c_str()));
 }
 
 void ExprCodegen::gen_literal_float(AST::LiteralFloatExprNode &node)
 {
     if (node.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float64) {
-        _ctx.value_stack.push(llvm::ConstantFP::get(*_ctx.llvm_context, llvm::APFloat(node.double_value())));
+        _ctx.push_scalar(llvm::ConstantFP::get(*_ctx.llvm_context, llvm::APFloat(node.double_value())));
     } else {
-        _ctx.value_stack.push(llvm::ConstantFP::get(*_ctx.llvm_context, llvm::APFloat(node.float_value())));
+        _ctx.push_scalar(llvm::ConstantFP::get(*_ctx.llvm_context, llvm::APFloat(node.float_value())));
     }
 }
 
@@ -140,15 +141,15 @@ void ExprCodegen::gen_literal_int(AST::LiteralIntExprNode &node)
     auto int_size = AST::get_integer_size(type);
 
     // push an integer constant on the stack
-    _ctx.value_stack.push(llvm::ConstantInt::get(*_ctx.llvm_context, llvm::APInt(int_size.size * 8, value, int_size.is_signed)));
+    _ctx.push_scalar(llvm::ConstantInt::get(*_ctx.llvm_context, llvm::APInt(int_size.size * 8, value, int_size.is_signed)));
 }
 
 void ExprCodegen::gen_literal_bool(AST::LiteralBoolExprNode &node)
 {
     if (node.get_bool_value()) {
-        _ctx.value_stack.push(llvm::ConstantInt::getTrue(*_ctx.llvm_context));
+        _ctx.push_scalar(llvm::ConstantInt::getTrue(*_ctx.llvm_context));
     } else {
-        _ctx.value_stack.push(llvm::ConstantInt::getFalse(*_ctx.llvm_context));
+        _ctx.push_scalar(llvm::ConstantInt::getFalse(*_ctx.llvm_context));
     }
 }
 
@@ -166,7 +167,7 @@ void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
     // path that compiles `stdlib/core/string.eco` itself. asks for a *layout*, since what follows
     // GEPs the window out of it
     if (!type.has_property_layout()) {
-        _ctx.push(byte_pointer);
+        _ctx.push_scalar(byte_pointer);
         return;
     }
 
@@ -199,7 +200,7 @@ void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
     string_fields[layout.owner_index] =
         llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));
 
-    _ctx.push(llvm::ConstantStruct::get(string_struct, string_fields));
+    _ctx.push_scalar(llvm::ConstantStruct::get(string_struct, string_fields));
 }
 
 void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
@@ -238,10 +239,10 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     auto lhsret = node.lhs->result_type();
     auto rhsret = node.rhs->result_type();
 
-    auto right = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
-    auto left = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    CodegenValue right_v = _ctx.pop_value();
+    CodegenValue left_v = _ctx.pop_value();
+    auto right = right_v.is_aggregate() ? nullptr : right_v.scalar();
+    auto left = left_v.is_aggregate() ? nullptr : left_v.scalar();
 
     // **a presence test against a written `null`** - over a wrapped `T?`, whose tag it reads, or over a
     // weak handle, which lowers to an opaque address and so is present exactly when it is non-null. One
@@ -265,10 +266,11 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 
         if ((lhs_is_null || rhs_is_null) && node.op_node->op->is_identity_comparison()) {
             const AST::ValueType &present_of = lhs_is_null ? rhsret : lhsret;
-            llvm::Value *present = _ctx.types->gen_has_value(lhs_is_null ? right : left, present_of);
+            llvm::Value *present = _ctx.types->gen_has_value(
+                lhs_is_null ? right_v : left_v, present_of);
 
             // `$x == null` is *absent*, so the tag is inverted - and `!=` is the tag as it stands
-            _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
+            _ctx.push_scalar(node.op_node->op->type == Token::Type::t_logical_eq
                 ? _ctx.builder->CreateNot(present, "is_null")
                 : present);
             return;
@@ -284,6 +286,14 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         }
     }
 
+    if (left == nullptr) {
+        left = _ctx.materialize(left_v, "lhs");
+    }
+
+    if (right == nullptr) {
+        right = _ctx.materialize(right_v, "rhs");
+    }
+
     // two class handles, or a handle against null. the only operators a class answers, and the type
     // checker has already rejected the rest - so this is a plain address comparison over two opaque
     // pointers, ahead of the pointer arm because a class type is not a t_pointer
@@ -295,7 +305,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             throw unlowered(lhsret, rhsret);
         }
 
-        _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
+        _ctx.push_scalar(node.op_node->op->type == Token::Type::t_logical_eq
             ? _ctx.builder->CreateICmpEQ(left, right)
             : _ctx.builder->CreateICmpNE(left, right));
         return;
@@ -316,7 +326,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         llvm::Value *left_tag = _ctx.builder->CreateExtractValue(left, {AST::k_enum_tag_index}, "lhs.tag");
         llvm::Value *right_tag = _ctx.builder->CreateExtractValue(right, {AST::k_enum_tag_index}, "rhs.tag");
 
-        _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
+        _ctx.push_scalar(node.op_node->op->type == Token::Type::t_logical_eq
             ? _ctx.builder->CreateICmpEQ(left_tag, right_tag)
             : _ctx.builder->CreateICmpNE(left_tag, right_tag));
         return;
@@ -329,22 +339,22 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 
         switch (node.op_node->op->type) {
             case Token::Type::t_logical_eq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpEQ(left, right));
                 return;
             case Token::Type::t_logical_neq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpNE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpNE(left, right));
                 return;
             case Token::Type::t_open_angle:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpULT(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpULT(left, right));
                 return;
             case Token::Type::t_close_angle:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpUGT(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpUGT(left, right));
                 return;
             case Token::Type::t_logical_leq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpULE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpULE(left, right));
                 return;
             case Token::Type::t_logical_geq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpUGE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpUGE(left, right));
                 return;
 
             case Token::Type::t_op_add:
@@ -356,7 +366,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     }
 
                     // the distance between two addresses, counted in elements
-                    _ctx.value_stack.push(_ctx.builder->CreatePtrDiff(
+                    _ctx.push_scalar(_ctx.builder->CreatePtrDiff(
                         _ctx.types->get_llvm_type(AST::value_type_of(lhsret), *_ctx.current_cmp_unit),
                         left, right));
                     return;
@@ -368,7 +378,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     offset = _ctx.builder->CreateNeg(offset);
                 }
 
-                _ctx.value_stack.push(_ctx.builder->CreateGEP(
+                _ctx.push_scalar(_ctx.builder->CreateGEP(
                     _ctx.types->get_llvm_type(AST::value_type_of(lhsret), *_ctx.current_cmp_unit),
                     left, { offset }, "ptroff"));
                 return;
@@ -412,26 +422,26 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         // "this value, at that type" and it is the half that knows a narrowing count is a truncation
         const auto shift_count = [&]() {
             return _ctx.types->coerce_value(
-                right, AST::value_type_of(rhsret), op_type, *_ctx.current_cmp_unit);
+                CodegenValue::scalar(right), AST::value_type_of(rhsret), op_type, *_ctx.current_cmp_unit).scalar();
         };
 
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
-                _ctx.value_stack.push(_ctx.builder->CreateAdd(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateAdd(left, right));
                 break;
             case Token::Type::t_op_sub:
-                _ctx.value_stack.push(_ctx.builder->CreateSub(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateSub(left, right));
                 break;
             case Token::Type::t_op_mul:
-                _ctx.value_stack.push(_ctx.builder->CreateMul(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateMul(left, right));
                 break;
             case Token::Type::t_op_div:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateUDiv(left, right)
                     : _ctx.builder->CreateSDiv(left, right));
                 break;
             case Token::Type::t_op_mod:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateURem(left, right)
                     : _ctx.builder->CreateSRem(left, right));
                 break;
@@ -469,7 +479,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     llvm::Value *result = _ctx.builder->CreateCall(fun, args);
                     llvm::Type *int_type = _ctx.types->get_llvm_type(op_type, *_ctx.current_cmp_unit);
 
-                    _ctx.value_stack.push(is_unsigned
+                    _ctx.push_scalar(is_unsigned
                         ? _ctx.builder->CreateFPToUI(result, int_type)
                         : _ctx.builder->CreateFPToSI(result, int_type));
                 }
@@ -481,13 +491,13 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             // follows it. So `$h & $mask` is this and `$h &$mask` is an address-of - a real wart, left
             // alone deliberately, since unpicking it would change what `&$a[$i]` means everywhere
             case Token::Type::t_and:
-                _ctx.value_stack.push(_ctx.builder->CreateAnd(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateAnd(left, right));
                 break;
             case Token::Type::t_or:
-                _ctx.value_stack.push(_ctx.builder->CreateOr(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateOr(left, right));
                 break;
             case Token::Type::t_xor:
-                _ctx.value_stack.push(_ctx.builder->CreateXor(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateXor(left, right));
                 break;
             // **the two shifts, and the only arms in this function that convert an operand themselves.**
             // every other pair arrives already reconciled, because AST::common_numeric_type widened one
@@ -497,7 +507,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             // that leaves the operation where the user wrote it: `uint8 200 << int64 40` is a `uint8`
             // shift by 40, refused by AST::shift_count_refusal, rather than an int64 one that answers
             case Token::Type::t_op_shl:
-                _ctx.value_stack.push(_ctx.builder->CreateShl(left, shift_count()));
+                _ctx.push_scalar(_ctx.builder->CreateShl(left, shift_count()));
                 break;
             // **the one bitwise operator that is not sign-agnostic**, and it reads the same `is_unsigned`
             // `/ % **` and the comparisons above already read rather than asking a second time: a right
@@ -506,35 +516,35 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             // type cannot pick the instruction - which it did, and `int32 -16 >> uint32 2` answered
             // 1073741820 where the same shift by an `int32 2` answered -4
             case Token::Type::t_op_shr:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateLShr(left, shift_count())
                     : _ctx.builder->CreateAShr(left, shift_count()));
                 break;
             case Token::Type::t_logical_eq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpEQ(left, right));
                 break;
             case Token::Type::t_logical_neq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpNE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpNE(left, right));
                 break;
             // `==` and `!=` above need no arm of their own: they are sign-agnostic at equal width, which
             // is why the four below are the whole of the exposure
             case Token::Type::t_close_angle:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateICmpUGT(left, right)
                     : _ctx.builder->CreateICmpSGT(left, right));
                 break;
             case Token::Type::t_open_angle:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateICmpULT(left, right)
                     : _ctx.builder->CreateICmpSLT(left, right));
                 break;
             case Token::Type::t_logical_geq:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateICmpUGE(left, right)
                     : _ctx.builder->CreateICmpSGE(left, right));
                 break;
             case Token::Type::t_logical_leq:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateICmpULE(left, right)
                     : _ctx.builder->CreateICmpSLE(left, right));
                 break;
@@ -549,10 +559,10 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             // `$a < $b` on two of them is a precedence mistake far more often than it is a question -
             // refused the same way ordering two class handles is
             case Token::Type::t_logical_eq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpEQ(left, right));
                 break;
             case Token::Type::t_logical_neq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpNE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateICmpNE(left, right));
                 break;
             default:
                 throw unlowered(lhsret, rhsret);
@@ -583,37 +593,37 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
-                _ctx.value_stack.push(_ctx.builder->CreateFAdd(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFAdd(left, right));
                 break;
             case Token::Type::t_op_sub:
-                _ctx.value_stack.push(_ctx.builder->CreateFSub(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFSub(left, right));
                 break;
             case Token::Type::t_op_mul:
-                _ctx.value_stack.push(_ctx.builder->CreateFMul(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFMul(left, right));
                 break;
             case Token::Type::t_op_div:
-                _ctx.value_stack.push(_ctx.builder->CreateFDiv(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFDiv(left, right));
                 break;
             case Token::Type::t_op_mod:
-                _ctx.value_stack.push(_ctx.builder->CreateFRem(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFRem(left, right));
                 break;
             case Token::Type::t_logical_eq:
-                _ctx.value_stack.push(_ctx.builder->CreateFCmpOEQ(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFCmpOEQ(left, right));
                 break;
             case Token::Type::t_logical_neq:
-                _ctx.value_stack.push(_ctx.builder->CreateFCmpONE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFCmpONE(left, right));
                 break;
             case Token::Type::t_close_angle:
-                _ctx.value_stack.push(_ctx.builder->CreateFCmpOGT(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFCmpOGT(left, right));
                 break;
             case Token::Type::t_open_angle:
-                _ctx.value_stack.push(_ctx.builder->CreateFCmpOLT(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFCmpOLT(left, right));
                 break;
             case Token::Type::t_logical_geq:
-                _ctx.value_stack.push(_ctx.builder->CreateFCmpOGE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFCmpOGE(left, right));
                 break;
             case Token::Type::t_logical_leq:
-                _ctx.value_stack.push(_ctx.builder->CreateFCmpOLE(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFCmpOLE(left, right));
                 break;
 
 
@@ -630,8 +640,8 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
 {
     node.expr->accept(*_ctx.visitor);
 
-    auto value = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    CodegenValue operand = _ctx.pop_value();
+    llvm::Value *value = operand.is_aggregate() ? nullptr : operand.scalar();
 
     auto type = node.expr->result_type();
 
@@ -643,10 +653,10 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
     switch (node.token_operator.type()) {
         case Token::Type::t_op_sub:
             if (type.is_floating_type()) {
-                _ctx.value_stack.push(_ctx.builder->CreateFNeg(value));
+                _ctx.push_scalar(_ctx.builder->CreateFNeg(value));
             }
             else if (type.is_integer_type()) {
-                _ctx.value_stack.push(_ctx.builder->CreateNeg(value));
+                _ctx.push_scalar(_ctx.builder->CreateNeg(value));
             }
             else {
                 throw _ctx.error(fmt::format("unary '-' is not supported for operand type '{}' {}",
@@ -656,7 +666,7 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
 
         case Token::Type::t_tilde:
             if (type.is_integer_type()) {
-                _ctx.value_stack.push(_ctx.builder->CreateNot(value, "bitnot"));
+                _ctx.push_scalar(_ctx.builder->CreateNot(value, "bitnot"));
             }
             else {
                 throw _ctx.error(fmt::format("unary '~' is not supported for operand type '{}' {}",
@@ -671,11 +681,11 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
         // `$maybe == null` are the same instruction by construction rather than by agreement
         case Token::Type::t_exclamation:
             if (type.is_boolean_type()) {
-                _ctx.value_stack.push(_ctx.builder->CreateNot(value, "not"));
+                _ctx.push_scalar(_ctx.builder->CreateNot(value, "not"));
             }
             else if (AST::destination_admits_null(type)) {
-                _ctx.value_stack.push(_ctx.builder->CreateNot(
-                    _ctx.types->gen_has_value(value, type), "is_null"));
+                _ctx.push_scalar(_ctx.builder->CreateNot(
+                    _ctx.types->gen_has_value(operand, type), "is_null"));
             }
             else {
                 throw _ctx.error(fmt::format("unary '!' is not supported for operand type '{}' {}",
@@ -705,8 +715,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         for (auto &arg : node.arguments) {
             arg->accept(*_ctx.visitor);
 
-            auto arg_value = _ctx.value_stack.top();
-            _ctx.value_stack.pop();
+            CodegenValue printed = _ctx.pop_value();
 
             // the argument's own type, with no peeling. the adjustment pass already inserted the
             // auto-deref for a pointer read, so a value-position read has the pointee's type by
@@ -720,7 +729,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             // than through printf: its bytes are not NUL-terminated in general - a substring shares its
             // owner's buffer and simply stops early - and `%s` would run off the end of one
             if (_ctx.core_types().is_string_like(result_type)) {
-                gen_echo_string(arg_value, result_type);
+                gen_echo_string(printed.scalar(), result_type);
                 continue;
             }
 
@@ -735,8 +744,8 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             // conversion table rather than being hand rolled here: it takes the extend from the
             // *source's* signedness, so int8 sign extends where uint8 zero extends, and it hands
             // an already-wide value straight back - int32/int64/float64 emit no extra IR at all
-            arg_value = _ctx.types->coerce_value(
-                arg_value, result_type, AST::ValueType(conversion.promoted), *_ctx.current_cmp_unit);
+            llvm::Value *arg_value = _ctx.types->coerce_value(
+                printed, result_type, AST::ValueType(conversion.promoted), *_ctx.current_cmp_unit).scalar();
 
             // the newline is appended here rather than carried in the table: the table is shared with
             // `dprint`, which ends a line once per *value* and not once per leaf it prints
@@ -779,15 +788,14 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             if (auto *pack = AST::variadic_pack_of(arg)) {
                 for (auto *element : pack->elements) {
                     element->accept(*_ctx.visitor);
-                    args.push_back(_ctx.pop());
+                    args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
                 }
 
                 continue;
             }
 
             arg->accept(*_ctx.visitor);
-            args.push_back(_ctx.value_stack.top());
-            _ctx.value_stack.pop();
+            args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
         }
 
         _ctx.emit_call(func, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
@@ -820,7 +828,7 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
 
     // the erased receiver, addressed by the parser exactly as any other receiver is - `&$d`
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *iface_ptr = _ctx.pop();
+    llvm::Value *iface_ptr = _ctx.pop_scalar();
 
     // **the address of the object field is the `$this` the concrete method already expects.** a class
     // method's receiver is `Circle&`, the address of a slot holding a handle, and field 0 of the fat
@@ -845,7 +853,7 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
 
     for (size_t i = 1; i < node.arguments.size(); i++) {
         node.arguments[i]->accept(*_ctx.visitor);
-        args.push_back(_ctx.pop());
+        args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
     }
 
     // the signature comes off the *requirement*, which is the whole reason this needed no new node: it
@@ -904,19 +912,15 @@ void ExprCodegen::gen_closure_expr(AST::ClosureExprNode &node)
             AST::ExprNode *value = node.captured_values[i];
 
             value->accept(*_ctx.visitor);
-            llvm::Value *captured = _ctx.value_stack.top();
-            _ctx.value_stack.pop();
+            const AST::ValueType captured_type = node.environment_type->get_property_type(i);
 
             llvm::Value *slot = _ctx.builder->CreateStructGEP(
                 layout.payload, payload_ptr, static_cast<unsigned>(i), "env_slot");
 
-            _ctx.builder->CreateStore(
+            _ctx.lvalues->gen_store(
+                LValue{ slot, captured_type },
                 _ctx.types->coerce_value(
-                    captured,
-                    value->result_type(),
-                    node.environment_type->get_property_type(i),
-                    *_ctx.current_cmp_unit),
-                slot);
+                    _ctx.pop_value(), value->result_type(), captured_type, *_ctx.current_cmp_unit));
         }
     }
     else {
@@ -931,7 +935,7 @@ void ExprCodegen::gen_closure_expr(AST::ClosureExprNode &node)
     value = _ctx.builder->CreateInsertValue(value, func, 0, "closure.fn");
     value = _ctx.builder->CreateInsertValue(value, environment, 1, "closure.env");
 
-    _ctx.value_stack.push(value);
+    _ctx.push_scalar(value);
 }
 
 void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
@@ -945,8 +949,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
     }
 
     node.callee->accept(*_ctx.visitor);
-    llvm::Value *callee_value = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    llvm::Value *callee_value = _ctx.pop_scalar();
 
     const bool c_function = callee_type.is_c_function();
 
@@ -969,8 +972,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
         AST::ExprNode *arg = node.arguments[i];
 
         arg->accept(*_ctx.visitor);
-        llvm::Value *value = _ctx.value_stack.top();
-        _ctx.value_stack.pop();
+        CodegenValue value = _ctx.pop_value();
 
         // through the one conversion table, like every other destination. a direct call has its
         // arguments coerced by AST::CallResolver, which walks the callee's *declaration* - an indirect
@@ -980,7 +982,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
                 value, arg->result_type(), signature.parameter_types[i], *_ctx.current_cmp_unit);
         }
 
-        args.push_back(value);
+        args.push_back(_ctx.materialize(value, "agg.arg"));
     }
 
     llvm::FunctionType *fn_type = _ctx.types->get_llvm_function_type(
@@ -1066,11 +1068,11 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
                 throw _ctx.error(fmt::format("'set_hook' has no hook {}", _ctx.function_context()));
             }
             node.arguments[0]->accept(*_ctx.visitor);
-            _ctx.push(_ctx.abort->swap_hook(_ctx.pop()));
+            _ctx.push_scalar(_ctx.abort->swap_hook(_ctx.pop_scalar()));
             return;
 
         case AST::BuiltinKind::t_crash_take_hook:
-            _ctx.push(_ctx.abort->take_hook());
+            _ctx.push_scalar(_ctx.abort->take_hook());
             return;
 
         case AST::BuiltinKind::t_crash_default_hook:
@@ -1079,7 +1081,7 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
                     "'default_hook' has no info {}", _ctx.function_context()));
             }
             node.arguments[0]->accept(*_ctx.visitor);
-            _ctx.abort->gen_default_hook(_ctx.pop());
+            _ctx.abort->gen_default_hook(_ctx.pop_scalar());
             return;
 
         case AST::BuiltinKind::t_ref_count:
@@ -1156,7 +1158,7 @@ void ExprCodegen::gen_dprint_builtin(AST::FunctionCallExprNode &node)
     // wants the slot itself, because a struct is walked by GEP. what arrives is already the address:
     // the parameter is a borrow, so AST::CallResolver wrapped the argument in an AddrOfExprNode
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *address = _ctx.pop();
+    llvm::Value *address = _ctx.pop_scalar();
 
     _ctx.debug_print->gen_dprint(LValue{address, subject});
 
@@ -1204,7 +1206,7 @@ void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::Bu
     const AST::ValueType handle_type = AST::value_type_of(argument_type);
 
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *handle = _ctx.pop();
+    llvm::Value *handle = _ctx.pop_scalar();
 
     // read *through* the borrow. the parameter is `T&`, so what arrives is the address of the slot
     // holding the handle rather than the handle - one load short. the pointer adjuster inserts no deref
@@ -1222,7 +1224,7 @@ void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::Bu
         weak ? ClassBox::weak_index : ClassBox::strong_index);
 
     _ctx.push(_ctx.types->coerce_value(
-        count, AST::ValueType(AST::ValueTypePrimitive::t_uint64), node.decl->get_return_type(),
+        CodegenValue::scalar(count), AST::ValueType(AST::ValueTypePrimitive::t_uint64), node.decl->get_return_type(),
         *_ctx.current_cmp_unit));
 }
 
@@ -1247,7 +1249,7 @@ void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
     // argument is a `string` by the declaration, so the window is the same two words `echo`
     // reads
     message->accept(*_ctx.visitor);
-    llvm::Value *value = _ctx.pop();
+    llvm::Value *value = _ctx.pop_scalar();
     const auto [bytes, size] = _ctx.gen_string_window(
         _ctx.string_as_view(value, message->result_type(), ""), "");
 
@@ -1268,7 +1270,7 @@ void ExprCodegen::gen_assert_builtin(AST::FunctionCallExprNode &node)
     }
 
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *condition = _ctx.pop();
+    llvm::Value *condition = _ctx.pop_scalar();
 
     // stop on the *false* path, so the branch reads the way the source does
     _ctx.abort->gen_abort_if(
@@ -1383,7 +1385,7 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }
 
-    _ctx.value_stack.push(llvm::ConstantInt::get(result_type, value));
+    _ctx.push_scalar(llvm::ConstantInt::get(result_type, value));
 }
 
 LValue ExprCodegen::gen_raw_place(AST::FunctionCallExprNode &node, const char *name, size_t arity)
@@ -1413,7 +1415,7 @@ LValue ExprCodegen::gen_raw_place(AST::FunctionCallExprNode &node, const char *n
 
     // the *pointee*, which is what both callers want: the address names a slot holding a `T`, and
     // `place_type` is the borrow that reached it
-    return LValue{ _ctx.pop(), AST::value_type_of(place_type) };
+    return LValue{ _ctx.pop_scalar(), AST::value_type_of(place_type) };
 }
 
 void ExprCodegen::gen_take_builtin(AST::FunctionCallExprNode &node)
@@ -1430,7 +1432,7 @@ void ExprCodegen::gen_take_builtin(AST::FunctionCallExprNode &node)
     //
     // nothing is written back. that *is* the move - the slot keeps its bits and stops being an owner,
     // which is a claim about the source that only its manager can make and is why this sits in `mem::`
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(place, "take"));
+    _ctx.push(_ctx.lvalues->gen_load(place, "take"));
 }
 
 void ExprCodegen::gen_init_builtin(AST::FunctionCallExprNode &node)
@@ -1438,7 +1440,11 @@ void ExprCodegen::gen_init_builtin(AST::FunctionCallExprNode &node)
     const LValue place = gen_raw_place(node, "init", 2);
 
     node.arguments[1]->accept(*_ctx.visitor);
-    llvm::Value *value = _ctx.pop();
+    CodegenValue value = _ctx.types->coerce_value(
+        _ctx.pop_value(),
+        node.arguments[1]->result_type(),
+        place.storage_type,
+        *_ctx.current_cmp_unit);
 
     // **the whole lowering: one store through the borrow.** the mirror of `take`'s one load, and correct
     // for the same reason read from the other end - the parameter is `T&`, so what arrives is the address
@@ -1452,10 +1458,7 @@ void ExprCodegen::gen_init_builtin(AST::FunctionCallExprNode &node)
     //
     // and nothing is *retained* either: the value arrived by value, so the caller's copy already
     // happened and this hands that owner over rather than duplicating it
-    _ctx.builder->CreateStore(
-        _ctx.types->coerce_value(
-            value, node.arguments[1]->result_type(), place.storage_type, *_ctx.current_cmp_unit),
-        place.address);
+    _ctx.lvalues->gen_store(place, value);
 }
 
 void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
@@ -1486,7 +1489,7 @@ void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::B
             : size_type;
 
         args.push_back(_ctx.types->coerce_value(
-            _ctx.pop(), node.arguments[i]->result_type(), wanted, *_ctx.current_cmp_unit));
+            _ctx.pop_value(), node.arguments[i]->result_type(), wanted, *_ctx.current_cmp_unit).scalar());
     }
 
     // `free` returns void, so it pushes nothing - the one of the three that is a statement
@@ -1499,8 +1502,8 @@ void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::B
         ? _ctx.memory->gen_alloc(args[0], "bytes")
         : _ctx.memory->gen_realloc(args[0], args[1], "bytes");
 
-    _ctx.value_stack.push(_ctx.types->coerce_value(
-        block, block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
+    _ctx.push(_ctx.types->coerce_value(
+        CodegenValue::scalar(block), block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_live_allocations_builtin(AST::FunctionCallExprNode &node)
@@ -1508,8 +1511,8 @@ void ExprCodegen::gen_live_allocations_builtin(AST::FunctionCallExprNode &node)
     // no argument check: the declaration takes none, so AST::CallResolver already refused every call
     // that passed one. no availability check either - AST::TypeChecker refuses this builtin without
     // --track-allocations, at the call site, where it can name a line
-    _ctx.value_stack.push(_ctx.types->coerce_value(
-        _ctx.memory->gen_live_count("live"),
+    _ctx.push(_ctx.types->coerce_value(
+        CodegenValue::scalar(_ctx.memory->gen_live_count("live")),
         AST::ValueType(AST::ValueTypePrimitive::t_uint64),
         node.decl->get_return_type(), *_ctx.current_cmp_unit));
 }
@@ -1519,8 +1522,8 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
     // no argument check, for gen_live_allocations_builtin's reason: all three declarations take none,
     // so AST::CallResolver already refused every call that passed one
     if (kind == AST::BuiltinKind::t_process_argc) {
-        _ctx.value_stack.push(_ctx.types->coerce_value(
-            _ctx.process->gen_argc("argc"),
+        _ctx.push(_ctx.types->coerce_value(
+            CodegenValue::scalar(_ctx.process->gen_argc("argc")),
             AST::ValueType(AST::ValueTypePrimitive::t_uint64),
             node.decl->get_return_type(), *_ctx.current_cmp_unit));
         return;
@@ -1539,8 +1542,8 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
         ? _ctx.process->gen_argv("argv")
         : _ctx.process->gen_envp("envp");
 
-    _ctx.value_stack.push(_ctx.types->coerce_value(
-        block, block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
+    _ctx.push(_ctx.types->coerce_value(
+        CodegenValue::scalar(block), block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_exit_builtin(AST::FunctionCallExprNode &node)
@@ -1553,8 +1556,8 @@ void ExprCodegen::gen_exit_builtin(AST::FunctionCallExprNode &node)
     // AST::CallResolver already coerced to it, so this is the last spelling difference rather than a
     // conversion
     llvm::Value *code = _ctx.types->coerce_value(
-        _ctx.pop(), node.arguments[0]->result_type(),
-        AST::ValueType(AST::ValueTypePrimitive::t_int32), *_ctx.current_cmp_unit);
+        _ctx.pop_value(), node.arguments[0]->result_type(),
+        AST::ValueType(AST::ValueTypePrimitive::t_int32), *_ctx.current_cmp_unit).scalar();
 
     // pushes nothing and terminates the block, like `die` - the two ways a program stops share one
     // owner, so the `unreachable` and the NoReturn on the symbol are decided in one place
@@ -1571,15 +1574,15 @@ void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
         const AST::ValueType class_type = node.operand->result_type();
 
         LValue place = _ctx.lvalues->gen_lvalue(*node.operand);
-        llvm::Value *handle = _ctx.lvalues->gen_load(place, "obj");
+        llvm::Value *handle = _ctx.lvalues->gen_load(place, "obj").scalar();
 
-        _ctx.value_stack.push(_ctx.classes->gen_weak_of(handle, class_type));
+        _ctx.push_scalar(_ctx.classes->gen_weak_of(handle, class_type));
         return;
     }
 
     // `&E` is the address of E's slot, with no transparency peeling - gen_lvalue, not
     // gen_place. so `&$buf` on a `ptr<uint8>` yields the address of $buf itself
-    _ctx.value_stack.push(_ctx.lvalues->gen_lvalue(*node.operand).address);
+    _ctx.push_scalar(_ctx.lvalues->gen_lvalue(*node.operand).address);
 }
 
 void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
@@ -1599,7 +1602,7 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
     }
 
     if (!node.as_callable) {
-        _ctx.value_stack.push(fn);
+        _ctx.push_scalar(fn);
         return;
     }
 
@@ -1612,7 +1615,7 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
         llvm::ConstantPointerNull::get(llvm::PointerType::get(*_ctx.llvm_context, 0)),
         1,
         "ref.env");
-    _ctx.value_stack.push(value);
+    _ctx.push_scalar(value);
 }
 
 llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
@@ -1690,8 +1693,8 @@ void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)
 
     node.operand->accept(*_ctx.visitor);
 
-    _ctx.value_stack.push(
-        _ctx.classes->gen_strong_upgrade(_ctx.pop(), operand_type.weak_target()));
+    _ctx.push_scalar(
+        _ctx.classes->gen_strong_upgrade(_ctx.pop_scalar(), operand_type.weak_target()));
 }
 
 void ExprCodegen::gen_null_assert(llvm::Value *address, const TokenReference &at)
@@ -1716,7 +1719,7 @@ void ExprCodegen::gen_null_assert(llvm::Value *address, const TokenReference &at
 
 void ExprCodegen::gen_index(AST::IndexExprNode &node)
 {
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, "elem"));
+    _ctx.push(_ctx.lvalues->gen_load(node, "elem"));
 }
 
 void ExprCodegen::gen_deref(AST::DerefExprNode &node)
@@ -1724,7 +1727,7 @@ void ExprCodegen::gen_deref(AST::DerefExprNode &node)
     // gen_lvalue on the deref node itself resolves to the pointee's storage; loading it is
     // the read. keeping the address computation in LValueCodegen is what lets a deref appear
     // on the left of an assignment as readily as on the right
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, "deref"));
+    _ctx.push(_ctx.lvalues->gen_load(node, "deref"));
 }
 
 void ExprCodegen::gen_temporary_bind(AST::TemporaryBindExprNode &node)
@@ -1753,7 +1756,8 @@ void ExprCodegen::gen_temporary_bind(AST::TemporaryBindExprNode &node)
     // than of result_type() because gen_function_call is what decides it - a void call deliberately
     // pushes no value - and the two must not be able to disagree. popping unconditionally read an
     // empty stack, which is not a diagnostic but a crash
-    llvm::Value *value = _ctx.value_stack.size() > depth_before ? _ctx.pop() : nullptr;
+    const bool has_value = _ctx.value_stack.size() > depth_before;
+    CodegenValue value = has_value ? _ctx.pop_value() : CodegenValue{};
 
     // the value out of the way *before* the drops rather than after: they are void calls and releases,
     // so they push nothing, and popping first keeps that a fact rather than a hope. it is also what
@@ -1765,8 +1769,8 @@ void ExprCodegen::gen_temporary_bind(AST::TemporaryBindExprNode &node)
 
     assert(_ctx.value_stack.size() == depth_before && "a temporary's drop leaked a value onto the stack");
 
-    if (value != nullptr) {
-        _ctx.value_stack.push(value);
+    if (has_value) {
+        _ctx.push(value);
     }
 }
 
@@ -1780,7 +1784,7 @@ void ExprCodegen::gen_logical_short_circuit(AST::BinaryExprNode &node)
     const char *phi_name = is_and ? "and" : "or";
 
     node.lhs->accept(*_ctx.visitor);
-    llvm::Value *left = _ctx.pop();
+    llvm::Value *left = _ctx.pop_scalar();
 
     auto *rhs_block = llvm::BasicBlock::Create(*_ctx.llvm_context, rhs_name, function);
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, done_name, function);
@@ -1798,7 +1802,7 @@ void ExprCodegen::gen_logical_short_circuit(AST::BinaryExprNode &node)
 
     _ctx.set_insert_point(rhs_block);
     node.rhs->accept(*_ctx.visitor);
-    llvm::Value *right = _ctx.pop();
+    llvm::Value *right = _ctx.pop_scalar();
     llvm::BasicBlock *rhs_end = _ctx.builder->GetInsertBlock();
     _ctx.builder->CreateBr(done_block);
 
@@ -1806,7 +1810,7 @@ void ExprCodegen::gen_logical_short_circuit(AST::BinaryExprNode &node)
     llvm::PHINode *phi = _ctx.builder->CreatePHI(left->getType(), 2, phi_name);
     phi->addIncoming(left, lhs_end);
     phi->addIncoming(right, rhs_end);
-    _ctx.value_stack.push(phi);
+    _ctx.push_scalar(phi);
 }
 
 void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
@@ -1817,14 +1821,20 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     const AST::ValueType result = node.result_type();
 
     node.lhs->accept(*_ctx.visitor);
-    llvm::Value *left = _ctx.pop();
+    CodegenValue left_v = _ctx.pop_value();
+
+    llvm::Type *result_llvm = _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit);
+    const bool result_in_memory = aggregate_lives_in_memory(result_llvm, _ctx.layout());
+    llvm::Value *result_slot = result_in_memory
+        ? _ctx.entry_alloca(result_llvm, "coalesce.result")
+        : nullptr;
 
     auto *present_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "coalesce.present", function);
     auto *absent_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "coalesce.absent", function);
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "coalesce.done", function);
 
     _ctx.builder->CreateCondBr(
-        _ctx.types->gen_has_value(left, lhs_type), present_block, absent_block);
+        _ctx.types->gen_has_value(left_v, lhs_type), present_block, absent_block);
 
     // the present path unwraps and fits the result type. that second step matters when the two sides
     // differ - `lookup($k) ?? 0` over an `int32?` and an untyped literal, or a nullable result the right
@@ -1836,23 +1846,28 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // computed left side, or a payload that copies as bytes, and unwrap is the whole of it
     _ctx.set_insert_point(present_block);
 
-    llvm::Value *unwrapped = nullptr;
+    CodegenValue unwrapped;
     AST::ValueType present_type = AST::unwrapped_type_of(lhs_type);
 
     if (node.present_value != nullptr) {
         node.present_value->accept(*_ctx.visitor);
-        unwrapped = _ctx.pop();
+        unwrapped = _ctx.pop_value();
         present_type = node.present_value->result_type();
     }
     else {
-        unwrapped = _ctx.types->gen_unwrapped(left, lhs_type);
+        unwrapped = _ctx.types->gen_unwrapped(left_v, lhs_type);
     }
 
-    llvm::Value *present = _ctx.types->coerce_value(
-        unwrapped,
-        present_type,
-        result,
-        *_ctx.current_cmp_unit);
+    unwrapped = _ctx.types->coerce_value(
+        unwrapped, present_type, result, *_ctx.current_cmp_unit);
+    llvm::Value *present = nullptr;
+
+    if (result_in_memory) {
+        _ctx.lvalues->gen_store(LValue{ result_slot, result }, unwrapped);
+    } else {
+        present = _ctx.materialize(unwrapped, "coalesce.present");
+    }
+
     llvm::BasicBlock *present_end = _ctx.builder->GetInsertBlock();
     _ctx.builder->CreateBr(done_block);
 
@@ -1875,8 +1890,15 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     llvm::BasicBlock *absent_end = nullptr;
 
     if (!AST::expression_never_returns(*node.rhs) && !_ctx.block_is_terminated()) {
-        right = _ctx.types->coerce_value(
-            _ctx.pop(), node.rhs->result_type(), result, *_ctx.current_cmp_unit);
+        CodegenValue right_v = _ctx.types->coerce_value(
+            _ctx.pop_value(), node.rhs->result_type(), result, *_ctx.current_cmp_unit);
+
+        if (result_in_memory) {
+            _ctx.lvalues->gen_store(LValue{ result_slot, result }, right_v);
+        } else {
+            right = _ctx.materialize(right_v, "coalesce.absent");
+        }
+
         absent_end = _ctx.builder->GetInsertBlock();
         _ctx.builder->CreateBr(done_block);
     }
@@ -1889,17 +1911,21 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // `??` - and a phi naming the wrong predecessor is an llvm verifier failure with no source location
     _ctx.set_insert_point(done_block);
 
-    if (right == nullptr) {
-        _ctx.value_stack.push(present);
+    if (result_in_memory) {
+        _ctx.push(CodegenValue::aggregate(result_slot, result_llvm, Provenance::t_typed));
         return;
     }
 
-    llvm::PHINode *phi = _ctx.builder->CreatePHI(
-        _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit), 2, "coalesce");
+    if (right == nullptr) {
+        _ctx.push_scalar(present);
+        return;
+    }
+
+    llvm::PHINode *phi = _ctx.builder->CreatePHI(result_llvm, 2, "coalesce");
     phi->addIncoming(present, present_end);
     phi->addIncoming(right, absent_end);
 
-    _ctx.value_stack.push(phi);
+    _ctx.push_scalar(phi);
 }
 
 void ExprCodegen::gen_chain_base(AST::ChainBaseNode &node)
@@ -1912,12 +1938,18 @@ void ExprCodegen::gen_chain_base(AST::ChainBaseNode &node)
     // the nearest enclosing chain's, which is the top: the marker is built by the parser inside exactly
     // one chain's continuation, and a nested chain pushes and pops around its own
     //
-    // a *load*, because this is the value position - reaching the slot itself is gen_lvalue's arm, which
-    // is what a method receiver and a write through the chain go through
-    _ctx.value_stack.push(_ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(node.type, *_ctx.current_cmp_unit),
-        _ctx.chain_base_slots.back(),
-        "chain.base"));
+    // a *load* for a scalar, because this is the value position - reaching the slot itself is
+    // gen_lvalue's arm, which is what a method receiver and a write through the chain go through.
+    // a large aggregate stays the slot: loading it is the SSA pathology
+    llvm::Type *ty = _ctx.types->get_llvm_type(node.type, *_ctx.current_cmp_unit);
+
+    if (aggregate_lives_in_memory(ty, _ctx.layout())) {
+        _ctx.push(CodegenValue::aggregate(
+            _ctx.chain_base_slots.back(), ty, Provenance::t_typed));
+        return;
+    }
+
+    _ctx.push_scalar(_ctx.builder->CreateLoad(ty, _ctx.chain_base_slots.back(), "chain.base"));
 }
 
 void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
@@ -1926,42 +1958,68 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
 
     const AST::ValueType base_type = node.base->result_type();
     const AST::ValueType result = node.result_type();
+    const bool has_value = !result.is_void();
+
+    llvm::Type *llvm_result = has_value
+        ? _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit)
+        : nullptr;
+    const bool result_in_memory = has_value
+        && aggregate_lives_in_memory(llvm_result, _ctx.layout());
+    llvm::Value *result_slot = result_in_memory
+        ? _ctx.entry_alloca(llvm_result, "chain.result")
+        : nullptr;
 
     // **evaluated once, before the branch.** the continuation reaches it through the marker rather than by
     // re-evaluating, which is what makes `$cache->find($k)?->name` call `find` exactly once
     node.base->accept(*_ctx.visitor);
-    llvm::Value *base = _ctx.pop();
+    CodegenValue base_v = _ctx.pop_value();
 
     auto *reach_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.reach", function);
     auto *absent_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.absent", function);
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.done", function);
 
     _ctx.builder->CreateCondBr(
-        _ctx.types->gen_has_value(base, base_type), reach_block, absent_block);
+        _ctx.types->gen_has_value(base_v, base_type), reach_block, absent_block);
 
     _ctx.set_insert_point(reach_block);
 
     // spilled to a slot rather than kept as a value: the continuation may call a method, and a receiver
-    // is an address. two instructions to keep one receiver convention, the same trade the class release
-    // thunk makes when it spills a handle for a deinit
-    llvm::Value *unwrapped = _ctx.types->gen_unwrapped(base, base_type);
+    // is an address. a large payload is already an address, so that address *is* the slot - memcpying
+    // it into a fresh one would be a copy the chain does not owe
+    CodegenValue unwrapped = _ctx.types->gen_unwrapped(base_v, base_type);
+    const AST::ValueType unwrapped_type = AST::unwrapped_type_of(base_type);
+    llvm::Type *unwrapped_llvm = _ctx.types->get_llvm_type(
+        unwrapped_type, *_ctx.current_cmp_unit);
 
-    // **the slot is seated in the entry block, the store is not.** an alloca here would be an alloca per
-    // *evaluation*, so a `?->` in a loop body would grow the stack once per turn - and `run` defaults to
-    // --debug, where nothing folds it away. CodegenContext::entry_alloca is the one owner of that rule,
-    // shared with every local and every parameter, so no slot in the language is seated any other way
-    llvm::Value *slot = _ctx.entry_alloca(unwrapped->getType(), "chain.slot");
-    _ctx.builder->CreateStore(unwrapped, slot);
+    llvm::Value *slot = nullptr;
+
+    if (unwrapped.is_aggregate()) {
+        slot = unwrapped.value;
+    } else {
+        // **the slot is seated in the entry block, the store is not.** an alloca here would be an alloca per
+        // *evaluation*, so a `?->` in a loop body would grow the stack once per turn - and `run` defaults to
+        // --debug, where nothing folds it away. CodegenContext::entry_alloca is the one owner of that rule,
+        // shared with every local and every parameter, so no slot in the language is seated any other way
+        slot = _ctx.entry_alloca(unwrapped_llvm, "chain.slot");
+        _ctx.lvalues->gen_store(LValue{ slot, unwrapped_type }, unwrapped);
+    }
 
     _ctx.chain_base_slots.push_back(slot);
     node.continuation->accept(*_ctx.visitor);
 
     const AST::ValueType reached_type = node.continuation->result_type();
-    const bool has_value = !reached_type.is_void();
+    llvm::Value *reached = nullptr;
 
-    llvm::Value *reached = has_value
-        ? _ctx.types->coerce_value(_ctx.pop(), reached_type, result, *_ctx.current_cmp_unit)
-        : nullptr;
+    if (has_value) {
+        CodegenValue reached_v = _ctx.types->coerce_value(
+            _ctx.pop_value(), reached_type, result, *_ctx.current_cmp_unit);
+
+        if (result_in_memory) {
+            _ctx.lvalues->gen_store(LValue{ result_slot, result }, reached_v);
+        } else {
+            reached = _ctx.materialize(reached_v, "chain.reach");
+        }
+    }
 
     _ctx.chain_base_slots.pop_back();
 
@@ -1972,13 +2030,15 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
     // replacement. it only supplies the result type's empty value, and for a void chain not even that
     _ctx.set_insert_point(absent_block);
 
-    // lowered once and used by both the empty value and the phi below
-    llvm::Type *llvm_result = has_value
-        ? _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit)
-        : nullptr;
+    llvm::Value *absent = nullptr;
 
-    llvm::Value *absent =
-        has_value ? _ctx.types->gen_absent(result, *_ctx.current_cmp_unit) : nullptr;
+    if (has_value) {
+        if (result_in_memory) {
+            _ctx.lvalues->gen_zero(LValue{ result_slot, result });
+        } else {
+            absent = _ctx.types->gen_absent(result, *_ctx.current_cmp_unit).scalar();
+        }
+    }
 
     llvm::BasicBlock *absent_end = _ctx.builder->GetInsertBlock();
     _ctx.builder->CreateBr(done_block);
@@ -1991,11 +2051,16 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
         return;
     }
 
+    if (result_in_memory) {
+        _ctx.push(CodegenValue::aggregate(result_slot, llvm_result, Provenance::t_typed));
+        return;
+    }
+
     llvm::PHINode *phi = _ctx.builder->CreatePHI(llvm_result, 2, "chain");
     phi->addIncoming(reached, reach_end);
     phi->addIncoming(absent, absent_end);
 
-    _ctx.value_stack.push(phi);
+    _ctx.push_scalar(phi);
 }
 
 void ExprCodegen::gen_null(AST::NullNode &node)
@@ -2010,14 +2075,14 @@ void ExprCodegen::gen_null(AST::NullNode &node)
     // an unbound null still answers with the pointer constant below, and that is not a fallback so much as
     // the shape every *other* nullable actually has
     if (bound.is_wrapped_optional()) {
-        _ctx.value_stack.push(_ctx.types->gen_absent(bound, *_ctx.current_cmp_unit));
+        _ctx.push(_ctx.types->gen_absent(bound, *_ctx.current_cmp_unit));
         return;
     }
 
     // every pointer is the same opaque `ptr` under llvm, so one null constant serves them all - and a
     // class handle and a weak handle are addresses too, which is exactly what has_null_representation()
     // says about them
-    _ctx.value_stack.push(llvm::ConstantPointerNull::get(
+    _ctx.push_scalar(llvm::ConstantPointerNull::get(
         llvm::PointerType::get(*_ctx.llvm_context, 0)));
 }
 
@@ -2043,6 +2108,14 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
 
     const AST::ValueType result = node.result_type();
     const bool has_value = !result.is_void();
+    llvm::Type *result_llvm = has_value
+        ? _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit)
+        : nullptr;
+    const bool result_in_memory = has_value
+        && aggregate_lives_in_memory(result_llvm, _ctx.layout());
+    llvm::Value *result_slot = result_in_memory
+        ? _ctx.entry_alloca(result_llvm, "match.result")
+        : nullptr;
 
     // **the subject is emitted as the declaration it is**, slot and initializer, through the same
     // gen_var_decl every local goes through - so it is evaluated exactly once, before the branch, and
@@ -2075,7 +2148,7 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
                 subject_decl_type,
                 Provenance::t_typed,
             },
-            "match.subject");
+            "match.subject").scalar();
     }
 
     // the discriminant, read as the ordinary property it is - the same GEP any member read emits, which
@@ -2088,7 +2161,7 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
             AST::k_enum_tag_index,
             ct->get_property_type(AST::k_enum_tag_index),
             "match.tag_ptr"),
-        "match.tag");
+        "match.tag").scalar();
 
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.done", function);
 
@@ -2200,10 +2273,16 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
                 arm.value->accept(*_ctx.visitor);
 
                 if (has_value) {
-                    llvm::Value *value = _ctx.types->coerce_value(
-                        _ctx.pop(), arm.value->result_type(), result, *_ctx.current_cmp_unit);
+                    CodegenValue value = _ctx.types->coerce_value(
+                        _ctx.pop_value(), arm.value->result_type(), result, *_ctx.current_cmp_unit);
 
-                    incoming.emplace_back(value, _ctx.builder->GetInsertBlock());
+                    if (result_in_memory) {
+                        _ctx.lvalues->gen_store(LValue{ result_slot, result }, value);
+                    } else {
+                        incoming.emplace_back(
+                            _ctx.materialize(value, "match.arm"),
+                            _ctx.builder->GetInsertBlock());
+                    }
                 }
             }
         }
@@ -2225,12 +2304,21 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
 
     // a void match is a statement and pushes nothing, exactly as a void call does - so gen_scope's
     // stack-depth assertion stays true rather than being special-cased for this node
-    if (!has_value || incoming.empty()) {
+    if (!has_value) {
+        return;
+    }
+
+    if (result_in_memory) {
+        _ctx.push(CodegenValue::aggregate(result_slot, result_llvm, Provenance::t_typed));
+        return;
+    }
+
+    if (incoming.empty()) {
         return;
     }
 
     llvm::PHINode *phi = _ctx.builder->CreatePHI(
-        _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit),
+        result_llvm,
         static_cast<unsigned>(incoming.size()),
         "match");
 
@@ -2238,6 +2326,6 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
         phi->addIncoming(value, block);
     }
 
-    _ctx.value_stack.push(phi);
+    _ctx.push_scalar(phi);
 }
 };

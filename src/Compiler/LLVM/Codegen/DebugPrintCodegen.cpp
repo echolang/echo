@@ -94,7 +94,7 @@ void DebugPrintCodegen::render(
     // be anything at all - unmapped, freed, or the middle of something
     if (type.is_pointer()) {
         text(fmt::format("[{}] {}", type_name, label));
-        address(_ctx.lvalues->gen_load(place, "dprint.ptr"));
+        address(_ctx.lvalues->gen_load(place, "dprint.ptr").scalar());
         return;
     }
 
@@ -102,13 +102,13 @@ void DebugPrintCodegen::render(
     // not change what it is observing. an empty weak prints its null address for free
     if (type.is_weak()) {
         text(fmt::format("[{}] {}weak(", type_name, label));
-        address(_ctx.lvalues->gen_load(place, "dprint.weak"));
+        address(_ctx.lvalues->gen_load(place, "dprint.weak").scalar());
         text(")");
         return;
     }
 
     if (type.is_callable()) {
-        llvm::Value *callable = _ctx.lvalues->gen_load(place, "dprint.fn");
+        llvm::Value *callable = _ctx.lvalues->gen_load(place, "dprint.fn").scalar();
 
         text(fmt::format("[{}] {}fn=", type_name, label));
         address(_ctx.builder->CreateExtractValue(callable, 0, "dprint.fn.code"));
@@ -119,7 +119,7 @@ void DebugPrintCodegen::render(
 
     if (type.is_c_function()) {
         text(fmt::format("[{}] {}fn=", type_name, label));
-        address(_ctx.lvalues->gen_load(place, "dprint.cfn"));
+        address(_ctx.lvalues->gen_load(place, "dprint.cfn").scalar());
         return;
     }
 
@@ -150,7 +150,7 @@ void DebugPrintCodegen::render(
 
     if (type.is_primitive()) {
         text(fmt::format("[{}] {}", type_name, label));
-        render_primitive(_ctx.lvalues->gen_load(place, "dprint.val"), type);
+        render_primitive(_ctx.lvalues->gen_load(place, "dprint.val").scalar(), type);
         return;
     }
 
@@ -269,7 +269,7 @@ void DebugPrintCodegen::render_enum(
     llvm::Value *tag = _ctx.lvalues->gen_load(
         _ctx.lvalues->property_place(
             structure, place, AST::k_enum_tag_index, tag_type, "dprint.enum.tag"),
-        "dprint.enum.tag");
+        "dprint.enum.tag").scalar();
 
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
     llvm::BasicBlock *join = llvm::BasicBlock::Create(*_ctx.llvm_context, "dprint.enum.join", function);
@@ -338,7 +338,7 @@ void DebugPrintCodegen::render_class(
 
     // **no retain.** the payload is read in place through the handle, so ref_count($x) reads the same on
     // either side of a dprint($x) - which the corpus pins
-    llvm::Value *handle = _ctx.lvalues->gen_load(place, "dprint.obj");
+    llvm::Value *handle = _ctx.lvalues->gen_load(place, "dprint.obj").scalar();
     llvm::Value *is_null = _ctx.builder->CreateIsNull(handle, "dprint.isnull");
 
     llvm::BasicBlock *value_block = nullptr;
@@ -377,7 +377,7 @@ void DebugPrintCodegen::render_optional(
     // having an address rather than a value is a reason to load the wrapper first, not a reason to
     // re-derive how the two shapes of a `T?` are told apart
     llvm::Value *has = _ctx.types->gen_has_value(
-        _ctx.builder->CreateLoad(box, place.address, "dprint.opt"), type);
+        CodegenValue::aggregate(place.address, box, place.provenance), type);
 
     llvm::BasicBlock *some_block = nullptr;
     llvm::BasicBlock *join = open_branch(_ctx.builder->CreateNot(has, "dprint.absent"), "dprint.none", some_block);
@@ -405,7 +405,7 @@ void DebugPrintCodegen::render_optional(
 
 void DebugPrintCodegen::render_string(const LValue &place, const AST::ValueType &type)
 {
-    llvm::Value *loaded = _ctx.lvalues->gen_load(place, "dprint.str");
+    llvm::Value *loaded = _ctx.lvalues->gen_load(place, "dprint.str").scalar();
     const auto [bytes, size] = _ctx.gen_string_window(
         _ctx.string_as_view(loaded, type, "dprint.str."), "dprint.str.");
 
@@ -419,8 +419,8 @@ void DebugPrintCodegen::render_string(const LValue &place, const AST::ValueType 
     //
     // the precision argument is an `int`, so the usize is narrowed through the one conversion table
     llvm::Value *precision = _ctx.types->coerce_value(
-        size, AST::ValueType(AST::ValueTypePrimitive::t_usize),
-        AST::ValueType(AST::ValueTypePrimitive::t_int32), *_ctx.current_cmp_unit);
+        CodegenValue::scalar(size), AST::ValueType(AST::ValueTypePrimitive::t_usize),
+        AST::ValueType(AST::ValueTypePrimitive::t_int32), *_ctx.current_cmp_unit).scalar();
 
     text("\"");
     _pending_args.push_back(precision);
@@ -464,7 +464,7 @@ void DebugPrintCodegen::render_primitive(llvm::Value *value, const AST::ValueTyp
     // through the one conversion table, which takes the extend from the source's signedness and hands an
     // already-wide value straight back
     arg(conversion.format, _ctx.types->coerce_value(
-        value, type, AST::ValueType(conversion.promoted), *_ctx.current_cmp_unit));
+        CodegenValue::scalar(value), type, AST::ValueType(conversion.promoted), *_ctx.current_cmp_unit).scalar());
 }
 
 void DebugPrintCodegen::text(std::string_view literal)

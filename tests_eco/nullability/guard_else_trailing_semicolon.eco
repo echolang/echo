@@ -1,0 +1,30 @@
+// a trailing `;` after `guard else { }` is accepted by Parser::parse_guard, rather than
+// required. the omitted-else form still needs its `;`, because that form has no brace to
+// end on
+
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n;
+}
+
+function bound(int32 $n) : int32
+{
+    int32 $v = guard pick($n) else { return -1; };
+    return $v;
+}
+
+function statement(int32 $n) : void
+{
+    guard pick($n) else { return; };
+    echo $n;
+}
+
+echo bound(10);
+echo bound(-1);
+statement(7);
+statement(-1);
+echo 0;

@@ -1,0 +1,63 @@
+// `$a[] = null` into `array<T?>` is an assignment through `operator [] : T&`, not a call.
+// CallResolver therefore never sees the null. GpuPass is a struct, so `GpuPass?` is a
+// wrapped optional, and an unbound null there used to reach codegen as an ICE.
+// a class handle's `T?` lowered as a pointer constant even unbound, which is why a
+// standalone class reduction compiled
+
+struct P
+{
+    int32 $n;
+}
+
+array<P?> $a = array<P?>();
+
+usize $i = 0;
+while ($i < 3) {
+    $a[] = null;
+    $i = $i + 1;
+}
+
+echo $a[0] == null;
+echo $a[1] == null;
+echo $a[2] == null;
+
+$a[1] = P(7);
+echo ($a[1] ?? P(0))->n;
+
+$a[1] = null;
+echo $a[1] == null;
+
+class Bank
+{
+    array<P?> $camera;
+    array<P?> $mirror;
+    array<P?> $outline;
+
+    constructor()
+    {
+        $this->camera = arr::room<P?>(3);
+        $this->mirror = arr::room<P?>(3);
+        $this->outline = arr::room<P?>(3);
+        $this->reset();
+    }
+
+    function reset() : void
+    {
+        $this->camera->clear();
+        $this->mirror->clear();
+        $this->outline->clear();
+
+        usize $n = 0;
+        while ($n < 3) {
+            $this->camera[] = null;
+            $this->mirror[] = null;
+            $this->outline[] = null;
+            $n = $n + 1;
+        }
+    }
+}
+
+Bank $b = Bank();
+echo $b->camera[0] == null;
+echo $b->mirror[2] == null;
+echo $b->outline[1] == null;

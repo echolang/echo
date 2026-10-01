@@ -31,6 +31,13 @@ namespace Compiler
         const AST::File *file() const {
             return _file;
         }
+
+        // a located issue, or null. InternalCompilerException has a sentence and no span;
+        // ASTCompilerException is the collector's own record. the driver asks this rather
+        // than naming both siblings at every catch
+        virtual const AST::IssueRecord *as_issue() const {
+            return nullptr;
+        }
     };
 
     class ASTCompilerException : public CompilerException
@@ -45,6 +52,10 @@ namespace Compiler
 
         const AST::IssueRecord &issue() const {
             return _issue;
+        }
+
+        virtual const AST::IssueRecord *as_issue() const override {
+            return &_issue;
         }
 
         virtual const char *what() const noexcept override {

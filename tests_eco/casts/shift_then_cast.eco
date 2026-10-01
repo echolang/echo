@@ -1,0 +1,18 @@
+// a float32 destination used to flow through grouping into every operand of
+// `($h >> 8)`, so the shift count was typed as float32 and the operator was
+// refused. the same dest used to type a literal *left* operand: `(8 >> 1) as
+// float32`. `as` is postfix on the group; the hint is the declaration's, not
+// the cast's. room_and_vine DriftSystem.driftHash is the same shape
+
+uint32 $h = 0x12345678;
+
+float32 $grouped = (($h >> 8) as float32) / 16777216.0f;
+echo $grouped;
+
+float32 $cast = ($h >> 8) as float32;
+echo $cast;
+
+echo ($h >> 8) as int32;
+
+float32 $from_literal = (8 >> 1) as float32;
+echo $from_literal;

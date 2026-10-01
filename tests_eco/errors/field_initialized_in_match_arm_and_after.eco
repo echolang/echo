@@ -1,0 +1,43 @@
+// a `match` arm that initializes an owning field and a write after the `match` meet: the arm
+// that initialized it reaches the second write, which would leak what the arm built
+
+struct Inner
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+enum Pick
+{
+    case one;
+    case two;
+}
+
+struct Outer
+{
+    Inner $inner;
+
+    constructor(Pick $p)
+    {
+        match ($p) {
+            Pick::one => {
+                $this->inner = Inner(2);
+            },
+            Pick::two => {
+            },
+        };
+
+        $this->inner = Inner(1);
+    }
+}
+
+$a = Outer(Pick::one);

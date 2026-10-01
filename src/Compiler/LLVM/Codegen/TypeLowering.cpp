@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
+#include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/StructureLayout.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
@@ -263,15 +264,33 @@ void TypeLowering::store_aggregate_fieldwise(llvm::Value *value, llvm::Value *sl
     _ctx.builder->CreateStore(value, slot);
 }
 
-void TypeLowering::emit_returned_value(llvm::Value *value)
+void TypeLowering::emit_returned_value(const CodegenValue &value)
 {
     if (_ctx.sret_pointer != nullptr) {
-        store_aggregate_fieldwise(value, _ctx.sret_pointer, _ctx.sret_type);
+        if (value.is_aggregate()) {
+            if (value.value != _ctx.sret_pointer) {
+                const llvm::Align align = _ctx.layout().getABITypeAlign(_ctx.sret_type);
+                _ctx.builder->CreateMemCpy(
+                    _ctx.sret_pointer,
+                    align,
+                    value.value,
+                    align,
+                    _ctx.layout().getTypeAllocSize(_ctx.sret_type));
+            }
+
+            _ctx.builder->CreateRetVoid();
+            return;
+        }
+
+        // a small SSA aggregate (string, result, Vec4): fieldwise, not one store of the whole
+        // struct. SROA reconstitutes a whole-struct store into the insertvalue chain it came from,
+        // which is the 4.7x phi-of-aggregate LoopVectorize refuses. Vec4[512] never reaches here
+        store_aggregate_fieldwise(value.scalar(), _ctx.sret_pointer, _ctx.sret_type);
         _ctx.builder->CreateRetVoid();
         return;
     }
 
-    _ctx.builder->CreateRet(value);
+    _ctx.builder->CreateRet(value.scalar());
 }
 
 void TypeLowering::apply_function_attributes(
@@ -775,7 +794,7 @@ void TypeLowering::gen_type_id(AST::FunctionCallExprNode &node)
     llvm::Value *agg = llvm::UndefValue::get(agg_type);
     agg = _ctx.builder->CreateInsertValue(
         agg, identity, { static_cast<unsigned>(desc->index) }, "type_id");
-    _ctx.push(agg);
+    _ctx.push_scalar(agg);
 }
 
 llvm::Constant *TypeLowering::conformance_table_constant(
@@ -1071,7 +1090,7 @@ llvm::StructType *TypeLowering::iface_llvm_type()
     return llvm::StructType::create(*_ctx.llvm_context, { ptr_type, ptr_type }, "eco.iface");
 }
 
-llvm::Value *TypeLowering::gen_has_value(llvm::Value *value, const AST::ValueType &type)
+llvm::Value *TypeLowering::has_value_ssa(llvm::Value *value, const AST::ValueType &type)
 {
     // the tag, for a `T?` whose `T` had no null value to donate. `is_wrapped_optional()` is the one
     // spelling of that question - see ValueType::has_null_representation
@@ -1085,7 +1104,23 @@ llvm::Value *TypeLowering::gen_has_value(llvm::Value *value, const AST::ValueTyp
     return _ctx.builder->CreateIsNotNull(value, "has_value");
 }
 
-llvm::Value *TypeLowering::gen_unwrapped(llvm::Value *value, const AST::ValueType &type)
+llvm::Value *TypeLowering::gen_has_value(const CodegenValue &value, const AST::ValueType &type)
+{
+    if (!value.is_aggregate()) {
+        return has_value_ssa(value.scalar(), type);
+    }
+
+    if (type.is_wrapped_optional()) {
+        llvm::Value *has_ptr = _ctx.builder->CreateStructGEP(
+            value.aggregate_type, value.value, AST::k_optional_has_index, "opt.has.ptr");
+        return _ctx.builder->CreateLoad(
+            llvm::Type::getInt1Ty(*_ctx.llvm_context), has_ptr, "opt.has");
+    }
+
+    return _ctx.builder->CreateIsNotNull(value.value, "has_value");
+}
+
+llvm::Value *TypeLowering::unwrapped_ssa(llvm::Value *value, const AST::ValueType &type)
 {
     if (type.is_wrapped_optional()) {
         return _ctx.builder->CreateExtractValue(value, { AST::k_optional_value_index }, "opt.val");
@@ -1096,12 +1131,43 @@ llvm::Value *TypeLowering::gen_unwrapped(llvm::Value *value, const AST::ValueTyp
     return value;
 }
 
-llvm::Value *TypeLowering::gen_absent(
+CodegenValue TypeLowering::gen_unwrapped(const CodegenValue &value, const AST::ValueType &type)
+{
+    if (!type.is_wrapped_optional()) {
+        return value;
+    }
+
+    if (!value.is_aggregate()) {
+        return CodegenValue::scalar(unwrapped_ssa(value.scalar(), type));
+    }
+
+    llvm::Type *payload_type = llvm::cast<llvm::StructType>(value.aggregate_type)
+        ->getElementType(AST::k_optional_value_index);
+    llvm::Value *payload_addr = _ctx.builder->CreateStructGEP(
+        value.aggregate_type, value.value, AST::k_optional_value_index, "opt.val.ptr");
+
+    if (aggregate_lives_in_memory(payload_type, _ctx.layout())) {
+        return CodegenValue::aggregate(payload_addr, payload_type, value.provenance);
+    }
+
+    return CodegenValue::scalar(
+        _ctx.builder->CreateLoad(payload_type, payload_addr, "opt.val"));
+}
+
+CodegenValue TypeLowering::gen_absent(
     const AST::ValueType &type,
     const Compiler::LLVM::CmpUnit &cmp_unit
 )
 {
-    return llvm::Constant::getNullValue(get_llvm_type(type, cmp_unit));
+    llvm::Type *ty = get_llvm_type(type, cmp_unit);
+
+    if (!aggregate_lives_in_memory(ty, _ctx.layout())) {
+        return CodegenValue::scalar(llvm::Constant::getNullValue(ty));
+    }
+
+    llvm::Value *slot = _ctx.entry_alloca(ty, "absent");
+    _ctx.lvalues->gen_zero(LValue{ slot, type });
+    return CodegenValue::aggregate(slot, ty, Provenance::t_typed);
 }
 
 llvm::StructType *TypeLowering::optional_llvm_type(
@@ -1513,7 +1579,7 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
     }
 }
 
-llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const CmpUnit &cmp_unit)
+llvm::Value *TypeLowering::coerce_ssa(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const CmpUnit &cmp_unit)
 {
     const AST::ValueType &source = from;
     const AST::ValueType &target = to;
@@ -1549,68 +1615,12 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
         return erased;
     }
 
-    // **wrapping into a `T?`, and unwrapping back out.** only ever reached for the tagged shape: over an
-    // address-like `T` the flag is invisible at the machine level, so the identity fast path at the top of
-    // this function already returned, and the arms below pass the value through as they always did
-    //
-    // the *unwrap* direction is not an implicit conversion - is_implicitly_convertible refuses it, and
-    // deliberately - so it arrives here only from a site that has already proven the value is there:
-    // `guard`, `??`, `?->`. this is the store, not the check
-    // asked once each: every arm below is about one side or the other being the tagged shape, and the
-    // question is a tag read through a ComplexType rather than a flag test
-    const bool target_is_tagged = target.is_wrapped_optional();
-    const bool source_is_tagged = source.is_wrapped_optional();
-
-    if (target_is_tagged || source_is_tagged) {
-        // **an undetermined source is never wrapped as present.** it means a `null` that was never bound
-        // to its destination, and wrapping one produces `{ i1 true, <garbage> }` - a value that claims to
-        // be there and is not, which is the single worst thing this code could emit. a throw rather than a
-        // guess: every path that legitimately reaches here knows its source type, so this firing is a
-        // compiler bug and wants to say so rather than to be quietly absorbed
-        if (target_is_tagged && AST::is_undetermined_type(source)) {
-            throw _ctx.error(fmt::format(
-                "an untyped value reached a '{}' destination - a null here was never bound to its type {}",
-                target.get_type_desciption(), _ctx.function_context()));
-        }
-
-        // asked of AST::arrival_wraps_optional, the same question AST::argument_fit ranked this arrival by
-        // and AST::CallResolver minted the cast from - this is the half that emits the wrap
-        if (AST::arrival_wraps_optional(source, target)) {
-            // `T` -> `T?`: present, carrying the value. the payload is coerced first, so widening
-            // `int32 -> int64?` is one conversion and one wrap rather than a shape mismatch
-            //
-            // the payload is built inside the arm that wants it: the two arms are mutually exclusive, and a
-            // ValueType is not a free thing to materialise twice for one of them to be thrown away
-            const AST::ValueType target_payload = AST::ValueType::make_non_nullable(target);
-
-            llvm::Value *payload = coerce_value(value, source, target_payload, cmp_unit);
-            llvm::StructType *opt_ty = optional_llvm_type(target, cmp_unit);
-            llvm::Value *wrapped = llvm::UndefValue::get(opt_ty);
-
-            wrapped = _ctx.builder->CreateInsertValue(
-                wrapped,
-                llvm::ConstantInt::getTrue(*_ctx.llvm_context),
-                { AST::k_optional_has_index },
-                "opt.has");
-
-            return _ctx.builder->CreateInsertValue(
-                wrapped, payload, { AST::k_optional_value_index }, "opt.val");
-        }
-
-        if (source_is_tagged && !target.is_nullable()) {
-            // `T?` -> `T`: read the payload out. the tag is not tested here - whoever asked for this
-            // narrowing tested it, and that is the whole reason the narrowing is not implicit
-            llvm::Value *payload = _ctx.builder->CreateExtractValue(
-                value, { AST::k_optional_value_index }, "opt.val");
-
-            return coerce_value(payload, AST::ValueType::make_non_nullable(source), target, cmp_unit);
-        }
-
-        // both sides nullable and not identical - `int32? -> int64?`. **passed through unconverted**: the
-        // payloads would have to be unwrapped, converted and rewrapped under the tag they arrived with,
-        // and that is not written yet. left as it is rather than guessed at, since every arrival that
-        // reaches codegen with two different wrapped payloads is a shape this file cannot yet lower
-        return value;
+    // wrap/unwrap is coerce_value's. a pair that still names a tagged optional here is a
+    // compiler bug rather than a conversion this table should guess at
+    if (source.is_wrapped_optional() || target.is_wrapped_optional()) {
+        throw _ctx.error(fmt::format(
+            "optional wrap/unwrap reached the SSA conversion table from '{}' to '{}' {}",
+            from.get_type_desciption(), to.get_type_desciption(), _ctx.function_context()));
     }
 
     // an address is passed along as the address it is. reinterpreting one as pointing at a
@@ -1698,5 +1708,101 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
 
     throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
         from.get_type_desciption(), to.get_type_desciption(), _ctx.function_context()));
+}
+
+CodegenValue TypeLowering::coerce_value(
+    const CodegenValue &value,
+    const AST::ValueType &from,
+    const AST::ValueType &to,
+    const CmpUnit &cmp_unit
+)
+{
+    if (from == to) {
+        return value;
+    }
+
+    // wrap `T` -> `T?`. a large payload is stored fieldwise into a slot; a small one is
+    // insertvalue. this is the only wrap table - coerce_ssa refuses a tagged pair
+    if (AST::arrival_wraps_optional(from, to)) {
+        // **an undetermined source is never wrapped as present.** it means a `null` that was never bound
+        // to its destination, and wrapping one produces `{ i1 true, <garbage> }` - a value that claims to
+        // be there and is not. every path that legitimately reaches here knows its source type
+        if (AST::is_undetermined_type(from)) {
+            throw _ctx.error(fmt::format(
+                "an untyped value reached a '{}' destination - a null here was never bound to its type {}",
+                to.get_type_desciption(), _ctx.function_context()));
+        }
+
+        const AST::ValueType target_payload = AST::ValueType::make_non_nullable(to);
+        CodegenValue payload = coerce_value(value, from, target_payload, cmp_unit);
+        llvm::StructType *opt_ty = optional_llvm_type(to, cmp_unit);
+
+        if (payload.is_aggregate() || aggregate_lives_in_memory(opt_ty, _ctx.layout())) {
+            llvm::Value *slot = _ctx.entry_alloca(opt_ty, "opt.wrap");
+            llvm::Value *has_ptr = _ctx.builder->CreateStructGEP(
+                opt_ty, slot, AST::k_optional_has_index, "opt.has.ptr");
+            _ctx.builder->CreateStore(
+                llvm::ConstantInt::getTrue(*_ctx.llvm_context), has_ptr);
+            llvm::Value *val_ptr = _ctx.builder->CreateStructGEP(
+                opt_ty, slot, AST::k_optional_value_index, "opt.val.ptr");
+            _ctx.lvalues->gen_store(LValue{ val_ptr, target_payload }, payload);
+
+            if (aggregate_lives_in_memory(opt_ty, _ctx.layout())) {
+                return CodegenValue::aggregate(slot, opt_ty, Provenance::t_typed);
+            }
+
+            return CodegenValue::scalar(
+                _ctx.builder->CreateLoad(opt_ty, slot, "opt.wrap"));
+        }
+
+        llvm::Value *ssa_payload = _ctx.materialize(payload, "opt.payload");
+        llvm::Value *wrapped = llvm::UndefValue::get(opt_ty);
+        wrapped = _ctx.builder->CreateInsertValue(
+            wrapped,
+            llvm::ConstantInt::getTrue(*_ctx.llvm_context),
+            { AST::k_optional_has_index },
+            "opt.has");
+
+        return CodegenValue::scalar(_ctx.builder->CreateInsertValue(
+            wrapped, ssa_payload, { AST::k_optional_value_index }, "opt.val"));
+    }
+
+    if (from.is_wrapped_optional() && !to.is_nullable()) {
+        return coerce_value(
+            gen_unwrapped(value, from),
+            AST::ValueType::make_non_nullable(from),
+            to,
+            cmp_unit);
+    }
+
+    // both sides nullable and not identical - `int32? -> int64?`. **passed through unconverted**:
+    // the payloads would have to be unwrapped, converted and rewrapped under the tag they arrived
+    // with, and that is not written yet
+    if (from.is_wrapped_optional() && to.is_wrapped_optional()) {
+        return value;
+    }
+
+    llvm::Type *to_llvm = get_llvm_type(to, cmp_unit);
+
+    // a large aggregate converting as identity at LLVM (struct to itself, both-nullable
+    // pass-through) stays an address. materialising it is the load gen_load refused
+    if (value.is_aggregate()) {
+        if (aggregate_lives_in_memory(to_llvm, _ctx.layout())) {
+            return value;
+        }
+
+        return CodegenValue::scalar(
+            coerce_ssa(_ctx.materialize(value, "agg.coerce"), from, to, cmp_unit));
+    }
+
+    llvm::Value *coerced = coerce_ssa(value.scalar(), from, to, cmp_unit);
+
+    if (aggregate_lives_in_memory(to_llvm, _ctx.layout())) {
+        llvm::Value *slot = _ctx.entry_alloca(to_llvm, "agg.dst");
+        _ctx.lvalues->gen_store(LValue{ slot, to }, CodegenValue::scalar(coerced));
+        return CodegenValue::aggregate(slot, to_llvm, Provenance::t_typed);
+    }
+
+    return CodegenValue::scalar(coerced);
 }
 };

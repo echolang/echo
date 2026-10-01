@@ -4,8 +4,16 @@
 #include <Compiler/TerminalCapabilities.h>
 
 #include <cctype>
+#include <chrono>
 #include <sstream>
 #include <string>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <cerrno>
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 #include "subprocess.h"
 #include "terminal_fixture.h"
@@ -15,7 +23,8 @@
 // design rests on and is asserted by name at the bottom of this file.
 //
 // everything above it hands the reporter an ostringstream, a forced TerminalCapabilities and literal
-// milliseconds, so a row is byte-comparable. That is why Compiler::ProgressReporter owns no clock
+// milliseconds, so a row is byte-comparable. The test constructor does not animate, which is what
+// keeps the frame index a function of the tick sequence
 
 using Compiler::ProgressPhase;
 using Compiler::ProgressReporter;
@@ -26,6 +35,120 @@ using EchoTests::a_terminal;
 namespace
 {
     constexpr const char *ERASE = "\r\x1b[K";
+
+#if defined(__unix__) || defined(__APPLE__)
+    struct FdPair
+    {
+        int fds[2] = { -1, -1 };
+
+        bool open()
+        {
+            int raw[2] = { -1, -1 };
+            if (pipe(raw) != 0) {
+                return false;
+            }
+
+            fds[0] = raw[0];
+            fds[1] = raw[1];
+            return true;
+        }
+
+        ~FdPair()
+        {
+            if (fds[0] >= 0) {
+                close(fds[0]);
+            }
+            if (fds[1] >= 0) {
+                close(fds[1]);
+            }
+        }
+    };
+
+    size_t erase_frames(const std::string &text)
+    {
+        size_t frames = 0;
+        for (size_t i = 0; i + 4 <= text.size(); i++) {
+            if (text.compare(i, 4, ERASE) == 0) {
+                frames++;
+            }
+        }
+
+        return frames;
+    }
+
+    bool wait_for_erase_frames(
+        int fd,
+        std::string &clocked,
+        size_t want,
+        std::chrono::milliseconds deadline
+    )
+    {
+        const auto started = std::chrono::steady_clock::now();
+        char buffer[4096];
+
+        while (erase_frames(clocked) < want) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started);
+            if (elapsed >= deadline) {
+                return false;
+            }
+
+            pollfd watched;
+            watched.fd = fd;
+            watched.events = POLLIN;
+            watched.revents = 0;
+
+            const int left = static_cast<int>((deadline - elapsed).count());
+            const int ready = poll(&watched, 1, left);
+            if (ready <= 0) {
+                return erase_frames(clocked) >= want;
+            }
+
+            const ssize_t n = read(fd, buffer, sizeof(buffer));
+            if (n > 0) {
+                clocked.append(buffer, static_cast<size_t>(n));
+                continue;
+            }
+
+            if (n == 0) {
+                return erase_frames(clocked) >= want;
+            }
+
+            if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+#endif
+
+    void require_rows_fit(const std::string &drawn, unsigned int limit)
+    {
+        // walked as a terminal would: an escape sequence occupies no column, a carriage return ends
+        // a frame as much as a newline does, and a UTF-8 continuation byte is not a glyph
+        size_t columns = 0;
+
+        for (size_t i = 0; i < drawn.size(); i++) {
+            if (drawn[i] == '\x1b') {
+                while (i < drawn.size() && !std::isalpha(static_cast<unsigned char>(drawn[i]))) {
+                    i++;
+                }
+                continue;
+            }
+
+            if (drawn[i] == '\n' || drawn[i] == '\r') {
+                columns = 0;
+                continue;
+            }
+
+            if ((static_cast<unsigned char>(drawn[i]) & 0xC0) != 0x80) {
+                columns++;
+            }
+
+            REQUIRE(columns < limit);
+        }
+    }
 };
 
 TEST_CASE("a disabled reporter writes nothing at all", "[progress]")
@@ -210,35 +333,65 @@ TEST_CASE("no row ever reaches the last column of the terminal", "[progress]")
             reporter.tick(very_long_path);
             reporter.commit(ProgressState::t_done, 123456);
 
+            require_rows_fit(out.str(), width > 0 ? width : 80);
+        }
+    }
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("an animated row keeps the erase intact at every width", "[progress]")
+{
+    // a truncated live row stores ms_offset = 0. painting elapsed there overwrites ERASE_ROW.
+    // the clock writes only to the pipe; the ostringstream still has to fit the same limit
+    const std::string very_long_path
+        = "modules/rendering/backends/vulkan/pipeline/descriptors/very_long_file_name.eco";
+
+    for (const unsigned int width : { 0u, 20u, 40u, 60u, 80u, 120u }) {
+        for (const bool unicode : { true, false }) {
+            FdPair pipe_ends;
+            REQUIRE(pipe_ends.open());
+
+            std::ostringstream out;
+            ProgressReporter reporter;
+            reporter.enable(out, a_terminal(unicode, width), true, pipe_ends.fds[1]);
+            reporter.open(ProgressPhase::t_semantic_passes, "rendering");
+            reporter.tick(very_long_path);
+
             const unsigned int limit = width > 0 ? width : 80;
+            require_rows_fit(out.str(), limit);
 
-            // walked as a terminal would: an escape sequence occupies no column, a carriage return ends
-            // a frame as much as a newline does, and a UTF-8 continuation byte is not a glyph
-            const std::string drawn = out.str();
-            size_t columns = 0;
+            std::string clocked;
+            REQUIRE(wait_for_erase_frames(
+                pipe_ends.fds[0], clocked, 1, std::chrono::milliseconds(2000)));
 
-            for (size_t i = 0; i < drawn.size(); i++) {
-                if (drawn[i] == '\x1b') {
-                    while (i < drawn.size() && !std::isalpha(static_cast<unsigned char>(drawn[i]))) {
-                        i++;
-                    }
-                    continue;
+            reporter.commit(ProgressState::t_done, 123456);
+
+            REQUIRE(fcntl(pipe_ends.fds[0], F_SETFL, O_NONBLOCK) != -1);
+
+            char buffer[4096];
+            while (true) {
+                const ssize_t n = read(pipe_ends.fds[0], buffer, sizeof(buffer));
+                if (n <= 0) {
+                    break;
                 }
 
-                if (drawn[i] == '\n' || drawn[i] == '\r') {
-                    columns = 0;
-                    continue;
-                }
+                clocked.append(buffer, static_cast<size_t>(n));
+            }
 
-                if ((static_cast<unsigned char>(drawn[i]) & 0xC0) != 0x80) {
-                    columns++;
-                }
+            REQUIRE(clocked.compare(0, 4, ERASE) == 0);
 
-                REQUIRE(columns < limit);
+            size_t frame_at = 0;
+            while (frame_at < clocked.size()) {
+                REQUIRE(clocked.compare(frame_at, 4, ERASE) == 0);
+                const size_t next = clocked.find(ERASE, frame_at + 4);
+                const size_t frame_end = next == std::string::npos ? clocked.size() : next;
+                require_rows_fit(clocked.substr(frame_at, frame_end - frame_at), limit);
+                frame_at = frame_end;
             }
         }
     }
 }
+#endif
 
 TEST_CASE("every phase has a word", "[progress]")
 {
@@ -286,6 +439,64 @@ TEST_CASE("colour wraps the mark and nothing that is measured", "[progress]")
     REQUIRE(out.str().find("\x1b[1;32m✓\x1b[0m  parse            main          1 file           4 ms\n")
         != std::string::npos);
 }
+
+TEST_CASE("pausing the clock is a no-op when nothing is animating", "[progress]")
+{
+    ProgressReporter disabled;
+    {
+        ProgressReporter::ClockPause pause(disabled);
+    }
+    REQUIRE(!disabled.enabled());
+
+    std::ostringstream out;
+    ProgressReporter reporter(out, a_terminal());
+    reporter.open(ProgressPhase::t_parse, "main");
+    const std::string before = out.str();
+
+    {
+        ProgressReporter::ClockPause pause(reporter);
+    }
+    REQUIRE(out.str() == before);
+
+    reporter.commit(ProgressState::t_done, 1);
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("the clock thread advances the glyph and elapsed field without a tick", "[progress]")
+{
+    FdPair pipe_ends;
+    REQUIRE(pipe_ends.open());
+
+    std::ostringstream out;
+    ProgressReporter reporter;
+    reporter.enable(out, a_terminal(), true, pipe_ends.fds[1]);
+    reporter.open(ProgressPhase::t_codegen, "");
+
+    REQUIRE(out.str().find("⠋") != std::string::npos);
+    REQUIRE(out.str().find(" ms") != std::string::npos);
+
+    std::string clocked;
+    REQUIRE(wait_for_erase_frames(pipe_ends.fds[0], clocked, 2, std::chrono::milliseconds(2000)));
+
+    reporter.close("compiled", 280);
+
+    REQUIRE(fcntl(pipe_ends.fds[0], F_SETFL, O_NONBLOCK) != -1);
+
+    char buffer[4096];
+    while (true) {
+        const ssize_t n = read(pipe_ends.fds[0], buffer, sizeof(buffer));
+        if (n <= 0) {
+            break;
+        }
+
+        clocked.append(buffer, static_cast<size_t>(n));
+    }
+
+    REQUIRE(erase_frames(clocked) >= 2);
+    REQUIRE(clocked.find(" ms") != std::string::npos);
+    REQUIRE((clocked.find("⠙") != std::string::npos || clocked.find("⠹") != std::string::npos));
+}
+#endif
 
 TEST_CASE("a compile through a pipe writes no cursor movement", "[progress]")
 {

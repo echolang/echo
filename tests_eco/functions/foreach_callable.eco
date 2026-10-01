@@ -1,0 +1,30 @@
+// calling through a foreach binding, and through an index of the same array.
+// both callees are untyped at parse: the binding until ForeachLowering, the
+// index until operator [] attaches
+
+array<function<int32(int32)>> $fns = array<function<int32(int32)>>();
+$fns[] = function(int32 $n) : int32 { return $n + 1; };
+$fns[] = function(int32 $n) : int32 { return $n * 2; };
+
+foreach ($fns as $fn) {
+    echo $fn(21);
+}
+
+echo $fns[0](41);
+
+// statement form: visu Systems.begin is `$begin($entities)` over array<function<void(Entities)>>
+array<function<void()>> $begins = array<function<void()>>();
+$begins[] = function() { echo 7; };
+$begins[] = function() { echo 8; };
+
+foreach ($begins as $begin) {
+    $begin();
+}
+
+// a literal argument typed from the signature after the binding settles
+array<function<int32(int64)>> $wide = array<function<int32(int64)>>();
+$wide[] = function(int64 $n) : int32 { return 42; };
+
+foreach ($wide as $w) {
+    echo $w(1);
+}

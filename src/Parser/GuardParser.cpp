@@ -210,5 +210,12 @@ AST::GuardNode *Parser::parse_guard(
     // rvalue subject still has to be hoisted so the frame owns it
     node.plan_decided = decide_now && failure == nullptr && binding != nullptr;
 
+    // a written else ends at this `}`. a trailing `;` is the declaration's or the
+    // statement's, accepted rather than required - the omitted-else form already
+    // consumed its required `;` above, because that form has no brace to end on
+    if (cursor.is_type(Token::Type::t_semicolon)) {
+        cursor.skip();
+    }
+
     return &node;
 }

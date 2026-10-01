@@ -74,7 +74,7 @@ namespace Compiler::LLVM
 
         auto splat_count = [&]() {
             llvm::Value *count = _ctx.types->coerce_value(
-                right, AST::value_type_of(rhs), lane, *_ctx.current_cmp_unit);
+                CodegenValue::scalar(right), AST::value_type_of(rhs), lane, *_ctx.current_cmp_unit).scalar();
             auto *vec_ty = llvm::cast<llvm::FixedVectorType>(left->getType());
 
             return splat(count, vec_ty);
@@ -82,73 +82,73 @@ namespace Compiler::LLVM
 
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFAdd(left, right)
                     : _ctx.builder->CreateAdd(left, right));
                 return;
             case Token::Type::t_op_sub:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFSub(left, right)
                     : _ctx.builder->CreateSub(left, right));
                 return;
             case Token::Type::t_op_mul:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFMul(left, right)
                     : _ctx.builder->CreateMul(left, right));
                 return;
             case Token::Type::t_op_div:
-                _ctx.value_stack.push(_ctx.builder->CreateFDiv(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateFDiv(left, right));
                 return;
             case Token::Type::t_and:
-                _ctx.value_stack.push(_ctx.builder->CreateAnd(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateAnd(left, right));
                 return;
             case Token::Type::t_or:
-                _ctx.value_stack.push(_ctx.builder->CreateOr(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateOr(left, right));
                 return;
             case Token::Type::t_xor:
-                _ctx.value_stack.push(_ctx.builder->CreateXor(left, right));
+                _ctx.push_scalar(_ctx.builder->CreateXor(left, right));
                 return;
             case Token::Type::t_op_shl:
-                _ctx.value_stack.push(_ctx.builder->CreateShl(left, splat_count()));
+                _ctx.push_scalar(_ctx.builder->CreateShl(left, splat_count()));
                 return;
             case Token::Type::t_op_shr:
-                _ctx.value_stack.push(is_unsigned
+                _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateLShr(left, splat_count())
                     : _ctx.builder->CreateAShr(left, splat_count()));
                 return;
             case Token::Type::t_logical_eq:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFCmpOEQ(left, right)
                     : _ctx.builder->CreateICmpEQ(left, right));
                 return;
             case Token::Type::t_logical_neq:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFCmpONE(left, right)
                     : _ctx.builder->CreateICmpNE(left, right));
                 return;
             case Token::Type::t_close_angle:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFCmpOGT(left, right)
                     : is_unsigned
                         ? _ctx.builder->CreateICmpUGT(left, right)
                         : _ctx.builder->CreateICmpSGT(left, right));
                 return;
             case Token::Type::t_open_angle:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFCmpOLT(left, right)
                     : is_unsigned
                         ? _ctx.builder->CreateICmpULT(left, right)
                         : _ctx.builder->CreateICmpSLT(left, right));
                 return;
             case Token::Type::t_logical_geq:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFCmpOGE(left, right)
                     : is_unsigned
                         ? _ctx.builder->CreateICmpUGE(left, right)
                         : _ctx.builder->CreateICmpSGE(left, right));
                 return;
             case Token::Type::t_logical_leq:
-                _ctx.value_stack.push(is_float
+                _ctx.push_scalar(is_float
                     ? _ctx.builder->CreateFCmpOLE(left, right)
                     : is_unsigned
                         ? _ctx.builder->CreateICmpULE(left, right)
@@ -175,17 +175,17 @@ namespace Compiler::LLVM
 
         switch (node.token_operator.type()) {
             case Token::Type::t_op_sub:
-                _ctx.value_stack.push(lane.is_floating_type()
+                _ctx.push_scalar(lane.is_floating_type()
                     ? _ctx.builder->CreateFNeg(value)
                     : _ctx.builder->CreateNeg(value));
                 return;
 
             case Token::Type::t_tilde:
-                _ctx.value_stack.push(_ctx.builder->CreateNot(value, "bitnot"));
+                _ctx.push_scalar(_ctx.builder->CreateNot(value, "bitnot"));
                 return;
 
             case Token::Type::t_exclamation:
-                _ctx.value_stack.push(_ctx.builder->CreateNot(value, "not"));
+                _ctx.push_scalar(_ctx.builder->CreateNot(value, "not"));
                 return;
 
             default:
@@ -206,7 +206,7 @@ namespace Compiler::LLVM
 
         node.arguments[index]->accept(*_ctx.visitor);
 
-        return _ctx.pop();
+        return _ctx.pop_scalar();
     }
 
     unsigned SimdCodegen::bound_n(AST::FunctionCallExprNode &node, size_t arg_index)
@@ -243,13 +243,13 @@ namespace Compiler::LLVM
 
                 if (node.decl->instantiation_args.size() >= 1) {
                     scalar = _ctx.types->coerce_value(
-                        scalar,
+                        CodegenValue::scalar(scalar),
                         node.arguments[0]->result_type(),
                         node.decl->instantiation_args[0],
-                        *_ctx.current_cmp_unit);
+                        *_ctx.current_cmp_unit).scalar();
                 }
 
-                _ctx.push(splat(scalar, vec_ty));
+                _ctx.push_scalar(splat(scalar, vec_ty));
                 return;
             }
 
@@ -259,7 +259,7 @@ namespace Compiler::LLVM
                 llvm::LoadInst *load = _ctx.builder->CreateAlignedLoad(
                     vec_ty, ptr, packed_alignment(node.decl->get_return_type()), "simd.load");
 
-                _ctx.push(load);
+                _ctx.push_scalar(load);
                 return;
             }
 
@@ -277,7 +277,7 @@ namespace Compiler::LLVM
                 llvm::Value *on_true = eval_arg(node, 1);
                 llvm::Value *on_false = eval_arg(node, 2);
 
-                _ctx.push(_ctx.builder->CreateSelect(mask, on_true, on_false, "simd.select"));
+                _ctx.push_scalar(_ctx.builder->CreateSelect(mask, on_true, on_false, "simd.select"));
                 return;
             }
 
@@ -300,7 +300,7 @@ namespace Compiler::LLVM
                     llvm::Value *bits = _ctx.builder->CreateBitCast(
                         mask, packed, "simd.bitmask.bits");
 
-                    _ctx.push(_ctx.builder->CreateZExt(bits, i64, "simd.bitmask"));
+                    _ctx.push_scalar(_ctx.builder->CreateZExt(bits, i64, "simd.bitmask"));
                     return;
                 }
 
@@ -358,7 +358,7 @@ namespace Compiler::LLVM
                 llvm::Value *shifted = _ctx.builder->CreateShl(
                     w_hi, llvm::ConstantInt::get(i64, 8), "simd.bitmask.shift");
 
-                _ctx.push(_ctx.builder->CreateOr(w_lo, shifted, "simd.bitmask"));
+                _ctx.push_scalar(_ctx.builder->CreateOr(w_lo, shifted, "simd.bitmask"));
                 return;
             }
 
@@ -373,7 +373,7 @@ namespace Compiler::LLVM
                     vec = _ctx.builder->CreateInsertElement(vec, lane, i);
                 }
 
-                _ctx.push(vec);
+                _ctx.push_scalar(vec);
                 return;
             }
 
@@ -388,7 +388,7 @@ namespace Compiler::LLVM
                     arr = _ctx.builder->CreateInsertValue(arr, lane, { i });
                 }
 
-                _ctx.push(arr);
+                _ctx.push_scalar(arr);
                 return;
             }
 

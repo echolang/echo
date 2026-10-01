@@ -187,7 +187,18 @@ public:
     const std::string &prune_report() const;
 
     // one object per unit that still has a module, into `object_for(unit name)`. The objects are appended to
-    // `out_objects` in unit order, so the link command is deterministic
+    // `out_objects` in unit order, so the link command is deterministic.
+    //
+    // several units share a worker pool (`Compiler::job_count()`): each worker parses bitcode into its own
+    // LLVMContext, because a context is not safe to share. one remaining unit, or `ECO_JOBS=1`, stays in
+    // this context; a partitioned entry unit is bitcode either way
+    //
+    // the never-cached entry unit is split by source file when it has more than one partition (a
+    // this-module file, plus `__shared` for foreign `linkonce_odr`). each partition's object is stored
+    // under a structural hash of the original IR plus the emit environment, so a rebuild whose
+    // code did not change skips ISel. `--optimize whole` marks the merged unit optimized first
+    // and does not split. `-g` does not split: DWARF metadata names every file of the unit, so a
+    // one-file edit would miss every hex
     bool emit_objects(
         const std::function<std::filesystem::path(const std::string &)> &object_for,
         std::vector<std::filesystem::path> &out_objects);

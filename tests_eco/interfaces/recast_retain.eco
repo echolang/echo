@@ -1,0 +1,34 @@
+// a recast is a new owner of the same object. without the retain, teardown over-releases.
+// darwin's allocator used to hide it: after free the header read as a large positive
+// count, so `next < 0` never fired. windows left 0 and aborted
+
+interface A
+{
+    function a() : int32;
+}
+
+interface B
+{
+    function b() : int32;
+}
+
+class Both : A, B
+{
+    function a() : int32 { return 1; }
+    function b() : int32 { return 2; }
+}
+
+Both $both = Both();
+echo mem::refs($both);
+
+A $asA = $both;
+echo mem::refs($both);
+
+B $asB = $asA as B;
+echo mem::refs($both);
+
+Both $back = $asA as Both;
+echo mem::refs($both);
+
+B? $hit = $asA as B?;
+echo mem::refs($both);

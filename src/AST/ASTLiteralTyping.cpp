@@ -12,6 +12,7 @@
 #include "AST/ASTOps.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
+#include "AST/ASTRegion.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -663,7 +664,7 @@ namespace AST
 
         void visitFunctionDecl(FunctionDeclNode &node) override
         {
-            if (node.is_generic()) {
+            if (!function_needs_typing(node)) {
                 return;
             }
 
@@ -745,6 +746,24 @@ namespace AST
             RecursiveVisitor::visit_match(node);
         }
 
+        // **an indirect call's arguments take the signature's parameter types**, once the callee
+        // has one. a typed `$f(1)` already dest-typed at parse; `$fn(3)` over a foreach binding
+        // did not, and coerce_value would wrap or refuse a defaulted int32 at an int64 parameter
+        void visit_indirect_call_expr(IndirectCallExprNode &node) override
+        {
+            const ValueType callee_type = node.callee_type();
+
+            if (callee_type.has_signature()) {
+                const auto &signature = callee_type.signature();
+
+                for (size_t i = 0; i < node.arguments.size() && i < signature.parameter_types.size(); i++) {
+                    write_at(node.arguments[i], signature.parameter_types[i], node.token);
+                }
+            }
+
+            RecursiveVisitor::visit_indirect_call_expr(node);
+        }
+
         // a written `$x as T` is a destination for its operand, the same rule a declaration is.
         // implicit casts are not: the site that inserted them already typed the literal
         void visitTypeCast(TypeCastNode &node) override
@@ -784,6 +803,16 @@ namespace AST
                 return;
             }
 
+            // a written `null` has no type of its own. parse-time binding covers a declaration
+            // (`T? $x = null`) and CallResolver covers a direct-call argument (`push(null)`).
+            // an assignment through a place that was untyped at parse - `$a[] = null` after
+            // operator [] has resolved to `T&` - is this walk's, the same destination it
+            // already uses for a number literal. AST::bind_null_to is the one writer
+            if (bind_null_to(slot, destination)) {
+                changed = true;
+                return;
+            }
+
             if (!is_untyped_literal(slot)) {
                 return;
             }
@@ -819,13 +848,10 @@ namespace AST
         for (auto &module_ptr : bundle.modules) {
             DestinationLiteralTyping walker(*module_ptr, bundle.collector);
 
-            for (auto &file : module_ptr->files()) {
+            for_each_semantic_root(*module_ptr, [&](File &file, ScopeNode &root) {
                 walker.file = &file;
-
-                if (file.root != nullptr) {
-                    file.root->accept(walker);
-                }
-            }
+                root.accept(walker);
+            });
 
             progressed |= walker.changed;
         }

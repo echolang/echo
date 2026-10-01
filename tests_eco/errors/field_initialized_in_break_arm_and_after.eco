@@ -1,0 +1,38 @@
+// an `if` arm that initializes an owning field then `break`s does not join after the `if`,
+// so the init has to travel with the break or the write after the loop leaks what it built
+
+struct Inner
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Outer
+{
+    Inner $inner;
+
+    constructor(bool $ready)
+    {
+        while (true) {
+            if ($ready) {
+                $this->inner = Inner(2);
+                break;
+            }
+
+            break;
+        }
+
+        $this->inner = Inner(1);
+    }
+}
+
+$a = Outer(true);

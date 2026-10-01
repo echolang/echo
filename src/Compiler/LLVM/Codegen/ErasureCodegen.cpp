@@ -50,7 +50,7 @@ unsigned ErasureCodegen::release_index()
 llvm::Value *ErasureCodegen::load_erased(AST::FunctionCallExprNode &node)
 {
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *addr = _ctx.pop();
+    llvm::Value *addr = _ctx.pop_scalar();
     const AST::ValueType argument_type = node.arguments[0]->result_type();
     llvm::Type *erased_type = _ctx.types->get_llvm_type(
         AST::value_type_of(argument_type), *_ctx.current_cmp_unit);
@@ -75,7 +75,7 @@ void ErasureCodegen::gen_from(AST::FunctionCallExprNode &node)
 
     const AST::ValueType class_type = AST::ValueType::make_mutable(decl->instantiation_args[0]);
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *handle = _ctx.pop();
+    llvm::Value *handle = _ctx.pop_scalar();
 
     const AST::ValueType argument_type = node.arguments[0]->result_type();
     if (argument_type.is_pointer()) {
@@ -91,7 +91,7 @@ void ErasureCodegen::gen_from(AST::FunctionCallExprNode &node)
     llvm::Value *agg = llvm::UndefValue::get(agg_type);
     agg = _ctx.builder->CreateInsertValue(agg, handle, { object_index() }, "erased.obj");
     agg = _ctx.builder->CreateInsertValue(agg, thunk, { release_index() }, "erased.release");
-    _ctx.push(agg);
+    _ctx.push_scalar(agg);
 }
 
 void ErasureCodegen::gen_retain(AST::FunctionCallExprNode &node)
@@ -125,7 +125,7 @@ void ErasureCodegen::gen_assume(AST::FunctionCallExprNode &node)
 
     llvm::Value *agg = load_erased(node);
     llvm::Value *object = _ctx.builder->CreateExtractValue(agg, { object_index() }, "erased.obj");
-    _ctx.push(_ctx.classes->gen_erased_retain(object));
+    _ctx.push_scalar(_ctx.classes->gen_erased_retain(object));
 }
 
 };

@@ -741,8 +741,10 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     c->instances.clear();
 
     // a clone is a new region. cc.shallow copy-constructs, so an instance of an already-owned
-    // template would otherwise start t_owned and skip the ownership walk
+    // template would otherwise start t_owned and skip the ownership walk, and a cleared
+    // live_calls_pending would hide the body's calls from bind
     c->region_state = RegionState::t_open;
+    c->live_calls_pending = true;
 
     // parameters first, so the map is populated before the body rebinds its VarNodes to them. the same
     // rule ScopeNode::clone follows for a scope's declarations - and this loop is the only thing that can

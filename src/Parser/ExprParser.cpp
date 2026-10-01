@@ -2302,6 +2302,31 @@ struct ExprPart
     AST::OperatorNode *opnode;
 };
 
+// dest-type a collected untyped literal once a reconciling infix is known.
+// parse_expr_parts cannot dest-type the first operand up front: grouping
+// forwards dest, and `(8 >> $n) as float32` would type `8` as float32.
+// `float $b = 2 * 3.14` still dest-types `2` here, when `*` is collected
+bool dest_type_collected_literal(Parser::Payload &payload, std::vector<ExprPart> &expr_parts, AST::TypeNode *expected_type)
+{
+    if (expected_type == nullptr || expr_parts.empty() || expr_parts.back().opnode != nullptr) {
+        return true;
+    }
+
+    AST::ExprNode *prev = expr_parts.back().node.unsafe_ptr<AST::ExprNode>();
+    if (prev == nullptr || !AST::is_untyped_literal(prev)) {
+        return true;
+    }
+
+    const AST::NodeReference typed = apply_literal_typing_if_wanted(payload, prev, expected_type);
+    if (!typed.has()) {
+        return false;
+    }
+
+    expr_parts.pop_back();
+    expr_parts.push_back({typed, nullptr});
+    return true;
+}
+
 #define O1Prec part.opnode->op->precedence
 #define O2Prec operator_stack.top()->op->precedence
 
@@ -2390,6 +2415,20 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         // after a group the last part is the inner expression and the next token is infix
         bool expects_operand = expr_parts.empty() || expr_parts.back().opnode != nullptr;
 
+        // dest is the expression's result, not every operand's. a shift's count is
+        // AST::binary_reconciles_operands; its left operand is the same hole when
+        // grouping forwards dest: `(8 >> $n) as float32` at a float32 declaration.
+        // a first plain operand is dest-typed when a reconciling infix is collected,
+        // or by parse_expr_ref if the expression is just that literal. grouping and
+        // prefix still take dest. `*` still wants the hint so `float $b = $a * 3.14`
+        // dest-types the literal
+        AST::TypeNode *operand_hint = expected_type;
+        if (!expr_parts.empty()
+            && expr_parts.back().opnode != nullptr
+            && !AST::binary_reconciles_operands(expr_parts.back().opnode->op)) {
+            operand_hint = nullptr;
+        }
+
         // ...and the same is true of any symbol declared in *prefix* position. without this arm a word
         // operator in operand position - the plain call `avg(1.0, 2.0)`, where `avg` is also declared
         // infix - would be read as an operator with nothing on its left
@@ -2400,7 +2439,7 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         {
             // `(` is grouping, parsed by parse_prefix_unary, not a yard operator. without
             // this arm it fell through to parse_operand, which never opens a group
-            auto node = parse_prefix_unary(payload, expected_type);
+            auto node = parse_prefix_unary(payload, operand_hint);
             if (!node.has()) {
                 return AST::make_void_ref();
             }
@@ -2435,6 +2474,11 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
             && (!op->is_custom() || (op->has_fixity(AST::OpFixity::t_infix) && !expects_operand));
 
         if (usable_here) {
+            if (AST::binary_reconciles_operands(op)
+                && !dest_type_collected_literal(payload, expr_parts, expected_type)) {
+                return AST::make_void_ref();
+            }
+
             auto &opnode = payload.context.emplace_node<AST::OperatorNode>(cursor.current(), op);
 
             cursor.skip(match.token_count);
@@ -2468,7 +2512,18 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
             return AST::make_void_ref();
         }
 
-        auto node = parse_operand(payload, expected_type);
+        // a first numeric/bool literal is dest-typed after a reconciling infix, or
+        // by parse_expr_ref when the expression is just that literal. handing dest
+        // here would type the `8` of `(8 >> $n) as float32`. shorthand and `null`
+        // still take dest: `.ok(...)` reads its owner from it
+        if (expr_parts.empty()
+            && (AST::token_is_integer_literal(cursor.current().type())
+                || cursor.is_type(Token::Type::t_floating_literal)
+                || cursor.is_type(Token::Type::t_bool_literal))) {
+            operand_hint = nullptr;
+        }
+
+        auto node = parse_operand(payload, operand_hint);
 
         // if the node is empty
         if (!node.has()) {
@@ -2567,7 +2622,11 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     // must not be handed down at all. AST::can_type_a_literal is that filter, and `bool` is the case it
     // exists for: without this step `bool $x = 3 < 4;` retyped both operands and compared two bools,
     // and with the filter alone `bool $a = 3;` would have been coerced in silence via icmp ne 0.
-    // `bool $a = 1;` is typed here, as `true`; `3` is refused.
+    // `bool $a = 1;` is typed here, as `true`; `3` is refused. a shift is the other hole: neither
+    // operand is a value of the result type, so parse_expr_parts dest-types a collected literal
+    // only after a reconciling infix (AST::binary_reconciles_operands) and drops the hint after
+    // `<<` / `>>`. grouping still forwards dest, which is why the first operand of
+    // `(8 >> $n) as float32` used to take it.
     //
     // costs nothing for the destinations the operands *were* given: those literals already carry a
     // chosen type, so AST::is_untyped_literal answers false and this does not fire

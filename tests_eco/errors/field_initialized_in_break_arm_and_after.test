@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] field_initialized_in_break_arm_and_after.eco:34:22
+
+  '$this->inner' is initialized twice, and 'Inner' owns a resource - the value the first write built would never be destroyed. Build it once, or assign the whole variable instead so the old value is torn down.
+
+  33 | 
+  34 |         $this->inner = Inner(1);
+     :                      ^
+  35 |     }
+
+1 error, nothing was compiled.

@@ -220,7 +220,11 @@ AST::ExprNode *Parser::parse_assigned_value(
             "'guard' can only introduce a new declaration, and this name already holds storage. "
             "Writing to it would have to end the value it holds on the path that binds and leave it "
             "alone on the path that leaves. Declare a new name instead.");
-        cursor.try_skip_to_next_statement();
+        // Parser::parse_guard owns the production. a skip_until on else/semicolon/brace
+        // stops at a `}` inside the subject and leaves the real else arm in the stream;
+        // try_skip_to_next_statement stops at the first `;` of the else arm. statement
+        // form, and the node is dropped: this assignment has no value to write
+        parse_guard(payload, nullptr, false);
         return nullptr;
     }
 

@@ -175,3 +175,27 @@ TEST_CASE("statement guard binds nothing", "[parser][nullability]")
     REQUIRE(guard->subject != nullptr);
     REQUIRE(guard->tested() == guard->subject);
 }
+
+TEST_CASE("a trailing semicolon after guard else is accepted", "[parser][nullability]")
+{
+    // Parser::parse_guard accepts a trailing `;` after the else `}` rather than requiring it.
+    // both the initializer form and the statement form share that one terminator
+    auto with_semi = EchoTests::tests_make_parsed_bundle(
+        HALVE +
+        "function unwrap(int32 $n) : int32\n"
+        "{\n"
+        "    int32 $v = guard halve($n) else { return -1; };\n"
+        "    return $v;\n"
+        "}\n"
+        "function run(int32 $n) : void { guard halve($n) else { return; }; echo 1; }\n");
+    REQUIRE_FALSE(with_semi->collector.has_critical_issues());
+
+    auto without_semi = EchoTests::tests_make_parsed_bundle(
+        HALVE +
+        "function unwrap(int32 $n) : int32\n"
+        "{\n"
+        "    int32 $v = guard halve($n) else { return -1; }\n"
+        "    return $v;\n"
+        "}\n");
+    REQUIRE_FALSE(without_semi->collector.has_critical_issues());
+}

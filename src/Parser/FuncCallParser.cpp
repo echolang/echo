@@ -332,7 +332,14 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
 
     // reported here rather than in the type checker because the *shape* is what is wrong: `$x(1)` on a
     // non-callable is not a call with bad arguments, it is not a call at all
-    if (!callee_type.has_signature()) {
+    //
+    // **an undetermined callee is "ask again later", not an error.** a foreach binding is untyped
+    // until AST::ForeachLowering fills V, a match binding is `unknown&` until MatchResolution, and
+    // `$fns[0](3)` has no element type until OperatorRewriter attaches `operator []`. the same
+    // standing parse_member_call gives an undetermined receiver. arity is TypeChecker's once a
+    // signature is in hand, parse-time or later - planting on a mismatch is what lets that walk
+    // see the node
+    if (!callee_type.has_signature() && !AST::is_undetermined_type(callee_type)) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(at),
             fmt::format(
@@ -344,22 +351,15 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
 
     cursor.skip(); // the open paren
 
-    const auto &signature = callee_type.signature();
-
     std::vector<AST::ExprNode *> arguments;
 
-    // through the one argument-list walk, handing it the signature's parameter types as the
-    // destinations its literals are typed against
-    if (!parse_call_arguments(payload, at, arguments, nullptr, &signature.parameter_types)) {
-        return nullptr;
-    }
+    // a known signature types literals by destination here, the way a direct call cannot until it
+    // resolves. a pending callee passes none; AST::type_destination_literals fills them in once
+    // the binding or the index has a type
+    const std::vector<AST::ValueType> *expected_types =
+        callee_type.has_signature() ? &callee_type.signature().parameter_types : nullptr;
 
-    if (arguments.size() != signature.parameter_types.size()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(at),
-            fmt::format(
-                "'{}' takes {} argument(s), but {} were given.",
-                callee_type.get_type_desciption(), signature.parameter_types.size(), arguments.size()));
+    if (!parse_call_arguments(payload, at, arguments, nullptr, expected_types)) {
         return nullptr;
     }
 

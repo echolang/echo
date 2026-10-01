@@ -2,6 +2,7 @@
 
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTCast.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTRegion.h"
@@ -116,6 +117,26 @@ namespace
         }
 
         return root;
+    }
+
+    // **an explicit `as I` / `as C` copies the object's reference.** a cast is materializable, so
+    // the place test below would move it and plant no retain. `$s as Other` is a new owner of the
+    // same object - the implicit widening already copies via place_under_implicit_cast, and this
+    // is that rule for the written form. `$s as Other?` retains only on the hit path, which is
+    // codegen's: a miss owns nothing
+    bool explicit_interface_cast_copies_source(const TypeCastNode &cast)
+    {
+        if (cast.is_implcit || cast.expr == nullptr || cast.result_type().is_wrapped_optional()) {
+            return false;
+        }
+
+        const CastLookup lookup = cast_plan_for(*cast.expr, cast.result_type());
+        if (lookup.result != CastLookup::Result::t_ok) {
+            return false;
+        }
+
+        return lookup.plan.kind == CastKind::t_interface
+            || lookup.plan.kind == CastKind::t_interface_recast;
     }
 
 }
@@ -270,9 +291,7 @@ void OwnershipPass::resolve_root(ScopeNode &root)
     _current_function = nullptr;
     _frames.clear();
     _loop_frames.clear();
-    _moved.clear();
-    _maybe_moved.clear();
-    _initialized_storage.clear();
+    _flow = {};
     _temporary_count = 0;
 
     // a file root has no parameters - `main` is synthesized from its statements, and takes none of
@@ -310,9 +329,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     _current_function = &decl;
     _frames.clear();
     _loop_frames.clear();
-    _moved.clear();
-    _maybe_moved.clear();
-    _initialized_storage.clear();
+    _flow = {};
     _temporary_count = 0;
 
     // a by-value parameter of an owning type owns what it was handed - "$items is ours; it is
@@ -414,15 +431,15 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
 
             collect_unwind(_loop_frames.back().frame_floor, loop_exit->unwind);
 
-            // **the moved state travels with the branch.** where it goes is the loop's exit rather than
-            // the join after whatever `if` this sits in, so it is recorded on the loop frame and merged
+            // **the facts travel with the branch.** where they go is the loop's exit rather than the
+            // join after whatever `if` this sits in, so they are recorded on the loop frame and merged
             // by the loop arm. the same edge as the unwind above and for the same reason: this is the
             // point where what the branch carries out of here is known
             auto &carried = loop_exit->kind == LoopControlKind::t_break
-                ? _loop_frames.back().break_moved
-                : _loop_frames.back().continue_moved;
+                ? _loop_frames.back().break_facts
+                : _loop_frames.back().continue_facts;
 
-            carried.insert(_moved.begin(), _moved.end());
+            carried.merge(_flow);
         }
 
         rebuilt.push_back(kept);
@@ -468,8 +485,8 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
         // handed over inside one arm was being reported as "moved out of on only one branch", against
         // an other branch in which the variable was never declared at all
         for (const VarDeclNode *local : _frames.back().locals) {
-            _moved.erase(local);
-            _maybe_moved.erase(local);
+            _flow.moved.erase(local);
+            _flow.maybe_moved.erase(local);
         }
 
         _frames.pop_back();
@@ -564,7 +581,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 // handle still sitting in the slot is somebody else's. releasing it here would be the
                 // second release of one reference. a field or an element target (no root) always owes
                 // one - a field cannot be moved out of, so it always still holds what it was given
-                assign->releases_old = root == nullptr || _moved.count(root) == 0;
+                assign->releases_old = root == nullptr || _flow.moved.count(root) == 0;
 
                 // a callable's teardown is uniform and needs no per-type deinit - see emit_drop
                 if (assign->releases_old && target_type.is_class()) {
@@ -576,8 +593,8 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 if (root != nullptr) {
                     // the assignment re-seats it: it holds a value again, so it is readable again and
                     // owes a release again at the end of its scope
-                    _moved.erase(root);
-                    _maybe_moved.erase(root);
+                    _flow.moved.erase(root);
+                    _flow.maybe_moved.erase(root);
                 }
                 break;
             }
@@ -601,7 +618,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                         description += "->" + segment;
                     }
 
-                    if (!_initialized_storage.insert(key).second) {
+                    if (!_flow.initialized.insert(key).second) {
                         _collector.collect_issue<Issue::GenericError>(
                             code_ref_for(assign->token_assign), fmt::format(
                                 "'{}' is initialized twice, and '{}' owns a resource - the value the first "
@@ -636,7 +653,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                     // carried *on* the assignment rather than pushed ahead of it: gen_assign
                     // runs these after the right-hand side and before the store, which is the
                     // only window in which both the old value and the new one exist
-                    if (_moved.count(root) == 0) {
+                    if (_flow.moved.count(root) == 0) {
                         auto &teardown = _current_module->nodes.emplace_back<ScopeNode>();
 
                         emit_drop(root, path, target_type, teardown.children);
@@ -650,8 +667,8 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                     // whole of it. writing one field of a moved-out value re-seats one field, so
                     // clearing the mark there would claim the rest of it is readable again
                     if (path.empty()) {
-                        _moved.erase(root);
-                        _maybe_moved.erase(root);
+                        _flow.moved.erase(root);
+                        _flow.maybe_moved.erase(root);
                     }
                 }
                 else if (assign->target != nullptr
@@ -789,13 +806,11 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // where they *are* visible is wherever the arm went, and nothing here has to arrange that: an
             // arm leaving by `break` recorded them on the enclosing loop's frame as it was walked
             if (stmt->else_scope != nullptr) {
-                const auto before = _moved;
-                const auto maybe_before = _maybe_moved;
+                const auto before = _flow;
 
                 walk_scope(*stmt->else_scope);
 
-                _moved = before;
-                _maybe_moved = maybe_before;
+                _flow = before;
             }
 
             // **the binding joins the frame after the else arm, not before it.** Parser::parse_guard
@@ -815,92 +830,30 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             auto *stmt = static_cast<IfStatementNode *>(node);
             stmt->condition = walk_value_edge(stmt->condition);
 
-            // each arm moves out of its own copy of the state, and the arms that *reach the code after
-            // the `if`* are merged by union: a variable moved on either side is unset afterwards.
-            // reading pessimism into that is the wrong way round - the alternative is a variable whose
-            // validity you can only determine by simulating the branch in your head
-            const auto before = _moved;
-            const auto maybe_before = _maybe_moved;
+            // each arm starts from its own copy of `_flow`, and the arms that *reach the code after
+            // the `if`* are merged. exclusive arms each writing an owning field once is one
+            // initialization on every path, not two. a missing else falls through as `before`; an
+            // arm that leaves has already recorded what it carries onto a return or the enclosing
+            // loop
+            const auto before = _flow;
+            std::vector<FlowFacts> joining;
 
-            // **one arm's contribution to what follows the `if`**, so the two arms are walked by one
-            // piece of code rather than by two that have to be edited symmetrically
-            //
-            // an arm with no block falls through, moving nothing - which is what the snapshot it starts
-            // out as says. an arm that *has* a block hands its result over rather than being copied out
-            // of: the walk of the next arm re-seats `_moved` from the snapshot anyway, so the arm's set
-            // has no second reader
-            struct ArmState
-            {
-                bool joins = true;
-                std::unordered_set<const VarDeclNode *> moved;
-                std::unordered_set<const VarDeclNode *> maybe_moved;
-            };
-
-            const auto walk_arm = [&](ScopeNode *arm) -> ArmState {
+            const auto take_joining = [&](ScopeNode *arm) {
                 if (arm == nullptr) {
-                    return ArmState { true, before, maybe_before };
+                    joining.push_back(before);
+                    return;
                 }
 
-                _moved = before;
-                _maybe_moved = maybe_before;
+                _flow = before;
 
-                ArmState state;
-                state.joins = walk_scope(*arm) == ExitKind::t_none;
-                state.moved = std::move(_moved);
-                state.maybe_moved = std::move(_maybe_moved);
-
-                return state;
-            };
-
-            auto if_arm = walk_arm(stmt->if_scope);
-            auto else_arm = walk_arm(stmt->else_scope);
-
-            _moved = before;
-            _maybe_moved = maybe_before;
-
-            // **neither arm comes back.** the code after the `if` is unreachable, so there is no state
-            // for it to be wrong about. what each arm moved has already gone where it belongs - onto a
-            // `return`'s unwind, or onto the enclosing loop's frame
-            if (!if_arm.joins && !else_arm.joins) {
-                break;
-            }
-
-            // **an arm that leaves contributes nothing to the join.** it does not reach the code after
-            // the `if`, so what it moved is not visible there - and it is not an "other branch" for the
-            // arm that does reach it to disagree with. a constructor whose `if` arm returns `$this`
-            // moves it on that path only, and merging that into the fall-through would read
-            // as a conditional move
-            //
-            // spelled as the remaining arm standing in for the one that left: it is then both sides of
-            // the comparison below, so the union is its own state and there is nothing to report
-            if (!if_arm.joins) {
-                if_arm.moved = else_arm.moved;
-                if_arm.maybe_moved = else_arm.maybe_moved;
-            }
-            else if (!else_arm.joins) {
-                else_arm.moved = if_arm.moved;
-                else_arm.maybe_moved = if_arm.maybe_moved;
-            }
-
-            // a decl stays *definitely* moved only where no reaching arm was unsure about it, which is
-            // why this is the arms' own sets rather than the snapshot: an arm that moved outright what
-            // was merely maybe-moved before the `if` erased it, and that erase must survive the merge
-            _maybe_moved = if_arm.maybe_moved;
-            _maybe_moved.insert(else_arm.maybe_moved.begin(), else_arm.maybe_moved.end());
-
-            // moved on one side and not the other is a conditional move, whichever side that is - so the
-            // union runs twice over the same body rather than being written out per side
-            const auto join = [&](const auto &arm, const auto &other) {
-                for (const auto *decl : arm) {
-                    if (_moved.insert(decl).second && other.count(decl) == 0) {
-                        _maybe_moved.insert(decl);
-                        report_conditional_move(decl);
-                    }
+                if (walk_scope(*arm) == ExitKind::t_none) {
+                    joining.push_back(std::move(_flow));
                 }
             };
 
-            join(if_arm.moved, else_arm.moved);
-            join(else_arm.moved, if_arm.moved);
+            take_joining(stmt->if_scope);
+            take_joining(stmt->else_scope);
+            join_exclusive(before, std::move(joining));
             break;
         }
 
@@ -970,6 +923,51 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
     return child;
 }
 
+void OwnershipPass::join_exclusive(const FlowFacts &before, std::vector<FlowFacts> joining)
+{
+    _flow = before;
+
+    if (joining.empty()) {
+        return;
+    }
+
+    if (joining.size() == 1) {
+        _flow = std::move(joining[0]);
+        return;
+    }
+
+    for (const FlowFacts &arm : joining) {
+        _flow.initialized.insert(arm.initialized.begin(), arm.initialized.end());
+    }
+
+    // a decl stays *definitely* moved only where no reaching arm was unsure about it, which is
+    // why this is the arms' own sets rather than the snapshot: an arm that moved outright what
+    // was merely maybe-moved before the statement erased it, and that erase must survive the merge
+    _flow.maybe_moved = joining[0].maybe_moved;
+
+    for (size_t i = 1; i < joining.size(); i++) {
+        _flow.maybe_moved.insert(joining[i].maybe_moved.begin(), joining[i].maybe_moved.end());
+    }
+
+    std::unordered_map<const VarDeclNode *, size_t> moved_on;
+
+    for (const FlowFacts &arm : joining) {
+        for (const VarDeclNode *decl : arm.moved) {
+            moved_on[decl]++;
+        }
+    }
+
+    for (const auto &[decl, count] : moved_on) {
+        if (count == joining.size()) {
+            _flow.moved.insert(decl);
+        }
+        else {
+            _flow.maybe_moved.insert(decl);
+            report_conditional_move(decl);
+        }
+    }
+}
+
 // **the one loop walk**, which both loop statements above go through. what a `for` adds is the step, and
 // it is walked *inside* the loop's frame and after the body: it runs on the fall-through and on every
 // `continue`, so a temporary it materializes lives and dies there, once per iteration
@@ -989,7 +987,7 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
             outer.insert(frame.locals.begin(), frame.locals.end());
         }
 
-        const auto before = _moved;
+        const auto before_moved = _flow.moved;
 
         // the frame walk_scope is about to push for the body, recorded here rather than inside
         // it: walk_scope does not know whose scope it has been handed, and its `own_frame` test
@@ -1012,13 +1010,13 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
         // the body's fall-through where it has one, plus every `continue`. a body that always
         // leaves has no fall-through, so the header is re-entered only by a `continue` - and by
         // nothing at all if there is none
-        auto back_edge = body_exit == ExitKind::t_none ? _moved : before;
-        back_edge.insert(frame.continue_moved.begin(), frame.continue_moved.end());
+        auto back_edge = body_exit == ExitKind::t_none ? _flow.moved : before_moved;
+        back_edge.insert(frame.continue_facts.moved.begin(), frame.continue_facts.moved.end());
 
         // **and the state that reaches the code after the loop**: the back edge - the condition
         // is what the loop is left by, and it is read from the header - plus every `break`
         auto after_loop = back_edge;
-        after_loop.insert(frame.break_moved.begin(), frame.break_moved.end());
+        after_loop.insert(frame.break_facts.moved.begin(), frame.break_facts.moved.end());
 
         // judged over both, and that is the over-approximation this keeps. a `break` runs at
         // most once, so moving an outer local on that path does not repeat - but the loop can
@@ -1027,7 +1025,7 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
         // a loop's trip count (`while (true)` included). so "moved anywhere inside the loop"
         // stays the rule, and a break-only move is refused with the rest
         for (const auto *decl : after_loop) {
-            if (before.count(decl) > 0 || outer.count(decl) == 0) {
+            if (before_moved.count(decl) > 0 || outer.count(decl) == 0) {
                 continue;
             }
 
@@ -1043,13 +1041,21 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
 
         // a decl only a `break` moved is one the condition-exit path did not, so a read after
         // the loop says *may* have been moved rather than claiming it was
-        for (const auto *decl : frame.break_moved) {
+        for (const auto *decl : frame.break_facts.moved) {
             if (back_edge.count(decl) == 0) {
-                _maybe_moved.insert(decl);
+                _flow.maybe_moved.insert(decl);
             }
         }
 
-        _moved = std::move(after_loop);
+        _flow.moved = std::move(after_loop);
+        _flow.maybe_moved.insert(
+            frame.continue_facts.maybe_moved.begin(), frame.continue_facts.maybe_moved.end());
+        _flow.maybe_moved.insert(
+            frame.break_facts.maybe_moved.begin(), frame.break_facts.maybe_moved.end());
+        _flow.initialized.insert(
+            frame.continue_facts.initialized.begin(), frame.continue_facts.initialized.end());
+        _flow.initialized.insert(
+            frame.break_facts.initialized.begin(), frame.break_facts.initialized.end());
     }
 }
 
@@ -1457,12 +1463,12 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // runtime
             VarDeclNode *decl = place_root_of(expr);
 
-            if (decl != nullptr && _moved.count(decl) > 0) {
+            if (decl != nullptr && _flow.moved.count(decl) > 0) {
                 _collector.collect_issue<Issue::UseAfterMove>(
                     code_ref_for(location_of_expression(expr)), fmt::format(
                         "'{}' {} moved out of.",
                         decl->name_full(),
-                        _maybe_moved.count(decl) > 0 ? "may have been" : "has been"
+                        _flow.maybe_moved.count(decl) > 0 ? "may have been" : "has been"
                     )
                 );
             }
@@ -1760,24 +1766,16 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 walk_statement(make_ref(node->subject));
             }
 
-            // **each arm starts from the pre-match moved set**, the same snapshot/restore an `if`
+            // **each arm starts from the pre-match `_flow`**, the same snapshot/restore an `if`
             // uses. walking them against one shared set made `ok => consume(mv $x)` mark `$x`
             // moved before `error => use($x)` was walked, a false use-after-move on exclusive
-            // arms. arms that rejoin merge; arms that leave contribute nothing to the join
-            const auto before = _moved;
-            const auto maybe_before = _maybe_moved;
-
-            struct ArmState
-            {
-                std::unordered_set<const VarDeclNode *> moved;
-                std::unordered_set<const VarDeclNode *> maybe_moved;
-            };
-
-            std::vector<ArmState> joining;
+            // arms. exclusive arms that each initialize an owning field once initialize it once.
+            // arms that rejoin merge; arms that leave contribute nothing to the join
+            const auto before = _flow;
+            std::vector<FlowFacts> joining;
 
             for (MatchExprNode::Arm &arm : node->arms) {
-                _moved = before;
-                _maybe_moved = maybe_before;
+                _flow = before;
 
                 ExitKind scope_exit = ExitKind::t_none;
 
@@ -1801,47 +1799,10 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                     continue;
                 }
 
-                joining.push_back(ArmState{std::move(_moved), std::move(_maybe_moved)});
+                joining.push_back(std::move(_flow));
             }
 
-            _moved = before;
-            _maybe_moved = maybe_before;
-
-            if (joining.empty()) {
-                break;
-            }
-
-            if (joining.size() == 1) {
-                _moved = std::move(joining[0].moved);
-                _maybe_moved = std::move(joining[0].maybe_moved);
-                break;
-            }
-
-            _maybe_moved = joining[0].maybe_moved;
-
-            for (size_t i = 1; i < joining.size(); i++) {
-                _maybe_moved.insert(
-                    joining[i].maybe_moved.begin(), joining[i].maybe_moved.end());
-            }
-
-            std::unordered_map<const VarDeclNode *, size_t> moved_on;
-
-            for (const ArmState &arm : joining) {
-                for (const VarDeclNode *decl : arm.moved) {
-                    moved_on[decl]++;
-                }
-            }
-
-            for (const auto &[decl, count] : moved_on) {
-                if (count == joining.size()) {
-                    _moved.insert(decl);
-                }
-                else {
-                    _maybe_moved.insert(decl);
-                    report_conditional_move(decl);
-                }
-            }
-
+            join_exclusive(before, std::move(joining));
             break;
         }
 
@@ -2053,8 +2014,8 @@ ExprNode *OwnershipPass::arrive_value(
             // the read happens before the move: `$b = mv $a` on an already-moved `$a` is a
             // use-after-move, not a second transfer
             move->operand = walk_expression(move->operand);
-            _moved.insert(source);
-            _maybe_moved.erase(source);
+            _flow.moved.insert(source);
+            _flow.maybe_moved.erase(source);
         }
 
         // the marker's whole job is done. from here the tree is the plain place expression, and
@@ -2117,6 +2078,18 @@ ExprNode *OwnershipPass::arrive_value(
             nullptr, destination);
 
         return expr;
+    }
+
+    if (expr->get_node_type() == NodeType::n_type_cast) {
+        auto *cast = static_cast<TypeCastNode *>(expr);
+
+        if (explicit_interface_cast_copies_source(*cast)) {
+            cast->expr = arrive_value(
+                cast->expr, ValueType::make_mutable(value_result_type(*cast->expr)),
+                nullptr, destination);
+
+            return expr;
+        }
     }
 
     expr = walk_expression(expr);
@@ -2220,8 +2193,8 @@ ExprNode *OwnershipPass::arrive_value(
         source != nullptr && source->has_type() && !source->type().is_pointer();
 
     if (moves_implicitly && source_owns_its_value) {
-        _moved.insert(source);
-        _maybe_moved.erase(source);
+        _flow.moved.insert(source);
+        _flow.maybe_moved.erase(source);
         return expr;
     }
 
@@ -2424,7 +2397,7 @@ void OwnershipPass::collect_frame_drops(const Frame &frame, std::vector<NodeRefe
     // reverse declaration order: the last thing built is the first thing torn down, so a local
     // holding a borrow of an earlier one is gone before its target is
     for (auto local = frame.locals.rbegin(); local != frame.locals.rend(); ++local) {
-        if (_moved.count(*local) > 0) {
+        if (_flow.moved.count(*local) > 0) {
             // "a moved-from local is also not destroyed at the end of its scope; its destructor
             // travelled with the value"
             continue;
@@ -2689,18 +2662,33 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 {
     const ValueType type = place->result_type();
 
+    auto mint_strip = [this](ValueType dest, ExprNode *operand) -> TypeCastNode & {
+        auto &cast = _current_module->nodes.emplace_back<TypeCastNode>(dest, operand, false);
+        const CastLookup lookup = cast_plan_for(*operand, dest);
+
+        if (lookup.result == CastLookup::Result::t_ok) {
+            cast.plan_decided = true;
+        }
+
+        return cast;
+    };
+
     // an address is the deinit's `$this`, already the borrow its parameter wants. **stripped of const
     // there too**, and that is not defensive: the exemption in AST::const_receiver_refusal is spelled for
     // `is_destructor()`, and a synthesized deinit is an ordinary method - so what keeps a teardown out of
     // that rule is this function never handing one a const borrow, and it can only claim that by being
-    // total
+    // total.
+    //
+    // planted as a written TypeCastNode (implicit=false): const T& to T& is not an implicit
+    // conversion. classified here so CastResolution does not have to punch t_owned for a
+    // node this mint already knows the plan of
     if (type.is_pointer()) {
         if (!type.pointee().is_const()) {
             return place;
         }
 
-        return &_current_module->nodes.emplace_back<TypeCastNode>(
-            ValueType::make_pointer(ValueType::make_mutable(type.pointee()), false), place, false);
+        return &mint_strip(
+            ValueType::make_pointer(ValueType::make_mutable(type.pointee()), false), place);
     }
 
     // a mutable place is what every other drop hands over
@@ -2710,8 +2698,8 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 
     auto &address = _current_module->nodes.emplace_back<AddrOfExprNode>(place);
 
-    return &_current_module->nodes.emplace_back<TypeCastNode>(
-        ValueType::make_pointer(ValueType::make_mutable(type), false), &address, false);
+    return &mint_strip(
+        ValueType::make_pointer(ValueType::make_mutable(type), false), &address);
 }
 
 void OwnershipPass::emit_teardown_call(

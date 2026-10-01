@@ -63,7 +63,7 @@ void TypeDeclCodegen::gen_member_access(AST::MemberAccessNode &node)
             node.get_member_name().value(), _ctx.function_context()));
     }
 
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(place, node.get_member_name().value().c_str()));
+    _ctx.push(_ctx.lvalues->gen_load(place, node.get_member_name().value().c_str()));
 }
 
 void TypeDeclCodegen::gen_var(AST::VarNode &node)
@@ -76,7 +76,7 @@ void TypeDeclCodegen::gen_var(AST::VarNode &node)
     }
 
     // push the alloca instruction (variable pointer) onto the stack
-    _ctx.value_stack.push(it->second);
+    _ctx.push_scalar(it->second);
 }
 
 };

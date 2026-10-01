@@ -7,6 +7,7 @@
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "AST/ASTAccess.h"
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
@@ -30,8 +31,10 @@
 #include "AST/ForStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
 
+#include <llvm/IR/Argument.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 
 #include <fmt/core.h>
@@ -42,6 +45,20 @@
 
 namespace Compiler::LLVM
 {
+
+static llvm::Function *slot_function(llvm::Value *slot)
+{
+    if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(slot)) {
+        return alloca->getFunction();
+    }
+
+    if (auto *arg = llvm::dyn_cast<llvm::Argument>(slot)) {
+        return arg->getParent();
+    }
+
+    return nullptr;
+}
+
 void StmtCodegen::gen_scope(AST::ScopeNode &node)
 {
     // asked before the slots below rather than only between statements: an alloca is an instruction, and
@@ -125,7 +142,7 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
     _ctx.debug_info->pop_lexical_block(debug_block);
 }
 
-llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
+llvm::Value *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
 {
     // a declaration carrying no type describes no slot. unreachable for a program that got this far -
     // every declaration the parser builds has a type node and AST::TypeChecker refuses an unresolved one -
@@ -139,8 +156,8 @@ llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
     // cleared between functions, so a hit that was emitted into *another* llvm::Function is not this
     // scope's slot - reusing it would build a body reading an alloca that does not dominate its uses
     auto found = _ctx.var_map.find(&node);
-    if (found != _ctx.var_map.end() &&
-        found->second->getFunction() == _ctx.builder->GetInsertBlock()->getParent()) {
+    if (found != _ctx.var_map.end()
+        && slot_function(found->second) == _ctx.builder->GetInsertBlock()->getParent()) {
         return found->second;
     }
 
@@ -183,7 +200,7 @@ llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
     // null is a legitimate value of every type this applies to, and releasing null is a no-op
     const bool needs_zero_init = type->isAggregateType() || node.type_node()->type.is_class();
     if (needs_zero_init && (!node.init_expr || node.binds_unwrapped)) {
-        _ctx.builder->CreateStore(llvm::Constant::getNullValue(type), alloca);
+        _ctx.lvalues->gen_zero(LValue{ alloca, node.type_node()->type });
     }
 
     return alloca;
@@ -195,9 +212,9 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
     // program writes. asked again rather than assumed, because a temporary is *not* a scope's child -
     // gen_temporary_bind visits its declarations directly - and one owner of the slot is what keeps the
     // two paths from disagreeing about whether it has been created
-    llvm::AllocaInst *alloca = ensure_var_slot(node);
+    llvm::Value *slot = ensure_var_slot(node);
 
-    if (!alloca) {
+    if (!slot) {
         return;
     }
 
@@ -217,15 +234,15 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
         // check that the visited node pushed a value on the stack
         assert(_ctx.value_stack.size() > 0 && "No value on the stack");
 
-        llvm::Value *init_value = _ctx.value_stack.top();
-        _ctx.value_stack.pop();
+        CodegenValue init_value = _ctx.pop_value();
 
         // the same conversion every assignment and member write uses. this path used to handle
         // only float/double, so an initializer that widened an integer stored the narrow value
         // straight into the wide slot and read back whatever else was in those bytes
-        _ctx.builder->CreateStore(
-            _ctx.types->coerce_value(init_value, node.init_expr->result_type(), node.type_node()->type, *_ctx.current_cmp_unit),
-            alloca);
+        _ctx.lvalues->gen_store(
+            LValue{ slot, node.type_node()->type },
+            _ctx.types->coerce_value(
+                init_value, node.init_expr->result_type(), node.type_node()->type, *_ctx.current_cmp_unit));
     }
 }
 
@@ -333,6 +350,27 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     _ctx.sret_pointer = sret_destination;
     _ctx.sret_type = abi.indirect_type;
 
+    // a value-type constructor's `$this` *is* the sret slot. the return already moves that local, so
+    // seating it here deletes the load of the whole aggregate and the fieldwise store into sret.
+    // a class constructor's `$this` is a handle, which is not an aggregate, so this does not fire
+    if (node.is_constructor() && sret_destination != nullptr && node.body != nullptr) {
+        for (auto &child : node.body->children) {
+            if (!child.has_type<AST::VarDeclNode>()) {
+                continue;
+            }
+
+            AST::VarDeclNode *this_decl = child.get_ptr<AST::VarDeclNode>();
+
+            if (AST::access_effect_of(*this_decl) != AST::AccessEffect::t_out) {
+                continue;
+            }
+
+            _ctx.var_map[this_decl] = sret_destination;
+            _ctx.lvalues->gen_zero(LValue{ sret_destination, this_decl->type() });
+            break;
+        }
+    }
+
     const unsigned abi_offset = abi.is_indirect() ? 1 : 0;
 
     for (auto &arg : func->args()) {
@@ -429,8 +467,7 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
         return;
     }
 
-    llvm::Value *ret = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    CodegenValue ret = _ctx.pop_value();
 
     // a return fits its value to the declared return type through the same conversion table a
     // declaration, an assignment and a member write use - signedness lives on the ValueType and
@@ -467,7 +504,7 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     // the slot before the branch, like every other local: ensure_var_slot allocates in the function's
     // entry block, so where the declaration sits among its siblings decides nothing. the statement
     // form has no binding and so no slot
-    llvm::AllocaInst *slot = node.decl != nullptr ? ensure_var_slot(*node.decl) : nullptr;
+    llvm::Value *slot = node.decl != nullptr ? ensure_var_slot(*node.decl) : nullptr;
 
     // **`presence_test` is what decides which of the two shapes this is**, and it is the whole of what
     // this function knows about which protocol answered. with one set it is the value evaluated before
@@ -479,7 +516,7 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
 
     // the tested optional, on the builtin path only. the protocol path leaves both unset - there is no
     // optional there at all - so the unwrap arm below never reads them
-    llvm::Value *optional = nullptr;
+    CodegenValue optional_value;
     AST::ValueType optional_type;
 
     if (node.presence_test != nullptr) {
@@ -491,10 +528,10 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
         node.presence_test->accept(*_ctx.visitor);
 
         condition = _ctx.types->coerce_value(
-            _ctx.pop(),
+            _ctx.pop_value(),
             node.presence_test->result_type(),
             AST::ValueType(AST::ValueTypePrimitive::t_bool),
-            *_ctx.current_cmp_unit);
+            *_ctx.current_cmp_unit).scalar();
     }
     else {
         // **evaluated exactly once.** the same value is tested and then stored, which is what makes
@@ -505,10 +542,10 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
         // a place, and a call's result is a wrapper nobody owns whose payload it moves out of here
         AST::ExprNode *tested = node.tested();
         tested->accept(*_ctx.visitor);
-        optional = _ctx.pop();
+        optional_value = _ctx.pop_value();
         optional_type = tested->result_type();
 
-        condition = _ctx.types->gen_has_value(optional, optional_type);
+        condition = _ctx.types->gen_has_value(optional_value, optional_type);
     }
 
     _ctx.builder->CreateCondBr(condition, bound_block, else_block);
@@ -519,7 +556,7 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     _ctx.set_insert_point(bound_block);
 
     if (node.decl != nullptr) {
-        llvm::Value *bound = nullptr;
+        CodegenValue bound;
         AST::ValueType bound_type;
 
         if (node.presence_test != nullptr) {
@@ -531,7 +568,7 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
             // declaration's, so whatever copy an owning payload owes is already in it
             node.decl->init_expr->accept(*_ctx.visitor);
 
-            bound = _ctx.pop();
+            bound = _ctx.pop_value();
             bound_type = node.decl->init_expr->result_type();
         }
         else if (node.bound_value != nullptr) {
@@ -539,19 +576,19 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
             // else still owns. AST::OwnershipPass built the copy over the `__value` place and hung it here
             node.bound_value->accept(*_ctx.visitor);
 
-            bound = _ctx.pop();
+            bound = _ctx.pop_value();
             bound_type = node.bound_value->result_type();
         }
         else {
-            bound = _ctx.types->gen_unwrapped(optional, optional_type);
+            bound = _ctx.types->gen_unwrapped(optional_value, optional_type);
             bound_type = AST::unwrapped_type_of(optional_type);
         }
 
         // one store for both, because only the value and the type it comes from differ: what a guard's binding
         // is *given* is the arm's question, how it is seated is the statement's
-        _ctx.builder->CreateStore(
-            _ctx.types->coerce_value(bound, bound_type, node.decl->type(), *_ctx.current_cmp_unit),
-            slot);
+        _ctx.lvalues->gen_store(
+            LValue{ slot, node.decl->type() },
+            _ctx.types->coerce_value(bound, bound_type, node.decl->type(), *_ctx.current_cmp_unit));
     }
 
     // and control falls out of the *bound* block into whatever follows the guard, which is the whole
@@ -580,8 +617,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
 
     // condition
     node.condition->accept(*_ctx.visitor);
-    llvm::Value *condition = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    llvm::Value *condition = _ctx.pop_scalar();
 
     // if there is no else block we directly jump to the merge block
     if (!node.else_scope) {
@@ -663,8 +699,7 @@ void StmtCodegen::gen_loop(AST::ExprNode &condition, AST::ScopeNode *step, AST::
     // loop block
     _ctx.set_insert_point(loop_block);
     condition.accept(*_ctx.visitor);
-    llvm::Value *condition_value = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    llvm::Value *condition_value = _ctx.pop_scalar();
 
     _ctx.builder->CreateCondBr(condition_value, body_block, merge_block);
 
@@ -742,8 +777,7 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
         return;
     }
 
-    llvm::Value *new_value = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
+    CodegenValue new_value = _ctx.pop_value();
 
     // the target's address, bound once - see AssignNode::target_bind. **after** the right-hand side and
     // never before it: the right-hand side may mutate the container, and an address taken ahead of it
@@ -762,7 +796,7 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
     // AssignNode::teardown_old for why a class's teardown is a bool here and a struct's is a tree
     llvm::Value *old_handle = nullptr;
     if (node.releases_old) {
-        old_handle = _ctx.lvalues->gen_load(place, "old");
+        old_handle = _ctx.lvalues->gen_load(place, "old").scalar();
     }
 
     // an owning struct is destroyed *in place*, so its teardown sits between the right-hand side and
@@ -776,7 +810,8 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
     // `=` reaches
     _ctx.lvalues->gen_store(
         place,
-        _ctx.types->coerce_value(new_value, node.value_expr->result_type(), place.storage_type, *_ctx.current_cmp_unit));
+        _ctx.types->coerce_value(
+            new_value, node.value_expr->result_type(), place.storage_type, *_ctx.current_cmp_unit));
 
     if (old_handle != nullptr) {
         _ctx.classes->gen_release_value(old_handle, place.storage_type);

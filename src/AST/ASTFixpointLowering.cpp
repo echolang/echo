@@ -56,16 +56,21 @@ void FixpointLowering::finalize()
     _finalizing = false;
 }
 
-void FixpointLowering::visitFunctionDecl(FunctionDeclNode &node)
+void FixpointLowering::walk_function(FunctionDeclNode &node)
 {
-    if (node.is_generic()) {
-        return;
-    }
-
     FunctionDeclNode *enclosing = _current_function;
     _current_function = &node;
     RecursiveVisitor::visitFunctionDecl(node);
     _current_function = enclosing;
+}
+
+void FixpointLowering::visitFunctionDecl(FunctionDeclNode &node)
+{
+    if (!function_is_fixpoint_open(node)) {
+        return;
+    }
+
+    walk_function(node);
 }
 
 };  // namespace AST

@@ -1,0 +1,13 @@
+# 1 1 1 is three appends of null; 7 is the one filled slot; 1 is that slot cleared
+# again; 1 1 1 is ScenePasses.reset's shape: three array<P?> fields, clear, push
+# null in a loop from the constructor
+
+--- OUT --->
+1
+1
+1
+7
+1
+1
+1
+1

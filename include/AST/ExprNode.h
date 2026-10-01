@@ -635,8 +635,11 @@ namespace AST
     // a distinct node rather than a `callee` field on FunctionCallExprNode, because `decl` there is not
     // one thing: it is the callee, the return type, the parameter list argument coercion walks, the
     // function-table key and the name every diagnostic prints. an indirect call answers all five from its
-    // callee's type instead, and has no overload set to resolve - so it is settled the moment it parses,
-    // the same standing `echo` already has
+    // callee's type instead, and has no overload set to resolve. a callee that already has a
+    // signature is planted here; an undetermined one (a foreach binding, an index whose
+    // operator [] has not attached) is a not-yet, the same standing parse_member_call gives
+    // an undetermined receiver. TypeChecker owns arity, and the shape of a callee that
+    // settles later. a determined non-callable is the parser's refusal
     class IndirectCallExprNode : public ExprNode
     {
     public:

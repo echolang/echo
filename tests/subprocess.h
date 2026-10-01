@@ -181,12 +181,15 @@ namespace EchoTests
         // `cd <dir> && echoc <args>`, because the working directory is what project discovery and
         // manifest resolution both read. The root is the default, which is what every case but the
         // ones testing discovery itself wants
-        ProcessResult echoc(const std::string &args, const std::filesystem::path &working_directory) const
+        ProcessResult echoc(
+            const std::string &args,
+            const std::filesystem::path &working_directory,
+            const std::vector<std::pair<std::string, std::string>> &extra_env = {}) const
         {
             std::vector<std::string> argv = { echoc_binary() };
             const std::vector<std::string> words = split_command_words(args);
             argv.insert(argv.end(), words.begin(), words.end());
-            return run_process(argv, k_default_timeout_ms, working_directory);
+            return run_process(argv, k_default_timeout_ms, working_directory, extra_env);
         }
 
         ProcessResult echoc(const std::string &args) const { return echoc(args, _root); }

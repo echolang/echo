@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 
 #include "AST/StaticPropertyExprNode.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
@@ -19,6 +20,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Metadata.h>
+#include <llvm/IR/Type.h>
 
 #include <fmt/core.h>
 
@@ -80,8 +82,7 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
             // already route through here, and none of them knows which arm answered
             if (index_expr.element_call != nullptr) {
                 index_expr.element_call->accept(*_ctx.visitor);
-                llvm::Value *address = _ctx.value_stack.top();
-                _ctx.value_stack.pop();
+                llvm::Value *address = _ctx.pop_scalar();
 
                 // **typed.** the container handed back a borrow of one of its own elements, and
                 // what that element *is* is the element type - the only way to make that false is a
@@ -91,8 +92,7 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
             }
 
             index_expr.indices[0]->accept(*_ctx.visitor);
-            llvm::Value *offset = _ctx.value_stack.top();
-            _ctx.value_stack.pop();
+            llvm::Value *offset = _ctx.pop_scalar();
 
             const AST::ValueType base_type = index_expr.base->result_type();
             const AST::ValueType indexed = index_expr.indexed_base_type();
@@ -173,9 +173,14 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
     }
 }
 
-llvm::Value *LValueCodegen::gen_load(const LValue &place, const char *name)
+CodegenValue LValueCodegen::gen_load(const LValue &place, const char *name)
 {
     llvm::Type *llvm_type = _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit);
+
+    if (aggregate_lives_in_memory(llvm_type, _ctx.layout())) {
+        return CodegenValue::aggregate(place.address, llvm_type, place.provenance);
+    }
+
     llvm::LoadInst *load = _ctx.builder->CreateLoad(llvm_type, place.address, name);
 
     if (place.storage_type.is_simd() && place.provenance == Provenance::t_raw) {
@@ -184,20 +189,58 @@ llvm::Value *LValueCodegen::gen_load(const LValue &place, const char *name)
 
     tag_access(load, place);
 
-    return load;
+    return CodegenValue::scalar(load);
 }
 
-llvm::StoreInst *LValueCodegen::gen_store(const LValue &place, llvm::Value *value)
+void LValueCodegen::gen_store(const LValue &place, CodegenValue value)
 {
-    llvm::StoreInst *store = _ctx.builder->CreateStore(value, place.address);
+    llvm::Type *llvm_type = _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit);
+
+    if (value.is_aggregate() || aggregate_lives_in_memory(llvm_type, _ctx.layout())) {
+        llvm::Value *src = value.is_aggregate()
+            ? value.value
+            : [&]() {
+                llvm::Value *slot = _ctx.entry_alloca(llvm_type, "agg.src");
+                _ctx.builder->CreateStore(value.scalar(), slot);
+                return slot;
+            }();
+
+        if (src == place.address) {
+            return;
+        }
+
+        const llvm::Align align = _ctx.layout().getABITypeAlign(llvm_type);
+        _ctx.builder->CreateMemMove(
+            place.address, align, src, align, _ctx.layout().getTypeAllocSize(llvm_type));
+        return;
+    }
+
+    llvm::StoreInst *store = _ctx.builder->CreateStore(value.scalar(), place.address);
 
     if (place.storage_type.is_simd() && place.provenance == Provenance::t_raw) {
         store->setAlignment(_ctx.simd->packed_alignment(place.storage_type));
     }
 
     tag_access(store, place);
+}
 
-    return store;
+void LValueCodegen::gen_zero(const LValue &place)
+{
+    llvm::Type *llvm_type = _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit);
+
+    if (aggregate_lives_in_memory(llvm_type, _ctx.layout())) {
+        const llvm::Align align = _ctx.layout().getABITypeAlign(llvm_type);
+        _ctx.builder->CreateMemSet(
+            place.address,
+            llvm::ConstantInt::get(llvm::Type::getInt8Ty(*_ctx.llvm_context), 0),
+            _ctx.layout().getTypeAllocSize(llvm_type),
+            align);
+        return;
+    }
+
+    llvm::StoreInst *store = _ctx.builder->CreateStore(
+        llvm::Constant::getNullValue(llvm_type), place.address);
+    tag_access(store, place);
 }
 
 void LValueCodegen::tag_access(llvm::Instruction *access, const LValue &place)
@@ -215,7 +258,7 @@ void LValueCodegen::tag_access(llvm::Instruction *access, const LValue &place)
     }
 }
 
-llvm::Value *LValueCodegen::gen_load(AST::ExprNode &expr, const char *name)
+CodegenValue LValueCodegen::gen_load(AST::ExprNode &expr, const char *name)
 {
     return gen_load(gen_lvalue(expr), name);
 }
@@ -237,7 +280,7 @@ LValue LValueCodegen::deref_once(const LValue &place)
 
     // exactly one level: load the address out of the slot, and the result addresses the
     // pointee. `ptr<ptr<uint8>>` still lands on a `ptr<uint8>`, never on the uint8
-    return LValue{ gen_load(place, "deref"), AST::value_type_of(place.storage_type), through };
+    return LValue{ gen_load(place, "deref").scalar(), AST::value_type_of(place.storage_type), through };
 }
 
 LValue LValueCodegen::gen_place(AST::ExprNode &expr)
@@ -311,7 +354,7 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
     if (base_place.storage_type.is_class()) {
         const ClassLayout layout = _ctx.types->get_or_create_class_layout(complex, *_ctx.current_cmp_unit);
 
-        llvm::Value *handle = gen_load(base_place, "obj");
+        llvm::Value *handle = gen_load(base_place, "obj").scalar();
 
         base_place.address = _ctx.builder->CreateStructGEP(
             layout.box, handle, ClassBox::payload_index, "payload");
@@ -419,13 +462,11 @@ llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)
     // a place holding a pointer: load the slot to get the address it holds, with no deref
     // anything else already evaluates to an address, so just let it push its value
     if (AST::is_place_expression(expr)) {
-        return gen_load(expr, "addr");
+        return gen_load(expr, "addr").scalar();
     }
 
     expr.accept(*_ctx.visitor);
-    llvm::Value *address = _ctx.value_stack.top();
-    _ctx.value_stack.pop();
-    return address;
+    return _ctx.pop_scalar();
 }
 
 };

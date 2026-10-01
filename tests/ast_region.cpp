@@ -21,6 +21,7 @@ TEST_CASE("a concrete function is owned after the pipeline", "[region]")
     auto decls = EchoTests::decls_named(m, "f");
     REQUIRE(decls.size() == 1);
     REQUIRE(decls[0]->region_state == RegionState::t_owned);
+    REQUIRE_FALSE(decls[0]->live_calls_pending);
     REQUIRE(m.files().first()->region_state == RegionState::t_owned);
 }
 
@@ -42,9 +43,11 @@ TEST_CASE("a generic template stays open; its instance is owned", "[region]")
     for (auto *decl : decls) {
         if (decl->is_generic()) {
             REQUIRE(decl->region_state == RegionState::t_open);
+            REQUIRE(decl->live_calls_pending);
             saw_template = true;
         } else {
             REQUIRE(decl->region_state == RegionState::t_owned);
+            REQUIRE_FALSE(decl->live_calls_pending);
             saw_instance = true;
         }
     }

@@ -61,15 +61,25 @@ namespace AST
         return !body_is_pending(scope);
     }
 
-    // every call the live tree still contains. skips generic bodies; walks a const if's condition
-    // so it can fold, and only the taken arm once it has. a different visitor from body_is_pending:
-    // that one stops at the first unfinished node, this one has to see every live call
+    // every call the live tree still contains that bind or settle still owes. skips generic bodies
+    // and t_owned bodies whose live_calls_pending is clear; walks a const if's condition so it can
+    // fold, and only the taken arm once it has. a different visitor from body_is_pending: that one
+    // stops at the first unfinished node, this one has to see every live call
     std::vector<std::pair<FunctionCallExprNode *, Module *>> live_calls(Bundle &bundle);
+
+    // a template is never walked; a t_owned body is done for every lowering that mints
+    bool function_is_fixpoint_open(const FunctionDeclNode &fn);
+
+    // bind/settle, literal typing, and operator rewrite still walk a t_owned body: ownership
+    // can type a neighbouring call in the same round it marks t_owned, and the next round
+    // retypes `== 0` / widens a binary beside it. mutation lowerings use function_is_fixpoint_open
+    bool function_needs_typing(const FunctionDeclNode &fn);
 
     // **what a semantic pipeline round walks.** every live file root. one iterator so TypeChecker,
     // PointerAdjuster, AccessPass, FixpointLowering, OwnershipPass, OperatorRewriter, ConstFolding,
-    // ConstantExpander and live_calls cannot disagree. the loop lives in the .cpp because
-    // ASTFile.h includes this header
+    // ConstantExpander and live_calls cannot disagree. a lowering's visitFunctionDecl skips
+    // t_owned; the file root is still walked so a TypeDecl property and a newly cloned instance
+    // stay reachable. the loop lives in the .cpp because ASTFile.h includes this header
     void visit_semantic_roots(
         Module &module,
         void *ctx,

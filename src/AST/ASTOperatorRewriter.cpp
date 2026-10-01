@@ -632,9 +632,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
 
 void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
 {
-    // a template's body is only meaningful once cloned into a concrete instance, and its operand
-    // types are the very things that are not known there. PointerAdjuster's rule
-    if (node.is_generic()) {
+    if (!function_needs_typing(node)) {
         return;
     }
 

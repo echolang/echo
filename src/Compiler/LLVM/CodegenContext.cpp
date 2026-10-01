@@ -64,8 +64,13 @@ namespace Compiler::LLVM
                 *llvm_context, 0,
                 indirect_return_attributes(*llvm_context, abi, layout())));
 
-            // the call answers `void`, so the value this expression produces is what the callee wrote
-            value_stack.push(builder->CreateLoad(abi.indirect_type, slot, "call.result"));
+            // the call answers `void`, so the value this expression produces is what the callee wrote.
+            // a large aggregate stays the slot; loading it as SSA is the pathology sret exists to avoid
+            if (aggregate_lives_in_memory(abi.indirect_type, layout())) {
+                push(CodegenValue::aggregate(slot, abi.indirect_type, Provenance::t_typed));
+            } else {
+                push_scalar(builder->CreateLoad(abi.indirect_type, slot, "call.result"));
+            }
 
             return;
         }
@@ -75,8 +80,17 @@ namespace Compiler::LLVM
         // a void call produces no value. pushing one anyway left a void-typed entry that no
         // parent ever pops, so a `foo();` statement quietly grew the stack
         if (!call->getType()->isVoidTy()) {
-            value_stack.push(call);
+            push_scalar(call);
         }
+    }
+
+    llvm::Value *CodegenContext::materialize(const CodegenValue &value, const char *name)
+    {
+        if (!value.is_aggregate()) {
+            return value.scalar();
+        }
+
+        return builder->CreateLoad(value.aggregate_type, value.value, name);
     }
 
     llvm::Value *CodegenContext::string_as_view(
@@ -110,7 +124,7 @@ namespace Compiler::LLVM
 
         emit_call(fn, args, types->return_abi_of(to_view, *current_cmp_unit));
 
-        return pop();
+        return pop_scalar();
     }
 
     CodegenContext::StringWindow CodegenContext::gen_string_window(

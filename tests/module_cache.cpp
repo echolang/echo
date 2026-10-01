@@ -6,6 +6,7 @@
 
 #include "subprocess.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -42,6 +43,16 @@ public:
     {};
 };
 
+
+// the hex in `  cachelib  bf2d4bf22f2e09d0  miss` - the miss/hit word is not the key
+std::string cache_key(const std::string &line)
+{
+    std::istringstream fields(line);
+    std::string name;
+    std::string key;
+    fields >> name >> key;
+    return key;
+}
 
 bool files_are_identical(const fs::path &a, const fs::path &b)
 {
@@ -164,9 +175,13 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
     {
         const ProcessResult second = project.echoc(args, app_dir);
 
-        REQUIRE(line_starting_with(second.output, "cachelib") == lib_before);
-        REQUIRE(line_starting_with(second.output, "app") == app_before);
-        REQUIRE(line_starting_with(second.output, "stdlib") == stdlib_before);
+        REQUIRE(cache_key(line_starting_with(second.output, "cachelib")) == cache_key(lib_before));
+        REQUIRE(cache_key(line_starting_with(second.output, "app")) == cache_key(app_before));
+        REQUIRE(cache_key(line_starting_with(second.output, "stdlib")) == cache_key(stdlib_before));
+
+        // `run` stores objects now, so a second compile of the same library is a hit
+        REQUIRE(line_starting_with(second.output, "cachelib").find("hit") != std::string::npos);
+        REQUIRE(line_starting_with(second.output, "stdlib").find("hit") != std::string::npos);
     }
 
     SECTION("editing the library moves its key and its dependent's, but not the stdlib's")
@@ -181,13 +196,13 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
 
         const ProcessResult after = project.echoc(args, app_dir);
 
-        REQUIRE(line_starting_with(after.output, "cachelib") != lib_before);
+        REQUIRE(cache_key(line_starting_with(after.output, "cachelib")) != cache_key(lib_before));
 
         // transitively, without a second graph walk: a dependency contributes its whole key
-        REQUIRE(line_starting_with(after.output, "app") != app_before);
+        REQUIRE(cache_key(line_starting_with(after.output, "app")) != cache_key(app_before));
 
         // and nothing below it in the order is disturbed
-        REQUIRE(line_starting_with(after.output, "stdlib") == stdlib_before);
+        REQUIRE(cache_key(line_starting_with(after.output, "stdlib")) == cache_key(stdlib_before));
     }
 
     SECTION("editing the application does not move the library's key")
@@ -196,8 +211,8 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
 
         const ProcessResult after = project.echoc(args, app_dir);
 
-        REQUIRE(line_starting_with(after.output, "cachelib") == lib_before);
-        REQUIRE(line_starting_with(after.output, "app") != app_before);
+        REQUIRE(cache_key(line_starting_with(after.output, "cachelib")) == cache_key(lib_before));
+        REQUIRE(cache_key(line_starting_with(after.output, "app")) != cache_key(app_before));
     }
 
     SECTION("debug and release are different builds of the same source")
@@ -427,6 +442,60 @@ TEST_CASE("a library's object does not depend on which application consumes it",
 TEST_CASE("a library's object does not depend on its consumer with the pipeline off", "[cache][odr]")
 {
     check_consumer_independence("consumer_independence_noopt", "--optimize none");
+}
+
+TEST_CASE("a library's object does not depend on how many emit workers ran", "[cache][odr]")
+{
+    // ECO_JOBS=1 stays in the driver's LLVMContext; several jobs snapshot bitcode and parse it into a
+    // worker's own. the object is a function of the IR, so the two stores must agree byte for byte -
+    // otherwise the cache would hand a serial build the object a parallel one wrote, or the reverse
+    ScopedProject project("emit_jobs");
+
+    write_library(project.root() / "lib", "shared");
+
+    write_file(project.root() / "app" / "app.eco",
+        "echo shared::twice(21);\n");
+
+    const fs::path manifest = project.root() / "lib" / "module.eco";
+
+    const auto build = [&](
+        const std::string &jobs,
+        const fs::path &cache
+    ) {
+        return project.echoc(
+            "build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache) + " app.eco",
+            project.root() / "app",
+            { { "ECO_JOBS", jobs } });
+    };
+
+    const fs::path serial_dir = project.root() / "cache_serial";
+    const fs::path parallel_dir = project.root() / "cache_parallel";
+
+    const ProcessResult serial = build("1", serial_dir);
+    const ProcessResult parallel = build("8", parallel_dir);
+
+    REQUIRE(serial.exit_code == 0);
+    REQUIRE(parallel.exit_code == 0);
+
+    const ProcessResult ran_serial = EchoTests::run_binary(project.root() / "app" / "out");
+    REQUIRE(ran_serial.exit_code == 0);
+    REQUIRE(ran_serial.output.find("42") != std::string::npos);
+
+    std::vector<fs::path> serial_objects;
+    for (const auto &entry : fs::recursive_directory_iterator(serial_dir)) {
+        if (entry.path().extension() == ".o") {
+            serial_objects.push_back(entry.path());
+        }
+    }
+
+    REQUIRE_FALSE(serial_objects.empty());
+
+    for (const fs::path &object : serial_objects) {
+        const fs::path counterpart = parallel_dir / fs::relative(object, serial_dir);
+
+        INFO("object: " << fs::relative(object, serial_dir).string());
+        REQUIRE(files_are_identical(object, counterpart));
+    }
 }
 
 TEST_CASE("a stored object is reused, and a changed source is not", "[cache][store]")
@@ -757,3 +826,173 @@ TEST_CASE("`--package-dir` overrides the vendor search", "[cache][packages]")
     REQUIRE(found.exit_code == 0);
     REQUIRE(found.output.find("42") != std::string::npos);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("an entry unit's partition objects reuse across a one-file edit", "[cache][partition]")
+{
+    // the entry object is rewritten every build, so a warm compile used to re-ISel every
+    // function in it. partitions are keyed on a structural hash of the original IR: editing
+    // left.eco must miss that file's object and hit the others, including after a new unused
+    // function appears in left.eco
+    ScopedProject project("entry_partitions");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+
+    write_file(project.root() / "src" / "left.eco",
+        "function left() : int32\n"
+        "{\n"
+        "    return 20;\n"
+        "}\n");
+
+    write_file(project.root() / "src" / "right.eco",
+        "function right() : int32\n"
+        "{\n"
+        "    return 22;\n"
+        "}\n");
+
+    write_file(project.root() / "src" / "main.eco",
+        "echo left() + right();\n");
+
+    const fs::path cache = project.root() / "cache";
+    const std::string args = "build -o out --build-dir " + quoted(cache);
+
+    const auto partition_names = [&]() {
+        std::vector<std::string> names;
+        const fs::path scratch = cache / "app" / "scratch";
+        std::error_code ec;
+
+        if (!fs::is_directory(scratch, ec)) {
+            return names;
+        }
+
+        for (const auto &entry : fs::directory_iterator(scratch, ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.size() > 4 && name.compare(0, 2, "p.") == 0 && entry.path().extension() == ".o") {
+                names.push_back(name);
+            }
+        }
+
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+
+    const ProcessResult first = project.echoc(args);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+
+    const ProcessResult ran = EchoTests::run_binary(project.root() / "out");
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("42") != std::string::npos);
+
+    const std::vector<std::string> before = partition_names();
+    REQUIRE(before.size() >= 2);
+
+    write_file(project.root() / "src" / "left.eco",
+        "function left() : int32\n"
+        "{\n"
+        "    return 21;\n"
+        "}\n"
+        "\n"
+        "function unused() : int32\n"
+        "{\n"
+        "    return 0;\n"
+        "}\n");
+
+    const ProcessResult second = project.echoc(args);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+
+    const ProcessResult ran_again = EchoTests::run_binary(project.root() / "out");
+    REQUIRE(ran_again.exit_code == 0);
+    REQUIRE(ran_again.output.find("43") != std::string::npos);
+
+    const std::vector<std::string> after = partition_names();
+    REQUIRE(after.size() >= 2);
+
+    bool reused = false;
+    for (const std::string &name : before) {
+        if (std::find(after.begin(), after.end(), name) != after.end()) {
+            reused = true;
+            break;
+        }
+    }
+
+    REQUIRE(reused);
+
+    bool replaced = false;
+    for (const std::string &name : after) {
+        if (std::find(before.begin(), before.end(), name) == before.end()) {
+            replaced = true;
+            break;
+        }
+    }
+
+    REQUIRE(replaced);
+}
+
+TEST_CASE("an entry unit's partition keys are stable across identical rebuilds", "[cache][partition]")
+{
+    ScopedProject project("entry_partition_stable");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+
+    write_file(project.root() / "src" / "left.eco",
+        "function left() : int32\n"
+        "{\n"
+        "    array<int32> $a;\n"
+        "    $a[] = 20;\n"
+        "    $a[] = 1;\n"
+        "    return $a[0] + $a[1];\n"
+        "}\n");
+
+    write_file(project.root() / "src" / "right.eco",
+        "function right() : string\n"
+        "{\n"
+        "    return \"ok\";\n"
+        "}\n");
+
+    write_file(project.root() / "src" / "main.eco",
+        "echo left();\n"
+        "echo right();\n");
+
+    const fs::path cache = project.root() / "cache";
+    const std::string args = "build -o out --build-dir " + quoted(cache);
+
+    const auto partition_names = [&]() {
+        std::vector<std::string> names;
+        const fs::path scratch = cache / "app" / "scratch";
+        std::error_code ec;
+
+        if (!fs::is_directory(scratch, ec)) {
+            return names;
+        }
+
+        for (const auto &entry : fs::directory_iterator(scratch, ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.size() > 4 && name.compare(0, 2, "p.") == 0 && entry.path().extension() == ".o") {
+                names.push_back(name);
+            }
+        }
+
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+
+    const ProcessResult first = project.echoc(args);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+
+    const std::vector<std::string> before = partition_names();
+    REQUIRE(before.size() >= 2);
+
+    const ProcessResult second = project.echoc(args);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+
+    REQUIRE(partition_names() == before);
+}
+#endif

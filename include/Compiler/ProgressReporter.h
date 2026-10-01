@@ -7,6 +7,8 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -67,8 +69,9 @@ namespace Compiler
         const char *failed;
         const char *skipped;
 
-        // advanced one frame per redraw, and a redraw only happens when something changed - so the motion
-        // is honest rather than a clock. See the class comment for why there is no thread
+        // advanced one frame per clock tick (~80 ms) when the interactive checklist is animating, and
+        // one frame per `tick()` when it is not. Pretty frames are the same byte width as each other;
+        // ascii frames are too - that is what lets the clock overwrite the glyph without rebuilding
         std::vector<const char *> spinner;
 
         static ProgressTheme pretty();
@@ -95,12 +98,11 @@ namespace Compiler
     //      0 falls back to 80 here rather than meaning "do not wrap": a line that cannot be measured must
     //      still be short.
     //
-    // **there is no spinner thread**, for three independent reasons. Compiler::run_tool hands fd 2 to a
-    // child and blocks while it writes, and there is no lock either side can take because the child is
-    // another process. MCJIT runs the user's program on this thread. And motion carrying no information
-    // is decoration. So the frame advances once per redraw and a redraw happens only when this object is
-    // told something changed - which also makes the frame index a function of the tick sequence, and the
-    // unit test byte-comparable.
+    // **the spinner is a thread. the compile is not.** `enable(..., true)` starts a clock that overwrites
+    // the glyph and elapsed field of the row already on screen. The constructor the unit tests use does
+    // not animate. Join before `fork` and before any other writer takes this stream: `suspend()` joins
+    // then erases, `close()` joins, `ClockPause` is what a `fork` that does not go through `suspend`
+    // owes. The rest is notes/progress.md.
     //
     // **process-wide, for Compiler::PhaseTimings' reason.** The rows are driven from the driver, which
     // could hold a reference - but the *obligation* is not the driver's: Compiler::run_tool hands its
@@ -108,24 +110,41 @@ namespace Compiler
     // Threading a UI reference into HostTool and into the renderer to discharge it would put this
     // question in three objects; a singleton puts it in one and costs those two call sites a line each.
     //
-    // **it owns no clock.** `commit` and `close` take milliseconds as a parameter and Compiler::ProgressStep
-    // holds the steady_clock, which is what lets a test hand this a literal 182 and compare bytes - and
-    // what keeps the drawing code from being a second reading of a time PhaseTimings already measures
+    // **`commit` and `close` still take milliseconds as a parameter.** Compiler::ProgressStep holds the
+    // steady_clock that becomes the committed number, which is what lets a test hand this a literal 182
+    // and compare bytes. The live field the clock paints is a different paint of the same start: `open`
+    // records it so the thread can write digits without asking ProgressStep, which lives on the driver.
     class ProgressReporter
     {
     public:
 
         // disabled: every entry point below is a no-op. The default state, so a caller that never enables
         // one is not a caller that has to branch - the shape PhaseTimings::_enabled already takes
-        ProgressReporter() = default;
+        ProgressReporter();
 
         // the testable constructor. An ostringstream and a forced TerminalCapabilities is the whole of
-        // what a byte-for-byte assertion needs, which is why there is no --progress=always
+        // what a byte-for-byte assertion needs, which is why there is no --progress=always. Does not
+        // animate: the frame index stays a function of the tick sequence
         ProgressReporter(std::ostream &out, TerminalCapabilities capabilities);
+
+        ~ProgressReporter();
+
+        ProgressReporter(const ProgressReporter &) = delete;
+        ProgressReporter &operator=(const ProgressReporter &) = delete;
+        ProgressReporter(ProgressReporter &&) = delete;
+        ProgressReporter &operator=(ProgressReporter &&) = delete;
 
         static ProgressReporter &instance();
 
-        void enable(std::ostream &out, TerminalCapabilities capabilities);
+        // `animate` is what lets a live row start the clock thread that redraws the glyph and elapsed
+        // field. `clock_fd` is the descriptor that thread `write`s; -1 means stderr. A test that wants
+        // the clock without touching the process's stderr passes the write end of a pipe
+        void enable(
+            std::ostream &out,
+            TerminalCapabilities capabilities,
+            bool animate = false,
+            int clock_fd = -1
+        );
 
         bool enabled() const { return _out != nullptr; }
 
@@ -159,8 +178,32 @@ namespace Compiler
         // erases the live row and leaves the cursor at column 0. **Sticky and idempotent**: there is no
         // resume() to forget, because the next open/tick/commit/row redraws from the state this object
         // still holds. So a caller about to write into this stream owes exactly one call and no pairing,
-        // and a forgotten one costs one garbled line rather than a lost row
+        // and a forgotten one costs one garbled line rather than a lost row.
+        //
+        // joins the clock first, then erases. thread-safe with itself: C compiles may each call this
+        // from a worker whose driver already erased the row, and two no-ops racing on `_drawn` is a
+        // data race
         void suspend();
+
+        // joins the clock and leaves the row on screen. What a caller about to `fork` owes when it
+        // does not go through `suspend()`: the child does not inherit a live thread. Restarts the
+        // clock in the parent destructor. The child `_exit`s, so it does not run this
+        class ClockPause
+        {
+        public:
+
+            explicit ClockPause(ProgressReporter &reporter);
+            ~ClockPause();
+
+            ClockPause(const ClockPause &) = delete;
+            ClockPause &operator=(const ClockPause &) = delete;
+            ClockPause(ClockPause &&) = delete;
+            ClockPause &operator=(ClockPause &&) = delete;
+
+        private:
+
+            ProgressReporter &_reporter;
+        };
 
         // the closing line, and the end of the checklist. After this the stream belongs to whatever comes
         // next - under `run` that is the program itself.
@@ -179,6 +222,10 @@ namespace Compiler
         TerminalCapabilities _capabilities;
         ProgressTheme _theme = ProgressTheme::ascii();
 
+        // only `suspend()` takes this, because that is the one entry a worker calls. Drawing the
+        // live row stays on the driver
+        std::mutex _suspend;
+
         // what the live row says, kept so suspend() can be undone by the next write with no caller
         // co-operation. No phase means nothing is live
         std::optional<ProgressPhase> _live_phase;
@@ -190,8 +237,31 @@ namespace Compiler
         // and the next write there is a row to redraw and nothing drawn
         bool _drawn = false;
 
+        bool _animate = false;
+        std::chrono::steady_clock::time_point _live_started;
+
+        // thread, cached line, glyph/ms offsets, fd. Incomplete here so this header does not pull
+        // <thread> into every translation unit that only wants to tick a row
+        struct Clock;
+        std::unique_ptr<Clock> _clock;
+
+        // glyph and elapsed offsets in `text`, so the clock overwrites slots `render_row` already
+        // knows rather than recovering them with `find` and a tail length
+        struct RenderedRow
+        {
+            std::string text;
+            size_t glyph_offset = 0;
+            size_t glyph_bytes = 0;
+            size_t ms_offset = 0;
+        };
+
+        void halt_spinner();
+        void continue_spinner();
+        std::unique_lock<std::mutex> lock_clock();
+        void write_live_row();
+
         // one row, already truncated to fit. The single place a column width is spelled
-        std::string render_row(
+        RenderedRow render_row(
             ProgressPhase phase,
             const std::string &subject,
             const std::string &detail,
@@ -203,8 +273,6 @@ namespace Compiler
         // not routed through the colour gate**: these are cursor movement rather than SGR, so they are an
         // `interactive` question and `--color=never` on a terminal must not turn them off
         void erase_live_row();
-
-        void draw_live_row();
     };
 
     // times a row for as long as it is in scope, so an early return cannot lose it. Deliberately the same

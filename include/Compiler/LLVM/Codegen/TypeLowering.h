@@ -6,6 +6,7 @@
 #include "AST/ASTValueType.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
+#include "Compiler/LLVM/Codegen/CodegenValue.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 
 #include <llvm/IR/DerivedTypes.h>
@@ -93,15 +94,11 @@ namespace Compiler::LLVM
         ReturnAbi return_abi_of(
             const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
-        // **write an aggregate into storage one leaf field at a time, never as a whole-struct store.**
-        // the granularity is the point: a `store %Foo %v, ptr %slot` of an already-assembled value is
-        // something SROA folds back into the insertvalue chain it came from, restoring the first-class
-        // aggregate this ABI exists to remove
-        void store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type);
-
         // **hand this function's answer back**, sret or first-class. one owner so a LUT body and
-        // gen_return do not each re-derive the store. the value is already coerced
-        void emit_returned_value(llvm::Value *value);
+        // gen_return do not each re-derive the store. the value is already coerced. a large
+        // aggregate is memcpy into sret, a small SSA one is stored fieldwise, and a constructor's
+        // `$this` that *is* sret stores nothing
+        void emit_returned_value(const CodegenValue &value);
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property
@@ -172,12 +169,12 @@ namespace Compiler::LLVM
         // here rather than in ExprCodegen because three subsystems need it - the expression arm for
         // `== null` and `??`, the statement arm for `guard` - and this is the file that already owns what
         // shape a ValueType has, right beside coerce_value and the wrapper it mints below
-        llvm::Value *gen_has_value(llvm::Value *value, const AST::ValueType &type);
+        llvm::Value *gen_has_value(const CodegenValue &value, const AST::ValueType &type);
 
         // the payload of a nullable that is known present - the counterpart of gen_has_value, and only
         // ever emitted on a path that one has guarded. an address-like nullable *is* its payload, so this
         // is the identity there; a wrapped one gives up its value field
-        llvm::Value *gen_unwrapped(llvm::Value *value, const AST::ValueType &type);
+        CodegenValue gen_unwrapped(const CodegenValue &value, const AST::ValueType &type);
 
         // **the empty value of a nullable** - the third of the set, and here for the reason the two above
         // are: `null` itself and a `?->` that short-circuited both have to produce one, and they produced
@@ -188,7 +185,7 @@ namespace Compiler::LLVM
         // `Constant::getNullValue` covers both shapes at once: a null pointer for an address-like nullable,
         // and an all-zero `{ i1 __has, T }` for a wrapped one, the two agreeing because
         // AST::k_optional_has_index is field 0 and false is zero
-        llvm::Value *gen_absent(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
+        CodegenValue gen_absent(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
 
         // the shape a `T?` takes when `T` has no spare null value of its own: `{ i1 __has, T }`. asked only
         // for a type AST::ValueType::is_wrapped_optional() answers true for - a nullable primitive, struct,
@@ -267,9 +264,21 @@ namespace Compiler::LLVM
         // `from` may be unknown - BinaryExprNode::result_type() answers unknown whenever
         // its operands differ - in which case the value's own llvm type stands in for it and
         // `to` supplies the signedness
-        llvm::Value *coerce_value(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const Compiler::LLVM::CmpUnit &cmp_unit);
+        CodegenValue coerce_value(const CodegenValue &value, const AST::ValueType &from, const AST::ValueType &to, const Compiler::LLVM::CmpUnit &cmp_unit);
 
     private:
+        // SSA conversion table. `coerce_value` is the public seam and the wrap/unwrap owner;
+        // this is the instruction half, asked only of a scalar that is not a tagged optional
+        llvm::Value *coerce_ssa(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const Compiler::LLVM::CmpUnit &cmp_unit);
+        llvm::Value *has_value_ssa(llvm::Value *value, const AST::ValueType &type);
+        llvm::Value *unwrapped_ssa(llvm::Value *value, const AST::ValueType &type);
+        // **write an aggregate into storage one leaf field at a time, never as a whole-struct store.**
+        // the granularity is the point: a `store %Foo %v, ptr %slot` of an already-assembled value is
+        // something SROA folds back into the insertvalue chain it came from, restoring the first-class
+        // aggregate this ABI exists to remove. large aggregates never reach here: they arrive as
+        // CodegenValue::aggregate and memcpy into sret
+        void store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type);
+
         // wraps an already-lowered payload in its heap block and mints the class's typeinfo global
         // idempotent - a second call over a structure that already has a box does nothing
         //

@@ -18,8 +18,10 @@ namespace Parser
     // **two shapes, one function.** the declaration is not this function's to read: Parser::parse_varexpr
     // owns the type, the name, the `=` and the registration, and hands the binding in. the statement
     // form has none - Parser::parse_scope calls with a null binding. what is left is everything from
-    // the `guard` keyword to the else arm's closing brace, which is where the cursor sits on entry
-    // and just past on return.
+    // the `guard` keyword through the else arm's closing brace. a trailing `;` after that `}` is
+    // accepted here rather than required, so both callers (parse_varexpr, parse_scope) share one
+    // terminator rule. an omitted else still requires and consumes its `;` here, because that form
+    // has no brace to end on
     //
     // the binding, when there is one, is registered by **name only** (AST::ScopeNode::declare_variable),
     // because its initializer runs once inside the branch that found a value rather than as a statement

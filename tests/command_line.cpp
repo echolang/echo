@@ -593,9 +593,10 @@ TEST_CASE("printing the IR merges the program but never enters the cache key", "
     REQUIRE(optimized.whole_program);
     REQUIRE(optimized.optimize_is_whole_program());
 
-    // the JIT holds one module and emits no object, so there is never an artifact to store or reuse
-    REQUIRE(resolved({ "run", "a.eco" }).whole_program);
+    // `run` is a cached build plus exec, so a plain run is not a merge. `--print ir` still is
+    REQUIRE_FALSE(resolved({ "run", "a.eco" }).whole_program);
     REQUIRE_FALSE(resolved({ "run", "a.eco" }).optimize_is_whole_program());
+    REQUIRE(resolved({ "run", "--print", "ir", "a.eco" }).whole_program);
 
     const DriverOptions plain = resolved({ "build", "-o", "x", "a.eco" });
 
