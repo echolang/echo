@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace AST
 {
@@ -145,6 +146,11 @@ namespace AST
         // below put the declaration in the child list as well, so the initializer was emitted twice - once
         // as an ordinary statement and once by the guard - and the second retain leaked
         void declare_variable(VarDeclNode &vardecl);
+
+        // VarDecl children and GuardNode bindings, in child order. a guard binding is
+        // declare_variable only, so clone and codegen ask this rather than the child
+        // list or `_declared_variables` (hash order)
+        std::vector<VarDeclNode *> named_declarations() const;
 
         // registers the name **and** appends the declaration as a statement, which is what an ordinary
         // `T $x = ...;` wants

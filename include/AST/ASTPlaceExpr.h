@@ -14,6 +14,7 @@
 namespace AST
 {
     class VarDeclNode;
+    class FunctionDeclNode;
 
     // **what storage does this expression have?** the one taxonomy behind every question the compiler
     // asks about an expression's address
@@ -406,6 +407,12 @@ namespace AST
     // and statement-form `T?` hoists `$__guardN`. seat_receiver_local borrows vs copies
     // on this answer
     bool place_outlives_statement(ExprNode *expr);
+
+    // **would this return hand the caller an address that dies with the call?**
+    // AddrOf of callee-frame value storage is yes. a T& local walks init_expr so
+    // `return $t` and `return $t->field` follow the binding; `&$t` names the slot.
+    // a ptr load copies bits and is not. the VarDeclNode is the root the diagnostic names
+    VarDeclNode *names_callee_frame_storage(ExprNode *expr, FunctionDeclNode *function);
 
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers
     // already look, but owned by AST::source_token_of ([ASTSourceToken.h]) - which answers the same

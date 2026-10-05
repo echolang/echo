@@ -1,0 +1,27 @@
+// a T& local holds the address it was bound to. returning it is the same question as
+// returning the initializer, so bind-then-return of a forwarded borrow compiles and
+// writes through the caller's storage
+
+struct Store
+{
+    int32 $v;
+
+    function at() : int32&
+    {
+        return $this->v;
+    }
+
+    function first() : int32&
+    {
+        int32& $t = $this->at();
+        $t = $t + 1;
+        return $t;
+    }
+}
+
+Store $s = Store(6);
+int32& $slot = $s->first();
+echo $s->v;
+$slot = 42;
+echo $s->v;
+echo $slot;

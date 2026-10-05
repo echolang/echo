@@ -1,0 +1,55 @@
+// a later local initialized from a guard binding in a generic method. the closure is
+// how visu instantiated pick; the file-scope call covers instantiation without one
+
+struct Pass
+{
+    int32 $n;
+}
+
+class Prog
+{
+    Pass? $pass;
+
+    constructor(Pass? $pass)
+    {
+        $this->pass = $pass;
+    }
+}
+
+class Lane<P>
+{
+    Prog? $plain;
+    Prog? $parallax;
+
+    constructor(Prog? $plain, Prog? $parallax)
+    {
+        $this->plain = $plain;
+        $this->parallax = $parallax;
+    }
+
+    function pick(bool $wantParallax) : Pass?
+    {
+        Prog $program = guard $this->plain else { return null; }
+        Prog $other = guard $this->parallax else { return null; }
+        Pass? $chosen = $program->pass;
+        if ($wantParallax) {
+            $chosen = $other->pass;
+        }
+        return $chosen;
+    }
+
+    function run() : void
+    {
+        Lane<P> $lane = $this;
+        function<void()> $go = function() : void {
+            Pass? $got = $lane->pick(false);
+            echo $got != null;
+        };
+        $go();
+    }
+}
+
+Lane<int32> $lane = Lane<int32>(Prog(Pass(7)), Prog(Pass(9)));
+$lane->run();
+echo $lane->pick(false) != null;
+echo $lane->pick(true) != null;

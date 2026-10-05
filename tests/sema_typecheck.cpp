@@ -280,6 +280,84 @@ TEST_CASE("a T& parameter still returns as a borrow", "[sema][pointer]")
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
+TEST_CASE("returning a T& local bound to a by-value local is rejected", "[sema][pointer]")
+{
+    // inheritance walks the initializer, so this is the same dangle as `return $x`
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function bad(int $x) : int& {\n"
+        "    int& $r = $x;\n"
+        "    return $r;\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot return the address of local '$x'"));
+}
+
+TEST_CASE("returning a T& local bound to a forwarded borrow is allowed", "[sema][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box {\n"
+        "    int32 $v;\n"
+        "    function at() : int32& { return $this->v; }\n"
+        "    function first() : int32& {\n"
+        "        int32& $t = $this->at();\n"
+        "        return $t;\n"
+        "    }\n"
+        "}\n"
+        "Box $b = Box(1);\n"
+        "int32& $r = $b->first();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("returning a field through a T& local bound to a forwarded borrow is allowed", "[sema][pointer]")
+{
+    // AddrOf of `$t->v` is a projection through the local, so the T& forwards the receiver
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box {\n"
+        "    int32 $v;\n"
+        "    function first() : int32& {\n"
+        "        Box& $t = $this;\n"
+        "        return $t->v;\n"
+        "    }\n"
+        "}\n"
+        "Box $b = Box(1);\n"
+        "int32& $r = $b->first();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("returning a field through a T& local bound to a by-value local is rejected", "[sema][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box { int32 $v; }\n"
+        "function bad(Box $b) : int32& {\n"
+        "    Box& $t = $b;\n"
+        "    return $t->v;\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot return the address of local '$b'"));
+}
+
+TEST_CASE("returning a ptr field of a guarded class handle is allowed", "[sema][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Body {\n"
+        "    ptr<int32> $raw;\n"
+        "    constructor(ptr<int32> $raw) { $this->raw:$ = $raw; }\n"
+        "}\n"
+        "function skip(Body? $ignore) : ptr<int32> {\n"
+        "    Body $body = guard $ignore else { return null; }\n"
+        "    return $body->raw;\n"
+        "}\n"
+        "int32 $n = 1;\n"
+        "Body $b = Body(&$n);\n"
+        "ptr<int32> $p = skip($b);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
 // the four below are regression guards for crashes. each aborted or segfaulted the compiler
 // before, with no location and nothing the user could act on - the assertions here are as much
 // "this terminates and reports" as they are about the wording

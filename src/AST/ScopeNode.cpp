@@ -3,6 +3,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/AttributeNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/GuardNode.h"
 #include "Debugging.h"
 
 const std::string AST::ScopeNode::node_description()
@@ -32,6 +33,23 @@ const std::string AST::ScopeNode::node_description_inner()
 void AST::ScopeNode::declare_variable(VarDeclNode &vardecl)
 {
     _declared_variables[vardecl.token_varname.value()] = &vardecl;
+}
+
+std::vector<AST::VarDeclNode *> AST::ScopeNode::named_declarations() const
+{
+    std::vector<VarDeclNode *> out;
+
+    for (const auto &ref : children) {
+        if (ref.has_type<VarDeclNode>()) {
+            out.push_back(ref.get_ptr<VarDeclNode>());
+        } else if (ref.has_type<GuardNode>()) {
+            if (VarDeclNode *decl = ref.get_ptr<GuardNode>()->decl) {
+                out.push_back(decl);
+            }
+        }
+    }
+
+    return out;
 }
 
 void AST::ScopeNode::add_vardecl(VarDeclNode &vardecl)

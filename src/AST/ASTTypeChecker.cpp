@@ -682,29 +682,16 @@ void TypeChecker::visitReturn(ReturnNode &node)
             }
         }
 
-        // the storage a local names is gone before the caller can read it, so handing back its
-        // address is always wrong. a parameter whose type is already an address holds the
-        // caller's storage and outlives the call. a by-value parameter is a callee-frame
-        // local: auto-borrow of `return $x` from `: T&` plants AddrOf, and that slot dies
-        // with the call. file scope's destination is int32, so this arm does not run there
+        // returning the address of callee-frame storage is always wrong.
+        // AST::names_callee_frame_storage owns the walk; file scope is int32 so this
+        // arm does not run there
         if (declared.is_pointer() && node.expr->result_type().is_pointer()
             && _current_function != nullptr) {
-            VarDeclNode *root = place_root_of(node.expr);
-            if (root != nullptr) {
-                bool caller_storage = false;
-                for (auto *arg : _current_function->args) {
-                    if (arg == root && arg->has_type() && arg->type().is_pointer()) {
-                        caller_storage = true;
-                        break;
-                    }
-                }
-
-                if (!caller_storage) {
-                    _collector.collect_issue<Issue::GenericError>(
-                        code_ref_for(node.token_return.value()),
-                        fmt::format("cannot return the address of local '{}' - its storage ends with the call",
-                            root->name_full()));
-                }
+            if (VarDeclNode *root = names_callee_frame_storage(node.expr, _current_function)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_return.value()),
+                    fmt::format("cannot return the address of local '{}' - its storage ends with the call",
+                        root->name_full()));
             }
         }
     }

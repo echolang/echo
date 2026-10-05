@@ -1,0 +1,26 @@
+// loading a ptr field copies bits stored in the object. the local is a class handle,
+// so nothing callee-frame is returned. the same shape as libbullet skipOf
+
+class Body
+{
+    ptr<int32> $raw;
+
+    constructor(ptr<int32> $raw)
+    {
+        $this->raw:$ = $raw;
+    }
+}
+
+function skipOf(Body? $ignore) : ptr<int32>
+{
+    Body $body = guard $ignore else { return null; }
+    return $body->raw;
+}
+
+int32 $n = 7;
+Body $b = Body(&$n);
+ptr<int32> $p = skipOf($b);
+echo $p;
+
+ptr<int32> $absent = skipOf(null);
+echo $absent:$ == null;

@@ -689,18 +689,12 @@ Node *ScopeNode::clone(CloneContext &cc) const
         c->token_brace.emplace(token_brace.value());
     }
 
-    // the declarations **first**, ahead of the statements that read them. a read reaches its declaration
-    // through cc.rebind, and rebind answers with the *original* for anything the map does not hold yet -
-    // so cloning in child order alone, a declaration that sits after a statement reading it leaves that
-    // read bound to the *template's* declaration. that is storage in a function nobody wrote, and it
-    // fails silently: nothing downstream can tell a legitimate outer-scope reference from this
-    //
-    // this is what makes a declaration's position in the child list mean nothing here. cc.child answers
-    // with the clone it already made, so the loop below reuses these rather than cloning them twice
-    for (const auto &ref : children) {
-        if (ref.has_type<VarDeclNode>()) {
-            cc.child(ref.get_ptr<VarDeclNode>());
-        }
+    // names first, so a later read rebinds onto the clone rather than the template.
+    // child order, guards included: hash order can clone `$y = $x` before the guard `$x`,
+    // and a non-child-first pass clones a guard that captures `$tx` before `$tx`.
+    // cc.child memoizes, so the loop below reuses these
+    for (VarDeclNode *decl : named_declarations()) {
+        cc.child(decl);
     }
 
     for (const auto &ref : children) {

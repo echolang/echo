@@ -1,6 +1,7 @@
 #include "AST/ASTPlaceExpr.h"
 
 #include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/MatchExprNode.h"
 #include "AST/MemberAccessNode.h"
@@ -11,6 +12,7 @@
 #include "AST/VarRefNode.h"
 
 #include <cassert>
+#include <unordered_set>
 
 namespace AST
 {
@@ -144,6 +146,115 @@ bool place_outlives_statement(ExprNode *expr)
     auto *var_ref = static_cast<VarRefNode *>(anchor);
 
     return var_ref->is_var();
+}
+
+namespace
+{
+
+bool is_pointer_typed_parameter(const VarDeclNode *decl, const FunctionDeclNode *function)
+{
+    if (decl == nullptr || function == nullptr) {
+        return false;
+    }
+
+    for (auto *arg : function->args) {
+        if (arg == decl && arg->has_type() && arg->type().is_pointer()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// T& / const T& local: non-nullable pointer, not a parameter. ptr<T> copies bits
+bool is_borrow_local(const VarDeclNode *decl, const FunctionDeclNode *function)
+{
+    if (decl == nullptr || !decl->has_type()) {
+        return false;
+    }
+
+    if (is_pointer_typed_parameter(decl, function)) {
+        return false;
+    }
+
+    const ValueType type = decl->type();
+    return type.is_pointer() && !type.is_nullable();
+}
+
+VarDeclNode *names_callee_frame_storage_walk(
+    ExprNode *expr,
+    FunctionDeclNode *function,
+    std::unordered_set<const VarDeclNode *> &visited
+)
+{
+    expr = strip_implicit_casts(expr);
+
+    if (expr == nullptr) {
+        return nullptr;
+    }
+
+    if (expr->get_node_type() == NodeType::n_expr_addrof) {
+        ExprNode *operand = strip_implicit_casts(static_cast<AddrOfExprNode *>(expr)->operand);
+
+        if (operand == nullptr) {
+            return nullptr;
+        }
+
+        // the address arrived through a pointer the compiler does not own
+        if (is_unaccounted_storage(*operand)) {
+            return nullptr;
+        }
+
+        VarDeclNode *root = place_root_of(operand);
+
+        if (root == nullptr) {
+            return nullptr;
+        }
+
+        if (is_pointer_typed_parameter(root, function)) {
+            return nullptr;
+        }
+
+        // `&$t` names the T& slot (callee-frame). `$t->field` is the address the local
+        // was bound to, so a projection walks the initializer
+        if (is_borrow_local(root, function)
+            && operand->get_node_type() != NodeType::n_varref) {
+            if (!visited.insert(root).second) {
+                return root;
+            }
+
+            return names_callee_frame_storage_walk(root->init_expr, function, visited);
+        }
+
+        return root;
+    }
+
+    if (expr->get_node_type() == NodeType::n_varref) {
+        VarDeclNode *root = place_root_of(expr);
+
+        if (is_borrow_local(root, function)) {
+            if (!visited.insert(root).second) {
+                return root;
+            }
+
+            return names_callee_frame_storage_walk(root->init_expr, function, visited);
+        }
+    }
+
+    // a load of pointer bits copies an address; it is not callee-frame storage
+    return nullptr;
+}
+
+}
+
+VarDeclNode *names_callee_frame_storage(ExprNode *expr, FunctionDeclNode *function)
+{
+    if (expr == nullptr || function == nullptr) {
+        return nullptr;
+    }
+
+    std::unordered_set<const VarDeclNode *> visited;
+    return names_callee_frame_storage_walk(expr, function, visited);
 }
 
 };  // namespace AST

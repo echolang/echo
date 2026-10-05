@@ -255,10 +255,8 @@ void drop_unused_declarations(llvm::Module &module)
 
 void keep_odr_from_dce(llvm::Module &module)
 {
-    // GlobalDCE drops unreferenced `linkonce_odr`. the calls that keep these
-    // bodies alive live in other partitions, so `llvm.compiler.used` names them
-    // without changing linkage. `ld -r` then sees one `linkonce_odr` definition
-    // in `__shared` and declarations in the file objects
+    // GlobalDCE drops unreferenced `linkonce_odr`. pin them in `llvm.compiler.used`
+    // so a this-module copy constructor whose only calls sit in another file survives
     llvm::SmallVector<llvm::GlobalValue *, 8> keep;
 
     auto consider = [&](llvm::GlobalValue &global) {
@@ -552,10 +550,7 @@ std::string Compiler::LLVM::materialize_partition(
             return should_define(global, needed, home_of, part.file, part.shared);
         });
 
-    if (part.shared) {
-        keep_odr_from_dce(*clone);
-    }
-
+    keep_odr_from_dce(*clone);
     keep_module_flags_only(*clone);
     drop_unused_declarations(*clone);
     canonicalize_unnamed_locals(*clone);

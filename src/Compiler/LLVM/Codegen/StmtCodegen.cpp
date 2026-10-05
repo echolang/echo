@@ -77,8 +77,8 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
     // and scope entry is the right height for it because it is the block a loop re-enters - a `Foo $x;`
     // inside one is re-cleared each turn
     //
-    // direct children only, for that same reason. a declaration nested in an `if` arm or a loop body
-    // belongs to that scope's sweep, and clearing it from here would clear it once instead of per turn
+    // named_declarations, not only VarDecl children: a guard binding is declare_variable only.
+    // nested scopes seat their own
 
     // the block's own debug scope, opened before the slots below because that is where their variables
     // are declared - two locals of one name in sibling blocks resolve apart only if each is recorded
@@ -86,9 +86,11 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
     // the answer here records for the matching pop
     const bool debug_block = _ctx.debug_info->push_lexical_block(node);
 
-    for (auto &child : node.children) {
-        if (child.has_type<AST::VarDeclNode>()) {
-            ensure_var_slot(*child.get_ptr<AST::VarDeclNode>());
+    // child order: `_declared_variables` is hash order and would move `%acc` relative to `%i`.
+    // ensure_var_slot is idempotent; gen_guard seats node.decl again
+    for (AST::VarDeclNode *decl : node.named_declarations()) {
+        if (decl != nullptr) {
+            ensure_var_slot(*decl);
         }
     }
 

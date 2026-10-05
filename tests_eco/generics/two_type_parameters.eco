@@ -97,17 +97,17 @@ struct pair_buffer<A, B> : contract::iterable<B>
         unsafe { return &$this->vs:$[$i]; }
     }
 
-    // a borrow **forwarded from another call**, which nothing else in the corpus does - the shape a
-    // cursor over a composed container needs for `current()`
-    //
-    // forwarded *directly*, and that spelling is the whole point of the method. binding it first -
-    // `B& $b = $this->at(0); return $b;` - is refused with "cannot return the address of local '$b'":
-    // the borrow local is a slot holding an address, and its storage ends with the call, so returning
-    // the local reads as returning that slot rather than what it names. binding is fine, and
-    // bind-then-return is not
+    // forwarded borrow, both spellings: the call itself, and bind-then-return of a T& local.
+    // the shape a cursor's `current()` needs
     function first() : B&
     {
         return $this->at(0);
+    }
+
+    function bound() : B&
+    {
+        B& $b = $this->at(0);
+        return $b;
     }
 
     function iterate() : pair_cursor<A, B>
@@ -190,7 +190,7 @@ struct holder
     // hands back a `B&`: bound to a `B&` it stays the address, so writing through it reaches the
     // buffer, and read in a value position AST::read_reaches_storage puts a deref over it and the
     // value is copied out. this used to be one spelling, the read being refused outright
-    int32& $slot = $p->first();
+    int32& $slot = $p->bound();
     echo $slot;
 
     echo $p->first();

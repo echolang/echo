@@ -1,0 +1,20 @@
+// a T& local forwards the address it was bound to, including a projection through it.
+// `return $t->v` is the same question as `return $this->v` when `$t` is `$this`
+
+struct Store
+{
+    int32 $v;
+
+    function through() : int32&
+    {
+        Store& $t = $this;
+        return $t->v;
+    }
+}
+
+Store $s = Store(6);
+int32& $slot = $s->through();
+echo $s->v;
+$slot = 42;
+echo $s->v;
+echo $slot;

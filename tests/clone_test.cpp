@@ -5,6 +5,7 @@
 #include <AST/ScopeNode.h>
 #include <AST/ASTPlaceExpr.h>
 #include <AST/AssignNode.h>
+#include <AST/GuardNode.h>
 #include <AST/MemberAccessNode.h>
 #include <AST/ReturnNode.h>
 #include <AST/TemporaryBindExprNode.h>
@@ -318,6 +319,88 @@ TEST_CASE("A declaration cloned after a reference to it still rebinds", "[clone]
         if (ref.has_type<VarDeclNode>()) clones_of_decl++;
     }
     REQUIRE(clones_of_decl == 1);
+}
+
+TEST_CASE("A later local initialized from a guard binding rebinds onto the clone", "[clone]")
+{
+    // a guard binding is not a child. cloning only VarDecl children left `$y = $x`
+    // pointing at the template's `$x`
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function take(int32? $n) : int32 {\n"
+        "    int32 $x = guard $n else { return 0; }\n"
+        "    int32 $y = $x;\n"
+        "    return $y;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+    FunctionDeclNode *fn = find_func(module, "take");
+    REQUIRE(fn != nullptr);
+    REQUIRE(fn->body->children.size() >= 2);
+    REQUIRE(fn->body->children[0].has_type<GuardNode>());
+
+    auto *guard = fn->body->children[0].get_ptr<GuardNode>();
+    REQUIRE(guard->decl != nullptr);
+
+    REQUIRE(fn->body->children[1].has_type<VarDeclNode>());
+    auto *later = fn->body->children[1].get_ptr<VarDeclNode>();
+    REQUIRE(place_root_of(later->init_expr) == guard->decl);
+
+    TypeSubstitution empty_subst;
+    CloneContext cc(module.nodes, empty_subst, bundle->collector.type_registry);
+
+    auto *clone = static_cast<FunctionDeclNode *>(fn->clone(cc));
+
+    REQUIRE(clone->body->children[0].has_type<GuardNode>());
+    auto *cloned_guard = clone->body->children[0].get_ptr<GuardNode>();
+    REQUIRE(cloned_guard->decl != nullptr);
+    REQUIRE(cloned_guard->decl != guard->decl);
+
+    REQUIRE(clone->body->children[1].has_type<VarDeclNode>());
+    auto *cloned_later = clone->body->children[1].get_ptr<VarDeclNode>();
+    REQUIRE(place_root_of(cloned_later->init_expr) == cloned_guard->decl);
+}
+
+TEST_CASE("A guard whose initializer reads an earlier local rebinds onto the clone", "[clone]")
+{
+    // the other order: a guard initializer that reads `$tx`. cloning non-child names
+    // first cloned `$h` before `$tx` (stdlib produce/spawn)
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function take(int32? $n) : int32 {\n"
+        "    int32? $tx = $n;\n"
+        "    int32 $h = guard $tx else { return 0; }\n"
+        "    return $h;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+    FunctionDeclNode *fn = find_func(module, "take");
+    REQUIRE(fn != nullptr);
+    REQUIRE(fn->body->children.size() >= 2);
+
+    REQUIRE(fn->body->children[0].has_type<VarDeclNode>());
+    auto *tx = fn->body->children[0].get_ptr<VarDeclNode>();
+
+    REQUIRE(fn->body->children[1].has_type<GuardNode>());
+    auto *guard = fn->body->children[1].get_ptr<GuardNode>();
+    REQUIRE(guard->decl != nullptr);
+    REQUIRE(place_root_of(guard->decl->init_expr) == tx);
+
+    TypeSubstitution empty_subst;
+    CloneContext cc(module.nodes, empty_subst, bundle->collector.type_registry);
+
+    auto *clone = static_cast<FunctionDeclNode *>(fn->clone(cc));
+
+    REQUIRE(clone->body->children[0].has_type<VarDeclNode>());
+    auto *cloned_tx = clone->body->children[0].get_ptr<VarDeclNode>();
+    REQUIRE(cloned_tx != tx);
+
+    REQUIRE(clone->body->children[1].has_type<GuardNode>());
+    auto *cloned_guard = clone->body->children[1].get_ptr<GuardNode>();
+    REQUIRE(cloned_guard->decl != nullptr);
+    REQUIRE(place_root_of(cloned_guard->decl->init_expr) == cloned_tx);
 }
 
 TEST_CASE("A synthesized constructor reads $this through a node per use", "[clone]")
