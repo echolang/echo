@@ -379,12 +379,9 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
         AST::ExprNode *left = AST::optional_operand_of(
             lhs_expr, payload.context.module, op_node->token_literal);
 
-        const AST::ValueType left_type = left->result_type();
-
-        // a left side that can never be absent makes the right side dead code. an undetermined type
-        // waits for a later round as ever, and AST::TypeChecker is the one that asks again
-        const std::string refusal =
-            AST::certainly_present_refusal(AST::OptionalForm::t_null_coalesce, left_type);
+        // the form tests the value a read of the left yields, same peel `?->` uses
+        const std::string refusal = AST::certainly_present_refusal(
+            AST::OptionalForm::t_null_coalesce, AST::value_result_type(*left));
 
         if (!refusal.empty()) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -1196,12 +1193,11 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // the weak upgrade, through the one function all three forms share
             base = AST::optional_operand_of(base, payload.context.module, optional_token);
 
-            const AST::ValueType base_type = base->result_type();
-
-            // a base that is always there makes the `?` a lie - the short circuit could never fire, and
-            // the reader is being told to expect an absence that cannot happen. `->` is what they want
-            const std::string refusal =
-                AST::certainly_present_refusal(AST::OptionalForm::t_optional_chain, base_type);
+            // the form tests the value a read of the base yields. a `T?&` foreach binding is the
+            // optional, so `?->` is legal; judging the borrow slot itself would refuse it as always
+            // present
+            const std::string refusal = AST::certainly_present_refusal(
+                AST::OptionalForm::t_optional_chain, AST::value_result_type(*base));
 
             if (!refusal.empty()) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -1210,7 +1206,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             }
 
             auto &marker = payload.context.emplace_node<AST::ChainBaseNode>(
-                AST::unwrapped_type_of(base_type), optional_token);
+                AST::chain_base_type_of(*base), optional_token);
 
             optional_links.push_back({base, &marker, optional_token});
 

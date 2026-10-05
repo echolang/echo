@@ -48,6 +48,7 @@ namespace
 
         ValueType structure;
         ValueType handle;
+        ValueType nullable_handle;
         ValueType weak_handle;
     };
 
@@ -65,6 +66,7 @@ namespace
 
         out.structure = EchoTests::type_named(module, "P")->value_type();
         out.handle = EchoTests::type_named(module, "C")->value_type();
+        out.nullable_handle = ValueType::make_nullable(out.handle);
         out.weak_handle = ValueType::make_weak(out.handle);
         out.wrapped_i32 = out.bundle->collector.type_registry.get_or_create_optional(out.i32);
 
@@ -114,7 +116,8 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         // **presence.** one rule for all four shapes TypeLowering::gen_has_value answers for
         { Token::Type::t_logical_eq, value(s.wrapped_i32), written_null(), true, "a wrapped optional" },
         { Token::Type::t_logical_neq, value(s.address), written_null(), true, "an address" },
-        { Token::Type::t_logical_eq, value(s.handle), written_null(), true, "a class handle" },
+        { Token::Type::t_logical_eq, value(s.nullable_handle), written_null(), true, "a nullable class handle" },
+        { Token::Type::t_logical_eq, value(s.handle), written_null(), false, "a non-nullable class looks for a declaration" },
         { Token::Type::t_logical_eq, value(s.weak_handle), written_null(), true, "a weak handle" },
         { Token::Type::t_logical_eq, written_null(), value(s.weak_handle), true, "either way round" },
         { Token::Type::t_open_angle, value(s.handle), written_null(), false, "and only the two identity comparisons" },
@@ -250,6 +253,13 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         REQUIRE(op != nullptr);
         REQUIRE(binary_has_builtin_meaning(op, row.lhs, row.rhs) == row.expected);
     }
+
+    const Operator *eq = op_for(registry, Token::Type::t_logical_eq);
+    REQUIRE(eq != nullptr);
+    const auto class_null = binary_operand_refusal(eq, value(s.handle), written_null());
+    REQUIRE(class_null.has_value());
+    REQUIRE(*class_null == "cannot compare 'C' against null - it is always there, write 'C?' if it may be absent");
+    REQUIRE_FALSE(binary_operand_refusal(eq, value(s.nullable_handle), written_null()).has_value());
 }
 
 TEST_CASE("a vector operator the language owns is refused in one place", "[AST][operators][simd]")

@@ -1,0 +1,6 @@
+// `?->` over a value that is always there stays a located refusal
+class Node { int32 $v; }
+
+array<Node> $a = [];
+$a[] = Node(4);
+echo $a[0]?->v;

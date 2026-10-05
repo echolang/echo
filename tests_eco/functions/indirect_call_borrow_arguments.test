@@ -1,0 +1,12 @@
+--- OUT --->
+1
+6
+0
+5
+1
+5
+3
+39
+1
+--- RAST --->
+CHECK: addrof<int32&>(varref<int32>(var($x)))

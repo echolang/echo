@@ -63,6 +63,11 @@ namespace AST
         // between the two halves of this
         Result settle(FunctionCallExprNode &call, NodeCollection &nodes, const CodeRef &at, bool report);
 
+        // an indirect call has no declaration to choose. pending while the callee is undetermined,
+        // then bind destination-typed arguments, wait for determined arguments, coerce, t_settled.
+        // a determined non-callable is t_failed: TypeChecker words it, and OwnershipPass can walk
+        Result settle(IndirectCallExprNode &call, NodeCollection &nodes, const CodeRef &at);
+
         // fit each argument to its parameter: an implicit address-of where the parameter is a borrow
         // and the argument a place, an implicit cast for whatever is left over. public because the
         // finalizing sweep coerces a call it is about to give up on, so the tree it hands the later
@@ -71,6 +76,10 @@ namespace AST
         // **not idempotent** - it wraps, and wrapping twice is wrong. AST::CallSettlement is what
         // guarantees it runs once
         void coerce_arguments(FunctionCallExprNode &call, NodeCollection &nodes);
+
+        // the same wrap against the callee's signature. CallResolver is the only writer of
+        // IndirectCallExprNode::settlement
+        void coerce_arguments(IndirectCallExprNode &call, NodeCollection &nodes);
 
     private:
         Collector &_collector;
@@ -90,6 +99,10 @@ namespace AST
             const CodeRef &at,
             bool report);
     };
+
+    // true when any argument still names a type parameter, so finalize stays silent: the call
+    // sits in an un-instantiated template, and the clone reports with concrete types
+    bool arguments_mention_a_type_param(const std::vector<ExprNode *> &arguments);
 };
 
 #endif

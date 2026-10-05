@@ -1,0 +1,39 @@
+// an indirect call coerces through CallResolver, the same wrap a direct call gets.
+// without it `$pred($x)` at `const int32&` reached codegen as a load, and LLVM refused
+function<bool(const int32&)> $pred = function(const int32& $n) : bool { return $n > 4; };
+int32 $x = 5;
+echo $pred($x);
+
+function<void(int32&)> $bump = function(int32& $n) : void { $n = $n + 1; };
+$bump($x);
+echo $x;
+$bump(3);
+echo $pred(3);
+
+function<int32(const string&)> $len = function(const string& $s) : int32 {
+    return $s->size() as int32;
+};
+string $s = 'hello';
+echo $len($s);
+
+struct Holder
+{
+    function<bool(const int32&)> $pred;
+}
+
+Holder $b = Holder(function(const int32& $n) : bool { return $n > 4; });
+echo $b->pred($x);
+
+function<int32(string::view)> $view_len = function(string::view $v) : int32 {
+    return $v->size as int32;
+};
+echo $view_len($s);
+
+function<int32(const array<int32>&)> $count = function(const array<int32>& $a) : int32 {
+    return $a->len as int32;
+};
+echo $count([1, 2, 3]);
+
+int32 $before = mem::live_allocations();
+echo $len('a-fairly-long-heap-string-for-the-test!');
+echo mem::live_allocations() == $before;

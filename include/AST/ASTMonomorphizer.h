@@ -13,6 +13,7 @@
 #include "AST/ASTInterpolationLowering.h"
 #include "AST/ASTConstFolding.h"
 #include "AST/ASTOwnership.h"
+#include "AST/ASTRegion.h"
 #include "AST/ASTValueType.h"
 
 #include <optional>
@@ -150,7 +151,9 @@ namespace AST
 
         // AST::live_calls, so a new transient node is one arm in ASTRegion.cpp rather than a second
         // skip list here
-        std::vector<std::pair<FunctionCallExprNode *, Module *>> snapshot_calls();
+        LiveCalls snapshot_calls() {
+            return live_calls(_bundle);
+        }
 
         // the round's phases. names are the contract; the order is handwritten and load-bearing
         bool bind(size_t round);

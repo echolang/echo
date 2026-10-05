@@ -1,0 +1,9 @@
+--- OUT --->
+4
+7
+-1
+5
+--- RAST --->
+CHECK: chainbase<Node>
+CHECK: ma<int32>(chainbase<Node>->v)
+CHECK-NOT: chainbase<[unknown]>

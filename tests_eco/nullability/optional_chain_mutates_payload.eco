@@ -1,0 +1,109 @@
+// a mutating call through `?->` on a tagged optional writes the payload in place.
+// spilling `__value` into a fresh chain.slot mutated a copy: silent for a 4-byte
+// payload, a use-after-free for an owning one. a payload over k_memory_aggregate_bytes
+// (64) used to work by accident because gen_unwrapped already handed the place's address
+struct Counter
+{
+    int32 $n;
+
+    function bump() : int32
+    {
+        $this->n = $this->n + 1;
+        return $this->n;
+    }
+}
+
+struct Big
+{
+    int32 $n;
+    int32[19] $pad;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    function bump() : int32
+    {
+        $this->n = $this->n + 1;
+        return $this->n;
+    }
+}
+
+struct Holder
+{
+    Counter? $inner;
+}
+
+struct Wrap
+{
+    Counter? $inner;
+}
+
+struct Root
+{
+    Counter $inner;
+}
+
+class Box
+{
+    Counter $inner;
+}
+
+struct Named
+{
+    string $s;
+
+    function grow() : void
+    {
+        $this->s = "{$this->s}-grown-by-one-step";
+    }
+}
+
+function make() : Counter?
+{
+    return Counter(7);
+}
+
+Counter? $c = Counter(0);
+$c?->bump();
+$c?->bump();
+echo $c?->n ?? -1;
+
+Big? $big = Big(0);
+$big?->bump();
+$big?->bump();
+echo $big?->n ?? -1;
+
+Holder $h = Holder(Counter(0));
+$h->inner?->bump();
+$h->inner?->bump();
+echo $h->inner?->n ?? -1;
+
+Holder $w = Holder(Counter(0));
+ptr<Holder> $p = &$w;
+$p->inner?->bump();
+echo $p->inner?->n ?? -1;
+
+Root? $s = Root(Counter(0));
+$s?->inner->bump();
+echo $s?->inner->n ?? -1;
+
+Wrap? $nested = Wrap(Counter(0));
+$nested?->inner?->bump();
+echo $nested?->inner?->n ?? -1;
+
+Box? $k = Box(Counter(0));
+$k?->inner->bump();
+echo $k?->inner->n ?? -1;
+
+string $base = 'a-fairly-long-heap-string-for-the-test';
+int32 $before = mem::live_allocations();
+{
+    Named? $named = Named("{$base}!");
+    $named?->grow();
+    echo $named?->s ?? 'none';
+}
+echo mem::live_allocations() == $before;
+
+echo make()?->bump() ?? -1;

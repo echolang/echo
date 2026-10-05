@@ -972,17 +972,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
         AST::ExprNode *arg = node.arguments[i];
 
         arg->accept(*_ctx.visitor);
-        CodegenValue value = _ctx.pop_value();
-
-        // through the one conversion table, like every other destination. a direct call has its
-        // arguments coerced by AST::CallResolver, which walks the callee's *declaration* - an indirect
-        // call has no declaration, so its parameter types come off the signature and the fit happens here
-        if (i < signature.parameter_types.size()) {
-            value = _ctx.types->coerce_value(
-                value, arg->result_type(), signature.parameter_types[i], *_ctx.current_cmp_unit);
-        }
-
-        args.push_back(_ctx.materialize(value, "agg.arg"));
+        args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
     }
 
     llvm::FunctionType *fn_type = _ctx.types->get_llvm_function_type(
@@ -1930,26 +1920,28 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
 
 void ExprCodegen::gen_chain_base(AST::ChainBaseNode &node)
 {
-    if (_ctx.chain_base_slots.empty()) {
+    auto it = _ctx.chain_base_slots.find(&node);
+
+    if (it == _ctx.chain_base_slots.end()) {
         throw _ctx.error(fmt::format(
             "a chain base marker was lowered outside a '?->' chain {}", _ctx.function_context()));
     }
 
-    // the nearest enclosing chain's, which is the top: the marker is built by the parser inside exactly
-    // one chain's continuation, and a nested chain pushes and pops around its own
+    // the marker names its own place: a nested chain keys a different ChainBaseNode, so the
+    // enclosing slot cannot be read by accident
     //
     // a *load* for a scalar, because this is the value position - reaching the slot itself is
     // gen_lvalue's arm, which is what a method receiver and a write through the chain go through.
     // a large aggregate stays the slot: loading it is the SSA pathology
+    const LValue &place = it->second;
     llvm::Type *ty = _ctx.types->get_llvm_type(node.type, *_ctx.current_cmp_unit);
 
     if (aggregate_lives_in_memory(ty, _ctx.layout())) {
-        _ctx.push(CodegenValue::aggregate(
-            _ctx.chain_base_slots.back(), ty, Provenance::t_typed));
+        _ctx.push(CodegenValue::aggregate(place.address, ty, place.provenance));
         return;
     }
 
-    _ctx.push_scalar(_ctx.builder->CreateLoad(ty, _ctx.chain_base_slots.back(), "chain.base"));
+    _ctx.push(_ctx.lvalues->gen_load(place, "chain.base"));
 }
 
 void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
@@ -1957,6 +1949,7 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
 
     const AST::ValueType base_type = node.base->result_type();
+    const AST::ValueType value_ty = AST::value_result_type(*node.base, base_type);
     const AST::ValueType result = node.result_type();
     const bool has_value = !result.is_void();
 
@@ -1971,40 +1964,66 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
 
     // **evaluated once, before the branch.** the continuation reaches it through the marker rather than by
     // re-evaluating, which is what makes `$cache->find($k)?->name` call `find` exactly once
-    node.base->accept(*_ctx.visitor);
-    CodegenValue base_v = _ctx.pop_value();
-
     auto *reach_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.reach", function);
     auto *absent_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.absent", function);
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.done", function);
 
-    _ctx.builder->CreateCondBr(
-        _ctx.types->gen_has_value(base_v, base_type), reach_block, absent_block);
+    const AST::ValueType unwrapped_type = AST::chain_base_type_of(*node.base);
+    llvm::Value *has = nullptr;
+    LValue chain_place;
+
+    // a place-base wrapped optional already has storage: unwrap in place. spilling `__value`
+    // into a fresh slot made `$c?->bump()` mutate a copy - silent for a 4-byte payload, a
+    // use-after-free for an owning one. AST::is_place_expression is the question; do not re-derive
+    // storage_of
+    //
+    // the wrapped optional is the value a read of the base yields. a `T?&` foreach binding peels to
+    // that through value_result_type, and gen_place is the matching address
+    if (AST::is_place_expression(*node.base) && value_ty.is_wrapped_optional()) {
+        const LValue base_place = _ctx.lvalues->gen_place(*node.base);
+        llvm::Type *opt_llvm = _ctx.types->get_llvm_type(value_ty, *_ctx.current_cmp_unit);
+        has = _ctx.types->gen_has_value(
+            CodegenValue::aggregate(base_place.address, opt_llvm, base_place.provenance),
+            value_ty);
+        chain_place = _ctx.types->unwrapped_place(base_place, value_ty);
+    } else {
+        node.base->accept(*_ctx.visitor);
+        CodegenValue base_v = _ctx.pop_value();
+        has = _ctx.types->gen_has_value(base_v, base_type);
+
+        // spilled to a slot rather than kept as a value: the continuation may call a method, and a
+        // receiver is an address. a large payload is already an address, so that address *is* the
+        // slot - memcpying it into a fresh one would be a copy the chain does not owe
+        CodegenValue unwrapped = _ctx.types->gen_unwrapped(base_v, base_type);
+        llvm::Type *unwrapped_llvm = _ctx.types->get_llvm_type(
+            unwrapped_type, *_ctx.current_cmp_unit);
+
+        llvm::Value *slot = nullptr;
+
+        if (unwrapped.is_aggregate()) {
+            slot = unwrapped.value;
+        } else {
+            // **the slot is seated in the entry block, the store is not.** an alloca here would be an alloca per
+            // *evaluation*, so a `?->` in a loop body would grow the stack once per turn - and `run` defaults to
+            // --debug, where nothing folds it away. CodegenContext::entry_alloca is the one owner of that rule,
+            // shared with every local and every parameter, so no slot in the language is seated any other way
+            slot = _ctx.entry_alloca(unwrapped_llvm, "chain.slot");
+            _ctx.lvalues->gen_store(LValue{ slot, unwrapped_type }, unwrapped);
+        }
+
+        chain_place = LValue{ slot, unwrapped_type, Provenance::t_typed };
+    }
+
+    _ctx.builder->CreateCondBr(has, reach_block, absent_block);
 
     _ctx.set_insert_point(reach_block);
 
-    // spilled to a slot rather than kept as a value: the continuation may call a method, and a receiver
-    // is an address. a large payload is already an address, so that address *is* the slot - memcpying
-    // it into a fresh one would be a copy the chain does not owe
-    CodegenValue unwrapped = _ctx.types->gen_unwrapped(base_v, base_type);
-    const AST::ValueType unwrapped_type = AST::unwrapped_type_of(base_type);
-    llvm::Type *unwrapped_llvm = _ctx.types->get_llvm_type(
-        unwrapped_type, *_ctx.current_cmp_unit);
-
-    llvm::Value *slot = nullptr;
-
-    if (unwrapped.is_aggregate()) {
-        slot = unwrapped.value;
-    } else {
-        // **the slot is seated in the entry block, the store is not.** an alloca here would be an alloca per
-        // *evaluation*, so a `?->` in a loop body would grow the stack once per turn - and `run` defaults to
-        // --debug, where nothing folds it away. CodegenContext::entry_alloca is the one owner of that rule,
-        // shared with every local and every parameter, so no slot in the language is seated any other way
-        slot = _ctx.entry_alloca(unwrapped_llvm, "chain.slot");
-        _ctx.lvalues->gen_store(LValue{ slot, unwrapped_type }, unwrapped);
+    if (node.chain_base == nullptr) {
+        throw _ctx.error(fmt::format(
+            "a '?->' chain has no marker {}", _ctx.function_context()));
     }
 
-    _ctx.chain_base_slots.push_back(slot);
+    _ctx.chain_base_slots[node.chain_base] = chain_place;
     node.continuation->accept(*_ctx.visitor);
 
     const AST::ValueType reached_type = node.continuation->result_type();
@@ -2021,7 +2040,7 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
         }
     }
 
-    _ctx.chain_base_slots.pop_back();
+    _ctx.chain_base_slots.erase(node.chain_base);
 
     llvm::BasicBlock *reach_end = _ctx.builder->GetInsertBlock();
     _ctx.builder->CreateBr(done_block);

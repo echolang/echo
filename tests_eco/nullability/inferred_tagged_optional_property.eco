@@ -1,0 +1,28 @@
+// a local inferred from a tagged-optional property of a generic keeps the instance, not the
+// template's `T`. `Box<T>?` is an interned layout with no template, so contains_type_param has to
+// walk the payload or rederive_stale_variable_types skips `$q`
+struct Box<T>
+{
+    T $val;
+}
+
+struct Node<T>
+{
+    T $val;
+    Box<T>? $b;
+}
+
+class Holder<T>
+{
+    Box<T>? $b;
+}
+
+$m = Node<int32>(6, Box<int32>(3));
+$q = $m->b;
+Box<int32> $x = guard $q else { die('none'); }
+echo $x->val;
+
+Holder<int32> $h = Holder<int32>(Box<int32>(9));
+$r = $h->b;
+Box<int32> $y = guard $r else { die('none'); }
+echo $y->val;

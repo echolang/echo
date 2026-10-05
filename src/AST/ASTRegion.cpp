@@ -5,6 +5,7 @@
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTOps.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTValueType.h"
@@ -256,14 +257,13 @@ namespace
             RecursiveVisitor::visitFunctionCallExpr(node);
         }
 
-        // **an undetermined callee has no signature yet**, so there is nothing to fit arguments
-        // against. walking now would arrive a class handle as unknown and skip the retain, the
-        // same hole visitFunctionCallExpr waits on for an unsettled direct call. a determined
-        // non-callable is TypeChecker's; waiting for it would stall a body that already has
-        // its diagnostic
+        // **an uncoerced indirect call has no AddrOf yet**, so walking now would arrive a place
+        // as a value and skip the retain the borrow wrap would have minted. CallResolver is the
+        // owner: pending while the callee is undetermined, t_failed for a determined non-callable
+        // (TypeChecker words it), t_settled once the arguments are fitted
         void visit_indirect_call_expr(IndirectCallExprNode &node) override
         {
-            if (is_undetermined_type(node.callee_type())) {
+            if (!call_is_terminal(node.settlement)) {
                 pending = true;
                 return;
             }
@@ -320,6 +320,25 @@ namespace
             RecursiveVisitor::visit_guard(node);
         }
 
+        // **a marker that still disagrees with the base is never answerable.** OperatorRewriter
+        // retypes it after walking the base, but ForeachLowering and MatchResolution type the
+        // base later in the same round. a walk now would resolve the continuation against
+        // `chainbase<[unknown]>` once, permanently
+        void visit_optional_chain(OptionalChainExprNode &node) override
+        {
+            if (node.chain_base != nullptr && node.base != nullptr) {
+                const ValueType expected = chain_base_type_of(*node.base);
+
+                if (is_undetermined_type(node.chain_base->type)
+                    || !(expected == node.chain_base->type)) {
+                    pending = true;
+                    return;
+                }
+            }
+
+            RecursiveVisitor::visit_optional_chain(node);
+        }
+
         // an undecided `&name` has no type yet. a walk now would decide the ownership of a
         // value about to be typed by a destination, and this pass walks a body exactly once
         void visit_function_ref_expr(FunctionRefExprNode &node) override
@@ -368,11 +387,12 @@ namespace
 
     // the worklist. skip generic bodies and t_owned bodies whose pending calls are gone; collect
     // only calls bind or settle still owe; a const if is condition plus taken arm
-    class LiveCalls : public RecursiveVisitor
+    class CollectLiveCalls : public RecursiveVisitor
     {
     public:
         Module *module = nullptr;
         std::vector<std::pair<FunctionCallExprNode *, Module *>> calls;
+        std::vector<std::pair<IndirectCallExprNode *, Module *>> indirect_calls;
 
         void visitFunctionDecl(FunctionDeclNode &node) override
         {
@@ -384,11 +404,11 @@ namespace
                 return;
             }
 
-            const size_t before = calls.size();
+            const size_t before = calls.size() + indirect_calls.size();
             RecursiveVisitor::visitFunctionDecl(node);
 
             if (node.region_state == RegionState::t_owned) {
-                node.live_calls_pending = calls.size() > before;
+                node.live_calls_pending = (calls.size() + indirect_calls.size()) > before;
             }
         }
 
@@ -405,12 +425,22 @@ namespace
             RecursiveVisitor::visitFunctionCallExpr(node);
         }
 
+        void visit_indirect_call_expr(IndirectCallExprNode &node) override
+        {
+            if (!call_is_terminal(node.settlement)) {
+                indirect_calls.push_back({&node, module});
+            }
+
+            RecursiveVisitor::visit_indirect_call_expr(node);
+        }
+
         void visit_const_if(ConstIfNode &node) override
         {
             value_edge(node.condition);
             statement_edge(taken_const_if_arm(node));
         }
     };
+
 }
 
 bool function_is_fixpoint_open(const FunctionDeclNode &fn)
@@ -459,16 +489,16 @@ void accept_semantic_roots(Module &module, Visitor &visitor)
     accept_semantic_roots(module, visitor, ignored);
 }
 
-std::vector<std::pair<FunctionCallExprNode *, Module *>> live_calls(Bundle &bundle)
+LiveCalls live_calls(Bundle &bundle)
 {
-    LiveCalls walk;
+    CollectLiveCalls walk;
 
     for (auto &module_ptr : bundle.modules) {
         walk.module = module_ptr.get();
         accept_semantic_roots(*module_ptr, walk);
     }
 
-    return walk.calls;
+    return LiveCalls{ std::move(walk.calls), std::move(walk.indirect_calls) };
 }
 
 };

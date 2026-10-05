@@ -1,0 +1,5 @@
+mode: build
+
+--- OUT --->
+a-fairly-long-heap-string-for-the-test!-grown-by-one-step
+1

@@ -13,6 +13,7 @@ namespace AST
     class File;
     class FunctionCallExprNode;
     class FunctionDeclNode;
+    class IndirectCallExprNode;
     class Module;
     class ScopeNode;
     class Visitor;
@@ -64,8 +65,15 @@ namespace AST
     // every call the live tree still contains that bind or settle still owes. skips generic bodies
     // and t_owned bodies whose live_calls_pending is clear; walks a const if's condition so it can
     // fold, and only the taken arm once it has. a different visitor from body_is_pending: that one
-    // stops at the first unfinished node, this one has to see every live call
-    std::vector<std::pair<FunctionCallExprNode *, Module *>> live_calls(Bundle &bundle);
+    // stops at the first unfinished node, this one has to see every live call. direct and indirect
+    // from one walk, so a t_owned body that still has an uncoerced `$pred($x)` is not skipped
+    struct LiveCalls
+    {
+        std::vector<std::pair<FunctionCallExprNode *, Module *>> calls;
+        std::vector<std::pair<IndirectCallExprNode *, Module *>> indirect_calls;
+    };
+
+    LiveCalls live_calls(Bundle &bundle);
 
     // a template is never walked; a t_owned body is done for every lowering that mints
     bool function_is_fixpoint_open(const FunctionDeclNode &fn);

@@ -1131,6 +1131,26 @@ llvm::Value *TypeLowering::unwrapped_ssa(llvm::Value *value, const AST::ValueTyp
     return value;
 }
 
+LValue TypeLowering::unwrapped_place(const LValue &optional, const AST::ValueType &optional_ty)
+{
+    if (!optional_ty.is_wrapped_optional()) {
+        return LValue{
+            optional.address,
+            AST::unwrapped_type_of(optional_ty),
+            optional.provenance
+        };
+    }
+
+    llvm::Type *opt_llvm = get_llvm_type(optional_ty, *_ctx.current_cmp_unit);
+    llvm::Value *payload_addr = _ctx.builder->CreateStructGEP(
+        opt_llvm, optional.address, AST::k_optional_value_index, "opt.val.ptr");
+    return LValue{
+        payload_addr,
+        AST::unwrapped_type_of(optional_ty),
+        optional.provenance
+    };
+}
+
 CodegenValue TypeLowering::gen_unwrapped(const CodegenValue &value, const AST::ValueType &type)
 {
     if (!type.is_wrapped_optional()) {
@@ -1141,17 +1161,17 @@ CodegenValue TypeLowering::gen_unwrapped(const CodegenValue &value, const AST::V
         return CodegenValue::scalar(unwrapped_ssa(value.scalar(), type));
     }
 
+    const LValue payload = unwrapped_place(
+        LValue{ value.value, type, value.provenance }, type);
     llvm::Type *payload_type = llvm::cast<llvm::StructType>(value.aggregate_type)
         ->getElementType(AST::k_optional_value_index);
-    llvm::Value *payload_addr = _ctx.builder->CreateStructGEP(
-        value.aggregate_type, value.value, AST::k_optional_value_index, "opt.val.ptr");
 
     if (aggregate_lives_in_memory(payload_type, _ctx.layout())) {
-        return CodegenValue::aggregate(payload_addr, payload_type, value.provenance);
+        return CodegenValue::aggregate(payload.address, payload_type, payload.provenance);
     }
 
     return CodegenValue::scalar(
-        _ctx.builder->CreateLoad(payload_type, payload_addr, "opt.val"));
+        _ctx.builder->CreateLoad(payload_type, payload.address, "opt.val"));
 }
 
 CodegenValue TypeLowering::gen_absent(

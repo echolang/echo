@@ -1,0 +1,6 @@
+// a class without `?` is a promise there is an object, same as a struct is a promise there is a
+// value. `$f == null` used to compile and was always false
+class Foo { int32 $x; }
+
+Foo $f = Foo(1);
+echo $f == null;

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "AST/ASTValueType.h"
+
 #include <llvm/Support/ErrorHandling.h>
 
 namespace llvm
@@ -33,6 +35,25 @@ namespace Compiler::LLVM
         t_typed,
         t_raw,
         t_overlapping,
+    };
+
+    // an addressable location: where the storage lives, and what it holds
+    //
+    // the type has to travel with the address. under llvm's opaque pointers every pointer is
+    // the same `ptr`, so an llvm::Value alone says nothing about what it points at - and every
+    // load needs its element type spelled out
+    struct LValue
+    {
+        llvm::Value *address = nullptr;
+
+        // st(E) in the model: the type of the thing *at* `address`, before any auto-deref
+        // for `ptr<int32> $p` this is ptr<int32>, and the address is $p's own slot
+        AST::ValueType storage_type;
+
+        // **it travels with the address for storage_type's reason.** by the time a load is emitted
+        // the expression is long gone, and "was there a raw pointer anywhere on the way here" is not
+        // a question an `llvm::Value *` can be asked
+        Provenance provenance = Provenance::t_typed;
     };
 
     // an r-value: either an SSA scalar, or a large aggregate that lives at an address.

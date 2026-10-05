@@ -1,0 +1,12 @@
+// over a class handle `?` is a flag, so `$q = $m->next` already retyped before this ticket. pins
+// the flag arm so a later walk cannot treat class `Node<T>?` as a layout
+class Node<T>
+{
+    T $val;
+    Node<T>? $next;
+}
+
+$m = Node<int32>(1, Node<int32>(2, null));
+$q = $m->next;
+Node<int32> $n = guard $q else { die('none'); }
+echo $n->val;

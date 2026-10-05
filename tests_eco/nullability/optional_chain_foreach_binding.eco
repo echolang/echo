@@ -1,0 +1,14 @@
+// a `foreach` binding is typed by ForeachLowering after OperatorRewriter in the same round, so the
+// marker has to stay pending until the next round retypes it
+class Sq
+{
+    int32 $s;
+}
+
+array<Sq?> $xs = [];
+$xs[] = Sq(4);
+$xs[] = null;
+
+foreach ($xs as $s) {
+    echo $s?->s ?? -1;
+}

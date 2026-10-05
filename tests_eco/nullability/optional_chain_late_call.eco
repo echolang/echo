@@ -1,0 +1,30 @@
+// a call-rooted `?->`: the base is a method or a generic that has not settled at parse time
+class Node
+{
+    int32 $v;
+}
+
+class List
+{
+    array<Node?> $items = [];
+
+    function get(usize $i) : Node?
+    {
+        return $this->items[$i];
+    }
+}
+
+class Bundle
+{
+    int32 $p;
+}
+
+function cheapest<T>() : T?
+{
+    return null;
+}
+
+List $a = List();
+$a->items[] = Node(4);
+echo $a->get(0)?->v ?? -1;
+echo cheapest<Bundle>()?->p ?? -1;

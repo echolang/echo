@@ -76,6 +76,11 @@ namespace AST
     // was handed rather than off the rewritten one is an easy and silent mistake
     ValueType unwrapped_type_of(const ValueType &type);
 
+    // the type a `?->` marker holds. the chain tests the *value* a read of the base yields, so a
+    // `const T?&` foreach binding unwraps to `T` rather than keeping the borrow. parser, OperatorRewriter
+    // and body_is_pending share this so the continuation cannot resolve against `chainbase<const T?&>`
+    ValueType chain_base_type_of(const ExprNode &base);
+
     // **the mirror of the above is not here**: `T` -> `T?` is AST::TypeRegistry::get_or_create_optional,
     // and it takes a registry rather than being a static on ValueType because a tagged optional is a *type*
     // and a type has to be interned. That function is the one place the two spellings of a nullable are

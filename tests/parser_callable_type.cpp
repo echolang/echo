@@ -302,7 +302,7 @@ TEST_CASE("an indirect call's argument types are checked against the signature",
         "echo $f($p);\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "Argument 1 of 'function<int32(int32)>' expects type 'int32' but got 'P'"));
+    REQUIRE(has_issue_containing(*bundle, "cannot implicitly convert 'P' to 'int32'"));
 }
 
 TEST_CASE("a callable stored in a property is callable", "[callable]")

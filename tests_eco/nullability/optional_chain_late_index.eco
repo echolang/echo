@@ -1,0 +1,18 @@
+// `?->` over a base the parser cannot type at the `?->` itself: an index, a map lookup, a nested
+// chain. OperatorRewriter retypes the marker after the base walk, before the continuation
+class Node
+{
+    int32 $v;
+    Node? $next;
+}
+
+array<Node?> $a = [];
+$a[] = Node(4, Node(7, null));
+$a[] = null;
+echo $a[0]?->v ?? -1;
+echo $a[0]?->next?->v ?? -1;
+echo $a[1]?->v ?? -1;
+
+map<string, Node?> $m = map<string, Node?>();
+$m['a'] = Node(5, null);
+echo $m['a']?->v ?? -1;

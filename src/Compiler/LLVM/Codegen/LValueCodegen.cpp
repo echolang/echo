@@ -154,17 +154,19 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
 
         case AST::NodeType::n_expr_chain_base:
         {
-            // the slot a `?->` spilled its unwrapped base into, before running the continuation this
+            // the place a `?->` seated its unwrapped base at, before running the continuation this
             // marker sits inside. so a method call in a chain gets an ordinary receiver address, and a
             // write through a chain has somewhere to write - both without the chain node knowing anything
-            // about member access
+            // about member access. keyed on the marker, and an LValue so a raw base stays raw
             auto &chain_base = static_cast<AST::ChainBaseNode &>(expr);
-            if (_ctx.chain_base_slots.empty()) {
+            auto it = _ctx.chain_base_slots.find(&chain_base);
+
+            if (it == _ctx.chain_base_slots.end()) {
                 throw _ctx.error(fmt::format(
                     "a chain base marker was addressed outside a '?->' chain {}", _ctx.function_context()));
             }
 
-            return LValue{ _ctx.chain_base_slots.back(), chain_base.type };
+            return it->second;
         }
 
         default:

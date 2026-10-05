@@ -1873,9 +1873,10 @@ namespace AST
     // - primitives and already-concrete types are returned unchanged
     ValueType substitute_type(const ValueType &type, const TypeSubstitution &subst, TypeRegistry &registry);
 
-    // true if the type is, or structurally contains, an unresolved type parameter - either directly
-    // or as an argument of a generic application. after monomorphization a concrete context should be
-    // free of these; anything left is a resolution bug rather than a legitimate type.
+    // true if the type is, or structurally contains, an unresolved type parameter - either directly,
+    // as an argument of a generic application, or as the payload of a tagged optional. after
+    // monomorphization a concrete context should be free of these; anything left is a resolution
+    // bug rather than a legitimate type.
     bool contains_type_param(const ValueType &type);
 
     // the same walk, asked about **one** declaration rather than about any of them: does this type

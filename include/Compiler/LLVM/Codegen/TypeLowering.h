@@ -176,6 +176,11 @@ namespace Compiler::LLVM
         // is the identity there; a wrapped one gives up its value field
         CodegenValue gen_unwrapped(const CodegenValue &value, const AST::ValueType &type);
 
+        // the payload of a nullable that is known present, as a place. gen_unwrapped loads a small
+        // payload; a `?->` continuation mutates through the original storage, so this GEPs `__value`
+        // and forwards provenance. an address-like nullable is the same address
+        LValue unwrapped_place(const LValue &optional, const AST::ValueType &optional_ty);
+
         // **the empty value of a nullable** - the third of the set, and here for the reason the two above
         // are: `null` itself and a `?->` that short-circuited both have to produce one, and they produced
         // two different values before this (an all-zero wrapper against a wrapper with an undef payload).

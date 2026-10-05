@@ -53,8 +53,8 @@ namespace AST
 
             // **a `?->` chain's unwrapped base is a place**, and it has to be: everything after the `?->`
             // is an ordinary member chain, and a method call in there needs a receiver with an address.
-            // the chain materialises the unwrapped value into a slot before running the continuation, so
-            // there genuinely is one - see ExprCodegen::gen_optional_chain
+            // a place-base wrapped optional GEPs into `__value`; a non-place base spills. either way
+            // the marker names storage - see ExprCodegen::gen_optional_chain
             //
             // it owns nothing, exactly like `$this`: the slot borrows the value the chain already holds,
             // so nothing here is retained and nothing is dropped

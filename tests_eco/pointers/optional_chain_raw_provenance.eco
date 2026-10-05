@@ -1,0 +1,21 @@
+// `$p->inner?->bump()` through a `ptr<W>` is a raw place. a typed `!tbaa` on the
+// payload access would be C's strict aliasing over a language that does not have it
+struct Counter
+{
+    int32 $n;
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+struct W
+{
+    Counter? $inner;
+}
+
+W $w = W(Counter(0));
+ptr<W> $p = &$w;
+$p->inner?->bump();
+echo 1;

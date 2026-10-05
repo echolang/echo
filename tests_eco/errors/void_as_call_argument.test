@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] void_as_call_argument.eco:12:6
+
+  'nothing()' produces no value
+
+  11 | 
+  12 | take(nothing());
+     :      ^^^^^^^
+  13 | 
+
+[error] void_as_call_argument.eco:15:4
+
+  'nothing()' produces no value
+
+  14 | function<void(int32)> $f = function(int32 $n) : void {};
+  15 | $f(nothing());
+     :    ^^^^^^^
+  16 | 
+
+2 errors, nothing was compiled.

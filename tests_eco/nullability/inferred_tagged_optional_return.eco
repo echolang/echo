@@ -1,0 +1,15 @@
+// a local inferred from a generic function that returns a tagged optional is the same walk as a
+// property: wrap(4) is Box<int32>?, so `$q` has to be too
+struct Box<T>
+{
+    T $val;
+}
+
+function wrap<T>(T $v) : Box<T>?
+{
+    return Box<T>($v);
+}
+
+$q = wrap(4);
+Box<int32> $x = guard $q else { die('none'); }
+echo $x->val;

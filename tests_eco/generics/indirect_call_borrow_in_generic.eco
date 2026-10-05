@@ -1,0 +1,34 @@
+// `$pred($x)` on a foreach binding, and `$f($this->first)` in a generic method: the callee
+// is a function value whose parameter is a borrow of the owner's type argument
+function find_first<T>(const array<T>& $xs, function<bool(const T&)> $pred) : T?
+{
+    foreach ($xs as $x) {
+        if ($pred($x)) {
+            return $x;
+        }
+    }
+
+    return null;
+}
+
+struct Pair<A, B>
+{
+    A $first;
+    B $second;
+
+    function map_first<C>(function<C(const A&)> $f) : C
+    {
+        return $f($this->first);
+    }
+}
+
+array<int32> $nums = [1, 5, 3];
+echo find_first($nums, function(const int32& $n) : bool { return $n > 4; }) ?? -1;
+
+array<string> $words = [];
+$words[] = 'aa';
+$words[] = 'hello';
+echo find_first($words, function(const string& $s) : bool { return $s->size() > 3; }) ?? 'none';
+
+Pair<int32, string> $p = Pair<int32, string>(7, 'x');
+echo $p->map_first(function(const int32& $n) : int32 { return $n + 1; });

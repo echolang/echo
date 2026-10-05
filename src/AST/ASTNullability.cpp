@@ -117,6 +117,11 @@ AST::ValueType AST::unwrapped_type_of(const AST::ValueType &type)
     return ValueType::make_non_nullable(type);
 }
 
+AST::ValueType AST::chain_base_type_of(const AST::ExprNode &base)
+{
+    return unwrapped_type_of(value_result_type(base));
+}
+
 bool AST::arrival_wraps_optional(const AST::ValueType &from, const AST::ValueType &to)
 {
     return to.is_wrapped_optional() && !from.is_nullable();

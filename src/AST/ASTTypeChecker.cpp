@@ -1073,8 +1073,9 @@ void TypeChecker::check_optional_operand(
     }
 
     // is_undetermined_type passes through inside the refusal itself, for the reason it does everywhere
-    // else in this file: a call that never resolved already has its own issue
-    const std::string refusal = certainly_present_refusal(form, operand->result_type());
+    // else in this file: a call that never resolved already has its own issue. the form tests the
+    // value a read yields, so a `T?&` binding is the optional
+    const std::string refusal = certainly_present_refusal(form, value_result_type(*operand));
 
     if (!refusal.empty()) {
         _collector.collect_issue<Issue::GenericError>(code_ref_for(at), refusal);
@@ -1128,7 +1129,8 @@ void TypeChecker::visit_optional_chain(OptionalChainExprNode &node)
 
     // the continuation is the original expression, the same standing TemporaryBind's body has.
     // `$a?->save();` is a void *statement*; if this chain is a value, rewrite_value_edge already
-    // asked about the chain (expression_produces_no_value peels it)
+    // asked about the chain (expression_produces_no_value peels it). a leftover `[unknown]` marker
+    // is codegen's ICE: this pass never throws
     value_edge(node.base);
     if (node.continuation != nullptr) {
         node.continuation->accept(*this);

@@ -274,14 +274,14 @@ namespace AST
             return true;
         }
 
-        // two class handles, or one against a written null - the only operators a class answers, and how
-        // two references are told apart. **ahead of the null arm below**, because a handle is an address
-        // whether or not its type is nullable: a non-nullable `Foo` compared against null is admitted
-        // here and is always false, which is a rule of its own and not this predicate's to change
+        // two class handles - the only operators a class answers, and how two references are told
+        // apart. a written null against a class that may be absent is the presence_test arm above;
+        // a non-nullable `Foo` against null has no builtin meaning, so the parser builds an operator
+        // call and AST::binary_operand_refusal is the sentence
         if (lhs.type.is_class() || rhs.type.is_class()) {
             return op->is_identity_comparison()
-                && (lhs.type.is_class() || lhs.is_null)
-                && (rhs.type.is_class() || rhs.is_null);
+                && lhs.type.is_class()
+                && rhs.type.is_class();
         }
 
         // **a written null against something that cannot be absent.** deliberately still *true* for a
@@ -500,10 +500,15 @@ namespace AST
             // *as* is ValueType::has_null_representation's. a kind added to either reaches this refusal
             // and binary_has_builtin_meaning's presence arm together, which is the whole point - one of
             // them claiming a lowering the other refuses is a comparison with two meanings
-            if (!destination_admits_null(other) && !other.has_null_representation()) {
+            //
+            // a non-nullable class has a spare null value (the handle) and still cannot be absent,
+            // so it joins the struct/enum sentence rather than slipping through on the representation
+            if (!destination_admits_null(other)
+                && (!other.has_null_representation() || other.is_class())) {
                 // an enum is on the struct's side of this: both are values with a layout and no spare
-                // null, so `T?` is the answer for either, where an address wants `:$`
-                return other.is_struct() || other.is_enum()
+                // null, so `T?` is the answer for either, where an address wants `:$`. a class is the
+                // same question about absence, even though the handle could encode one
+                return other.is_struct() || other.is_enum() || other.is_class()
                     ? fmt::format("cannot compare '{}' against null - it is always there, write "
                         "'{}?' if it may be absent",
                         other.get_type_desciption(), other.get_type_desciption())

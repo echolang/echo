@@ -1,0 +1,9 @@
+flags: --optimize none
+
+--- OUT --->
+1
+1
+--- IR --->
+CHECK: define i32 @main(
+CHECK-NOT: chain.slot
+CHECK: ret i32 0

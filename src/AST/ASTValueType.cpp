@@ -1091,6 +1091,13 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
         return false;
     }
 
+    // a tagged optional is a layout with no template, so the instantiation arm below cannot
+    // see it. `Box<T>?` is as unresolved as `Box<T>` and as `ptr<T>`: answering false here
+    // lets rederive_stale_variable_types skip `$q = $m->b` and TypeChecker stay silent too
+    if (type.is_wrapped_optional()) {
+        return contains_type_param(type.optional_payload(), param);
+    }
+
     // a generic application is unresolved if any of its arguments still is
     if (type.has_complex_type()) {
         ComplexType *ct = type.get_complex_type();

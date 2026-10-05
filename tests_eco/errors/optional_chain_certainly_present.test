@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] optional_chain_certainly_present.eco:6:11
+
+  '?->' needs a value that may be absent, and 'Node' always is one - write '->'
+
+  5 | $a[] = Node(4);
+  6 | echo $a[0]?->v;
+    :           ^^^
+  7 | 
+
+1 error, nothing was compiled.

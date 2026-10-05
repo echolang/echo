@@ -1,0 +1,4 @@
+// a const local still cannot satisfy an indirect `int32&` parameter
+function<void(int32&)> $bump = function(int32& $n) : void { $n = $n + 1; };
+const int32 $x = 5;
+$bump($x);

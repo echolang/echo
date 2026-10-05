@@ -1,0 +1,24 @@
+// a 4-byte place-base `?->` GEPs into `__value`. it must not spill a chain.slot
+// a `T?&` foreach binding is the same place: value_result_type peels the borrow, gen_place
+// addresses the optional, and the payload is borrowed rather than copied into a slot
+struct Counter
+{
+    int32 $n;
+
+    function bump() : int32
+    {
+        $this->n = $this->n + 1;
+        return $this->n;
+    }
+}
+
+Counter? $c = Counter(0);
+$c?->bump();
+echo $c?->n ?? -1;
+
+array<Counter?> $xs = array<Counter?>();
+$xs[] = Counter(0);
+foreach ($xs as &$s) {
+    $s?->bump();
+}
+echo $xs[0]?->n ?? -1;

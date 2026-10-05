@@ -640,6 +640,11 @@ namespace AST
     // operator [] has not attached) is a not-yet, the same standing parse_member_call gives
     // an undetermined receiver. TypeChecker owns arity, and the shape of a callee that
     // settles later. a determined non-callable is the parser's refusal
+    //
+    // **it has a CallSettlement.** there is no declaration to choose, so it starts at t_uncoerced
+    // and AST::CallResolver is the only writer: pending while the callee is undetermined, then the
+    // same bind / coerce a direct call gets against `signature().parameter_types`. a template body
+    // is never settled, so CloneContext::shallow leaves instances uncoerced
     class IndirectCallExprNode : public ExprNode
     {
     public:
@@ -649,6 +654,8 @@ namespace AST
         std::vector<ExprNode *> arguments;
 
         TokenReference token;
+
+        CallSettlement settlement = CallSettlement::t_uncoerced;
 
         IndirectCallExprNode(ExprNode *callee, std::vector<ExprNode *> arguments, TokenReference token) :
             callee(callee), arguments(std::move(arguments)), token(token) {};
@@ -906,8 +913,9 @@ namespace AST
     public:
         ECO_AST_NODE_TYPE(n_expr_chain_base);
 
-        // the non-null type of the chain's base. stored rather than derived, because by the time this is
-        // asked the base expression belongs to the enclosing chain node and this one has no edge to it
+        // the non-null *value* type of the chain's base. stored rather than derived, because by the time
+        // this is asked the base expression belongs to the enclosing chain node and this one has no edge
+        // to it. OperatorRewriter re-derives it every round from chain_base_type_of
         ValueType type;
 
         TokenReference token;

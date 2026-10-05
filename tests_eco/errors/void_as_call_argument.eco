@@ -1,0 +1,15 @@
+// a void argument at a user function, and at an indirect call of the same shape.
+// wrap_argument and residual_cast both skip it, so TypeChecker reports the call
+
+function nothing() : void
+{
+}
+
+function take(int32 $n) : void
+{
+}
+
+take(nothing());
+
+function<void(int32)> $f = function(int32 $n) : void {};
+$f(nothing());

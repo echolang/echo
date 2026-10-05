@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <ranges>
 
 namespace AST
 {
@@ -136,6 +137,52 @@ namespace AST
             return emit_declared_conversion(nodes, arg, conversion, expected, at);
         }
 
+        // the per-argument wrap: fit, a declared conversion, re-fit, then borrow. the residual
+        // TypeCastNode is a separate step so a receiver refused for const-ness can skip it
+        void wrap_argument(
+            ExprNode *&slot,
+            const ValueType &expected,
+            const TokenReference &at,
+            NodeCollection &nodes)
+        {
+            if (slot == nullptr || expression_produces_no_value(*slot)) {
+                return;
+            }
+
+            ArgumentFit fit = argument_fit(slot->result_type(), slot, expected);
+            ExprNode *converted = convert_if_wanted(nodes, slot, fit, expected, at);
+
+            if (converted != slot) {
+                fit = argument_fit(converted->result_type(), converted, expected);
+            }
+
+            slot = borrow_if_wanted(nodes, converted, fit);
+        }
+
+        void residual_cast(ExprNode *&slot, const ValueType &expected, NodeCollection &nodes)
+        {
+            if (slot == nullptr || expression_produces_no_value(*slot)) {
+                return;
+            }
+
+            const ValueType coerced = slot->result_type();
+
+            if (!is_implicitly_convertible(coerced, expected)
+                || arrival_wraps_optional(coerced, expected)) {
+                slot = &nodes.emplace_back<TypeCastNode>(expected, slot, true);
+            }
+        }
+
+        void coerce_argument(
+            ExprNode *&slot,
+            const ValueType &expected,
+            const TokenReference &at,
+            NodeCollection &nodes)
+        {
+            wrap_argument(slot, expected, at, nodes);
+            residual_cast(slot, expected, nodes);
+        }
+
         // **a written `null` argument takes the parameter's type**, which is the one thing about an
         // argument that has to be decided here rather than in the parser.
         //
@@ -177,21 +224,25 @@ namespace AST
         // an untyped literal decide what `T` is, and this is what then types it *at* whatever the
         // concrete arguments decided. so `pick(0, $n)` over a `usize $n` binds `usize` and the `0` is
         // written at it, rather than binding `int32` and truncating `$n`
+        template <typename ExpectedAt>
         bool bind_destination_typed_arguments(
-            FunctionCallExprNode &call, const CoreTypes &core, NodeCollection &nodes,
+            std::vector<ExprNode *> &arguments,
+            ExpectedAt expected_at,
+            size_t parameter_count,
+            const CoreTypes &core, NodeCollection &nodes,
             Collector &collector, const CodeRef &at)
         {
             bool waiting_on_a_literal = false;
 
-            for (size_t i = 0; i < call.arguments.size() && i < call.decl->args.size(); i++) {
-                if (call.arguments[i] == nullptr) {
+            for (size_t i = 0; i < arguments.size() && i < parameter_count; i++) {
+                if (arguments[i] == nullptr) {
                     continue;
                 }
 
-                const ValueType expected = call.decl->args[i]->type();
+                const ValueType expected = expected_at(i);
 
-                bind_null_to(call.arguments[i], expected);
-                bind_function_ref_to(call.arguments[i], expected, collector);
+                bind_null_to(arguments[i], expected);
+                bind_function_ref_to(arguments[i], expected, collector);
 
                 // **the one destination a shorthand cannot reach at parse time**, which is why it is
                 // here rather than only in the expression parser: a parameter's type sits on a
@@ -199,18 +250,18 @@ namespace AST
                 //
                 // nothing is returned into `waiting_on_a_literal`: an unbound shorthand answers `void`
                 // from result_type(), so arguments_are_determined below already holds the call for it
-                bind_shorthand_to(call.arguments[i], expected);
+                bind_shorthand_to(arguments[i], expected);
 
-                if (bind_array_literal_to(call.arguments[i], expected, core)) {
+                if (bind_array_literal_to(arguments[i], expected, core)) {
                     waiting_on_a_literal = true;
                 }
 
                 // asked only of a literal nobody has typed, so a round that runs again over a settled
                 // argument does nothing - and so an *explicit* cast the author wrote is never undone
-                if (is_untyped_literal(call.arguments[i])) {
+                if (is_untyped_literal(arguments[i])) {
                     const LiteralTyping typing =
-                        type_literal_at(call.arguments[i], value_type_of(expected), nodes);
-                    const CodeRef here = code_ref_at_literal(at, call.arguments[i]);
+                        type_literal_at(arguments[i], value_type_of(expected), nodes);
+                    const CodeRef here = code_ref_at_literal(at, arguments[i]);
 
                     report_literal_warning(collector, here, typing);
 
@@ -218,7 +269,7 @@ namespace AST
                         report_literal_refusal(collector, here, typing);
                     }
                     else {
-                        call.arguments[i] = typing.node;
+                        arguments[i] = typing.node;
                     }
                 }
             }
@@ -242,9 +293,9 @@ namespace AST
 
         // true when every argument's type is known, so a decision made about them is final rather
         // than premature
-        bool arguments_are_determined(const FunctionCallExprNode &call)
+        bool arguments_are_determined(const std::vector<ExprNode *> &arguments)
         {
-            for (auto *arg : call.arguments) {
+            for (auto *arg : arguments) {
                 // a hole left by a failed parse cannot be waited on - there is nothing coming that
                 // would give it a type, and the diagnostic for it was already reported where it was
                 // read
@@ -274,6 +325,42 @@ namespace AST
             }
 
             return true;
+        }
+
+        // bind destination-typed arguments, wait until they are determined, then coerce. shared
+        // by both settle overloads: an indirect call has no declaration, but the same last step
+        //
+        // after the generic gate, so a `T?` parameter is never what a null learns its shape from -
+        // the round that rewires `decl` to the instance is the first one with a concrete type to
+        // bind. an array literal also makes the call wait: what finally reaches the parameter is
+        // the declaration AST::OperatorRewriter hoists, not the literal itself
+        //
+        // coercing against a type that says nothing cannot tell "no conversion needed" from "no
+        // information": the borrow rule declines to wrap, and the residual cast fires for a
+        // mismatch that was never a mismatch. so wait instead
+        template <typename ExpectedAt, typename Coerce>
+        CallResolver::Result fit_arguments(
+            std::vector<ExprNode *> &arguments,
+            ExpectedAt expected_at,
+            size_t parameter_count,
+            Collector &collector,
+            NodeCollection &nodes,
+            const CodeRef &at,
+            Coerce coerce
+        )
+        {
+            if (!bind_destination_typed_arguments(
+                    arguments, expected_at, parameter_count,
+                    collector.core_types, nodes, collector, at)) {
+                return CallResolver::Result::t_pending;
+            }
+
+            if (!arguments_are_determined(arguments)) {
+                return CallResolver::Result::t_pending;
+            }
+
+            coerce();
+            return CallResolver::Result::t_settled;
         }
     }
 
@@ -655,7 +742,7 @@ namespace AST
         assert(call.decl != nullptr && "coercing a call that has no declaration");
 
         for (size_t i = 0; i < call.arguments.size() && i < call.decl->args.size(); i++) {
-            if (call.arguments[i] == nullptr) {
+            if (call.arguments[i] == nullptr || expression_produces_no_value(*call.arguments[i])) {
                 continue;
             }
 
@@ -692,64 +779,33 @@ namespace AST
                 continue;
             }
 
-            // a void-producing argument is rewrite_value_edge's. wrapping it in a cast would be
-            // "cannot convert 'void' to 'void&'" on top of "produces no value"
-            if (expression_produces_no_value(*argument)) {
+            wrap_argument(call.arguments[i], expected, call.token_function_name, nodes);
+
+            // **a receiver refused for its const-ness gets no residual cast.** `ptr<const Foo>` and
+            // `ptr<Foo>` are the same value, so there is nothing here for codegen to lower - the
+            // cast's only effect would be visitTypeCast reporting "cannot implicitly convert",
+            // drowning the located refusal AST::TypeChecker::check_receiver_const words about the
+            // same call
+            if (i == 0 && const_receiver_refused(*call.decl, call.arguments[i]->result_type())) {
                 continue;
             }
 
-            // the one fit rule, asked once and handed to both wrappers below rather than re-asked by
-            // each - it is the same question about the same pair, and asking it twice let the two
-            // answers differ in principle while costing a full member-function walk in practice
-            ArgumentFit fit = argument_fit(argument->result_type(), argument, expected);
+            residual_cast(call.arguments[i], expected, nodes);
+        }
 
-            // a value whose type declared a conversion to what this parameter wants. before the borrow
-            // below rather than after, so a `string::view&` parameter still sees the borrow rule applied
-            // to what this produced
-            ExprNode *converted = convert_if_wanted(nodes, argument, fit, expected, call.token_function_name);
+        call.settlement = CallSettlement::t_settled;
+    }
 
-            // ...which is why the fit is re-asked when, and only when, that wrapping happened: the
-            // borrow rule below is about the conversion's *result* now, not about what the caller wrote
-            if (converted != argument) {
-                fit = argument_fit(converted->result_type(), converted, expected);
-            }
+    void CallResolver::coerce_arguments(IndirectCallExprNode &call, NodeCollection &nodes)
+    {
+        const ValueType callee_type = call.callee_type();
+        assert(callee_type.has_signature() && "coercing an indirect call with no signature");
 
-            // a place passed to a borrow parameter is coerced to its address here, so codegen sees a
-            // uniform AddrOfExprNode instead of sniffing the argument's kind. t_borrow_through is
-            // the same owner: peel then borrow, not a second wrap beside this one
-            call.arguments[i] = borrow_if_wanted(nodes, converted, fit);
+        const auto &signature = callee_type.signature();
 
-            // once, for the two questions below: a receiver is an AddrOf over a `->` chain, and
-            // MemberAccessNode::result_type walks the whole chain to answer
-            const ValueType coerced = call.arguments[i]->result_type();
-
-            // **a receiver refused for its const-ness gets no cast.** `ptr<const Foo>` and `ptr<Foo>`
-            // are the same value, so there is nothing here for codegen to lower - the cast's only
-            // effect would be visitTypeCast reporting "cannot implicitly convert", drowning the
-            // located refusal AST::TypeChecker::check_receiver_const words about the same call.
-            //
-            // asked of the one owner rather than re-derived from the two types, which cannot tell
-            // this apart from any other pointee mismatch - and of its predicate half, so the wording
-            // is built by the pass that reports it rather than here, per call, to be thrown away
-            if (i == 0 && const_receiver_refused(*call.decl, coerced)) {
-                continue;
-            }
-
-            // is_implicitly_convertible rather than ==, so a borrow passed where a nullable pointer
-            // is expected does not acquire a cast codegen has no lowering for
-            //
-            // **a wrapped optional is the one place those two questions come apart**, and it needs the
-            // cast the first test declines to ask for. `int32` reaches `int32?` perfectly legally, so
-            // "implicitly convertible" says yes and nothing wraps it - but a `T?` with no spare null
-            // value lowers to `{ i1 __has, T }`, a different machine value, so codegen was handed a bare
-            // `i32` for a `{ i1, i32 }` parameter and the IR verifier caught it as an internal error.
-            // asked of AST::arrival_wraps_optional, which is also what AST::argument_fit ranked this
-            // arrival by and what TypeLowering::coerce_value will emit the wrap from - three readers of
-            // one question, and a disagreement between them is exactly the internal error above
-            if (!is_implicitly_convertible(coerced, expected)
-                || arrival_wraps_optional(coerced, expected)) {
-                call.arguments[i] = &nodes.emplace_back<TypeCastNode>(expected, call.arguments[i], true);
-            }
+        for (size_t i = 0; i < call.arguments.size() && i < signature.parameter_types.size(); i++) {
+            coerce_argument(
+                call.arguments[i], signature.parameter_types[i], call.token, nodes);
         }
 
         call.settlement = CallSettlement::t_settled;
@@ -817,28 +873,67 @@ namespace AST
         // can_instantiate bind a named list against the template before this runs
         apply_binding_to_call(call, nodes, _collector.type_registry);
 
-        // after the generic gate, so a `T?` parameter is never what a null learns its shape from - the
-        // round that rewires `decl` to the instance is the first one with a concrete type to bind. and
-        // before the determinedness test below, which is the half of this that un-wedges the fixpoint:
-        // bound, the null has a type and the call settles here rather than in the monomorphizer's
-        // out-of-rounds sweep
+        return fit_arguments(
+            call.arguments,
+            [&](size_t i) { return call.decl->args[i]->type(); },
+            call.decl->args.size(),
+            _collector,
+            nodes,
+            at,
+            [&] { coerce_arguments(call, nodes); }
+        );
+    }
+
+    CallResolver::Result CallResolver::settle(
+        IndirectCallExprNode &call,
+        NodeCollection &nodes,
+        const CodeRef &at
+    )
+    {
+        if (call_is_terminal(call.settlement)) {
+            return call.settlement == CallSettlement::t_settled ? Result::t_settled : Result::t_failed;
+        }
+
+        const ValueType callee_type = call.callee_type();
+
+        if (is_undetermined_type(callee_type)) {
+            return Result::t_pending;
+        }
+
+        // TypeChecker words a determined non-callable. terminal so OwnershipPass can walk
+        if (!callee_type.has_signature()) {
+            call.settlement = CallSettlement::t_failed;
+            return Result::t_failed;
+        }
+
+        const auto &signature = callee_type.signature();
+
+        return fit_arguments(
+            call.arguments,
+            [&](size_t i) { return signature.parameter_types[i]; },
+            signature.parameter_types.size(),
+            _collector,
+            nodes,
+            at,
+            [&] { coerce_arguments(call, nodes); }
+        );
+    }
+
+    bool arguments_mention_a_type_param(const std::vector<ExprNode *> &arguments)
+    {
+        // **an argument that still mentions a type parameter is a template's, not a program's.**
         //
-        // an array literal argument is typed here too, and unlike a null it also makes the call wait:
-        // what finally reaches the parameter is the declaration AST::OperatorRewriter hoists, not the
-        // literal itself, and that rewrite happens at the top of the next round
-        if (!bind_destination_typed_arguments(call, _collector.core_types, nodes, _collector, at)) {
-            return Result::t_pending;
-        }
-
-        // **the fix.** coercing against a type that says nothing cannot tell "no conversion needed"
-        // from "no information": the borrow rule declines to wrap, and the cast below it fires for
-        // the "remaining mismatch" that was never a mismatch. so wait instead - the round that
-        // answers the argument's type asks again
-        if (!arguments_are_determined(call)) {
-            return Result::t_pending;
-        }
-
-        coerce_arguments(call, nodes);
-        return Result::t_settled;
+        // this call sits in an un-instantiated body, the clones the fixpoint made are what carry
+        // concrete argument types, and reporting the template's would blame the one body that is
+        // never emitted. if nobody instantiated it there is nothing to report. if somebody did,
+        // the clone reports for itself, with the types the author can actually see.
+        //
+        // load-bearing for an overload set over a type parameter. `hash::of($key)` inside
+        // `map<K, V>` is undecidable in the template - every concrete overload scores neutrally
+        // against a bare `K`, so match_function answers t_undecidable - and it becomes decidable
+        // in `map<string, int32>`'s clone
+        return std::ranges::any_of(arguments, [](const ExprNode *argument) {
+            return argument != nullptr && contains_type_param(argument->result_type());
+        });
     }
 };

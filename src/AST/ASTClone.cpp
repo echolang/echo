@@ -321,6 +321,8 @@ Node *ClosureExprNode::clone(CloneContext &cc) const
 
 Node *IndirectCallExprNode::clone(CloneContext &cc) const
 {
+    // settlement is copied by shallow: a template body is never settled, so instances start
+    // uncoerced and CallResolver fits them against the substituted signature
     IndirectCallExprNode *c = cc.shallow(this);
     c->callee = cc.child(c->callee);
     for (auto &arg : c->arguments) arg = cc.child(arg);

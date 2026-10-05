@@ -1,0 +1,9 @@
+flags: --optimize none
+
+--- OUT --->
+1
+--- IR --->
+CHECK: define i32 @main(
+CHECK: opt.has.ptr
+CHECK-NOT: !tbaa
+CHECK: chain.reach

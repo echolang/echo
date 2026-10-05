@@ -266,13 +266,6 @@ namespace AST
         return instance;
     }
 
-    // every call the program still contains. AST::live_calls is the walk - a tree walk, not of_type,
-    // sharing its descent with body_is_pending so a new transient node is one arm
-    std::vector<std::pair<FunctionCallExprNode *, Module *>> Monomorphizer::snapshot_calls()
-    {
-        return live_calls(_bundle);
-    }
-
     // step A: a call naming a template becomes a call naming a concrete instance
     //
     // only the declaration is rewired here. fitting the arguments to it is step C's, through the one
@@ -283,7 +276,7 @@ namespace AST
     {
         bool progressed = false;
 
-        for (auto &[call, mod] : snapshot_calls()) {
+        for (auto &[call, mod] : snapshot_calls().calls) {
             if (_processed.count(call) || !call->decl || !call->decl->is_generic()) {
                 continue;
             }
@@ -514,8 +507,9 @@ namespace AST
     {
         CallResolver resolver(_collector);
         bool progressed = false;
+        const LiveCalls live = snapshot_calls();
 
-        for (auto &[call, mod] : snapshot_calls()) {
+        for (auto &[call, mod] : live.calls) {
             // a settled call owes nothing, and a failed one is decided on types no later round can
             // change - re-deriving its match would re-derive its diagnostic with it
             if (call_is_terminal(call->settlement)) {
@@ -533,6 +527,16 @@ namespace AST
             // pending); after finalize_module_construction it settles, which the first arm counts
             if (result == CallResolver::Result::t_settled
                 || (call->decl != nullptr && !had_decl)) {
+                progressed = true;
+            }
+        }
+
+        for (auto &[call, mod] : live.indirect_calls) {
+            if (call_is_terminal(call->settlement)) {
+                continue;
+            }
+            if (resolver.settle(*call, mod->nodes, CodeRef{mod, call->token.make_slice()})
+                == CallResolver::Result::t_settled) {
                 progressed = true;
             }
         }
@@ -627,7 +631,8 @@ namespace AST
         // rather than two for one mistake
         //
         // a shorthand nothing encloses is unaffected: its turn comes either way
-        auto ordered = snapshot_calls();
+        const LiveCalls live = snapshot_calls();
+        auto ordered = live.calls;
 
         std::stable_partition(ordered.begin(), ordered.end(), [](const auto &entry) {
             return !entry.first->is_shorthand_static_call();
@@ -650,31 +655,7 @@ namespace AST
                 continue;
             }
 
-            // **an argument that still mentions a type parameter is a template's, not a program's.**
-            //
-            // The same silence report_unknown_name keeps for a receiver, and for the same reason one
-            // argument further out. This call sits in an un-instantiated body, the clones the fixpoint
-            // made are what carry concrete argument types, and reporting the template's would blame the
-            // one body that is never emitted.
-            //
-            // If nobody instantiated it there is nothing to report. If somebody did, the clone reports
-            // for itself, with the types the author can actually see.
-            //
-            // What makes this load-bearing rather than tidy is an **overload set** over a type
-            // parameter. `hash::of($key)` inside `map<K, V>` is undecidable in the template - every
-            // concrete overload scores neutrally against a bare `K`, so match_function answers
-            // t_undecidable - and it becomes decidable in `map<string, int32>`'s clone.
-            //
-            // Without this, a standard library type could not call an overload set on its own key type
-            // at all, and the diagnostic named every overload in the set as though the author had
-            // written an ambiguous call
-            const bool argument_mentions_a_type_param = std::ranges::any_of(
-                call->arguments,
-                [](const ExprNode *argument) {
-                    return argument != nullptr && contains_type_param(argument->result_type());
-                });
-
-            if (argument_mentions_a_type_param) {
+            if (arguments_mention_a_type_param(call->arguments)) {
                 continue;
             }
 
@@ -702,6 +683,21 @@ namespace AST
             // `null`. coerced anyway, which is precisely what happened before any of this deferral
             // existed, so the diagnostic the type checker gives it is unchanged
             resolver.coerce_arguments(*call, mod->nodes);
+        }
+
+        for (auto &[call, mod] : live.indirect_calls) {
+            if (call_is_terminal(call->settlement)
+                || arguments_mention_a_type_param(call->arguments)) {
+                continue;
+            }
+
+            const CodeRef at{mod, call->token.make_slice()};
+            resolver.settle(*call, mod->nodes, at);
+
+            if (call->settlement == CallSettlement::t_uncoerced
+                && call->callee_type().has_signature()) {
+                resolver.coerce_arguments(*call, mod->nodes);
+            }
         }
     }
 
@@ -876,7 +872,7 @@ namespace AST
             if (++rounds > MAX_ROUNDS) {
                 // the fixpoint did not converge. locate the report at any generic call still
                 // unresolved so the user has a concrete site to look at rather than a silent stall
-                for (auto &[call, mod] : snapshot_calls()) {
+                for (auto &[call, mod] : snapshot_calls().calls) {
                     if (call->decl && call->decl->is_generic() && !_processed.count(call)) {
                         _collector.collect_issue<Issue::GenericError>(
                             code_ref_for(*mod, call->token_function_name),

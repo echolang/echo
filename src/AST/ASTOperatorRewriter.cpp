@@ -713,7 +713,32 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
     // rather than a control-flow analysis
     const HoistBarrier barrier(*this);
 
-    RecursiveVisitor::visit_optional_chain(node);
+    // base, then upgrade, then the marker, then the continuation. a late-typed base (`$a[0]`, a
+    // pending call, a `foreach` binding) is settled by the base walk; the marker has to carry that
+    // type before `->v` under it resolves. RecursiveVisitor walks both edges in one go, which is
+    // the order that left `chainbase<[unknown]>` in the continuation
+    value_edge(node.base);
+
+    ExprNode *base = upgrade_optional_operand(node.base, node.token);
+
+    if (base != node.base) {
+        node.base = base;
+        _changed = true;
+    }
+
+    // **the marker's stored type, every round.** a ChainBaseNode holds the base's non-null *value*
+    // rather than an edge to the base, and clone only *substitutes* it - so a marker minted for a
+    // bare `T` or `[unknown]` stays that until this write. chain_base_type_of is the one derivation
+    if (node.chain_base != nullptr && node.base != nullptr) {
+        const ValueType marker = chain_base_type_of(*node.base);
+
+        if (!(marker == node.chain_base->type)) {
+            node.chain_base->type = marker;
+            _changed = true;
+        }
+    }
+
+    value_edge(node.continuation);
 
     // **the stored result type, refreshed every round.** it cannot be derived at the ask - wrapping a
     // payload with no null value of its own interns a layout and `result_type()` has no registry - so this
@@ -724,23 +749,6 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
     if (!(refreshed == node.result)) {
         node.result = refreshed;
         _changed = true;
-    }
-
-    ExprNode *base = upgrade_optional_operand(node.base, node.token);
-
-    if (base == node.base) {
-        return;
-    }
-
-    node.base = base;
-
-    // **and the marker's stored type, which nothing else can repair.** a ChainBaseNode holds the
-    // base's non-null type rather than an edge to the base, and clone only *substitutes* it - so a
-    // marker minted for a bare `T` becomes `weak<Node>` where it should have become `Node`. re-derived
-    // here, at the one moment the base is known to have changed shape (it cannot be
-    // re-derived from the marker's own side)
-    if (node.chain_base != nullptr) {
-        node.chain_base->type = unwrapped_type_of(node.base->result_type());
     }
 }
 

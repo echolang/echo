@@ -1,0 +1,35 @@
+// a string continuation over a late base used to report a compiler-bug on an earlier line:
+// `label()` resolved against `chainbase<[unknown]>`, the call never settled, OwnershipPass skipped
+// the body, and the first unbacked `&` in the file took the blame
+class Bundle
+{
+    const function label() : string
+    {
+        return 'bundle';
+    }
+}
+
+function cheapest<T>() : T?
+{
+    return null;
+}
+
+echo 'x';
+echo cheapest<Bundle>()?->label() ?? 'none';
+
+array<Bundle?> $a = [];
+$a[] = Bundle();
+echo $a[0]?->label() ?? 'none';
+
+array<Bundle?> $xs = [];
+$xs[] = Bundle();
+$xs[] = null;
+foreach ($xs as $s) {
+    echo $s?->label() ?? '-';
+}
+
+usize $before = mem::live_allocations();
+{
+    echo $a[0]?->label() ?? 'none';
+}
+echo mem::live_allocations() == $before;

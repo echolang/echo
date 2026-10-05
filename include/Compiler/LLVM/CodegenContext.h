@@ -40,6 +40,7 @@ namespace AST
     class Visitor;
     class VarDeclNode;
     class FunctionDeclNode;
+    class ChainBaseNode;
 };
 
 namespace Compiler::LLVM
@@ -239,15 +240,18 @@ namespace Compiler::LLVM
         std::stack<CodegenValue> value_stack;
         std::unordered_map<AST::VarDeclNode *, llvm::Value *> var_map;
 
-        // **the slot each `?->` currently being lowered spilled its unwrapped base into**, innermost last.
-        // an AST::ChainBaseNode names the top one - it is the marker standing for that base inside the
-        // chain's continuation, and a chain nested in another's continuation pushes and pops around its own
+        // **the place each `?->` currently being lowered seated its unwrapped base at**, keyed on the
+        // marker so a nested chain names its own slot rather than whichever was pushed last.
         //
         // here rather than on ExprCodegen because two subsystems read it: the expression arm, for the
         // marker in value position, and LValueCodegen, for a method receiver or a write through the chain.
-        // the slot *borrows* - nothing is retained into it and nothing dropped out, exactly as a method's
-        // `$this` borrows what it was handed
-        std::vector<llvm::Value *> chain_base_slots;
+        // an LValue so provenance travels with the address: `$p->inner?->bump()` through a `ptr<W>` is
+        // raw, and a typed tag on that access is C's strict aliasing over a language that does not have it
+        //
+        // a place-base wrapped optional *borrows* the payload - the chain base is a GEP to `__value`,
+        // nothing is retained into it and nothing dropped out, exactly as a method's `$this` borrows
+        // what it was handed. a non-place base still spills
+        std::unordered_map<AST::ChainBaseNode *, LValue> chain_base_slots;
 
         // **where a `break` and a `continue` go**, innermost last.
         //

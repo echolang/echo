@@ -1,0 +1,6 @@
+--- OUT --->
+2
+--- RAST --->
+CHECK: chainbase<Node<int32>>
+CHECK-NOT: chainbase<Node<T>>
+CHECK-NOT: chainbase<T>

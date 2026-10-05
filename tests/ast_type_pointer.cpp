@@ -179,6 +179,26 @@ TEST_CASE( "contains_type_param sees through a pointer", "[types][pointer][gener
     REQUIRE_FALSE(contains_type_param(ptr_to(prim(ValueTypePrimitive::t_int32))));
 }
 
+TEST_CASE( "contains_type_param sees through a tagged optional", "[types][pointer][generics]" )
+{
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    TypeParamDecl *t = params.declare("T", 0);
+    box.add_type_parameter(t);
+    box.add_property("item", ValueType::make_type_param(t));
+
+    ValueType param_t = ValueType::make_type_param(t);
+    ComplexType *of_t = reg.get_or_create_instantiation(&box, { param_t });
+    ValueType tagged_open = reg.get_or_create_optional(ValueType::make_struct(of_t));
+    REQUIRE(contains_type_param(tagged_open));
+
+    ValueType i32 = prim(ValueTypePrimitive::t_int32);
+    ComplexType *of_i32 = reg.get_or_create_instantiation(&box, { i32 });
+    ValueType tagged_concrete = reg.get_or_create_optional(ValueType::make_struct(of_i32));
+    REQUIRE_FALSE(contains_type_param(tagged_concrete));
+}
+
 TEST_CASE( "target_type_of follows every level, value_type_of exactly one", "[types][pointer]" )
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);

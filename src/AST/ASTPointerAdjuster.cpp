@@ -1,6 +1,5 @@
 #include "AST/ASTPointerAdjuster.h"
 
-#include "AST/ASTArgumentFit.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTFileRoot.h"
@@ -133,17 +132,8 @@ void PointerAdjuster::adjust_call_arguments(std::vector<ExprNode *> &arguments, 
     for (size_t i = 0; i < arguments.size(); i++) {
         auto *&arg = arguments[i];
 
-        // a `ptr<T>` at a `T&` parameter of an *indirect* call - CallResolver does not see
-        // those, so this is the wrap t_borrow_through scores. planted before the AddrOf arm,
-        // which then treats it the same way a direct call's already-wrapped argument arrives
-        if (arg != nullptr && arg->get_node_type() != NodeType::n_expr_addrof
-            && pointer_borrows_through(arg->result_type(), wanted_at(i))) {
-            arg = borrow_through_pointer(_current_module->nodes, arg);
-        }
-
         // an argument already wrapped in an address-of was borrowed deliberately,
-        // by the coercion pass, by the wrap above, or by the user writing `&$x`; leave it
-        // as the address
+        // by CallResolver, or by the user writing `&$x`; leave it as the address
         if (arg != nullptr && arg->get_node_type() == NodeType::n_expr_addrof) {
             auto *addr = static_cast<AddrOfExprNode *>(arg);
             addr->operand = adjust_place(addr->operand);
@@ -207,15 +197,9 @@ void PointerAdjuster::bind_null_operand(ExprNode *maybe_null, ExprNode *other)
     // a weak is the *one* thing this admits that the other askers would refuse outright. `$w == null`
     // answers whether the reference was ever taken, not whether the object is still alive - that question
     // is `strong($w)`, because only reading the count can answer it
-    //
-    // **and a comparison-only widening on top of it**: a non-nullable class handle. it is an address, so
-    // `$obj == null` lowers to an icmp over two handles and has always been accepted - even though the
-    // answer is now statically known, because a `Foo` that is not a `Foo?` is never absent. narrowing that
-    // to a diagnostic is a semantic decision of its own and is deliberately not made here; it is spelled at
-    // this call site rather than inside destination_admits_null so the other askers cannot inherit it
     const ValueType other_type = other->result_type();
 
-    if (destination_admits_null(other_type) || other_type.is_class()) {
+    if (destination_admits_null(other_type)) {
         null_node->bound_type = other_type;
     }
 }

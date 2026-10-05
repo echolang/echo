@@ -1,0 +1,21 @@
+// the native binary used to SIGSEGV on an owning payload: the bitwise spill of
+// Named? released the original string from bump's assignment. mode: build is
+// the path that crashed; the run sibling covers the rest of the table
+struct Named
+{
+    string $s;
+
+    function grow() : void
+    {
+        $this->s = "{$this->s}-grown-by-one-step";
+    }
+}
+
+string $base = 'a-fairly-long-heap-string-for-the-test';
+int32 $before = mem::live_allocations();
+{
+    Named? $named = Named("{$base}!");
+    $named?->grow();
+    echo $named?->s ?? 'none';
+}
+echo mem::live_allocations() == $before;

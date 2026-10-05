@@ -1,0 +1,11 @@
+// the local is retyped by B65; the `?->` marker is this ticket. together they make
+// `$m->next?->val` a `Node<int32>` rather than a leftover `T`
+class Node<T>
+{
+    T $val;
+    Node<T>? $next;
+}
+
+$m = Node<int32>(1, Node<int32>(2, null));
+int32 $v = $m->next?->val ?? 0;
+echo $v;
