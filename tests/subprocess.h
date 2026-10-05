@@ -28,14 +28,16 @@ namespace EchoTests
 
         // true when the deadline fired and the child was SIGKILL'd. exit_code is then `128 + SIGKILL`,
         // but that number is also what a child that raised SIGKILL itself would report, so the flag
-        // is what lets a failure say "timed out after 20000 ms" rather than "exited 137"
+        // is what lets a failure say "timed out after the case's deadline" rather than "exited 137"
         bool timed_out = false;
     };
 
     // the suite's default deadline, in milliseconds. a `timeout:` key on a case overrides it; `0`
-    // means wait forever. twenty seconds is well above every case that finishes and short enough
-    // that a hang is a located failure rather than a CI job sitting until its own limit
-    constexpr unsigned k_default_timeout_ms = 20000;
+    // means wait forever. the e2e corpus gives every case its own `--build-dir`, so the first spawn
+    // compiles the stdlib from scratch; sixty seconds covers that on a contended Windows runner, and
+    // is still short enough that a hang is a located failure rather than a CI job sitting until its
+    // own limit
+    constexpr unsigned k_default_timeout_ms = 60000;
 
     // runs a shell command, capturing merged stdout+stderr. A signal is reported as `128 + signo`, the way a
     // shell reports it, which keeps a JIT segfault distinguishable from a clean rejection in the failure

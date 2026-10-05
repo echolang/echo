@@ -170,6 +170,9 @@ jobs:
       ECHOC_BINARY: ${{ github.workspace }}/build/echoc.exe
       ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
       ECO_E2E_TMP_DIR: ${{ github.workspace }}/build/e2e_tmp
+      # windows-2022 is two cores. hardware_concurrency() can still report four, and four echocs
+      # compiling the stdlib into isolated `--build-dir` trees starve each other past the case deadline
+      ECO_E2E_JOBS: 2
 
     steps:
     - name: Checkout repository

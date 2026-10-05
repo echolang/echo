@@ -54,6 +54,10 @@ namespace
     // cases run in irrelevant, which is what lets Catch2 shuffle them. It is also what lets the cleanup
     // be a single `remove_all` instead of a guess about how echoc names what it emits.
     //
+    // `--build-dir` is also where the stdlib object goes, so a cold case compiles it from scratch.
+    // `k_default_timeout_ms` is sized for that, and Windows CI pins `ECO_E2E_JOBS=2` so a two-core
+    // runner is running two of those compiles
+    //
     // absolute because the tests binary's working directory is not fixed - CI runs `./tests` from inside
     // `build/`, a developer runs `./build/tests` from the repo root - so any relative path is wrong in one
     // of the two, and a repo-root-relative one drops artifacts among tracked files
