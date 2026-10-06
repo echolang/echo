@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_generic_arg.eco:2:9
+
+  Unknown type 'Nope'
+
+  1 | function id<T>(T $v) : T { return $v; }
+  2 | echo id<Nope>(1);
+    :         ^^^^
+  3 | 
+
+1 error, nothing was compiled.

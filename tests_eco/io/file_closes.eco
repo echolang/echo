@@ -10,7 +10,7 @@ $path->append('.txt');
 usize $before = mem::live_allocations();
 
 {
-    file $f = guard std::io::create($path) else ($e) {
+    std::io::file $f = guard std::io::create($path) else ($e) {
         echo $e->message();
         return 1;
     }

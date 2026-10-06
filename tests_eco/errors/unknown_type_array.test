@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_array.eco:1:7
+
+  Unknown type 'Nope'
+
+  1 | array<Nope> $a;
+    :       ^^^^
+  2 | 
+
+1 error, nothing was compiled.

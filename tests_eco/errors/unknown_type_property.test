@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_property.eco:1:12
+
+  Unknown type 'Nope'
+
+  1 | struct S { Nope $a; }
+    :            ^^^^
+  2 | 
+
+1 error, nothing was compiled.

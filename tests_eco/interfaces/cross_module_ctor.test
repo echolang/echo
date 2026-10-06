@@ -1,0 +1,4 @@
+modules: interfaces/lib_cross_module_ctor
+
+--- OUT --->
+1

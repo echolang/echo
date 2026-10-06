@@ -25,6 +25,7 @@
 #include "AST/TypeCastNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/TypeNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/GuardNode.h"
 #include "AST/IfStatementNode.h"
@@ -264,6 +265,12 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
             }
         }
     }
+
+    // visitType is the unresolved-name check. a generic template returns before the args
+    // are walked as VarDecls, so those TypeNodes are reached here; a concrete body walks
+    // them through visitVarDecl as well. the return type is never a VarDecl, so it is
+    // always this edge — `Nope` on `: Nope` has no instance to inherit the check from
+    walk_function_signature_types(node);
 
     // a generic template's body legitimately mentions its type parameters; it is only
     // meaningful once cloned into a concrete instance, which is checked separately
@@ -532,6 +539,15 @@ void TypeChecker::check_incomplete_use(const ValueType &type, const TokenReferen
     }
 }
 
+void TypeChecker::check_layout_cycle(const ValueType &type, const TokenReference &at)
+{
+    if (auto refusal = layout_cycle_refusal(type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
+    }
+}
+
 void TypeChecker::check_void_as_value(const ValueType &type, const TokenReference &at)
 {
     if (auto refusal = void_as_value_refusal(type)) {
@@ -547,6 +563,19 @@ void TypeChecker::check_bare_generic_type(const ValueType &type, const TokenRefe
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(at),
             std::move(refusal.value()));
+    }
+}
+
+void TypeChecker::check_unresolved_type_name(const TypeNode *node)
+{
+    if (node == nullptr) {
+        return;
+    }
+
+    if (auto refusal = unresolved_type_name_refusal(*node)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(refusal->at),
+            std::move(refusal->sentence));
     }
 }
 
@@ -785,13 +814,28 @@ void TypeChecker::visit_type_decl(TypeDeclNode &node)
         AST::check_construction(node, _collector, *_current_module);
     }
 
+    // a layout cycle is a fact about the type's fields. uses inherit this one diagnostic
+    for (VarDeclNode *prop : node.properties()) {
+        if (prop != nullptr && prop->has_type()) {
+            check_layout_cycle(prop->type(), prop->token_varname);
+        }
+    }
+
     // a generic struct template's property types legitimately mention its type parameters (the T
     // in `struct Box<T> { T $value; }`); it is only meaningful once instantiated with concrete
-    // types. concrete/non-generic struct declarations are still checked
+    // types. concrete/non-generic struct declarations are still checked. written names on those
+    // properties still run through visitType — `struct Box<T> { Nope $x; }` has no instance
     if (node.is_generic()) {
+        walk_type_decl_property_types(node);
         return;
     }
     RecursiveVisitor::visit_type_decl(node);
+}
+
+void TypeChecker::visitType(TypeNode &node)
+{
+    check_unresolved_type_name(&node);
+    RecursiveVisitor::visitType(node);
 }
 
 void TypeChecker::check_conformances(TypeDeclNode &node)
@@ -1020,8 +1064,11 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
 
     // a declared type of any kind. a class is the exact-identity question, an interface the conformance
     // one, and a struct folds to false - has_complex_type() is already the predicate for "a declared
-    // type", so admitting interfaces needed nothing but this wording
-    if (!node.queried_type.has_complex_type()) {
+    // type", so admitting interfaces needed nothing but this wording. a name that never resolved is
+    // visitType's Unknown type; saying it is not a struct would bury that
+    if ((node.queried == nullptr
+            || !unresolved_type_name_refusal(*node.queried).has_value())
+        && !node.queried_type.has_complex_type()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token_instanceof),
             fmt::format(
@@ -1786,9 +1833,9 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
             }
 
             // **a tagged optional over a primitive prints its payload**, whether or not it is there - the
-            // peel `echo` has always performed. asked of AST::echo_printed_type_of, which is also what
-            // Compiler::LLVM::printf_conversion_for asks: this arm decides what is *accepted* and that
-            // table what is *emitted*, so a second spelling of the condition is a program accepted here
+            // peel `echo` has always performed. asked of AST::echo_printed_type_of, which is also
+            // what the printers emit through: this arm decides what is *accepted* and that table
+            // what is *emitted*, so a second spelling of the condition is a program accepted here
             // and thrown at by the other half
             if (expression_produces_no_value(*arg)) {
                 continue;
@@ -1825,6 +1872,14 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_function_name),
                     fmt::format("'echo' has no way to print a '{}' - call it and print the result",
+                        type.get_type_desciption()));
+            }
+            else if (!type.is_primitive() || type.is_void()) {
+                // simd, weak, inline array, void: kinds the arms above do not cover and
+                // printf_conversion_for has no row for. a primitive that is not void is the table
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_function_name),
+                    fmt::format("'echo' has no way to print a '{}'",
                         type.get_type_desciption()));
             }
         }
@@ -1914,6 +1969,10 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
 
 void TypeChecker::visitTypeCast(TypeCastNode &node)
 {
+    // the explicit path below walks the operand itself and returns, so written_to would
+    // never reach visitType without this. implicit casts have none
+    type_edge(node.written_to);
+
     // the parser/monomorphizer inserts implicit casts to reconcile types; if such a cast is not a
     // legal conversion (e.g. a struct where a primitive is expected) it would otherwise surface as
     // a context-free "Unsupported type cast" deep in codegen. report it here, located
@@ -2496,7 +2555,9 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
         // place by AST::OperatorRewriter before this pass, so those never reach here as literals
         if (array_literal_of(node.init_expr) != nullptr) {
             bind_array_literal_to(node.init_expr, node.type(), _collector.core_types);
-        } else if (!_in_parameter) {
+        } else if (!_in_parameter
+            && !unresolved_type_name_refusal(*node.type_node()).has_value()) {
+            // the name is the sentence; a conversion to '[unknown]' would bury it
             check_destination_fits(
                 Destination::t_declaration,
                 node.type(),

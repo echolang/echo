@@ -1,0 +1,5 @@
+const LIMIT = 3;
+int32 $n = 1;
+if ($n < LIMIT) {
+    echo 1;
+}

@@ -1,0 +1,3 @@
+class Cat {}
+Cat $c = Cat();
+echo $c instanceof Nope;

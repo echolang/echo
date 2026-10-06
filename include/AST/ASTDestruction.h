@@ -17,6 +17,10 @@ namespace AST
     // a later and separate question, asked by needs_deinit below. that split is what
     // terminates the recursion - `class Node { Node $next; }` is ordinary Echo
     //
+    // **a layout cycle answers false**, via AST::layout_cycle_refusal, for the same termination:
+    // `struct Node { Node? $next; }` stores a Node inside a Node. TypeChecker reports the sentence;
+    // this walk must not recurse through the interned optional while that diagnostic is still pending
+    //
     // **a weak reference also always answers true**, and it is worth being clear about what it owes.
     // it does not own its object - that is what it is for - but it does hold the block readable, and
     // that is a count somebody has to give back. so a `weak<T>` is destroyed at scope end exactly as a

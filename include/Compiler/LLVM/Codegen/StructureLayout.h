@@ -26,7 +26,7 @@ namespace Compiler::LLVM
 
     // the LLVM body of a registered aggregate: one field per property, or a packed enum overlay.
     // takes the id, not a Structure&, because lowering a field type can push another structure
-    // and reallocate the table
+    // and grow the table. build_class_box is the same split
     //
     // `lower` is TypeLowering::get_llvm_type. every aggregate then has property_byte_offset
     // filled from the DataLayout, so a property's address and its DWARF offset share one table

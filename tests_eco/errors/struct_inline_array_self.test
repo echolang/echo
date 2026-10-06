@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] struct_inline_array_self.eco:4:13
+
+  'Node' contains itself through 'Node[2]' - a struct field is stored inline, so a cycle has no size. Use a class, or 'ptr<Node>'.
+
+  3 | {
+  4 |     Node[2] $kids;
+    :             ^^^^^
+  5 | }
+
+1 error, nothing was compiled.

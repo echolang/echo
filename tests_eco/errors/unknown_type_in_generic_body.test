@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_in_generic_body.eco:3:5
+
+  Unknown type 'Tx'
+
+  2 | {
+  3 |     Tx $b = $a;
+    :     ^^
+  4 |     echo $b;
+
+1 error, nothing was compiled.

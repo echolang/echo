@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] struct_mutual_optional.eco:3:8
+
+  'B' contains itself through 'B?' - a struct field is stored inline, so a cycle has no size. Use a class, or 'ptr<B>'.
+
+  2 | {
+  3 |     B? $b;
+    :        ^^
+  4 | }
+
+[error] struct_mutual_optional.eco:8:8
+
+  'A' contains itself through 'A?' - a struct field is stored inline, so a cycle has no size. Use a class, or 'ptr<A>'.
+
+  7 | {
+  8 |     A? $a;
+    :        ^^
+  9 | }
+
+2 errors, nothing was compiled.

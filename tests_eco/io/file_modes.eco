@@ -14,7 +14,7 @@ usize $w = guard std::io::writefile($path, 'first') else ($e) {
 
 echo $w;
 
-file $again = guard std::io::create($path) else ($e) {
+std::io::file $again = guard std::io::create($path) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -34,7 +34,7 @@ string $truncated = guard std::io::readfile($path) else ($e) {
 
 echo $truncated;
 
-file $log = guard std::io::append($path) else ($e) {
+std::io::file $log = guard std::io::append($path) else ($e) {
     echo $e->message();
     return 1;
 }

@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_param.eco:1:12
+
+  Unknown type 'Nope'
+
+  1 | function g(Nope $a) : void {}
+    :            ^^^^
+  2 | 
+
+1 error, nothing was compiled.

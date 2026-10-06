@@ -287,12 +287,20 @@ namespace Compiler::LLVM
         // wraps an already-lowered payload in its heap block and mints the class's typeinfo global
         // idempotent - a second call over a structure that already has a box does nothing
         //
+        // takes the id, not a Structure&, because typeinfo construction can intern another
+        // struct (an interface method returning string, a generic payload) and grow the table.
+        // fill_structure_body is the same split
+        //
         // takes the ComplexType rather than a name, because the two names it needs are different
         // questions: the block's llvm name is cosmetic (llvm uniques it anyway), while the typeinfo
         // global's name *is* the class's runtime identity and has to be the mangled token. every
         // caller had a ComplexType to hand and passed a display string, which is how the two came
         // apart - `Foo` in two namespaces, and an instantiation whose name is the string `Box<int32>`
-        void build_class_box(Structure &structure, const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
+        void build_class_box(
+            structure_id_t struct_id,
+            const AST::ComplexType &type,
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
 
         // the `[N x { ptr identity, ptr vtable }]` a class conforms to, or null when none.
         // identities are known here; vtables are filled after function maps, or immediately

@@ -1,0 +1,16 @@
+namespace modiface;
+
+public interface Env
+{
+    function reset() : string;
+}
+
+public class Pole : Env
+{
+    public int32 $seed = 1;
+
+    public function reset() : string
+    {
+        return 'x';
+    }
+}

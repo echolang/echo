@@ -196,7 +196,9 @@ namespace
         // plants the `&` on the call, this pass walks a body exactly once
         //
         // "not decided yet" answers true from binary_has_builtin_meaning / unary_has_builtin_meaning,
-        // so an unknown operand does not take this arm - an unsettled call in the operand already does
+        // so an unknown operand does not take this arm - an unsettled call in the operand already does.
+        // identity comparison against a written `null` is builtin too, for the same seating reason:
+        // an operator call with an untyped null kept this arm firing for the whole body
         void visitBinaryExpr(BinaryExprNode &node) override
         {
             if (node.op_node != nullptr && node.op_node->op != nullptr

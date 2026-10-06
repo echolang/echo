@@ -10,6 +10,7 @@
 #include <llvm/IR/Function.h>
 
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 namespace Compiler::LLVM
@@ -95,7 +96,9 @@ namespace Compiler::LLVM
         }
 
     private:
-        std::vector<Structure> _structures;
+        // a deque so push_structure keeps Structure references valid. callers that intern
+        // during a layout still take an id and re-fetch (fill_structure_body, build_class_box)
+        std::deque<Structure> _structures;
         std::unordered_map<const AST::TypeDeclNode *, structure_id_t> _struct_ast_map;
         std::unordered_map<const AST::ComplexType *, structure_id_t> _struct_type_map;
     };

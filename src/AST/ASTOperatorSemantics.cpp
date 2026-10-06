@@ -238,20 +238,15 @@ namespace AST
             return false;
         }
 
-        // **the arms below are ExprCodegen::gen_binary_expr's, in its order.** that mirroring is the
-        // whole contract: this function's `true` *is* the claim that that one has an arm. ending in
-        // "neither operand is a struct, a class or an interface" would promise an arm for every
-        // operator over every other pair. it has far fewer, so `1 << 2`, `$a == $b` over two bools, and a
-        // weak against null would type-check and then reach a throw with no location at all. an arm
-        // added there wants one added here, and the reverse
-        //
-        // **not decided yet, so nothing is claimed either way.** an unresolved call's result type is
-        // unknown, and inside `function add<T>(T $a, T $b)` the operands are a bare `T` - the answer has
-        // to be *true* there, or Parser::parse_binary_expr builds an operator call out of a template body
-        // whose `T` nothing has bound. AST::OperatorRewriter re-asks once the round substituted it, which
-        // is what makes that pass self-guarding: the only nodes it rewrites are ones the parser could not
-        // have. a written `null` is excluded because its own type is unknown and the two arms below are
-        // the ones that answer for it
+        // **true keeps a BinaryExprNode.** the parser does not rewrite the site to an operator call.
+        // presence against a written null lowers through TypeLowering::gen_has_value; a value that
+        // cannot be absent is AST::binary_operand_refusal. an unresolved call's result type is
+        // unknown, and inside `function add<T>(T $a, T $b)` the operands are a bare `T` - the answer
+        // has to be *true* there, or Parser::parse_binary_expr builds an operator call out of a
+        // template body whose `T` nothing has bound. AST::OperatorRewriter re-asks once the round
+        // substituted it, which is what makes that pass self-guarding: the only nodes it rewrites
+        // are ones the parser could not have. a written `null` is excluded because its own type is
+        // unknown and the two arms below are the ones that answer for it
         const bool lhs_pending = !lhs.is_null && is_undetermined_type(lhs.type);
         const bool rhs_pending = !rhs.is_null && is_undetermined_type(rhs.type);
 
@@ -259,36 +254,28 @@ namespace AST
             return true;
         }
 
-        // **anything nullable against `null`**: not "are these two the same object" but "is this one
-        // there at all". the language lowers it for every shape - an address comparison where the type
-        // has a null value of its own, a tag test where it does not - so it has a built-in meaning even
-        // over a struct, where `==` otherwise has none. one predicate for all four shapes, the one
-        // TypeLowering::gen_has_value answers for, so a weak needs no arm of its own here
+        // **identity comparison against a written `null`.** presence when the other operand may be
+        // absent (TypeLowering::gen_has_value), a refusal when it may not
+        // (AST::binary_operand_refusal). both stay a BinaryExprNode: a declared operator call left
+        // the body pending because `null` is untyped, and OwnershipPass then skipped seating every
+        // other temp in it - `$m['a'] = 'b'` beside `$s == null` was reported as a compiler bug
         //
-        // one side has to be a written `null`. `$a == $b` over two `Point?`s is a question about the
-        // *values*, which is exactly what a declared `==` on Point would be for, so it is left to fall
-        // through to the declaration the way it always did
-        if (op->is_identity_comparison()
-            && ((lhs.is_null && destination_admits_null(rhs.type))
-                || (rhs.is_null && destination_admits_null(lhs.type)))) {
+        // `$a == $b` over two `Point?`s is a question about the *values* and still falls through
+        if (op->is_identity_comparison() && (lhs.is_null || rhs.is_null)) {
             return true;
         }
 
         // two class handles - the only operators a class answers, and how two references are told
-        // apart. a written null against a class that may be absent is the presence_test arm above;
-        // a non-nullable `Foo` against null has no builtin meaning, so the parser builds an operator
-        // call and AST::binary_operand_refusal is the sentence
+        // apart. a written null is the arm above
         if (lhs.type.is_class() || rhs.type.is_class()) {
             return op->is_identity_comparison()
                 && lhs.type.is_class()
                 && rhs.type.is_class();
         }
 
-        // **a written null against something that cannot be absent.** deliberately still *true* for a
-        // primitive and *false* for a named type, which is the answer the tail gives and which
-        // both goldens rest on: `$i == null` is the built-in comparison and AST::binary_operand_refusal
-        // explains why it cannot work, one message; `$p == null` on a struct becomes an operator call,
-        // because a declared `==` is a thing an author could reach for there
+        // **a written null against a non-identity operator.** true for a primitive so
+        // AST::binary_operand_refusal is the one message (`1 + null`); false for a named type,
+        // where a declared operator is something an author could reach for
         if (lhs.is_null || rhs.is_null) {
             return !(lhs.is_null ? rhs : lhs).type.has_complex_type();
         }

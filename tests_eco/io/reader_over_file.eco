@@ -15,7 +15,7 @@ usize $w = guard std::io::writefile($path, 'red\nblue') else ($e) {
 
 echo $w;
 
-file $f = guard std::io::open($path, .read) else ($e) {
+std::io::file $f = guard std::io::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }

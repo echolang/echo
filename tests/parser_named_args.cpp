@@ -12,7 +12,7 @@ using EchoTests::has_issue_containing;
 TEST_CASE("a parameter label is recorded on the declaration", "[named_args]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "function listen(forEvent: string $name, int32 $code) : void {}\n");
+        "function listen(forEvent: int32 $name, int32 $code) : void {}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
@@ -31,8 +31,8 @@ TEST_CASE("a parameter label is recorded on the declaration", "[named_args]")
 TEST_CASE("two labelled overloads of the same types are distinct", "[named_args]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "function print(int32 $level, string $message) : void {}\n"
-        "function print(fromDecimal: int32 $cents, currency: string $code) : void {}\n");
+        "function print(int32 $level, int32 $message) : void {}\n"
+        "function print(fromDecimal: int32 $cents, currency: int32 $code) : void {}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 

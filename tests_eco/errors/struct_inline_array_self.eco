@@ -1,0 +1,7 @@
+// Node[2] stores two Nodes by value
+struct Node
+{
+    Node[2] $kids;
+}
+
+echo 1;

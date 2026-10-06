@@ -134,6 +134,37 @@ void RecursiveVisitor::statement_edges(NodeReferenceList &edges)
     }
 }
 
+void RecursiveVisitor::type_edge(TypeNode *node)
+{
+    statement_edge(node);
+}
+
+void RecursiveVisitor::type_edges(std::vector<TypeNode *> &edges)
+{
+    for (TypeNode *node : edges) {
+        type_edge(node);
+    }
+}
+
+void RecursiveVisitor::walk_function_signature_types(FunctionDeclNode &node)
+{
+    type_edge(node.return_type);
+    for (VarDeclNode *arg : node.args) {
+        if (arg != nullptr) {
+            type_edge(arg->optional_type_node());
+        }
+    }
+}
+
+void RecursiveVisitor::walk_type_decl_property_types(TypeDeclNode &node)
+{
+    for (VarDeclNode *prop : node.properties()) {
+        if (prop != nullptr) {
+            type_edge(prop->optional_type_node());
+        }
+    }
+}
+
 // ---- the edges themselves -------------------------------------------------------------------
 
 void RecursiveVisitor::visitScope(ScopeNode &node)
@@ -149,6 +180,8 @@ void RecursiveVisitor::visitScope(ScopeNode &node)
 
 void RecursiveVisitor::visitFunctionDecl(FunctionDeclNode &node)
 {
+    walk_function_signature_types(node);
+
     for (auto *arg : node.args) {
         statement_edge(arg);
     }
@@ -158,6 +191,8 @@ void RecursiveVisitor::visitFunctionDecl(FunctionDeclNode &node)
 
 void RecursiveVisitor::visit_type_decl(TypeDeclNode &node)
 {
+    walk_type_decl_property_types(node);
+
     for (auto *prop : node.properties()) {
         statement_edge(prop);
     }
@@ -165,6 +200,7 @@ void RecursiveVisitor::visit_type_decl(TypeDeclNode &node)
 
 void RecursiveVisitor::visitVarDecl(VarDeclNode &node)
 {
+    type_edge(node.optional_type_node());
     value_edge(node.init_expr);
 }
 
@@ -276,11 +312,13 @@ void RecursiveVisitor::visit_foreach(ForeachNode &node)
 
 void RecursiveVisitor::visitTypeCast(TypeCastNode &node)
 {
+    type_edge(node.written_to);
     value_edge(node.expr);
 }
 
 void RecursiveVisitor::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
+    type_edges(node.explicit_type_args);
     value_edges(node.arguments);
 }
 
@@ -420,6 +458,7 @@ void RecursiveVisitor::visit_function_ref_expr(FunctionRefExprNode &)
 
 void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
 {
+    type_edge(node.queried);
     value_edge(node.operand);
 }
 
@@ -510,9 +549,7 @@ void RecursiveVisitor::visitMemberAccess(MemberAccessNode &node)
 
 void RecursiveVisitor::visitType(TypeNode &node)
 {
-    for (TypeNode *name : node.written_names) {
-        statement_edge(name);
-    }
+    type_edges(node.written_names);
 }
 
 // leaves and cross-reference-only nodes: nothing to descend into

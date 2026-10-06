@@ -8,7 +8,7 @@ usize $w = guard std::io::writefile($path, 'x') else ($e) {
     return 1;
 }
 
-dir $d = guard std::io::opendir($path) else ($e) {
+std::io::dir $d = guard std::io::opendir($path) else ($e) {
     echo $e->missing();
     echo $e->not_a_directory();
 

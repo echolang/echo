@@ -55,6 +55,12 @@ namespace
 
 AST::CopyKind AST::classify_copy(const AST::ValueType &type)
 {
+    // a layout cycle has no size, so it has no copy. AST::layout_cycle_refusal is the sentence;
+    // TypeChecker reports it. the fold below would otherwise walk `Node?` into `Node` forever
+    if (layout_cycle_refusal(type).has_value()) {
+        return CopyKind::t_none;
+    }
+
     // the reference kinds, and they are one arm because they are one answer: a copy is one more
     // reference, and what is behind it is a different question the type cannot answer
     //

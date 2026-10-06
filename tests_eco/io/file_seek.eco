@@ -12,7 +12,7 @@ usize $made = guard std::io::writefile($path, '') else ($e) {
     return 1;
 }
 
-file $f = guard std::io::open($path, .readwrite) else ($e) {
+std::io::file $f = guard std::io::open($path, .readwrite) else ($e) {
     echo $e->message();
     return 1;
 }

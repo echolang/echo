@@ -16,7 +16,7 @@ usize $w = guard std::io::writefile($path, "one\r\ntwo\r\nthree") else ($e) {
 
 echo $w;
 
-file $f = guard std::io::open($path, .read) else ($e) {
+std::io::file $f = guard std::io::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -44,7 +44,7 @@ echo $c ?? 'null';
 
 $f->close();
 
-file $g = guard std::io::open($path, .read) else ($e) {
+std::io::file $g = guard std::io::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }

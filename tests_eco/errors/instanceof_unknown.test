@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] instanceof_unknown.eco:3:20
+
+  Unknown type 'Nope'
+
+  2 | Cat $c = Cat();
+  3 | echo $c instanceof Nope;
+    :                    ^^^^
+  4 | 
+
+1 error, nothing was compiled.

@@ -12,6 +12,8 @@
 
 namespace AST
 {
+    class TypeNode;
+
     class TypeCastNode : public ExprNode
     {
     public:
@@ -19,6 +21,11 @@ namespace AST
 
         ValueType cast_to;
         ExprNode *expr;
+
+        // the TypeNode parse_type built for a written `$x as T` / `T(...)`. implicit casts
+        // have none. RecursiveVisitor walks it; TypeChecker::visitType asks
+        // unresolved_type_name_refusal of it
+        TypeNode *written_to = nullptr;
 
         // the `as` a written cast was spelled with, or the start of `T(...)`. empty for an implicit
         // cast the compiler inserted - those have no token of their own, and source_token_of walks

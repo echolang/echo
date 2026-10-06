@@ -124,6 +124,7 @@ Node *TypeNode::clone(CloneContext &cc) const
         ? cc.make<TypeNode>(this, cc.substitute(type), type_token.value())
         : cc.make<TypeNode>(this, cc.substitute(type));
 
+    c->written_spelling = written_spelling;
     c->written_names.reserve(written_names.size());
     for (TypeNode *name : written_names) {
         c->written_names.push_back(cc.child(name));
@@ -137,6 +138,7 @@ Node *TypeCastNode::clone(CloneContext &cc) const
     TypeCastNode *c = cc.shallow(this);
     c->cast_to = cc.substitute(c->cast_to);
     c->expr = cc.child(c->expr);
+    c->written_to = cc.child(written_to);
     return c;
 }
 
@@ -270,6 +272,7 @@ Node *InstanceOfExprNode::clone(CloneContext &cc) const
 {
     InstanceOfExprNode *c = cc.shallow(this);
     c->operand = cc.child(c->operand);
+    c->queried = cc.child(queried);
     c->queried_type = cc.substitute(c->queried_type);
     return c;
 }

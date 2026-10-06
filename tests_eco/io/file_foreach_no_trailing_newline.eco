@@ -8,7 +8,7 @@ usize $w = guard std::io::writefile($path, 'last') else ($e) {
     return 1;
 }
 
-file $f = guard std::io::open($path, .read) else ($e) {
+std::io::file $f = guard std::io::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }

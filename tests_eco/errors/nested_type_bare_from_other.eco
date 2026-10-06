@@ -1,0 +1,9 @@
+struct Outer
+{
+    struct Inner { int32 $n; }
+}
+
+struct Holder
+{
+    Inner $x;
+}

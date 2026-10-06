@@ -11,6 +11,7 @@
 #include "AST/ASTSourceToken.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
+#include "AST/TypeNode.h"
 
 namespace AST
 {
@@ -46,6 +47,14 @@ namespace AST
             // the operand is often an unresolved call, and that call already has a diagnostic of
             // its own. two reports of one failure is worse than one; keep the call's
             if (_finalizing && !_collector.has_critical_issues()) {
+                // a written `as Nope` is TypeChecker's Unknown type; this sentence would
+                // blame the conversion for a name that never resolved
+                if (node.written_to != nullptr
+                    && unresolved_type_name_refusal(*node.written_to).has_value()) {
+                    node.plan_decided = true;
+                    return &node;
+                }
+
                 refuse(
                     node,
                     location_of_expression(&node),

@@ -506,8 +506,7 @@ TEST_CASE("two sibling blocks of one function may each declare a struct of the s
 
 TEST_CASE("a body-local struct is not visible at file scope", "[lexical]")
 {
-    // an unresolved *unqualified* type name is silent by design, so what reports this is the call:
-    // `P(1)` finds no overload set anywhere on the walk out of the file's namespace
+    // the type name is TypeChecker's, and the constructor call is CallResolver's
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function outer() : int32 {\n"
         "    struct P { int32 $x; }\n"
@@ -517,7 +516,7 @@ TEST_CASE("a body-local struct is not visible at file scope", "[lexical]")
         "P $q = P(1);\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "The function 'P' could not be found"));
+    REQUIRE(has_issue_containing(*bundle, "Unknown type 'P'"));
 }
 
 TEST_CASE("a body-local struct's name lives in the block's lexical namespace", "[lexical]")

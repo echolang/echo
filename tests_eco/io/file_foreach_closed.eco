@@ -8,7 +8,7 @@ usize $w = guard std::io::writefile($path, 'one\ntwo') else ($e) {
     return 1;
 }
 
-file $f = guard std::io::open($path, .read) else ($e) {
+std::io::file $f = guard std::io::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -23,7 +23,7 @@ foreach ($f as $line) {
 
 echo $n;
 
-ioerror $err = guard $f->error() else {
+std::io::ioerror $err = guard $f->error() else {
     echo 0;
     echo 0;
 

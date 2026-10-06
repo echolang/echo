@@ -1,0 +1,2 @@
+int32 $x = 5;
+echo ($x as Nope);

@@ -1,0 +1,11 @@
+struct Outer
+{
+    struct Inner { int32 $n; }
+
+    function show(Inner $i) : int32
+    {
+        return $i->n;
+    }
+}
+
+echo Outer()->show(Outer::Inner(9));

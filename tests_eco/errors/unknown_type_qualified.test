@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_qualified.eco:1:16
+
+  Unknown type 'foo::Nope'
+
+  1 | echo 1 as foo::Nope;
+    :                ^^^^
+  2 | 
+
+1 error, nothing was compiled.

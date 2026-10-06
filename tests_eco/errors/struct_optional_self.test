@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] struct_optional_self.eco:5:11
+
+  'Node' contains itself through 'Node?' - a struct field is stored inline, so a cycle has no size. Use a class, or 'ptr<Node>'.
+
+  4 |     int32 $v;
+  5 |     Node? $next;
+    :           ^^^^^
+  6 | }
+
+1 error, nothing was compiled.

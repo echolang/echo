@@ -1,0 +1,8 @@
+class Res
+{
+    int32 $n;
+}
+
+Res $r = Res(1);
+weak<Res> $w = &$r;
+echo $w;

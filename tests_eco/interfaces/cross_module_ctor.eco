@@ -1,0 +1,7 @@
+// a non-generic class is lowered in its own unit during struct maps. constructed from another
+// module, the consumer unit lowers the box on first use, after function maps, so typeinfo is
+// written with vtables. filling those calls create_llvm_func_decl on reset() : string, which
+// interns string into a table that used to hold a Structure& across that intern.
+// tests_eco/classes/generic_interface_deinit is the generic cousin
+$c = modiface::Pole(1);
+echo $c->seed;

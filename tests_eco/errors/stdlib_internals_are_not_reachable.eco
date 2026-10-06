@@ -20,6 +20,6 @@ map<int32, int32> $m = map<int32, int32>();
 
 echo $m->len;
 
-stream $out = std::io::stdout;
+std::io::stream $out = std::io::stdout;
 
 echo $out->fd;

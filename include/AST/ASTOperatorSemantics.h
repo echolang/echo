@@ -143,8 +143,9 @@ namespace AST
     //
     // a custom symbol never has one: the language spells no meaning for `avg`. a built-in symbol has
     // one for every primitive and pointer combination ExprCodegen::gen_binary_expr enumerates, and
-    // exactly one complex case - `==`/`!=` over two class handles, which is how two references are
-    // told apart and how a null one is detected
+    // two complex cases - `==`/`!=` over two class handles, and `==`/`!=` against a written `null`
+    // (presence, or a refusal). keeping the null case a BinaryExprNode is what keeps the rest of
+    // the body concrete: an operator call with an untyped `null` left OwnershipPass unwalked
     bool binary_has_builtin_meaning(const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs);
 
     // the same question for a unary operator, where the built-in surface is far smaller:
@@ -175,9 +176,10 @@ namespace AST
     // the standard library moved every non-built-in `==` in every program from the first to the other
     // two - and the advice that made the message actionable went with it
     //
-    // **a fallback rather than a pre-gate**, and that is load-bearing: `operator (P $a) == (P? $b)` is a
-    // declaration a user may write, and it makes `$p == null` resolve. So this is only ever asked at a
-    // site that has already decided to refuse - never to decide *whether* to
+    // **a fallback rather than a pre-gate.** identity comparison against a written `null` is decided
+    // by `binary_has_builtin_meaning` instead, so `$p == null` is never a call. for every other
+    // operator a declaration a user may write still has to be able to match, so this is only ever
+    // asked at a site that has already decided to refuse - never to decide *whether* to
     std::optional<std::string> binary_operand_refusal(
         const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs);
 

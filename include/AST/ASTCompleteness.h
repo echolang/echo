@@ -51,6 +51,17 @@ namespace AST
     // asked of the pointer type, about its pointee. `$p:$ + 1` and `$p:$[i]` both need a stride,
     // and the sentence is the same one
     std::optional<std::string> incomplete_stride_refusal(const ValueType &pointer);
+
+    // **why may this type not appear on a declaration, given its layout contains itself?**
+    // nullopt when it may.
+    //
+    // a struct field is stored inline, so `Node? $next` on `struct Node` is a Node inside a Node
+    // and has no size. a class handle and a `ptr<Node>` are one word and break the cycle. asked
+    // by AST::TypeChecker of each TypeDeclNode property — a cycle is a fact about the type's
+    // layout, and uses inherit that one diagnostic. type_completeness does not answer this: a
+    // cycle is a type that will never have a size, and the incomplete-type sentence would tell
+    // the reader to write `ptr<Node?>`
+    std::optional<std::string> layout_cycle_refusal(const ValueType &type);
 };
 
 #endif

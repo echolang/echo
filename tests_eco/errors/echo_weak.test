@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] echo_weak.eco:8:1
+
+  'echo' has no way to print a 'weak<Res>'
+
+  7 | weak<Res> $w = &$r;
+  8 | echo $w;
+    : ^^^^
+  9 | 
+
+1 error, nothing was compiled.

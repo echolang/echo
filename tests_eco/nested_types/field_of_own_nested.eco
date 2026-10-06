@@ -1,0 +1,8 @@
+struct Outer
+{
+    struct Inner { int32 $n; }
+    Inner $inner;
+}
+
+Outer $o = Outer(Outer::Inner(7));
+echo $o->inner->n;

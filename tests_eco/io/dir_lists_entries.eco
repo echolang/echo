@@ -25,7 +25,7 @@ bool $ms = guard std::io::mkdir($sub) else ($e) {
     return 1;
 }
 
-dir $d = guard std::io::opendir($root) else ($e) {
+std::io::dir $d = guard std::io::opendir($root) else ($e) {
     echo $e->message();
     return 1;
 }

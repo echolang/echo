@@ -1,6 +1,6 @@
 // a missing path is a reason, not a die
 
-file $f = guard std::io::open('definitely-missing-echo-io-xyz', .read) else ($e) {
+std::io::file $f = guard std::io::open('definitely-missing-echo-io-xyz', .read) else ($e) {
     echo $e->missing();
     echo $e->denied();
     echo $e->exists();

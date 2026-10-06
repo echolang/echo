@@ -1,13 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] NoMatchingOverload  class_compare_null.eco:6:9
+[error] class_compare_null.eco:6:9
 
   cannot compare 'Foo' against null - it is always there, write 'Foo?' if it may be absent
 
   5 | Foo $f = Foo(1);
   6 | echo $f == null;
-    :         ^^^^^^^^
+    :         ^^
   7 | 
 
 1 error, nothing was compiled.

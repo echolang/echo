@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] nested_type_bare_from_other.eco:8:5
+
+  Unknown type 'Inner'
+
+  7 | {
+  8 |     Inner $x;
+    :     ^^^^^
+  9 | }
+
+1 error, nothing was compiled.

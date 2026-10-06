@@ -1,0 +1,8 @@
+// a struct field is stored inline, so Node? on Node is a Node inside a Node
+struct Node
+{
+    int32 $v;
+    Node? $next;
+}
+
+echo 1;

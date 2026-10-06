@@ -1,0 +1,3 @@
+map<string, string> $m = map<string, string>();
+$m['a'] = 'b';
+echo $m->get('a');

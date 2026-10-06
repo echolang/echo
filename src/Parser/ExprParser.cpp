@@ -865,10 +865,9 @@ namespace
         auto &cursor = payload.cursor;
 
         // **the owner is resolved before it is parsed**, and that order is the whole of what keeps this
-        // speculation silent. Parser::parse_type *reports* an unresolved qualified name - it has to,
-        // since parse_namespace mints what it does not find and a quiet failure there would be an
-        // unknown type nobody mentioned - so handing it `std::math` out of `std::math::sqrt(16.0)`
-        // costs a diagnostic for a spelling that is not an error at all
+        // speculation silent. parse_namespace mints what it does not find, so handing parse_type
+        // `std::math` out of `std::math::sqrt(16.0)` would build a type node for a spelling that is
+        // not a type at all. one symbol lookup instead, without minting
         //
         // one symbol lookup instead, on exactly the name the shape scan says is the owner: outward
         // from the enclosing namespace for a bare name, the way every use site resolves one, and exact
@@ -1229,7 +1228,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             }
 
             auto &check = payload.context.emplace_node<AST::InstanceOfExprNode>(
-                current_ref.unsafe_ptr<AST::ExprNode>(), queried->type, instanceof_token);
+                current_ref.unsafe_ptr<AST::ExprNode>(), queried, instanceof_token);
 
             current_ref = AST::make_ref(check);
             continue;
@@ -1254,6 +1253,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
                 current_ref.unsafe_ptr<AST::ExprNode>(),
                 false,
                 as_token);
+            cast.written_to = cast_type;
 
             current_ref = AST::make_ref(cast);
             continue;
@@ -2028,6 +2028,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         auto &cast = payload.context.emplace_node<AST::TypeCastNode>(cast_type->type, inner, false, cast_token);
+        cast.written_to = cast_type;
         return Parser::parse_postfix_chain(payload, AST::make_ref(cast));
     }
 

@@ -668,9 +668,9 @@ namespace AST
                 // declared an infix form of the symbol, so the answer must not depend on it
                 //
                 // asked here rather than ahead of the matcher because it is a fallback: a declared
-                // `operator (P $a) == (P? $b)` makes `$p == null` resolve, and a pre-gate would refuse
-                // a call that had a perfectly good candidate. operands are `parse_time_operand`,
-                // AST::PointerAdjuster running long after the fixpoint this sits in
+                // operator that actually fits still has to win. identity comparison against a written
+                // `null` is no longer a call at all (`binary_has_builtin_meaning`). operands are
+                // `parse_time_operand`, AST::PointerAdjuster running long after the fixpoint this sits in
                 if (op != nullptr && call.arguments.size() == 2) {
                     const auto refusal = binary_operand_refusal(op,
                         parse_time_operand(call.arguments[0]),

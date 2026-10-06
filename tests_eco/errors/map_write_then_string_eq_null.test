@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] map_write_then_string_eq_null.eco:4:10
+
+  cannot compare 'string' against null - it is always there, write 'string?' if it may be absent
+
+  3 | string $s = 'x';
+  4 | echo ($s == null);
+    :          ^^
+  5 | 
+
+1 error, nothing was compiled.

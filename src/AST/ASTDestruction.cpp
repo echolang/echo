@@ -1,9 +1,17 @@
 #include "AST/ASTDestruction.h"
 
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTMemberLookup.h"
 
 bool AST::needs_destruction(const AST::ValueType &type)
 {
+    // a layout cycle has no size, so it has no teardown either. AST::layout_cycle_refusal is the
+    // sentence; TypeChecker reports it. answering here without walking is what stops
+    // `struct Node { Node? $next; }` recursing through the interned optional into Node again
+    if (layout_cycle_refusal(type).has_value()) {
+        return false;
+    }
+
     // a callable owes exactly one release: its captured environment. answered before the leaf below and
     // *without* looking at what it captured, for the same reason a class is - the signature is the type,
     // so two callables of one type may capture different things, and only the value knows which. a

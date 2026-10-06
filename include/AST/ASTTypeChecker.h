@@ -16,6 +16,7 @@ namespace AST
     class File;
     class BinaryExprNode;
     class ExprNode;
+    class TypeNode;
 
     // a semantic-analysis pass that runs after monomorphization and before codegen. it walks the
     // concrete AST resolving member accesses and call arguments, and records located issues on the
@@ -86,6 +87,7 @@ namespace AST
         const ComplexType *enclosing_type() const;
 
         void visit_type_decl(TypeDeclNode &node) override;
+        void visitType(TypeNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;
         void visit_strong_expr(StrongExprNode &node) override;
@@ -215,6 +217,10 @@ namespace AST
         // one - AST::incomplete_use_refusal is the sentence
         void check_incomplete_use(const ValueType &type, const TokenReference &at);
 
+        // each TypeDeclNode property whose type's layout contains itself - AST::layout_cycle_refusal.
+        // a struct field is stored inline, so `Node?` on `struct Node` has no size
+        void check_layout_cycle(const ValueType &type, const TokenReference &at);
+
         // every declaration whose type is void used as a value - AST::void_as_value_refusal.
         // function returns ask nested_void_as_value_refusal so `: void` stays legal
         void check_void_as_value(const ValueType &type, const TokenReference &at);
@@ -224,6 +230,11 @@ namespace AST
         // AST::bare_generic_type_refusal. a return of the template is refused too
         // (`: void` is not this)
         void check_bare_generic_type(const ValueType &type, const TokenReference &at);
+
+        // every TypeNode the author wrote whose identifier never resolved -
+        // AST::unresolved_type_name_refusal. asked from visitType, which RecursiveVisitor
+        // reaches through type_edge. the parser is silent; this is the sentence
+        void check_unresolved_type_name(const TypeNode *node);
 
         // every declaration that carries a `simd<T, N>` - AST::simd_shape_refusal.
         // pending (unbound N or T) is silence; refused is a sentence

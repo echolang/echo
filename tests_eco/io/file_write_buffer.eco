@@ -8,7 +8,7 @@ $path->append(str::from(std::env::pid()));
 $path->append('.txt');
 
 {
-    file $f = guard std::io::create($path) else ($e) {
+    std::io::file $f = guard std::io::create($path) else ($e) {
         echo $e->message();
         return 1;
     }

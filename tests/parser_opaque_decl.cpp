@@ -182,3 +182,98 @@ TEST_CASE("a member of an incomplete type is one refusal", "[opaque]")
     REQUIRE_FALSE(has_issue_containing(*bundle, "has no member named"));
     REQUIRE(bundle->collector.error_count() == 1);
 }
+
+TEST_CASE("a struct field of the same optional type is a layout cycle", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Node {\n"
+        "    int32 $v;\n"
+        "    Node? $next;\n"
+        "}\n"
+        "echo 1;\n");
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "contains itself through 'Node?'"));
+    REQUIRE(has_issue_containing(*bundle, "ptr<Node>"));
+
+    auto &m = bundle->modules.find_module("test");
+    auto *decl = type_named(m, "Node");
+    REQUIRE(decl != nullptr);
+    REQUIRE(layout_cycle_refusal(decl->value_type()).has_value());
+}
+
+TEST_CASE("an inline array of the same struct is a layout cycle", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Node {\n"
+        "    Node[2] $kids;\n"
+        "}\n"
+        "echo 1;\n");
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "contains itself through 'Node[2]'"));
+}
+
+TEST_CASE("mutual optional struct fields are a layout cycle", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct A { B? $b; }\n"
+        "struct B { A? $a; }\n"
+        "echo 1;\n");
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "contains itself"));
+}
+
+TEST_CASE("a pointer field breaks a layout cycle", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Node {\n"
+        "    int32 $v;\n"
+        "    ptr<Node> $next;\n"
+        "}\n"
+        "echo 1;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *decl = type_named(m, "Node");
+    REQUIRE(decl != nullptr);
+    REQUIRE_FALSE(layout_cycle_refusal(decl->value_type()).has_value());
+}
+
+TEST_CASE("a class handle breaks a layout cycle", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Node {\n"
+        "    int32 $v;\n"
+        "    Node? $next;\n"
+        "}\n"
+        "echo 1;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *decl = type_named(m, "Node");
+    REQUIRE(decl != nullptr);
+    REQUIRE_FALSE(layout_cycle_refusal(decl->value_type()).has_value());
+}
+
+TEST_CASE("a layout cycle is reported on the field, not on a local of the type", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Node {\n"
+        "    Node? $next;\n"
+        "}\n"
+        "Node $n;\n"
+        "echo 1;\n");
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(bundle->collector.error_count() == 1);
+    REQUIRE(has_issue_containing(*bundle, "contains itself through 'Node?'"));
+}
+
+TEST_CASE("a generic struct that stores itself optionally is a layout cycle", "[opaque][layout]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Rec<T> {\n"
+        "    Rec<T>? $next;\n"
+        "}\n"
+        "echo 1;\n");
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "contains itself"));
+}

@@ -1,0 +1,2 @@
+string $s = 'x';
+echo ($s == null);

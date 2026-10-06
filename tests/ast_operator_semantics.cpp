@@ -10,15 +10,15 @@
 #include <algorithm>
 #include <vector>
 
-// AST::binary_has_builtin_meaning - "does ExprCodegen::gen_binary_expr lower this operator for these
-// operands?"
+// AST::binary_has_builtin_meaning - "does this operator stay a BinaryExprNode for these operands?"
 //
 // five consumers read it and only one of them turns a `false` into a message: the parser decides
 // whether to look for a declared `operator`, AST::OperatorRewriter re-asks after substitution,
 // Parser::parse_operatordecl refuses a declaration it answers yes for, AST::const_fold declines to fold
-// what it answers no for, and AST::TypeChecker reports. So a `true` it cannot back up is not a wrong
-// message, it is the compiler aborting with no location at all - which is what `1 << 2`, `$a == $b` over
-// two bools and a weak handle asked against null each did.
+// what it answers no for, and AST::TypeChecker reports. So a `true` that should have been `false` is
+// a BinaryExprNode with no lowering: `1 << 2`, `$a == $b` over two bools, a weak handle asked against
+// null. identity against a written null stays true so the node stays a BinaryExprNode; presence
+// lowers, absence is AST::binary_operand_refusal.
 //
 // the table below is that promise written down. it is asked of the *facts* rather than of a parsed
 // program, the way tests/ast_place_expr.cpp asks storage_of of the tag: OperandFacts is a plain
@@ -91,7 +91,7 @@ namespace
     }
 }
 
-TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[AST][operators]")
+TEST_CASE("binary_has_builtin_meaning keeps a BinaryExprNode when the parser should", "[AST][operators]")
 {
     OperatorRegistry registry;
     Shapes s = shapes();
@@ -117,16 +117,16 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         { Token::Type::t_logical_eq, value(s.wrapped_i32), written_null(), true, "a wrapped optional" },
         { Token::Type::t_logical_neq, value(s.address), written_null(), true, "an address" },
         { Token::Type::t_logical_eq, value(s.nullable_handle), written_null(), true, "a nullable class handle" },
-        { Token::Type::t_logical_eq, value(s.handle), written_null(), false, "a non-nullable class looks for a declaration" },
+        { Token::Type::t_logical_eq, value(s.handle), written_null(), true, "a non-nullable class keeps == so the refusal is one message" },
         { Token::Type::t_logical_eq, value(s.weak_handle), written_null(), true, "a weak handle" },
         { Token::Type::t_logical_eq, written_null(), value(s.weak_handle), true, "either way round" },
         { Token::Type::t_open_angle, value(s.handle), written_null(), false, "and only the two identity comparisons" },
 
-        // **a written null against something that cannot be absent.** true for a primitive, so
-        // AST::binary_operand_refusal is the one message; false for a named type, where a declared
-        // `operator ==` is something an author could reach for
+        // **identity against a written null is always builtin**, so the node stays a BinaryExprNode
+        // and AST::binary_operand_refusal is the one message. a declared operator call left the
+        // body pending (null is untyped) and skipped seating every other temp in it
         { Token::Type::t_logical_eq, value(s.i32), written_null(), true, "a primitive keeps the built-in ==" },
-        { Token::Type::t_logical_eq, value(s.structure), written_null(), false, "a struct looks for a declaration" },
+        { Token::Type::t_logical_eq, value(s.structure), written_null(), true, "and so does a struct" },
 
         // classes
         { Token::Type::t_logical_eq, value(s.handle), value(s.handle), true, "two handles compare as addresses" },
@@ -260,6 +260,10 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
     REQUIRE(class_null.has_value());
     REQUIRE(*class_null == "cannot compare 'C' against null - it is always there, write 'C?' if it may be absent");
     REQUIRE_FALSE(binary_operand_refusal(eq, value(s.nullable_handle), written_null()).has_value());
+
+    const auto struct_null = binary_operand_refusal(eq, value(s.structure), written_null());
+    REQUIRE(struct_null.has_value());
+    REQUIRE(*struct_null == "cannot compare 'P' against null - it is always there, write 'P?' if it may be absent");
 }
 
 TEST_CASE("a vector operator the language owns is refused in one place", "[AST][operators][simd]")

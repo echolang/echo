@@ -17,9 +17,10 @@ namespace Parser
     // lexical namespace, which only the two later passes can mint, and it is visible in one block of one
     // file - so there is no order for this pass to make it independent of. parse_typedecl publishes it
     //
-    // the declaration pass needs that: it reads property types, and an unresolved *unqualified* type
-    // name is not a diagnostic, it silently becomes `unknown`. so a struct name arriving late would
-    // not fail, it would quietly produce a wrong layout
+    // the declaration pass needs that: it reads property types, and an unresolved type name is
+    // `unknown` rather than a diagnostic here. TypeChecker asks AST::unresolved_type_name_refusal
+    // of the TypeNode that lands in the tree. a struct name arriving late would otherwise not fail,
+    // it would quietly produce a wrong layout
     //
     // deliberately silent - it validates nothing. every malformed declaration it walks past is
     // reported by parse_symbols and again by the body pass, and a third voice would only be noise

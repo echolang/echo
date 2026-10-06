@@ -2,6 +2,7 @@
 #include "Parser/VisibilityParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/IfStatementParser.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTImport.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTValueType.h"
@@ -26,11 +27,26 @@ namespace
     {
         TokenReference token;
         AST::ValueType type;
+        std::string spelling;
 
-        TypeNameSite(const TokenReference &token, AST::ValueType type)
-            : token(token), type(std::move(type))
+        TypeNameSite(const TokenReference &token, AST::ValueType type, std::string spelling = {})
+            : token(token), type(std::move(type)), spelling(std::move(spelling))
         {}
     };
+
+    // the type whose body, method, or constructor is being parsed. self_struct_ptr is live
+    // in the type body; FunctionBodyScope nulls it, and enclosing_type_of is the owner then
+    AST::TypeDeclNode *nested_type_in_enclosing(Parser::Payload &payload, const std::string &name)
+    {
+        const AST::ComplexType *owner = nullptr;
+        if (payload.context.self_struct_ptr != nullptr) {
+            owner = &payload.context.self_struct_ptr->complex_type();
+        } else if (payload.context.current_function_ptr != nullptr) {
+            owner = AST::enclosing_type_of(*payload.context.current_function_ptr);
+        }
+
+        return owner != nullptr ? owner->find_member_type_decl(name) : nullptr;
+    }
 };
 
 // the type grammar is mutually recursive: a generic argument is a type, and a type may be a
@@ -90,8 +106,8 @@ bool Parser::can_parse_type(Parser::Payload &payload)
 //
 // shape only - no symbol lookup, no diagnostics, no nodes - because this runs at a statement head,
 // where the answer decides which parser is called at all. a type name is not necessarily resolvable
-// there either: the type-name pass may not have reached it, and an unresolved unqualified name is
-// silently `unknown` rather than a diagnostic
+// there either: the type-name pass may not have reached it, and an unresolved name is `unknown`
+// here. TypeChecker asks AST::unresolved_type_name_refusal of the TypeNode that lands in the tree
 //
 // the grammar it walks mirrors parse_value_type:
 //   type      := 'const'? ( 'ptr' '<' arg '>' | 'weak' '<' arg '>' | qualified ) array* nullable? ref?
@@ -1478,12 +1494,12 @@ static std::optional<AST::ValueType> parse_value_type(
     if (AST::TypeDeclNode *member_type = try_parse_member_type_chain(payload, member_type_name, names)) {
         AST::ValueType nested_type = member_type->value_type();
 
-        // a nested type may itself be generic, and the application reads the same as any other
+        // a nested type may itself be generic, and the application reads the same as any other.
+        // the identifier's leaf stays the type it resolved to: an application that fails
+        // (bare generic, overflow) must not rewrite that leaf to unknown, or TypeChecker
+        // reports `Unknown type 'map'` beside the real sentence
         if (payload.cursor.is_type(Token::Type::t_open_angle)) {
             nested_type = parse_generic_application(payload, member_type, member_type_name.value(), names);
-            if (names != nullptr && !names->empty()) {
-                names->back().type = nested_type;
-            }
         }
 
         return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(nested_type) : nested_type);
@@ -1504,11 +1520,12 @@ static std::optional<AST::ValueType> parse_value_type(
     auto token = payload.cursor.current();
     auto primitive_type = is_qualified ? AST::ValueType::make_unknown() : get_primitive_type(token.value());
     AST::TypeDeclNode *user_type_decl = nullptr;
+    const AST::TypeParamDecl *type_param = nullptr;
 
     // if it's not a primitive type, check for type parameters first
     if (!primitive_type.is_primitive() && !primitive_type.is_struct() && !primitive_type.is_class()) {
         // a generic type parameter in scope, e.g. the T of the enclosing `struct Box<T>`
-        const AST::TypeParamDecl *type_param = is_qualified ? nullptr : payload.context.find_type_param(token.value());
+        type_param = is_qualified ? nullptr : payload.context.find_type_param(token.value());
 
         if (type_param) {
             if (type_param->is_value_param()) {
@@ -1518,10 +1535,11 @@ static std::optional<AST::ValueType> parse_value_type(
                         "Type parameter '{}' is a value of type '{}', not a type",
                         type_param->name,
                         type_param->value_type.get_type_desciption()));
-                primitive_type = AST::ValueType::make_unknown();
-            } else {
-                primitive_type = AST::ValueType::make_type_param(type_param);
             }
+            // the identifier resolved. a value param still plants that leaf so visitType
+            // does not say Unknown type beside the sentence above; the TypeNode itself
+            // is unknown after named_type is recorded, because a value is not a type
+            primitive_type = AST::ValueType::make_type_param(type_param);
         } else {
             // check for user-defined types (structs/classes). an unqualified name is searched from
             // the enclosing namespace *outward*, the way an unqualified call already resolves; a
@@ -1537,20 +1555,30 @@ static std::optional<AST::ValueType> parse_value_type(
 
                 // reported, and the type still handed back - see Parser::refuse_invisible_type
                 refuse_invisible_type(payload, *user_type_decl, token);
+            } else if (!is_qualified) {
+                // a nested type lives on its owner, not in the enclosing namespace. bare `Inner`
+                // inside `Outer` is that table; `Holder { Inner $x; }` still misses
+                AST::TypeDeclNode *nested = nested_type_in_enclosing(payload, token.value());
+                if (nested != nullptr) {
+                    user_type_decl = nested;
+                    primitive_type = nested->value_type();
+                }
             }
-
-            // an unresolved qualified name can only be a mistake - the namespace lookup creates
-            // missing namespaces on demand, so it would silently degrade to an unknown type
-            else if (is_qualified) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(token),
-                    "Unknown type '" + lookup_namespace->full_name() + ECO_NAMESPACE_SEPARATOR + token.value() + "'"
-                );
-            }
+            // a miss is silent here. a declaration-pass not-yet and a speculative `<` as type
+            // args both look the same, and reporting either is a wrong refuse. TypeChecker asks
+            // AST::unresolved_type_name_refusal of the TypeNode that lands in the tree
         }
     }
 
     payload.cursor.skip();
+
+    // the identifier's own type, before an application. written_names is "what this
+    // name resolved to"; `map<string, AssetRef>` failing the argument must not make
+    // the `map` leaf unknown
+    const AST::ValueType named_type = primitive_type;
+    if (type_param != nullptr && type_param->is_value_param()) {
+        primitive_type = AST::ValueType::make_unknown();
+    }
 
     // generic application on a user type: `Name<Arg, Arg, ...>` (nested, e.g. Foo<Bar<int>>)
     if (user_type_decl && payload.cursor.is_type(Token::Type::t_open_angle)) {
@@ -1558,7 +1586,15 @@ static std::optional<AST::ValueType> parse_value_type(
     }
 
     if (names != nullptr) {
-        names->emplace_back(token, primitive_type);
+        std::string spelling;
+        if (is_qualified) {
+            const std::string ns = lookup_namespace->full_name();
+            spelling = ns.empty()
+                ? token.value()
+                : ns + ECO_NAMESPACE_SEPARATOR + token.value();
+        }
+
+        names->emplace_back(token, named_type, std::move(spelling));
     }
 
     if (is_const) {
@@ -1581,6 +1617,7 @@ AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
     AST::TypeNode &node = payload.context.emplace_node<AST::TypeNode>(type.value(), token);
     for (const TypeNameSite &site : names) {
         AST::TypeNode &leaf = payload.context.emplace_node<AST::TypeNode>(site.type, site.token);
+        leaf.written_spelling = site.spelling;
         node.written_names.push_back(&leaf);
     }
 

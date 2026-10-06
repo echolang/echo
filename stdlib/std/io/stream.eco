@@ -6,7 +6,7 @@
  *
  *     std::io::stdout->write('hello');
  *
- *     stream $out = std::io::stdout;
+ *     std::io::stream $out = std::io::stdout;
  *     $out->write('hello');
  *
  * **Every write flushes stdio first**, and that is not a performance oversight. The `echo`

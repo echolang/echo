@@ -25,6 +25,102 @@ namespace
     }
 }
 
+TEST_CASE("an unknown type name is a located diagnostic", "[sema][types]")
+{
+    auto assigned = EchoTests::tests_make_parsed_bundle("Nope $y = 5;\necho $y;\n");
+    REQUIRE(assigned->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*assigned, "Unknown type 'Nope'"));
+    REQUIRE_FALSE(has_issue_containing(*assigned, "Unsupported type"));
+
+    auto qualified = EchoTests::tests_make_parsed_bundle(
+        "function distance(a::Vector $v) : int32 { return 0; }\n");
+    REQUIRE(qualified->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*qualified, "Unknown type 'a::Vector'"));
+}
+
+TEST_CASE("a nested type's bare name resolves inside its owner", "[sema][types]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Outer {\n"
+        "    struct Inner { int32 $n; }\n"
+        "    Inner $inner;\n"
+        "    function show(Inner $i) : int32 { return $i->n; }\n"
+        "}\n"
+        "Outer $o = Outer(Outer::Inner(7));\n"
+        "echo $o->inner->n;\n"
+        "echo $o->show(Outer::Inner(9));\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("a nested type's bare name is unknown outside its owner", "[sema][types]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Outer { struct Inner { int32 $n; } }\n"
+        "struct Holder { Inner $x; }\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "Unknown type 'Inner'"));
+}
+
+TEST_CASE("a nested type's bare name resolves in a method body", "[sema][types]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Outer {\n"
+        "    struct Inner { int32 $n; }\n"
+        "    function show() : int32 {\n"
+        "        Inner $i = Outer::Inner(1);\n"
+        "        return $i->n;\n"
+        "    }\n"
+        "}\n"
+        "echo Outer()->show();\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("an unknown property on a generic struct is a located diagnostic", "[sema][types]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> { Nope $x; }\n"
+        "echo 1;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "Unknown type 'Nope'"));
+}
+
+TEST_CASE("instanceof of an unknown type is Unknown type, not 'not unknown'", "[sema][types]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Cat {}\n"
+        "Cat $c = Cat();\n"
+        "echo $c instanceof Nope;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "Unknown type 'Nope'"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "not '[unknown]'"));
+}
+
+TEST_CASE("a comparison against a qualified constant is not an unknown type", "[sema][types]")
+{
+    // parse_explicit_type_args used to call parse_type on `lim::LIMIT` after `<` and
+    // report Unknown type even when the `<` was a comparison. the parser is silent now
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "namespace lim;\npublic const LIMIT = 3;\n",
+        "int32 $n = 1;\nif ($n < lim::LIMIT) { echo 1; }\n",
+    });
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
 TEST_CASE("unknown struct member is a located diagnostic, not a silent void", "[sema]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -572,6 +668,28 @@ TEST_CASE("a per-branch operator gap over primitives is reported here", "[sema]"
         "echo true % false;\n");
 
     REQUIRE(has_issue_containing(*bundle, "operator '%' is not supported on operands of type 'bool'"));
+}
+
+TEST_CASE("== null does not skip seating of a borrow-temporary argument", "[sema][operators]")
+{
+    // `$k == null` used to become an operator call with an untyped null, so body_is_concrete
+    // stayed false and OwnershipPass skipped the whole body. the earlier `$b[Key(1)] = 2` then
+    // reached TypeChecker as an AddrOf with no slot - a compiler-bug rail on a valid write
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Key { int32 $n; }\n"
+        "struct Box { int32 $v; }\n"
+        "operator (Box& $b)[const Key& $k] = (int32 $v) : void { $b->v = $v; }\n"
+        "Box $b = Box(0);\n"
+        "$b[Key(1)] = 2;\n"
+        "Key $k = Key(1);\n"
+        "echo ($k == null);\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("issue: " << issue->message());
+    }
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot compare 'Key' against null"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "compiler bug"));
 }
 
 TEST_CASE("the gaps that are gone report nothing", "[sema]")

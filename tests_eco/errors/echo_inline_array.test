@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] echo_inline_array.eco:2:1
+
+  'echo' has no way to print a 'int32[4]'
+
+  1 | int32[4] $xs;
+  2 | echo $xs;
+    : ^^^^
+  3 | 
+
+1 error, nothing was compiled.

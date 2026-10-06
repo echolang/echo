@@ -1,0 +1,2 @@
+struct Box<T> { Nope $x; }
+echo 1;

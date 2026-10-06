@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_cast.eco:2:13
+
+  Unknown type 'Nope'
+
+  1 | int32 $x = 5;
+  2 | echo ($x as Nope);
+    :             ^^^^
+  3 | 
+
+1 error, nothing was compiled.

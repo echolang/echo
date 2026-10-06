@@ -5,6 +5,7 @@
 
 #include "AST/ASTNode.h"
 #include "AST/ASTValueType.h"
+#include "AST/TypeNode.h"
 #include "Token.h"
 
 #include "AST/OperatorNode.h"
@@ -16,7 +17,6 @@ namespace AST
     class FunctionDeclNode;
     class Namespace;
     class VarRefNode;
-    class TypeNode;
 
     class ExprNode : public Node
     {
@@ -1036,6 +1036,10 @@ namespace AST
 
         ExprNode *operand;
 
+        // the TypeNode parse_type built for the right-hand type. RecursiveVisitor walks it;
+        // TypeChecker::visitType asks unresolved_type_name_refusal of it
+        TypeNode *queried = nullptr;
+
         // the type on the right. a named type either way - the diagnostic for a struct operand is the
         // *left* side's business, and a struct on the right is a legitimate question with the answer
         // `false`
@@ -1044,10 +1048,14 @@ namespace AST
         // the `instanceof` keyword, so a bad operand reports at the operator
         TokenReference token_instanceof;
 
-        InstanceOfExprNode(ExprNode *operand, ValueType queried_type, TokenReference token_instanceof) :
-            operand(operand), queried_type(std::move(queried_type)), token_instanceof(std::move(token_instanceof))
+        InstanceOfExprNode(ExprNode *operand, TypeNode *queried, TokenReference token_instanceof) :
+            operand(operand),
+            queried(queried),
+            queried_type(queried != nullptr ? queried->type : ValueType::make_unknown()),
+            token_instanceof(std::move(token_instanceof))
         {
             assert(operand != nullptr && "InstanceOfExprNode requires an operand");
+            assert(queried != nullptr && "InstanceOfExprNode requires a queried type");
         };
 
         ~InstanceOfExprNode() {}

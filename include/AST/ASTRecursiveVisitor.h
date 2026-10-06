@@ -131,6 +131,21 @@ namespace AST
         virtual void statement_edge(Node *node);
         void statement_edges(NodeReferenceList &edges);
 
+        // a written TypeNode: descended into, never replaced. clone already treats `_type_node`,
+        // `return_type`, `written_to`, `explicit_type_args` and instanceof's queried type as owned
+        // children; this is the matching walk. statement_edge would work (a TypeNode is a Node) and
+        // that is what this calls — the name is so a visit method names the edge the way value_edge
+        // names an expression
+        void type_edge(TypeNode *node);
+        void type_edges(std::vector<TypeNode *> &edges);
+
+        // the TypeNodes a declaration owns on its signature: return type and parameter types,
+        // or a type's property types. the generic early-return in TypeChecker walks these and
+        // skips the body; visitFunctionDecl / visit_type_decl walk them too, then the rest.
+        // visitVarDecl type_edges the same parameter/property nodes when the body is walked
+        void walk_function_signature_types(FunctionDeclNode &node);
+        void walk_type_decl_property_types(TypeDeclNode &node);
+
     private:
         // the NodeReference forms of the two edge helpers. a reference that does not hold an
         // expression is a statement edge instead - the gate lives here so its one owner is this file

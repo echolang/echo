@@ -1,0 +1,9 @@
+// a pointer is one word, so a struct may name itself this way
+struct Node
+{
+    int32 $v;
+    ptr<Node> $next;
+}
+
+Node $n = Node(1, null);
+echo $n->v;

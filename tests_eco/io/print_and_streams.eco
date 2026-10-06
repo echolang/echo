@@ -4,7 +4,7 @@
 std::io::stdout->write('written');
 std::io::stdout->writeline(' and a line');
 
-stream $out = std::io::stdout;
+std::io::stream $out = std::io::stdout;
 $out->writeline('through a copy');
 
 std::io::print('print');

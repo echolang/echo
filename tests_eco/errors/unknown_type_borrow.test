@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_borrow.eco:2:1
+
+  Unknown type 'Nope'
+
+  1 | int32 $x = 5;
+  2 | Nope& $y = $x;
+    : ^^^^
+  3 | 
+
+1 error, nothing was compiled.

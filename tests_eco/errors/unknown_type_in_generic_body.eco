@@ -1,0 +1,7 @@
+function f<T>(T $a) : void
+{
+    Tx $b = $a;
+    echo $b;
+}
+
+f(3);

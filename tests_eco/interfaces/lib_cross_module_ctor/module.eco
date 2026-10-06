@@ -1,0 +1,9 @@
+/*
+ * Library half of tests_eco/interfaces/cross_module_ctor: the class is declared here, the
+ * construction site is the entry file, so the consumer unit lowers the box after function maps.
+ */
+
+#[module: "modiface"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

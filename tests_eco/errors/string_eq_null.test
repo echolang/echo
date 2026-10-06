@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] string_eq_null.eco:2:10
+
+  cannot compare 'string' against null - it is always there, write 'string?' if it may be absent
+
+  1 | string $s = 'x';
+  2 | echo ($s == null);
+    :          ^^
+  3 | 
+
+1 error, nothing was compiled.

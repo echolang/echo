@@ -1,0 +1,2 @@
+simd<int32, 4> $v;
+echo $v;

@@ -108,9 +108,10 @@ namespace Parser
     // and nothing downstream keeps the token it was written at. That works because a type's visibility is
     // settled a pass earlier, in Parser::parse_type_names - see ComplexType::visibility.
     //
-    // **it reports and the caller carries on with the type it found.** An unresolved unqualified type name
-    // is silently `unknown` in this parser, so refusing to hand the declaration back would trade one exact
-    // diagnostic for a cascade of wrong layouts underneath it
+    // **it reports and the caller carries on with the type it found.** An unresolved type name
+    // is `unknown` in this parser, and TypeChecker asks AST::unresolved_type_name_refusal of
+    // the TypeNode that lands in the tree - so refusing to hand the declaration back would trade
+    // one exact diagnostic for a cascade of wrong layouts underneath it
     void refuse_invisible_type(Payload &payload, const AST::TypeDeclNode &decl, const TokenReference &at);
 };
 

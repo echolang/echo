@@ -1,6 +1,5 @@
-// a type declared inside a `{ }` block is not reachable from outside it. an unresolved *unqualified*
-// type name is silent by design, so what reports this is the constructor call: `P(1)` finds no
-// overload set anywhere on the walk out of the file's namespace
+// a type declared inside a `{ }` block is not reachable from outside it. the type name is
+// TypeChecker's; the constructor call is CallResolver's
 
 function outer() : int32
 {

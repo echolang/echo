@@ -1,0 +1,2 @@
+int32[4] $xs;
+echo $xs;

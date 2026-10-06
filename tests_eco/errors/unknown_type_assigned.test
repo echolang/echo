@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_assigned.eco:1:1
+
+  Unknown type 'Nope'
+
+  1 | Nope $y = 5;
+    : ^^^^
+  2 | echo $y;
+
+1 error, nothing was compiled.

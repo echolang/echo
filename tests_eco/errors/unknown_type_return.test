@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] unknown_type_return.eco:1:16
+
+  Unknown type 'Nope'
+
+  1 | function f() : Nope {}
+    :                ^^^^
+  2 | 
+
+1 error, nothing was compiled.

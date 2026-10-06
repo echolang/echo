@@ -607,7 +607,7 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode 
     // a class needs the block around that payload before anything can allocate one. built eagerly
     // here, alongside the payload, so the unit that declares the class always has it
     if (node->is_class()) {
-        build_class_box(cmp_unit.structure_table->get_structure(struct_id), node->complex_type(), cmp_unit);
+        build_class_box(struct_id, node->complex_type(), cmp_unit);
     }
 
     return llvm_struct_type;
@@ -640,21 +640,25 @@ llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::Compl
 
     // the block, once the payload is complete - it is a member of the block, so it has to be
     if (type->is_class_kind()) {
-        build_class_box(cmp_unit.structure_table->get_structure(struct_id), *type, cmp_unit);
+        build_class_box(struct_id, *type, cmp_unit);
     }
 
     return llvm_struct_type;
 }
 
 void TypeLowering::build_class_box(
-    Structure &structure,
+    structure_id_t struct_id,
     const AST::ComplexType &type,
     const Compiler::LLVM::CmpUnit &cmp_unit
 )
 {
-    assert(structure.llvm_struct != nullptr);
+    auto row_of = [&]() -> Structure & {
+        return cmp_unit.structure_table->get_structure(struct_id);
+    };
 
-    if (structure.llvm_box != nullptr) {
+    assert(row_of().llvm_struct != nullptr);
+
+    if (row_of().llvm_box != nullptr) {
         return;
     }
 
@@ -671,9 +675,9 @@ void TypeLowering::build_class_box(
     box_members[ClassBox::strong_index] = i64;
     box_members[ClassBox::weak_index] = i64;
     box_members[ClassBox::typeinfo_index] = opaque_ptr;
-    box_members[ClassBox::payload_index] = structure.llvm_struct;
+    box_members[ClassBox::payload_index] = row_of().llvm_struct;
 
-    structure.llvm_box = llvm::StructType::create(*_ctx.llvm_context, box_members, type_name + ".box");
+    row_of().llvm_box = llvm::StructType::create(*_ctx.llvm_context, box_members, type_name + ".box");
 
     // the descriptor whose *address* is the class's identity. linkonce_odr so every unit may define it
     // and the linker keeps one - which is what makes the address comparable across modules without a
@@ -684,7 +688,11 @@ void TypeLowering::build_class_box(
     // sharing one spelling here made them one identity, and instanceof then answered true across two
     // unrelated classes. ComplexType::mangled_token() is the existing answer to "which type is this",
     // including the namespace path, a nested owner and an instantiation's arguments
-    structure.typeinfo = get_or_create_odr_constant(
+    //
+    // re-fetched after the initializer: filling vtables calls create_llvm_func_decl, which can intern
+    // a method's return type into this unit and grow the table. a Structure& held across that write
+    // was the null typeinfo CreateAlignedStore faulted on
+    llvm::GlobalVariable *typeinfo = get_or_create_odr_constant(
         type.mangled_token() + ".typeinfo",
         [&] {
             // `{ i64 count, ptr conformances }` - see Codegen/ClassLayout.h. it used to be a bare `i8 0`,
@@ -720,6 +728,8 @@ void TypeLowering::build_class_box(
             return llvm::ConstantStruct::get(info_type, info_values);
         },
         cmp_unit);
+
+    row_of().typeinfo = typeinfo;
 }
 
 llvm::GlobalVariable *TypeLowering::get_or_create_interface_identity(
@@ -968,15 +978,18 @@ Compiler::LLVM::ClassLayout TypeLowering::get_or_create_class_layout(
             _ctx.function_context()));
     }
 
-    Structure &structure = cmp_unit.structure_table->get_structure(struct_id);
-
     // a struct registered before the declaration was known to be a class cannot happen - the kind is
     // settled in the type-name pass - but the box may still be missing if the payload was lowered
-    // through the struct path, so build it rather than assuming
-    if (structure.llvm_box == nullptr) {
-        build_class_box(structure, *type, cmp_unit);
+    // through the struct path, so build it rather than assuming. re-fetched after: build_class_box
+    // can intern a vtable method's return type into this unit
+    //
+    // llvm_box set and typeinfo still null is the in-progress state: the release thunk asks for
+    // this layout from inside typeinfo construction, and only needs the box type
+    if (cmp_unit.structure_table->get_structure(struct_id).llvm_box == nullptr) {
+        build_class_box(struct_id, *type, cmp_unit);
     }
 
+    Structure &structure = cmp_unit.structure_table->get_structure(struct_id);
     return ClassLayout{ structure.llvm_struct, structure.llvm_box, structure.typeinfo };
 }
 

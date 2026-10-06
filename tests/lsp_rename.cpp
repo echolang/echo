@@ -4,6 +4,7 @@
 #include <Compiler/DriverOptions.h>
 #include <Compiler/Lsp/LspRename.h>
 #include <Compiler/Lsp/LspSession.h>
+#include <Compiler/SettledPath.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -36,9 +37,11 @@ namespace
     // the source with every edit applied, so a test reads as before and after
     std::string applied(const std::string &source, const std::filesystem::path &path, std::vector<Compiler::Lsp::RenameEdit> edits)
     {
+        // File::get_path is settled: `/tmp/...` is `D:\tmp\...` on Windows
+        const std::filesystem::path settled = Compiler::canonical_or_absolute(path);
         std::vector<std::pair<size_t, Compiler::Lsp::RenameEdit>> located;
         for (const auto &edit : edits) {
-            if (edit.path != path) {
+            if (Compiler::canonical_or_absolute(edit.path) != settled) {
                 continue;
             }
 

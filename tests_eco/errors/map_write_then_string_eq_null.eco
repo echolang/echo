@@ -1,0 +1,4 @@
+map<string, string> $m = map<string, string>();
+$m['a'] = 'b';
+string $s = 'x';
+echo ($s == null);

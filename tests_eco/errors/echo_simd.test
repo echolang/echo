@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] echo_simd.eco:2:1
+
+  'echo' has no way to print a 'simd<int32, 4>'
+
+  1 | simd<int32, 4> $v;
+  2 | echo $v;
+    : ^^^^
+  3 | 
+
+1 error, nothing was compiled.

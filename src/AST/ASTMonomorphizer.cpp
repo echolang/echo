@@ -389,27 +389,9 @@ namespace AST
                     continue;
                 }
 
-                // **a type parameter the author *wrote* is not stale**, and it is the one shape here
-                // that is not.
-                //
-                // undetermined covers two different things. `$b = Box<int32>(...)` captured the
-                // template's un-substituted return type and `$x = f(...)` captured void - those are
-                // missing information, and this sweep is what supplies it. A written `T` is not
-                // missing anything: it is information that arrives at substitution, and deriving it
-                // from the initializer instead **destroyed the declaration on the template**.
-                // `T $sum = 0;` became `int32 $sum` there, so every instance cloned afterwards
-                // declared an int32 - a `float64` one computing in int32 and an `int64` one
-                // overflowing, both in silence. Invisible while every instance happened to be created
-                // before this ran, which is why it only showed once a generic reached another generic
-                // and was discovered a round later.
-                //
-                // **both halves are load-bearing.** `type_token` alone is too coarse - a written type
-                // whose *name* did not resolve at parse time is undetermined for the first reason and
-                // does want re-deriving, which is what `stream $out = std::io::stdout;` is. And
-                // `contains_type_param` alone is too coarse the other way, since a captured
-                // `Box<T>` mentions one and is exactly what this exists for. Written **and** a type
-                // parameter is the intersection, and it is only ever the declaration in a template
-                if (decl->type_node()->type_token.has_value() && contains_type_param(decl->type())) {
+                // a written type_token is information: a `T` waits for substitution, a miss is
+                // unresolved_type_name_refusal. only a minted undetermined type is stale
+                if (decl->type_node()->type_token.has_value()) {
                     continue;
                 }
 
