@@ -95,6 +95,44 @@ void Compiler::Lsp::Session::did_change(
     set_document(path, version, std::move(content));
 }
 
+void Compiler::Lsp::Session::did_change_watched(const std::vector<WatchedFile> &files)
+{
+    bool changed = false;
+
+    for (const WatchedFile &file : files) {
+        const std::filesystem::path key = key_of(file.path);
+
+        // the manifest is read from disk by resolution even while it is open, so a save is the
+        // moment an edit to it takes effect
+        if (is_manifest_file(key) || key.filename() == "epm.lock.json") {
+            _resolve_needed = true;
+            changed = true;
+            continue;
+        }
+
+        if (!is_echo_source(key)) {
+            continue;
+        }
+
+        // `#[sources:]` was expanded when the project was resolved. a file made after that is in no
+        // module until it is expanded again, and one removed is still listed
+        if (file.change != WatchedChange::t_changed) {
+            _resolve_needed = true;
+            changed = true;
+            continue;
+        }
+
+        // an open document is the editor's. its bytes arrive through didChange
+        if (_overlay.find(key) == _overlay.end()) {
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        mark_dirty();
+    }
+}
+
 void Compiler::Lsp::Session::did_close(const std::filesystem::path &path)
 {
     const std::filesystem::path key = key_of(path);
@@ -133,6 +171,9 @@ std::optional<int> Compiler::Lsp::Session::overlay_version(const std::filesystem
 
 void Compiler::Lsp::Session::resolve_project()
 {
+    _project_resolution++;
+    _project_issues.clear();
+
     std::string error;
 
     if (!Compiler::TargetFacts::resolve(
@@ -145,34 +186,50 @@ void Compiler::Lsp::Session::resolve_project()
         _manifests.clear();
         _roots.clear();
         _loose_mode = true;
-        _parse_failure = FrontEndFailure{ "Invalid Target", error, std::nullopt };
+        _project_issues.push_back(ProjectIssue{
+            std::nullopt, 0, AST::IssueSeverity::Error, "Invalid Target: " + error });
         return;
     }
 
     _facts_ok = true;
-    _parse_failure.reset();
 
     Parser::ManifestScratch scratch(_facts);
 
-    if (!Compiler::resolve_front_end_manifests(
-            _driver.modules,
-            !_driver.no_stdlib,
-            _driver.modules.empty(),
-            _workspace_root,
-            _driver.package_dir,
-            scratch,
-            _manifests,
-            _roots)) {
-        for (const auto &issue : scratch.bundle.collector.issues) {
-            const AST::Diagnostic diagnostic = AST::to_diagnostic(*issue);
-            if (diagnostic.primary.file == nullptr) {
-                _parse_failure = FrontEndFailure{ "", diagnostic.message, std::nullopt };
-                break;
-            }
+    const bool resolved = Compiler::resolve_front_end_manifests(
+        _driver.modules,
+        !_driver.no_stdlib,
+        _driver.modules.empty(),
+        _workspace_root,
+        _driver.package_dir,
+        scratch,
+        _manifests,
+        _roots);
+
+    // every issue from this resolution, including those with a file. a missing dependency drops the
+    // project into loose mode and every cross-file reference goes red; the editor needs the line in
+    // module.eco that caused that
+    for (const auto &issue : scratch.bundle.collector.issues) {
+        const AST::Diagnostic diagnostic = AST::to_diagnostic(*issue);
+
+        ProjectIssue out;
+        out.severity = diagnostic.severity;
+        out.message = diagnostic.message;
+        for (const auto &note : diagnostic.notes) {
+            out.message += "\n" + note.message;
         }
 
-        _loose_mode = _roots.empty();
-        return;
+        if (diagnostic.primary.file != nullptr) {
+            out.path = key_of(diagnostic.primary.file->get_path());
+            out.line = diagnostic.primary.start.line;
+        }
+
+        _project_issues.push_back(std::move(out));
+    }
+
+    if (!resolved && _project_issues.empty()) {
+        _project_issues.push_back(ProjectIssue{
+            std::nullopt, 0, AST::IssueSeverity::Error,
+            "The project's module.eco could not be resolved, so every file is checked on its own." });
     }
 
     _loose_mode = _roots.empty();
@@ -357,7 +414,10 @@ bool Compiler::Lsp::Session::launch(const std::string &reason)
     }
 
     if (!_facts_ok) {
+        // resolved again on the next edit or file event: the target is settled from the driver
+        // options, but a project reported as broken has to be able to stop being broken
         _dirty = false;
+        _resolve_needed = true;
         return false;
     }
 
@@ -473,4 +533,24 @@ const AST::File *Compiler::Lsp::Session::file_of(const std::filesystem::path &pa
     }
 
     return _snapshot->index.file_for_path(path);
+}
+
+const Compiler::Lsp::Document *Compiler::Lsp::Session::document(const std::filesystem::path &path) const
+{
+    auto found = _overlay.find(key_of(path));
+    return found != _overlay.end() ? &found->second : nullptr;
+}
+
+std::string Compiler::Lsp::Session::text_of(const std::filesystem::path &path) const
+{
+    if (const Document *open = document(path)) {
+        return open->content;
+    }
+
+    const AST::File *file = file_of(path);
+    if (file != nullptr && file->content.has_value()) {
+        return file->content.value();
+    }
+
+    return "";
 }

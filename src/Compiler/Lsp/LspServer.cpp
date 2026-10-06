@@ -1,249 +1,30 @@
 #include "Compiler/Lsp/LspServer.h"
 
 #include "AST/ASTFile.h"
+#include "Compiler/Lsp/LspCompletion.h"
+#include "Compiler/Lsp/LspHints.h"
+#include "Compiler/Lsp/LspLiveText.h"
 #include "Compiler/Lsp/LspPosition.h"
+#include "Compiler/Lsp/LspProtocol.h"
 #include "Compiler/Lsp/LspQuery.h"
+#include "Compiler/Lsp/LspRename.h"
 #include "Compiler/Lsp/LspSession.h"
 #include "Compiler/Lsp/LspTransport.h"
 #include "Compiler/Lsp/LspUri.h"
-#include "Compiler/SettledPath.h"
 #include "eco.h"
-
-#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <unordered_set>
 #include <utility>
 
-typedef nlohmann::json json;
-
-namespace
-{
-    json parse_json(const std::string &text)
-    {
-        return json::parse(text, nullptr, false);
-    }
-
-    json range_json(const Compiler::Lsp::Range &range)
-    {
-        return json{
-            { "start", { { "line", range.start.line }, { "character", range.start.character } } },
-            { "end", { { "line", range.end.line }, { "character", range.end.character } } }
-        };
-    }
-
-    json span_json(const AST::Span &span, bool utf8)
-    {
-        return range_json(Compiler::Lsp::span_to_lsp_range(span, utf8));
-    }
-
-    int lsp_severity(AST::IssueSeverity severity)
-    {
-        switch (severity) {
-        case AST::IssueSeverity::Error:
-            return 1;
-        case AST::IssueSeverity::Warning:
-            return 2;
-        case AST::IssueSeverity::Info:
-            return 3;
-        }
-
-        return 1;
-    }
-
-    int lsp_symbol_kind(Compiler::Lsp::OutlineKind kind)
-    {
-        switch (kind) {
-        case Compiler::Lsp::OutlineKind::t_method:
-            return 6;
-        case Compiler::Lsp::OutlineKind::t_constructor:
-            return 9;
-        case Compiler::Lsp::OutlineKind::t_operator:
-            return 25;
-        case Compiler::Lsp::OutlineKind::t_class:
-            return 5;
-        case Compiler::Lsp::OutlineKind::t_interface:
-            return 11;
-        case Compiler::Lsp::OutlineKind::t_enum:
-            return 10;
-        case Compiler::Lsp::OutlineKind::t_struct:
-            return 23;
-        case Compiler::Lsp::OutlineKind::t_constant:
-            return 14;
-        case Compiler::Lsp::OutlineKind::t_namespace:
-            return 3;
-        case Compiler::Lsp::OutlineKind::t_function:
-            return 12;
-        case Compiler::Lsp::OutlineKind::t_property:
-            return 7;
-        }
-
-        return 12;
-    }
-
-    json outline_json(const Compiler::Lsp::OutlineSymbol &symbol, bool utf8)
-    {
-        json item = {
-            { "name", symbol.name },
-            { "kind", lsp_symbol_kind(symbol.kind) },
-            { "range", span_json(symbol.range, utf8) },
-            { "selectionRange", span_json(symbol.selection, utf8) }
-        };
-
-        if (!symbol.children.empty()) {
-            json children = json::array();
-            for (const Compiler::Lsp::OutlineSymbol &child : symbol.children) {
-                children.push_back(outline_json(child, utf8));
-            }
-
-            item["children"] = std::move(children);
-        }
-
-        return item;
-    }
-
-    json location_json(const std::filesystem::path &path, const AST::Span &span, bool utf8)
-    {
-        return json{
-            { "uri", Compiler::Lsp::uri_from_path(path) },
-            { "range", span_json(span, utf8) }
-        };
-    }
-
-    std::string eco_fence(const std::string &body)
-    {
-        return "```eco\n" + body + "\n```";
-    }
-
-    bool wants_utf8(const json &params)
-    {
-        if (!params.is_object() || !params.contains("capabilities")) {
-            return false;
-        }
-
-        const json &capabilities = params["capabilities"];
-        if (!capabilities.is_object() || !capabilities.contains("general")) {
-            return false;
-        }
-
-        const json &general = capabilities["general"];
-        if (!general.is_object() || !general.contains("positionEncodings")) {
-            return false;
-        }
-
-        const json &encodings = general["positionEncodings"];
-        if (!encodings.is_array()) {
-            return false;
-        }
-
-        for (const json &encoding : encodings) {
-            if (encoding.is_string() && encoding.get<std::string>() == "utf-8") {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    std::filesystem::path workspace_root_of(const json &params)
-    {
-        if (params.contains("rootUri") && params["rootUri"].is_string()) {
-            const std::string uri = params["rootUri"].get<std::string>();
-            if (!uri.empty()) {
-                return Compiler::Lsp::path_from_uri(uri);
-            }
-        }
-
-        if (params.contains("rootPath") && params["rootPath"].is_string()) {
-            const std::string path = params["rootPath"].get<std::string>();
-            if (!path.empty()) {
-                return Compiler::canonical_or_absolute(path);
-            }
-        }
-
-        std::error_code ec;
-        const std::filesystem::path here = std::filesystem::current_path(ec);
-        return ec ? std::filesystem::path{} : here;
-    }
-
-    json diagnostic_json(const AST::Diagnostic &diagnostic, bool utf8)
-    {
-        std::string message = diagnostic.message;
-        for (const auto &note : diagnostic.notes) {
-            message += "\n" + note.message;
-        }
-
-        json item = {
-            { "range", span_json(diagnostic.primary, utf8) },
-            { "severity", lsp_severity(diagnostic.severity) },
-            { "source", "echoc" },
-            { "message", message }
-        };
-
-        if (diagnostic.code.has_value()) {
-            item["code"] = diagnostic.code.value();
-        }
-
-        if (!diagnostic.labels.empty()) {
-            json related = json::array();
-            for (const auto &label : diagnostic.labels) {
-                if (label.span.file == nullptr) {
-                    continue;
-                }
-
-                related.push_back({
-                    { "location", {
-                        { "uri", Compiler::Lsp::uri_from_path(label.span.file->get_path()) },
-                        { "range", span_json(label.span, utf8) }
-                    } },
-                    { "message", label.message }
-                });
-            }
-
-            if (!related.empty()) {
-                item["relatedInformation"] = related;
-            }
-        }
-
-        return item;
-    }
-
-    bool document_path(const json &params, std::filesystem::path &out)
-    {
-        if (!params.is_object() || !params.contains("textDocument")) {
-            return false;
-        }
-
-        const json &doc = params["textDocument"];
-        if (!doc.is_object() || !doc.contains("uri") || !doc["uri"].is_string()) {
-            return false;
-        }
-
-        out = Compiler::Lsp::path_from_uri(doc["uri"].get<std::string>());
-        return true;
-    }
-
-    bool document_position(
-        const json &params,
-        std::filesystem::path &out_path,
-        Compiler::Lsp::Position &out_position
-    )
-    {
-        if (!document_path(params, out_path) || !params.contains("position")
-            || !params["position"].is_object()) {
-            return false;
-        }
-
-        out_position.line = params["position"].value("line", 0u);
-        out_position.character = params["position"].value("character", 0u);
-        return true;
-    }
-};
+typedef Compiler::Lsp::Json json;
 
 struct Compiler::Lsp::Server::Impl
 {
@@ -254,7 +35,18 @@ struct Compiler::Lsp::Server::Impl
     bool shutdown = false;
     bool exit = false;
     bool debug = false;
+    int next_request_id = 1;
+
+    // what the client said it can take, from `initialize`
+    bool snippet_support = false;
+    bool label_details_support = false;
+    bool insert_replace_support = false;
+    bool prepare_rename_support = false;
+    bool document_changes_support = false;
+    bool inlay_refresh_support = false;
+
     std::unordered_set<std::string> published;
+    std::string shown_project_message;
 
     Impl(std::istream &in, std::ostream &out, const DriverOptions &driver) :
         transport(in, out),
@@ -273,6 +65,7 @@ struct Compiler::Lsp::Server::Impl
     void reply_null(const json &id);
     void reply_error(const json &id, int code, const std::string &message);
     void notify(const std::string &method, json params);
+    void request(const std::string &method, json params);
     void flush_session_output();
     void handle_initialize(const json &id, const json &params);
     void handle_initialized(const json &params);
@@ -281,12 +74,28 @@ struct Compiler::Lsp::Server::Impl
     void handle_did_open(const json &params);
     void handle_did_change(const json &params);
     void handle_did_close(const json &params);
+    void handle_did_change_watched_files(const json &params);
     void handle_hover(const json &id, const json &params);
     void handle_definition(const json &id, const json &params);
     void handle_document_symbol(const json &id, const json &params);
     void handle_references(const json &id, const json &params);
     void handle_workspace_symbol(const json &id, const json &params);
     void handle_signature_help(const json &id, const json &params);
+    void handle_document_highlight(const json &id, const json &params);
+    void handle_inlay_hint(const json &id, const json &params);
+    void handle_completion(const json &id, const json &params);
+    void handle_prepare_rename(const json &id, const json &params);
+    void handle_rename(const json &id, const json &params);
+    const AST::File *rename_file(const json &id, const json &params, std::filesystem::path &path, AST::Location &location);
+
+    struct LocatedQuery
+    {
+        const AST::File *file;
+        std::optional<AST::Location> location;
+        LiveViews views;
+    };
+
+    std::optional<LocatedQuery> locate_query(const json &params);
 };
 
 Compiler::Lsp::Server::Server(
@@ -380,7 +189,7 @@ int Compiler::Lsp::Server::Impl::run()
             continue;
         }
 
-        const json message = parse_json(frame.body);
+        const json message = parse_rpc(frame.body);
         if (message.is_discarded() || !message.is_object()) {
             std::cerr << "echoc lsp: discarded a malformed JSON-RPC frame" << std::endl;
             continue;
@@ -400,16 +209,30 @@ int Compiler::Lsp::Server::Impl::run()
 
 void Compiler::Lsp::Server::Impl::dispatch(const json &message)
 {
+    // a response to a request this server sent (workspace/inlayHint/refresh). it carries an id
+    // and no method; answering it with 'method not found' would be a reply to a reply
+    if (!message.contains("method")) {
+        return;
+    }
+
     const std::string method = message.value("method", "");
     const json id = message.contains("id") ? message["id"] : json();
     const bool is_request = message.contains("id");
     const json params = message.contains("params") ? message["params"] : json::object();
 
+    // t_query answers from the last snapshot and compiles first only when there is none.
+    // t_live waits on a compile only for a document no snapshot has seen: it reads the editor's
+    // text and whatever snapshot there is, because it runs on every keystroke and the statement
+    // being typed is in no snapshot anyway.
+    // t_fresh compiles first whenever anything changed, because it edits the user's files and
+    // a stale tree would write the wrong ranges
     enum class MethodKind
     {
         t_request,
         t_notify,
-        t_query
+        t_query,
+        t_live,
+        t_fresh
     };
 
     typedef void (Impl::*RequestHandler)(const json &, const json &);
@@ -431,12 +254,18 @@ void Compiler::Lsp::Server::Impl::dispatch(const json &message)
         { "textDocument/didOpen", MethodKind::t_notify, nullptr, &Impl::handle_did_open },
         { "textDocument/didChange", MethodKind::t_notify, nullptr, &Impl::handle_did_change },
         { "textDocument/didClose", MethodKind::t_notify, nullptr, &Impl::handle_did_close },
+        { "workspace/didChangeWatchedFiles", MethodKind::t_notify, nullptr, &Impl::handle_did_change_watched_files },
         { "textDocument/hover", MethodKind::t_query, &Impl::handle_hover, nullptr },
         { "textDocument/definition", MethodKind::t_query, &Impl::handle_definition, nullptr },
         { "textDocument/documentSymbol", MethodKind::t_query, &Impl::handle_document_symbol, nullptr },
         { "textDocument/references", MethodKind::t_query, &Impl::handle_references, nullptr },
         { "workspace/symbol", MethodKind::t_query, &Impl::handle_workspace_symbol, nullptr },
         { "textDocument/signatureHelp", MethodKind::t_query, &Impl::handle_signature_help, nullptr },
+        { "textDocument/documentHighlight", MethodKind::t_live, &Impl::handle_document_highlight, nullptr },
+        { "textDocument/inlayHint", MethodKind::t_live, &Impl::handle_inlay_hint, nullptr },
+        { "textDocument/completion", MethodKind::t_live, &Impl::handle_completion, nullptr },
+        { "textDocument/prepareRename", MethodKind::t_fresh, &Impl::handle_prepare_rename, nullptr },
+        { "textDocument/rename", MethodKind::t_fresh, &Impl::handle_rename, nullptr },
     };
 
     const Method *found = nullptr;
@@ -462,10 +291,26 @@ void Compiler::Lsp::Server::Impl::dispatch(const json &message)
         log(line.str(), false);
     }
 
+    if (found != nullptr && found->kind == MethodKind::t_fresh && initialized
+        && (session.dirty() || !session.has_snapshot())) {
+        log("blocking rebuild: " + method + " needs the current text", true);
+        log_rebuild(session.rebuild());
+        flush_session_output();
+    }
+
+    // a document just opened is in no snapshot, and the text alone answers almost nothing about it.
+    // the one compile a live request waits for is that one; after it, keystrokes keep going
+    if (found != nullptr && found->kind == MethodKind::t_live && initialized && unknown_document
+        && session.dirty()) {
+        log("blocking rebuild: " + path.string() + " not in snapshot yet", true);
+        log_rebuild(session.rebuild());
+        flush_session_output();
+    }
+
     if (found != nullptr && found->kind == MethodKind::t_query && initialized) {
         // queries answer from the last snapshot. rebuild now only when there is no
         // snapshot, or this document is dirty and not in the index yet. a miss after
-        // a compile is a path-key problem - log it, do not compile the world again
+        // a compile is a path-key problem: log it, skip compiling the world again
         if (!session.has_snapshot()) {
             log("blocking rebuild: no snapshot yet", true);
             log_rebuild(session.rebuild());
@@ -528,11 +373,7 @@ void Compiler::Lsp::Server::Impl::handle_exit(const json &)
 
 void Compiler::Lsp::Server::Impl::reply(const json &id, json result)
 {
-    json message;
-    message["jsonrpc"] = "2.0";
-    message["id"] = id;
-    message["result"] = std::move(result);
-    transport.write_message(message.dump());
+    transport.write_message(rpc_result(id, std::move(result)).dump());
 }
 
 void Compiler::Lsp::Server::Impl::reply_null(const json &id)
@@ -542,20 +383,21 @@ void Compiler::Lsp::Server::Impl::reply_null(const json &id)
 
 void Compiler::Lsp::Server::Impl::reply_error(const json &id, int code, const std::string &message_text)
 {
-    json message;
-    message["jsonrpc"] = "2.0";
-    message["id"] = id;
-    message["error"] = { { "code", code }, { "message", message_text } };
-    transport.write_message(message.dump());
+    transport.write_message(rpc_error(id, code, message_text).dump());
 }
 
 void Compiler::Lsp::Server::Impl::notify(const std::string &method, json params)
 {
-    json message;
-    message["jsonrpc"] = "2.0";
-    message["method"] = method;
-    message["params"] = std::move(params);
-    transport.write_message(message.dump());
+    transport.write_message(rpc_notify(method, std::move(params)).dump());
+}
+
+void Compiler::Lsp::Server::Impl::request(const std::string &method, json params)
+{
+    transport.write_message(rpc_request(
+        "echoc-" + std::to_string(next_request_id++),
+        method,
+        std::move(params)
+    ).dump());
 }
 
 void Compiler::Lsp::Server::Impl::flush_session_output()
@@ -573,7 +415,7 @@ void Compiler::Lsp::Server::Impl::flush_session_output()
         return diagnostics_by_uri[uri];
     };
 
-    // keep the last snapshot's squiggles even when this rebuild failed - dropping
+    // keep the last snapshot's squiggles even when this rebuild failed. dropping
     // them leaves hover answering from a tree the editor thinks is clean
     if (session.has_snapshot()) {
         for (const AST::Diagnostic &diagnostic : session.diagnostics()) {
@@ -588,6 +430,35 @@ void Compiler::Lsp::Server::Impl::flush_session_output()
             add_uri(diagnostic.primary.file->get_path()).push_back(
                 diagnostic_json(diagnostic, utf8));
         }
+    }
+
+    // the project's own problems, kept until the project is resolved again. one on a file (a
+    // manifest line) is a squiggle there; one with nowhere to point is said once per resolution
+    std::string project_message;
+    for (const ProjectIssue &issue : session.project_issues()) {
+        if (issue.path.has_value()) {
+            const uint32_t line = issue.line > 0 ? issue.line - 1 : 0;
+            add_uri(issue.path.value()).push_back(json{
+                { "range", {
+                    { "start", { { "line", line }, { "character", 0 } } },
+                    { "end", { { "line", line + 1 }, { "character", 0 } } }
+                } },
+                { "severity", lsp_severity(issue.severity) },
+                { "source", "echoc" },
+                { "message", issue.message }
+            });
+            continue;
+        }
+
+        project_message += (project_message.empty() ? "" : "\n") + issue.message;
+    }
+
+    if (project_message != shown_project_message) {
+        if (!project_message.empty()) {
+            notify("window/showMessage", json{ { "type", 1 }, { "message", project_message } });
+        }
+
+        shown_project_message = project_message;
     }
 
     const std::optional<FrontEndFailure> &failure = session.parse_failure();
@@ -632,24 +503,27 @@ void Compiler::Lsp::Server::Impl::flush_session_output()
     }
 
     published = std::move(now);
+
+    // the editor asks for inlay hints when a document changes. without this the hints shown are
+    // the previous snapshot's until the next keystroke
+    if (initialized && inlay_refresh_support) {
+        request("workspace/inlayHint/refresh", json());
+    }
 }
 
 void Compiler::Lsp::Server::Impl::handle_initialize(const json &id, const json &params)
 {
     session.set_workspace_root(workspace_root_of(params));
     utf8 = wants_utf8(params);
+    snippet_support = client_capability(params, { "textDocument", "completion", "completionItem", "snippetSupport" });
+    label_details_support = client_capability(params, { "textDocument", "completion", "completionItem", "labelDetailsSupport" });
+    insert_replace_support = client_capability(params, { "textDocument", "completion", "completionItem", "insertReplaceSupport" });
+    prepare_rename_support = client_capability(params, { "textDocument", "rename", "prepareSupport" });
+    document_changes_support = client_capability(params, { "workspace", "workspaceEdit", "documentChanges" });
+    inlay_refresh_support = client_capability(params, { "workspace", "inlayHint", "refreshSupport" });
 
     json result;
-    result["capabilities"] = {
-        { "textDocumentSync", 1 },
-        { "hoverProvider", true },
-        { "definitionProvider", true },
-        { "documentSymbolProvider", true },
-        { "referencesProvider", true },
-        { "workspaceSymbolProvider", true },
-        { "signatureHelpProvider", { { "triggerCharacters", json::array({ "(", "," }) } } },
-        { "positionEncoding", utf8 ? "utf-8" : "utf-16" }
-    };
+    result["capabilities"] = server_capabilities_json(utf8, prepare_rename_support);
     result["serverInfo"] = { { "name", "echoc" }, { "version", ECO_VERSION_STRING } };
 
     reply(id, std::move(result));
@@ -706,22 +580,58 @@ void Compiler::Lsp::Server::Impl::handle_did_close(const json &params)
     session.did_close(path);
 }
 
-void Compiler::Lsp::Server::Impl::handle_hover(const json &id, const json &params)
+void Compiler::Lsp::Server::Impl::handle_did_change_watched_files(const json &params)
+{
+    if (!params.is_object() || !params.contains("changes") || !params["changes"].is_array()) {
+        return;
+    }
+
+    std::vector<WatchedFile> files;
+    for (const json &change : params["changes"]) {
+        if (!change.is_object() || !change.contains("uri") || !change["uri"].is_string()) {
+            continue;
+        }
+
+        const int type = change.value("type", 2);
+        if (type < 1 || type > 3) {
+            continue;
+        }
+
+        files.push_back(WatchedFile{
+            path_from_uri(change["uri"].get<std::string>()),
+            static_cast<WatchedChange>(type) });
+    }
+
+    log("didChangeWatchedFiles " + std::to_string(files.size()) + " file(s)", true);
+    session.did_change_watched(files);
+}
+
+std::optional<Compiler::Lsp::Server::Impl::LocatedQuery> Compiler::Lsp::Server::Impl::locate_query(
+    const json &params
+)
 {
     std::filesystem::path path;
     Position position;
     if (!document_position(params, path, position) || session.snapshot() == nullptr) {
-        reply_null(id);
-        return;
+        return std::nullopt;
     }
 
     const AST::File *file = session.file_of(path);
     if (file == nullptr) {
-        reply_null(id);
-        return;
+        return std::nullopt;
     }
 
-    const auto hit = hover(*session.snapshot(), *file, echo_location_of(*file, position, utf8));
+    LiveViews views(session);
+    std::optional<AST::Location> location = snapshot_location(views, *file, position, utf8);
+    return LocatedQuery{ file, std::move(location), std::move(views) };
+}
+
+void Compiler::Lsp::Server::Impl::handle_hover(const json &id, const json &params)
+{
+    auto query = locate_query(params);
+    const auto hit = query.has_value() && query->location.has_value()
+        ? hover(*session.snapshot(), *query->file, query->location.value())
+        : std::nullopt;
     if (!hit.has_value()) {
         reply_null(id);
         return;
@@ -734,7 +644,10 @@ void Compiler::Lsp::Server::Impl::handle_hover(const json &id, const json &param
 
     json result = { { "contents", { { "kind", "markdown" }, { "value", markdown } } } };
     if (hit->range.file != nullptr) {
-        result["range"] = span_json(hit->range, utf8);
+        json range = live_span_json(query->views, hit->range, utf8);
+        if (!range.is_null()) {
+            result["range"] = std::move(range);
+        }
     }
 
     reply(id, std::move(result));
@@ -742,29 +655,17 @@ void Compiler::Lsp::Server::Impl::handle_hover(const json &id, const json &param
 
 void Compiler::Lsp::Server::Impl::handle_definition(const json &id, const json &params)
 {
-    std::filesystem::path path;
-    Position position;
-    if (!document_position(params, path, position) || session.snapshot() == nullptr) {
+    auto query = locate_query(params);
+    const auto hit = query.has_value() && query->location.has_value()
+        ? definition(*session.snapshot(), *query->file, query->location.value())
+        : std::nullopt;
+    json result = hit.has_value() ? live_location_json(query->views, hit.value(), utf8) : json();
+    if (result.is_null()) {
         reply_null(id);
         return;
     }
 
-    const AST::File *file = session.file_of(path);
-    if (file == nullptr) {
-        reply_null(id);
-        return;
-    }
-
-    const auto hit = definition(*session.snapshot(), *file, echo_location_of(*file, position, utf8));
-    if (!hit.has_value()) {
-        reply_null(id);
-        return;
-    }
-
-    reply(id, json{
-        { "uri", uri_from_path(hit->path) },
-        { "range", span_json(hit->range, utf8) }
-    });
+    reply(id, std::move(result));
 }
 
 void Compiler::Lsp::Server::Impl::handle_document_symbol(const json &id, const json &params)
@@ -791,16 +692,10 @@ void Compiler::Lsp::Server::Impl::handle_document_symbol(const json &id, const j
 
 void Compiler::Lsp::Server::Impl::handle_references(const json &id, const json &params)
 {
-    std::filesystem::path path;
-    Position position;
-    if (!document_position(params, path, position) || session.snapshot() == nullptr) {
-        reply(id, json::array());
-        return;
-    }
-
-    const AST::File *file = session.file_of(path);
-    if (file == nullptr) {
-        reply(id, json::array());
+    auto query = locate_query(params);
+    json result = json::array();
+    if (!query.has_value() || !query->location.has_value()) {
+        reply(id, std::move(result));
         return;
     }
 
@@ -809,10 +704,12 @@ void Compiler::Lsp::Server::Impl::handle_references(const json &id, const json &
         include_declaration = params["context"].value("includeDeclaration", true);
     }
 
-    json result = json::array();
     for (const DefinitionAnswer &hit : references(
-            *session.snapshot(), *file, echo_location_of(*file, position, utf8), include_declaration)) {
-        result.push_back(location_json(hit.path, hit.range, utf8));
+            *session.snapshot(), *query->file, query->location.value(), include_declaration)) {
+        json loc = live_location_json(query->views, hit, utf8);
+        if (!loc.is_null()) {
+            result.push_back(std::move(loc));
+        }
     }
 
     reply(id, std::move(result));
@@ -828,16 +725,7 @@ void Compiler::Lsp::Server::Impl::handle_workspace_symbol(const json &id, const 
     const std::string query = params.is_object() ? params.value("query", "") : "";
     json result = json::array();
     for (const WorkspaceSymbol &symbol : workspace_symbols(*session.snapshot(), query)) {
-        json item = {
-            { "name", symbol.name },
-            { "kind", lsp_symbol_kind(symbol.kind) },
-            { "location", location_json(symbol.path, symbol.range, utf8) }
-        };
-        if (!symbol.container.empty()) {
-            item["containerName"] = symbol.container;
-        }
-
-        result.push_back(std::move(item));
+        result.push_back(workspace_symbol_json(symbol, utf8));
     }
 
     reply(id, std::move(result));
@@ -845,41 +733,217 @@ void Compiler::Lsp::Server::Impl::handle_workspace_symbol(const json &id, const 
 
 void Compiler::Lsp::Server::Impl::handle_signature_help(const json &id, const json &params)
 {
-    std::filesystem::path path;
-    Position position;
-    if (!document_position(params, path, position) || session.snapshot() == nullptr) {
-        reply_null(id);
-        return;
-    }
-
-    const AST::File *file = session.file_of(path);
-    if (file == nullptr) {
-        reply_null(id);
-        return;
-    }
-
-    const auto help = signature_help(
-        *session.snapshot(), *file, echo_location_of(*file, position, utf8));
+    auto query = locate_query(params);
+    const auto help = query.has_value() && query->location.has_value()
+        ? signature_help(*session.snapshot(), *query->file, query->location.value())
+        : std::nullopt;
     if (!help.has_value()) {
         reply_null(id);
         return;
     }
 
-    json parameters = json::array();
-    for (const std::string &parameter : help->parameters) {
-        parameters.push_back({ { "label", parameter } });
+    reply(id, signature_help_json(help.value()));
+}
+
+void Compiler::Lsp::Server::Impl::handle_document_highlight(const json &id, const json &params)
+{
+    auto query = locate_query(params);
+    json result = json::array();
+    if (!query.has_value() || !query->location.has_value()) {
+        reply(id, std::move(result));
+        return;
     }
 
-    json result = {
-        { "signatures", json::array({
-            {
-                { "label", help->label },
-                { "parameters", std::move(parameters) }
-            }
-        }) },
-        { "activeSignature", 0 },
-        { "activeParameter", help->active_parameter }
-    };
+    for (const Highlight &highlight : document_highlights(
+            *session.snapshot(), *query->file, query->location.value())) {
+        json range = live_span_json(query->views, highlight.range, utf8);
+        if (!range.is_null()) {
+            result.push_back(json{
+                { "range", std::move(range) },
+                { "kind", static_cast<int>(highlight.kind) } });
+        }
+    }
 
     reply(id, std::move(result));
+}
+
+void Compiler::Lsp::Server::Impl::handle_inlay_hint(const json &id, const json &params)
+{
+    std::filesystem::path path;
+    const AST::File *file = nullptr;
+    if (!document_path(params, path) || session.snapshot() == nullptr
+        || (file = session.file_of(path)) == nullptr) {
+        reply(id, json::array());
+        return;
+    }
+
+    // the requested range is live lines. the snapshot's lines sit elsewhere, so ask for all of
+    // them and keep the hints that land inside it once mapped back
+    uint32_t first = 0;
+    uint32_t last = std::numeric_limits<uint32_t>::max();
+    if (params.contains("range") && params["range"].is_object()) {
+        const json &range = params["range"];
+        if (range.contains("start") && range["start"].is_object()) {
+            first = range["start"].value("line", 0u);
+        }
+        if (range.contains("end") && range["end"].is_object()) {
+            last = range["end"].value("line", last);
+        }
+    }
+
+    LiveViews views(session);
+    const LiveViews::View &view = views.view_of(*file);
+
+    json result = json::array();
+    for (const InlayHint &hint : inlay_hints(*session.snapshot(), *file, 1, std::numeric_limits<uint32_t>::max())) {
+        const std::optional<AST::Location> live = view.map.location_to_live(hint.position);
+        if (!live.has_value()) {
+            continue;
+        }
+
+        const Position at = view.live.has_value()
+            ? live_position_of(view.live.value(), live.value(), utf8)
+            : lsp_position_of(*file, live.value(), utf8);
+        if (at.line < first || at.line > last) {
+            continue;
+        }
+
+        result.push_back(inlay_hint_json(at, hint));
+    }
+
+    reply(id, std::move(result));
+}
+
+void Compiler::Lsp::Server::Impl::handle_completion(const json &id, const json &params)
+{
+    std::filesystem::path path;
+    Position position;
+    if (!document_position(params, path, position)) {
+        reply(id, json{ { "isIncomplete", false }, { "items", json::array() } });
+        return;
+    }
+
+    // the editor's text: the line being typed is in no snapshot
+    const LiveText live(session.text_of(path));
+    const AST::File *file = session.file_of(path);
+
+    CompletionRequest request;
+    request.live = &live;
+    request.cursor = live.offset_of(live_location_of(live, position, utf8));
+    request.snippets = snippet_support;
+    request.is_manifest = path.filename() == "module.eco";
+    if (file != nullptr && session.snapshot() != nullptr) {
+        request.snapshot = session.snapshot();
+        request.file = file;
+        request.map = LineMap::build(*file, live);
+    }
+
+    if (params.contains("context") && params["context"].is_object()) {
+        request.from_trigger_character = params["context"].value("triggerKind", 1) == 2;
+    }
+
+    const CompletionAnswer answer = completion(request);
+    const Position start = live_position_of(live, live.location_of(answer.replace_start), utf8);
+    const Position cursor = live_position_of(live, live.location_of(request.cursor), utf8);
+    const Position end = live_position_of(live, live.location_of(answer.replace_end), utf8);
+
+    json items = json::array();
+    const Range insert{ start, cursor };
+    const Range replace{ start, end };
+    for (const CompletionItem &item : answer.items) {
+        items.push_back(completion_item_json(
+            item,
+            insert,
+            replace,
+            label_details_support,
+            insert_replace_support
+        ));
+    }
+
+    reply(id, json{ { "isIncomplete", false }, { "items", std::move(items) } });
+}
+
+// the file and position a rename is asked at, or nothing after a refusal has already gone out. a
+// rename answers only from a snapshot of exactly the editor's text (the dispatcher compiled first),
+// so a compile that failed, or a text it has not caught up with, is a refusal
+const AST::File *Compiler::Lsp::Server::Impl::rename_file(
+    const json &id,
+    const json &params,
+    std::filesystem::path &path,
+    AST::Location &location
+)
+{
+    Position position;
+    const AST::File *file = nullptr;
+    if (!document_position(params, path, position) || session.snapshot() == nullptr
+        || (file = session.file_of(path)) == nullptr) {
+        reply_error(id, -32803, "This file is not part of the compiled project, so there is nothing to rename.");
+        return nullptr;
+    }
+
+    const Document *open = session.document(path);
+    if (session.parse_failure().has_value() || (open != nullptr && (!file->content.has_value() || file->content.value() != open->content))) {
+        reply_error(id, -32803, "The file does not compile as it is. Fix the error first, then rename.");
+        return nullptr;
+    }
+
+    location = echo_location_of(*file, position, utf8);
+    return file;
+}
+
+void Compiler::Lsp::Server::Impl::handle_prepare_rename(const json &id, const json &params)
+{
+    std::filesystem::path path;
+    AST::Location location;
+    const AST::File *file = rename_file(id, params, path, location);
+    if (file == nullptr) {
+        return;
+    }
+
+    const PrepareRenameAnswer answer = prepare_rename(*session.snapshot(), *file, location, session.workspace_root());
+    if (!answer.refusal.empty()) {
+        reply_error(id, -32803, answer.refusal);
+        return;
+    }
+
+    reply(id, json{ { "range", span_json(answer.range, utf8) }, { "placeholder", answer.placeholder } });
+}
+
+void Compiler::Lsp::Server::Impl::handle_rename(const json &id, const json &params)
+{
+    std::filesystem::path path;
+    AST::Location location;
+    const AST::File *file = rename_file(id, params, path, location);
+    if (file == nullptr) {
+        return;
+    }
+
+    const std::string new_name = params.is_object() ? params.value("newName", "") : "";
+    const RenameAnswer answer = rename(*session.snapshot(), *file, location, new_name, session.workspace_root());
+    if (!answer.refusal.empty()) {
+        reply_error(id, -32803, answer.refusal);
+        return;
+    }
+
+    // every file an edit lands in has to be the text that was compiled, or the ranges are wrong
+    std::map<std::string, json> by_uri;
+    std::map<std::string, std::optional<int>> versions;
+    for (const RenameEdit &edit : answer.edits) {
+        const Document *open = session.document(edit.path);
+        if (open != nullptr && edit.range.file != nullptr
+            && (!edit.range.file->content.has_value() || edit.range.file->content.value() != open->content)) {
+            reply_error(id, -32803, edit.path.filename().string() + " has changed since it was compiled. Try again in a moment.");
+            return;
+        }
+
+        const std::string uri = uri_from_path(edit.path);
+        if (!by_uri.contains(uri)) {
+            by_uri[uri] = json::array();
+            versions[uri] = session.overlay_version(edit.path);
+        }
+
+        by_uri[uri].push_back(json{ { "range", span_json(edit.range, utf8) }, { "newText", edit.new_text } });
+    }
+
+    reply(id, workspace_edit_json(by_uri, versions, document_changes_support));
 }

@@ -8,8 +8,8 @@
 #include "AST/ASTFile.h"
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/DriverOptions.h"
-#include "Compiler/ParsePipeline.h"
 #include "Compiler/Lsp/LspSnapshot.h"
+#include "Compiler/ParsePipeline.h"
 #include "Compiler/TargetFacts.h"
 #include "Parser/ManifestParser.h"
 
@@ -32,6 +32,31 @@ namespace Compiler
         {
             std::string content;
             int version = 0;
+        };
+
+        // the FileChangeType numbers of workspace/didChangeWatchedFiles
+        enum class WatchedChange
+        {
+            t_created = 1,
+            t_changed = 2,
+            t_deleted = 3
+        };
+
+        struct WatchedFile
+        {
+            std::filesystem::path path;
+            WatchedChange change = WatchedChange::t_changed;
+        };
+
+        // a problem with the project: a broken manifest, a missing dependency, a target that
+        // failed to resolve. held by value because the manifest scratch it came from is gone by
+        // the time anything publishes it
+        struct ProjectIssue
+        {
+            std::optional<std::filesystem::path> path;
+            uint32_t line = 0;
+            AST::IssueSeverity severity = AST::IssueSeverity::Error;
+            std::string message;
         };
 
         struct RebuildReport
@@ -65,6 +90,10 @@ namespace Compiler
             void did_change(const std::filesystem::path &path, int version, std::string content);
             void did_close(const std::filesystem::path &path);
 
+            // the disk moved under the editor: a checkout, an epm install, a file made or removed
+            // by another tool. re-reads what the change can have invalidated, nothing more
+            void did_change_watched(const std::vector<WatchedFile> &files);
+
             bool dirty() const {
                 return _dirty;
             }
@@ -92,8 +121,31 @@ namespace Compiler
             }
 
             std::vector<AST::Diagnostic> diagnostics() const;
+
+            // what the last project resolution reported. replaced only by the next resolution, so a
+            // later compile that succeeds in loose mode still shows why it is in loose mode
+            const std::vector<ProjectIssue> &project_issues() const {
+                return _project_issues;
+            }
+
+            // bumped by every resolution, so a caller can tell a new report from the one it already showed
+            uint64_t project_resolution() const {
+                return _project_resolution;
+            }
+
             std::optional<int> overlay_version(const std::filesystem::path &path) const;
             const AST::File *file_of(const std::filesystem::path &path) const;
+
+            // the editor's copy of a document, or null for a file that is read from disk
+            const Document *document(const std::filesystem::path &path) const;
+
+            // what the editor has for this path now: the open document, else what the snapshot
+            // compiled, else "". a query reads the user's text through this
+            std::string text_of(const std::filesystem::path &path) const;
+
+            const std::filesystem::path &workspace_root() const {
+                return _workspace_root;
+            }
 
         private:
 
@@ -133,6 +185,9 @@ namespace Compiler
             std::vector<Parser::ModuleManifest> _manifests;
             std::vector<std::filesystem::path> _roots;
             bool _loose_mode = true;
+
+            std::vector<ProjectIssue> _project_issues;
+            uint64_t _project_resolution = 0;
 
             std::unique_ptr<Snapshot> _snapshot;
             std::optional<FrontEndFailure> _parse_failure;

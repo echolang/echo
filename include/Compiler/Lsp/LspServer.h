@@ -13,8 +13,8 @@ namespace Compiler
 {
     namespace Lsp
     {
-        // JSON-RPC over stdio. queries stay on this thread. a rebuild runs on a
-        // worker so hover is not stuck behind compiling the project
+        // JSON-RPC over stdio. queries stay on this thread. a rebuild runs on a worker, so hover
+        // keeps answering while the project compiles
         class Server
         {
         public:

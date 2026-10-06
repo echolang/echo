@@ -293,6 +293,35 @@ void AST::Namespace::push_symbol(std::unique_ptr<AST::Symbol> symbol)
     _symbols[symbol->name()] = std::move(symbol);
 }
 
+std::vector<const AST::Namespace *> AST::Namespace::named_children() const
+{
+    // `_children` is the named ones. lexical scopes live in `_lexical_children`, keyed by brace
+    std::vector<const Namespace *> out;
+    out.reserve(_children.size());
+    for (const auto &[name, child] : _children) {
+        out.push_back(child.get());
+    }
+
+    std::sort(out.begin(), out.end(), [](const Namespace *a, const Namespace *b) {
+        return a->name() < b->name();
+    });
+    return out;
+}
+
+std::vector<const AST::Symbol *> AST::Namespace::symbols() const
+{
+    std::vector<const Symbol *> out;
+    out.reserve(_symbols.size());
+    for (const auto &[name, symbol] : _symbols) {
+        out.push_back(symbol.get());
+    }
+
+    std::sort(out.begin(), out.end(), [](const Symbol *a, const Symbol *b) {
+        return a->name() < b->name();
+    });
+    return out;
+}
+
 std::string AST::Namespace::debug_dump_symbols() const
 {
     std::string buffer;

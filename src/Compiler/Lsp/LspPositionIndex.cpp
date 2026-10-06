@@ -3,8 +3,10 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTNode.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTSourceToken.h"
+#include "AST/AssignNode.h"
 #include "AST/ConstDeclNode.h"
 #include "AST/ConstRefExprNode.h"
 #include "AST/GenericValueExprNode.h"
@@ -16,11 +18,15 @@
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 #include "Compiler/SettledPath.h"
 #include "Token.h"
 
 #include <algorithm>
 #include <optional>
+#include <set>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace
@@ -136,6 +142,8 @@ namespace
     {
     public:
 
+        typedef Compiler::Lsp::PositionIndex::EntryRole EntryRole;
+
         IndexBuilder(
             std::vector<Compiler::Lsp::PositionIndex::Entry> &into,
             std::vector<Compiler::Lsp::PositionIndex::CallSite> *calls
@@ -143,6 +151,18 @@ namespace
             _into(into),
             _calls(calls)
         {}
+
+        // positions written by an assignment, marked on the sorted entries afterwards. the
+        // ownership pass reseats a target's node, so a position is what survives to compare
+        const std::set<std::pair<uint32_t, uint32_t>> &writes() const {
+            return _writes;
+        }
+
+        void visit_assign(AST::AssignNode &node) override
+        {
+            record_write(node);
+            AST::RecursiveVisitor::visit_assign(node);
+        }
 
         void visitVar(AST::VarNode &node) override
         {
@@ -173,7 +193,11 @@ namespace
 
         void visitVarDecl(AST::VarDeclNode &node) override
         {
-            record(node.token_varname, &node);
+            record(
+                node.token_varname,
+                &node,
+                _parameters.count(&node) > 0 ? EntryRole::t_parameter : EntryRole::t_declaration
+            );
             index_type(node.optional_type_node());
             AST::RecursiveVisitor::visitVarDecl(node);
         }
@@ -187,7 +211,11 @@ namespace
             }
 
             if (node.name_token.has_value()) {
-                record(node.name_token.value(), &node);
+                record(node.name_token.value(), &node, EntryRole::t_declaration);
+            }
+
+            for (AST::VarDeclNode *arg : node.args) {
+                _parameters.insert(arg);
             }
 
             index_type(node.return_type);
@@ -197,7 +225,7 @@ namespace
         void visit_type_decl(AST::TypeDeclNode &node) override
         {
             if (node.name_token.has_value()) {
-                record(node.name_token.value(), &node);
+                record(node.name_token.value(), &node, EntryRole::t_declaration);
             }
 
             AST::RecursiveVisitor::visit_type_decl(node);
@@ -205,7 +233,7 @@ namespace
 
         void visit_const_decl(AST::ConstDeclNode &node) override
         {
-            record(node.token_name, &node);
+            record(node.token_name, &node, EntryRole::t_declaration);
             AST::RecursiveVisitor::visit_const_decl(node);
         }
 
@@ -252,6 +280,43 @@ namespace
 
         std::vector<Compiler::Lsp::PositionIndex::Entry> &_into;
         std::vector<Compiler::Lsp::PositionIndex::CallSite> *_calls;
+        std::set<std::pair<uint32_t, uint32_t>> _writes;
+        std::unordered_set<const AST::VarDeclNode *> _parameters;
+
+        // what an assignment writes, at the token the author wrote for it: the one in front of the
+        // `=`. a variable target is a VarNode that carries its *declaration's* token, so the write
+        // is recorded here or nowhere; a property target is recorded by visitMemberAccess and only
+        // marked. an index or a deref names no declaration to colour
+        void record_write(AST::AssignNode &node)
+        {
+            if (!token_is_indexable(&node.token_assign) || node.token_assign.get_handle() == 0) {
+                return;
+            }
+
+            const TokenReference written(node.token_assign.get_collection_ref(), node.token_assign.get_handle() - 1);
+            if (!token_is_indexable(&written) || written.file() != node.token_assign.file()) {
+                return;
+            }
+
+            AST::ExprNode *place = AST::strip_implicit_casts(node.target);
+            const AST::NodeReference ref = AST::make_ref(place);
+            AST::VarNode *var = nullptr;
+            if (ref.has_type<AST::VarNode>()) {
+                var = ref.get_ptr<AST::VarNode>();
+            }
+            else if (ref.has_type<AST::VarRefNode>() && ref.get_ptr<AST::VarRefNode>()->is_var()) {
+                var = &ref.get_ptr<AST::VarRefNode>()->get_var();
+            }
+
+            if (var != nullptr && written.type() == Token::Type::t_varname) {
+                record(written, var, EntryRole::t_write);
+                return;
+            }
+
+            if (written.type() == Token::Type::t_identifier) {
+                _writes.insert({ written.line(), written.char_offset() });
+            }
+        }
 
         void index_type(AST::TypeNode *type)
         {
@@ -260,7 +325,7 @@ namespace
             }
         }
 
-        void record(const TokenReference &token, AST::Node *node)
+        void record(const TokenReference &token, AST::Node *node, EntryRole role = EntryRole::t_use)
         {
             if (!token_is_indexable(&token)) {
                 return;
@@ -274,6 +339,7 @@ namespace
                 entry.width = 1;
             }
             entry.node = node;
+            entry.role = role;
             _into.push_back(entry);
         }
     };
@@ -294,12 +360,14 @@ void Compiler::Lsp::PositionIndex::build(AST::Bundle &bundle)
             std::vector<Entry> entries;
             std::vector<CallSite> calls;
 
+            std::set<std::pair<uint32_t, uint32_t>> writes;
             if (file.root != nullptr) {
                 IndexBuilder builder(entries, &calls);
                 file.root->accept(builder);
+                writes = builder.writes();
             }
 
-            // constants live in the arena, not the file root. pick up the ones written here
+            // constants live in the arena. pick up the ones written here
             IndexBuilder builder(entries, nullptr);
             for (AST::ConstDeclNode *decl : module.nodes.of_type<AST::ConstDeclNode>()) {
                 const AST::File *home = decl->declared_in.file;
@@ -315,7 +383,7 @@ void Compiler::Lsp::PositionIndex::build(AST::Bundle &bundle)
             }
 
             // ConstantExpander replaces each use with a clone of the initializer, so the
-            // ConstRefExprNode is gone from the tree but still in the arena - and still holds
+            // ConstRefExprNode is gone from the tree but still in the arena, and still holds
             // the name token the author wrote
             for (AST::ConstRefExprNode *ref : module.nodes.of_type<AST::ConstRefExprNode>()) {
                 if (ref->token_name.is_valid() && ref->token_name.file() == &file) {
@@ -331,10 +399,34 @@ void Compiler::Lsp::PositionIndex::build(AST::Bundle &bundle)
                     return a.column < b.column;
                 });
 
+            for (Entry &entry : entries) {
+                if (entry.role == EntryRole::t_use && writes.count({ entry.line, entry.column }) > 0) {
+                    entry.role = EntryRole::t_write;
+                }
+            }
+
             _by_file[&file] = std::move(entries);
             _calls[&file] = std::move(calls);
         }
     }
+}
+
+const std::vector<Compiler::Lsp::PositionIndex::Entry> &Compiler::Lsp::PositionIndex::entries_of(
+    const AST::File *file
+) const
+{
+    static const std::vector<Entry> none;
+    auto found = _by_file.find(file);
+    return found != _by_file.end() ? found->second : none;
+}
+
+const std::vector<Compiler::Lsp::PositionIndex::CallSite> &Compiler::Lsp::PositionIndex::calls_of(
+    const AST::File *file
+) const
+{
+    static const std::vector<CallSite> none;
+    auto found = _calls.find(file);
+    return found != _calls.end() ? found->second : none;
 }
 
 const Compiler::Lsp::PositionIndex::Entry *Compiler::Lsp::PositionIndex::entry_at(

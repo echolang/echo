@@ -271,3 +271,58 @@ bool token_spells_a_word(const std::string &value)
         return std::isalnum(at) != 0 || at == '_';
     });
 }
+
+bool token_is_reserved_word(const std::string &spelling)
+{
+    if (spelling == "true" || spelling == "false") {
+        return true;
+    }
+
+    // `::` sits among these in the enum, so the list is closed rather than a range
+    static const Token::Type types[] = {
+        Token::Type::t_const,
+        Token::Type::t_echo,
+        Token::Type::t_function,
+        Token::Type::t_return,
+        Token::Type::t_if,
+        Token::Type::t_guard,
+        Token::Type::t_else,
+        Token::Type::t_while,
+        Token::Type::t_for,
+        Token::Type::t_foreach,
+        Token::Type::t_break,
+        Token::Type::t_continue,
+        Token::Type::t_namespace,
+        Token::Type::t_use,
+        Token::Type::t_ptr,
+        Token::Type::t_weak,
+        Token::Type::t_strong,
+        Token::Type::t_null,
+        Token::Type::t_struct,
+        Token::Type::t_class,
+        Token::Type::t_interface,
+        Token::Type::t_enum,
+        Token::Type::t_case,
+        Token::Type::t_match,
+        Token::Type::t_extern,
+        Token::Type::t_as,
+        Token::Type::t_destructor,
+        Token::Type::t_instanceof,
+        Token::Type::t_mv,
+        Token::Type::t_unsafe,
+        Token::Type::t_private,
+        Token::Type::t_internal,
+        Token::Type::t_public,
+        Token::Type::t_operator,
+        Token::Type::t_test,
+        Token::Type::t_static,
+    };
+
+    for (Token::Type type : types) {
+        if (token_lit_symbol_string(type) == spelling) {
+            return true;
+        }
+    }
+
+    return false;
+}

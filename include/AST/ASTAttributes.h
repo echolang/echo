@@ -5,7 +5,9 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace AST
 {
@@ -25,6 +27,12 @@ namespace AST
     // a *closed* set, the rule the manifest reader has always lived by: `#[sources:]` misspelled
     // `#[source:]` would otherwise produce a module with no files and no complaint.
     bool is_known_attribute(const std::string &name);
+
+    // the names themselves, in table order: the declaration attributes (`#[inline]`) and the
+    // manifest's (`#[module: ...]`). the language server's `#[` completion reads these so the
+    // tables stay the one list
+    std::vector<std::string_view> declaration_attribute_names();
+    std::vector<std::string_view> manifest_attribute_names();
 
     // the accepted names, comma separated, for the "expected one of" in the diagnostic. Built from the same
     // list, so a name added there cannot be missing from the message that rejects its neighbours

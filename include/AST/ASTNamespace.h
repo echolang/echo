@@ -95,6 +95,14 @@ namespace AST
 
         void push_symbol(std::unique_ptr<Symbol> symbol);
 
+        // the named child namespaces, sorted by name. a lexical (block-local) namespace lives in
+        // `_lexical_children` and has no spelling. the language server's `ns::` completion is the reader
+        std::vector<const Namespace *> named_children() const;
+
+        // the types and constants declared directly here, sorted by name. functions live in
+        // FunctionRegistry, keyed by namespace and name
+        std::vector<const Symbol *> symbols() const;
+
         std::string debug_dump_symbols() const;
 
     private:

@@ -87,6 +87,16 @@ namespace
     }
 };
 
+std::vector<std::string_view> AST::declaration_attribute_names()
+{
+    return std::vector<std::string_view>(std::begin(k_declaration_attributes), std::end(k_declaration_attributes));
+}
+
+std::vector<std::string_view> AST::manifest_attribute_names()
+{
+    return std::vector<std::string_view>(std::begin(k_manifest_attributes), std::end(k_manifest_attributes));
+}
+
 bool AST::is_known_attribute(const std::string &name)
 {
     // the union, which is the only question one parser shared by both grammars can answer: "is this a name

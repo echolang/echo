@@ -2,8 +2,6 @@
 
 #include <Compiler/Lsp/LspTransport.h>
 
-#include "test_lane.h"
-
 #include <chrono>
 #include <sstream>
 #include <string>
@@ -15,6 +13,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+
+#include "test_lane.h"
 
 #if defined(__unix__) || defined(__APPLE__)
 
@@ -173,6 +173,73 @@ TEST_CASE("echoc lsp speaks framed JSON-RPC on stdout and nothing else", "[lsp]"
     REQUIRE(captured.find("\"referencesProvider\":true") != std::string::npos);
     REQUIRE(captured.find("\"workspaceSymbolProvider\":true") != std::string::npos);
     REQUIRE(captured.find("signatureHelpProvider") != std::string::npos);
+    REQUIRE(captured.find("completionProvider") != std::string::npos);
+    REQUIRE(captured.find("\"renameProvider\":true") != std::string::npos);
+    REQUIRE(captured.find("\"documentHighlightProvider\":true") != std::string::npos);
+    REQUIRE(captured.find("inlayHintProvider") != std::string::npos);
+}
+
+TEST_CASE("echoc lsp completes from the editor's text and ignores a client's response", "[lsp]")
+{
+    int to_child[2];
+    int from_child[2];
+    REQUIRE(pipe(to_child) == 0);
+    REQUIRE(pipe(from_child) == 0);
+
+    const pid_t pid = fork();
+    REQUIRE(pid >= 0);
+
+    if (pid == 0) {
+        dup2(to_child[0], STDIN_FILENO);
+        dup2(from_child[1], STDOUT_FILENO);
+        close(to_child[0]);
+        close(to_child[1]);
+        close(from_child[0]);
+        close(from_child[1]);
+        execl(EchoTests::echoc_binary(), "echoc", "lsp", "--no-stdlib", static_cast<char *>(nullptr));
+        _exit(127);
+    }
+
+    close(to_child[0]);
+    close(from_child[1]);
+
+    // a response the client sends to a request of the server's (workspace/inlayHint/refresh) has an
+    // id and no method. answering it with 'method not found' would be a reply to a reply
+    const std::string script
+        = frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
+                "\"processId\":null,\"rootUri\":null,\"capabilities\":{}}}")
+        + frame("{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}")
+        + frame("{\"jsonrpc\":\"2.0\",\"id\":\"echoc-1\",\"result\":null}")
+        + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{"
+                "\"uri\":\"file:///tmp/lsp-e2e-complete.eco\",\"languageId\":\"echo\",\"version\":1,"
+                "\"text\":\"function main() : void {\\n    $count = 1;\\n    $c\\n}\\n\"}}}")
+        + frame("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{"
+                "\"textDocument\":{\"uri\":\"file:///tmp/lsp-e2e-complete.eco\"},"
+                "\"position\":{\"line\":2,\"character\":6}}}")
+        + frame("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\",\"params\":null}")
+        + frame("{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}");
+    REQUIRE(write(to_child[1], script.data(), script.size()) == static_cast<ssize_t>(script.size()));
+    close(to_child[1]);
+
+    std::string captured;
+    char buffer[4096];
+    while (true) {
+        const ssize_t n = read(from_child[0], buffer, sizeof(buffer));
+        if (n <= 0) {
+            break;
+        }
+        captured.append(buffer, static_cast<size_t>(n));
+    }
+    close(from_child[0]);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
+    REQUIRE(well_formed_frames(captured));
+    REQUIRE(captured.find("-32601") == std::string::npos);
+    REQUIRE(captured.find("\"label\":\"$count\"") != std::string::npos);
 }
 
 TEST_CASE("didOpen of a broken file publishes diagnostics, a fix clears them", "[lsp]")

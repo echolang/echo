@@ -41,8 +41,13 @@ ConstDeclNode *find_constant(
         return nullptr;
     }
 
-    // a slot holds one node per name, so a hit that is a *type* is a name that is taken rather than a
-    // constant. answered by asking the node, which is what every other reader of a symbol does
+    // a slot holds one node per name. get_ptr only asserts the kind, so a struct in a release
+    // build was read as a ConstDeclNode and `m::P{ ... }` in a file outside m's sources took
+    // `echoc lsp` down
+    if (!symbol->node.has_type<ConstDeclNode>()) {
+        return nullptr;
+    }
+
     return symbol->node.get_ptr<ConstDeclNode>();
 }
 

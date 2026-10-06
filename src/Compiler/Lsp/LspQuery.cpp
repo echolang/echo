@@ -1,7 +1,6 @@
 #include "Compiler/Lsp/LspQuery.h"
 
 #include "AST/ASTBundle.h"
-#include "AST/ASTConstantExpander.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -19,6 +18,7 @@
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
+#include "Compiler/Lsp/LspResolve.h"
 #include "Compiler/Lsp/LspUri.h"
 #include "Compiler/SettledPath.h"
 #include "Token.h"
@@ -31,128 +31,8 @@
 
 namespace
 {
-    AST::TypeDeclNode *type_decl_of(AST::Bundle &bundle, const AST::ValueType &type)
-    {
-        const AST::ValueType named = AST::target_type_of(type);
-        if (!named.has_complex_type()) {
-            return nullptr;
-        }
-
-        const AST::ComplexType *wanted = named.get_complex_type()->template_or_self();
-
-        for (auto &module_ptr : bundle.modules) {
-            for (AST::TypeDeclNode *decl : module_ptr->nodes.of_type<AST::TypeDeclNode>()) {
-                if (&decl->complex_type() == wanted) {
-                    return decl;
-                }
-            }
-        }
-
-        return nullptr;
-    }
-
-    AST::VarDeclNode *property_decl_of(AST::Bundle &bundle, const AST::MemberAccessNode &access)
-    {
-        const AST::ValueType base = access.base_target_type();
-        if (!base.has_complex_type()) {
-            return nullptr;
-        }
-
-        AST::TypeDeclNode *owner = type_decl_of(bundle, base);
-        if (owner == nullptr) {
-            return nullptr;
-        }
-
-        const std::string &name = access.get_member_name().value();
-        for (AST::VarDeclNode *prop : owner->properties()) {
-            if (prop->name() == name) {
-                return prop;
-            }
-        }
-
-        return nullptr;
-    }
-
-    AST::ConstDeclNode *constant_decl_of(AST::Bundle &bundle, AST::ConstRefExprNode &ref)
-    {
-        return AST::find_constant(
-            bundle.collector.namespaces,
-            ref.lookup_name(),
-            ref.lookup_namespace,
-            ref.is_qualified);
-    }
-
-    AST::Node *definition_target(AST::Node *node, AST::Bundle &bundle)
-    {
-        if (node == nullptr) {
-            return nullptr;
-        }
-
-        const AST::NodeReference ref = AST::make_ref(node);
-
-        if (ref.has_type<AST::VarNode>()) {
-            return &ref.get_ptr<AST::VarNode>()->decl();
-        }
-
-        if (ref.has_type<AST::FunctionCallExprNode>()) {
-            return ref.get_ptr<AST::FunctionCallExprNode>()->decl;
-        }
-
-        if (ref.has_type<AST::TypeNode>()) {
-            return type_decl_of(bundle, ref.get_ptr<AST::TypeNode>()->type);
-        }
-
-        if (ref.has_type<AST::MemberAccessNode>()) {
-            return property_decl_of(bundle, *ref.get_ptr<AST::MemberAccessNode>());
-        }
-
-        if (ref.has_type<AST::StaticPropertyExprNode>()) {
-            return ref.get_ptr<AST::StaticPropertyExprNode>()->decl;
-        }
-
-        if (ref.has_type<AST::FunctionRefExprNode>()) {
-            return ref.get_ptr<AST::FunctionRefExprNode>()->decl;
-        }
-
-        if (ref.has_type<AST::ConstRefExprNode>()) {
-            return constant_decl_of(bundle, *ref.get_ptr<AST::ConstRefExprNode>());
-        }
-
-        return node;
-    }
-
-    AST::Node *canonical_target(AST::Node *node)
-    {
-        if (node == nullptr) {
-            return nullptr;
-        }
-
-        const AST::NodeReference ref = AST::make_ref(node);
-        if (ref.has_type<AST::FunctionDeclNode>()) {
-            AST::FunctionDeclNode *fn = ref.get_ptr<AST::FunctionDeclNode>();
-            if (fn->template_ref != nullptr) {
-                return fn->template_ref;
-            }
-        }
-
-        return node;
-    }
-
-    AST::Node *target_of(
-        AST::Node *node,
-        AST::Bundle &bundle,
-        std::unordered_map<AST::Node *, AST::Node *> &cache
-    )
-    {
-        auto found = cache.find(node);
-        if (found != cache.end()) {
-            return found->second;
-        }
-
-        AST::Node *target = canonical_target(definition_target(node, bundle));
-        cache[node] = target;
-        return target;
-    }
+    using Compiler::Lsp::name_token_of;
+    using Compiler::Lsp::reference_target;
 
     Compiler::Lsp::OutlineKind function_outline_kind(const AST::FunctionDeclNode &decl)
     {
@@ -205,43 +85,6 @@ namespace
             || decl.is_constructor();
     }
 
-    const TokenReference *name_token_of(AST::Node *node)
-    {
-        const AST::NodeReference ref = AST::make_ref(node);
-
-        if (ref.has_type<AST::VarDeclNode>()) {
-            return &ref.get_ptr<AST::VarDeclNode>()->token_varname;
-        }
-
-        if (ref.has_type<AST::FunctionDeclNode>()) {
-            AST::FunctionDeclNode *fn = ref.get_ptr<AST::FunctionDeclNode>();
-            if (fn->name_token.has_value()) {
-                return &fn->name_token.value();
-            }
-
-            return nullptr;
-        }
-
-        if (ref.has_type<AST::TypeDeclNode>()) {
-            AST::TypeDeclNode *type = ref.get_ptr<AST::TypeDeclNode>();
-            if (type->name_token.has_value()) {
-                return &type->name_token.value();
-            }
-
-            return nullptr;
-        }
-
-        if (ref.has_type<AST::ConstDeclNode>()) {
-            return &ref.get_ptr<AST::ConstDeclNode>()->token_name;
-        }
-
-        if (ref.has_type<AST::ConstRefExprNode>()) {
-            return &ref.get_ptr<AST::ConstRefExprNode>()->token_name;
-        }
-
-        return AST::source_token_of(*node);
-    }
-
     bool entry_is_declaration(
         const Compiler::Lsp::PositionIndex::Entry &entry,
         AST::Node *wanted
@@ -267,11 +110,11 @@ namespace
 
         if (ref.has_type<AST::ConstRefExprNode>()) {
             AST::ConstRefExprNode *cref = ref.get_ptr<AST::ConstRefExprNode>();
-            AST::ConstDeclNode *decl = AST::find_constant(
-                bundle.collector.namespaces,
-                cref->lookup_name(),
-                cref->lookup_namespace,
-                cref->is_qualified);
+            const AST::NodeReference target = AST::make_ref(
+                Compiler::Lsp::definition_target(cref, bundle));
+            AST::ConstDeclNode *decl = target.has_type<AST::ConstDeclNode>()
+                ? target.get_ptr<AST::ConstDeclNode>()
+                : nullptr;
             if (decl != nullptr && decl->value != nullptr) {
                 answer.type_description = "const " + decl->name()
                     + " : " + decl->value->result_type().get_type_desciption();
@@ -672,7 +515,7 @@ std::optional<Compiler::Lsp::DefinitionAnswer> Compiler::Lsp::definition(
     }
 
     std::unordered_map<AST::Node *, AST::Node *> cache;
-    AST::Node *target = target_of(hit->node, *snapshot.bundle, cache);
+    AST::Node *target = reference_target(hit->node, *snapshot.bundle, cache);
     if (target == nullptr) {
         return std::nullopt;
     }
@@ -703,7 +546,7 @@ std::vector<Compiler::Lsp::OutlineSymbol> Compiler::Lsp::document_symbols(const 
 
     OutlineSymbol *current_ns = nullptr;
 
-    // `namespace x;` is not a child of the file root; it only lives in the arena
+    // `namespace x;` lives in the arena, so the walk picks it up here
     if (file.module != nullptr) {
         for (AST::NamespaceDeclNode *ns : file.module->nodes.of_type<AST::NamespaceDeclNode>()) {
             if (!ns->namespace_tokens.start_ref().is_valid()
@@ -812,7 +655,7 @@ std::vector<Compiler::Lsp::OutlineSymbol> Compiler::Lsp::document_symbols(const 
         }
     }
 
-    // constants live in the arena, not the file root
+    // constants live in the arena
     if (file.module != nullptr) {
         for (AST::ConstDeclNode *decl : file.module->nodes.of_type<AST::ConstDeclNode>()) {
             if (decl->declared_in.file != &file) {
@@ -866,7 +709,7 @@ std::vector<Compiler::Lsp::DefinitionAnswer> Compiler::Lsp::references(
     }
 
     std::unordered_map<AST::Node *, AST::Node *> cache;
-    AST::Node *wanted = target_of(hit->node, *snapshot.bundle, cache);
+    AST::Node *wanted = reference_target(hit->node, *snapshot.bundle, cache);
     if (wanted == nullptr) {
         return out;
     }
@@ -898,7 +741,7 @@ std::vector<Compiler::Lsp::DefinitionAnswer> Compiler::Lsp::references(
 
     snapshot.index.visit_entries(
         [&](const AST::File &indexed, const PositionIndex::Entry &entry) {
-            if (entry.node == nullptr || target_of(entry.node, *snapshot.bundle, cache) != wanted) {
+            if (entry.node == nullptr || reference_target(entry.node, *snapshot.bundle, cache) != wanted) {
                 return;
             }
 

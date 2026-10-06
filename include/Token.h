@@ -171,6 +171,10 @@ const std::string token_lit_symbol_string(const Token::Type type);
 // an attribute value being refused for no reason a user could see
 bool token_spells_a_word(const std::string &value);
 
+// true when `spelling` is an identifier the lexer keeps as a keyword, including `true` and
+// `false`. a name cannot be one of these. `this` is not: `$this` is a varname
+bool token_is_reserved_word(const std::string &spelling);
+
 class TokenReference;
 struct TokenSlice;
 struct TokenCollection

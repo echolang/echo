@@ -8,6 +8,7 @@
 #include <Compiler/SettledPath.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace
@@ -416,4 +417,186 @@ TEST_CASE("go-to-definition works for a file that exists only in the overlay", "
     REQUIRE(hit.has_value());
     // definition answers the settled path: `/tmp/...` is `D:\tmp\...` on Windows
     REQUIRE(hit->path == Compiler::canonical_or_absolute(path));
+}
+
+namespace
+{
+    // a project on disk, because what these tests pin is the server's view of the disk going stale
+    struct ProjectDir
+    {
+        std::filesystem::path root;
+
+        explicit ProjectDir(const std::string &name) :
+            root(std::filesystem::temp_directory_path() / ("echo-lsp-" + name))
+        {
+            std::filesystem::remove_all(root);
+            std::filesystem::create_directories(root);
+        }
+
+        ~ProjectDir()
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(root, ec);
+        }
+
+        std::filesystem::path write(const std::string &relative, const std::string &content) const
+        {
+            const std::filesystem::path path = root / relative;
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream(path) << content;
+            return path;
+        }
+    };
+
+    Compiler::DriverOptions lsp_driver()
+    {
+        Compiler::DriverOptions driver;
+        driver.subcommand = Compiler::Subcommand::t_lsp;
+        driver.no_stdlib = true;
+        return driver;
+    }
+
+    size_t error_count(const Compiler::Lsp::Session &session)
+    {
+        size_t errors = 0;
+        for (const auto &diagnostic : session.diagnostics()) {
+            if (diagnostic.severity == AST::IssueSeverity::Error) {
+                errors++;
+            }
+        }
+
+        return errors;
+    }
+
+    const std::string mini_manifest = "#[module: \"m\"]\n#[sources: \"src/*.eco\"]\n";
+};
+
+TEST_CASE("a struct literal of a module's type in a loose file is an error", "[lsp]")
+{
+    // `m::P` is a struct. the constant lookup used to cast it to a constant anyway, and read
+    // the struct's fields as an initializer: a segfault in a release build
+    const ProjectDir project("loose-struct-literal");
+    project.write("module.eco", mini_manifest);
+    project.write("src/p.eco", "namespace m;\n\npublic struct P\n{\n    public const int64 $a;\n}\n");
+
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    session.set_workspace_root(project.root);
+    session.did_open(project.root / "loose/e.eco", 1,
+        "function e() : int32\n{\n    $p = m::P{ $a: 1 };\n    return 1;\n}\n");
+    session.rebuild();
+
+    REQUIRE(session.has_snapshot());
+    REQUIRE(error_count(session) > 0);
+}
+
+TEST_CASE("a source created after the project was resolved joins its module on a watched-file event", "[lsp]")
+{
+    const ProjectDir project("watched-create");
+    project.write("module.eco", mini_manifest);
+    const std::filesystem::path a = project.write(
+        "src/a.eco", "namespace m;\n\nfunction a() : int32 { return 1; }\n");
+
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    session.set_workspace_root(project.root);
+    session.did_open(a, 1, "namespace m;\n\nfunction a() : int32 { return 1; }\n");
+    session.rebuild();
+    REQUIRE(error_count(session) == 0);
+
+    const std::filesystem::path b = project.write(
+        "src/b.eco", "namespace m;\n\nfunction b() : int32 { return 2; }\n");
+    session.did_change(a, 2, "namespace m;\n\nfunction a() : int32 { return b(); }\n");
+    session.rebuild();
+
+    // the glob was expanded before b.eco existed. this is the stale view a restart used to fix
+    REQUIRE(error_count(session) > 0);
+
+    session.did_change_watched({ { b, Compiler::Lsp::WatchedChange::t_created } });
+    REQUIRE(session.dirty());
+    session.rebuild();
+    REQUIRE(error_count(session) == 0);
+}
+
+TEST_CASE("a source removed on disk leaves its module on a watched-file event", "[lsp]")
+{
+    const ProjectDir project("watched-delete");
+    project.write("module.eco", mini_manifest);
+    const std::filesystem::path a = project.write(
+        "src/a.eco", "namespace m;\n\nfunction a() : int32 { return 1; }\n");
+    const std::filesystem::path b = project.write(
+        "src/b.eco", "namespace m;\n\nfunction b() : int32 { return 2; }\n");
+
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    session.set_workspace_root(project.root);
+    session.did_open(a, 1, "namespace m;\n\nfunction a() : int32 { return 1; }\n");
+    session.rebuild();
+    REQUIRE(error_count(session) == 0);
+
+    std::filesystem::remove(b);
+    session.did_change_watched({ { b, Compiler::Lsp::WatchedChange::t_deleted } });
+    session.rebuild();
+
+    // the glob no longer matches the file, so the diagnostic list is empty
+    REQUIRE(error_count(session) == 0);
+}
+
+TEST_CASE("a change on disk to a closed file marks the session dirty", "[lsp]")
+{
+    const ProjectDir project("watched-change");
+    project.write("module.eco", mini_manifest);
+    const std::string source = "namespace m;\n\nfunction a() : int32 { return 1; }\n";
+    const std::filesystem::path a = project.write("src/a.eco", source);
+    const std::filesystem::path b = project.write(
+        "src/b.eco", "namespace m;\n\nfunction b() : int32 { return 2; }\n");
+
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    session.set_workspace_root(project.root);
+    session.did_open(a, 1, source);
+    session.rebuild();
+    REQUIRE(session.dirty() == false);
+
+    // the open one is the editor's: its bytes come through didChange
+    session.did_change_watched({ { a, Compiler::Lsp::WatchedChange::t_changed } });
+    REQUIRE(session.dirty() == false);
+
+    project.write("src/b.eco", "namespace m;\n\nfunction b() : int32 { return missing(); }\n");
+    session.did_change_watched({ { b, Compiler::Lsp::WatchedChange::t_changed } });
+    REQUIRE(session.dirty());
+    session.rebuild();
+    REQUIRE(error_count(session) > 0);
+}
+
+TEST_CASE("a manifest that fails to resolve is reported on module.eco and outlives a compile", "[lsp]")
+{
+    const ProjectDir project("unresolved-manifest");
+    const std::filesystem::path manifest = project.write(
+        "module.eco", mini_manifest + "#[depends: \"../echo-lsp-this-does-not-exist\"]\n");
+    const std::filesystem::path a = project.write("src/a.eco", "function a() : int32 { return 1; }\n");
+
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    session.set_workspace_root(project.root);
+    session.did_open(a, 1, "function a() : int32 { return 1; }\n");
+    session.rebuild();
+
+    const auto on_manifest = [&]() {
+        for (const Compiler::Lsp::ProjectIssue &issue : session.project_issues()) {
+            if (issue.path == Compiler::canonical_or_absolute(manifest)
+                && issue.severity == AST::IssueSeverity::Error) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    REQUIRE(on_manifest());
+
+    // a compile that succeeds (in loose mode, because of this very problem) has to keep the report
+    session.did_change(a, 2, "function a() : int32 { return 2; }\n");
+    session.rebuild();
+    REQUIRE(on_manifest());
 }
