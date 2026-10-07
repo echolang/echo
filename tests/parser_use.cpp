@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "AST/ASTImport.h"
+#include "AST/ASTNamespace.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ASTValueType.h"
@@ -71,6 +72,64 @@ TEST_CASE("use of a type names the type and its constructor", "[use]")
     REQUIRE_FALSE(calls.empty());
     REQUIRE(calls[0]->lookup_namespace != nullptr);
     REQUIRE(calls[0]->lookup_namespace->full_name() == "geometry");
+}
+
+TEST_CASE("use of a type starts Type::CONST on the member surface", "[use]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(R"(
+        namespace geometry;
+
+        struct buffer
+        {
+            const usize CAPACITY = 4096;
+            usize $used;
+        }
+
+        namespace app;
+
+        use geometry::buffer;
+
+        function run() : usize
+        {
+            return buffer::CAPACITY;
+        }
+    )");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *file = bundle->modules.find_module("test").files().first();
+    REQUIRE(file != nullptr);
+    REQUIRE(file->imports.size() == 1);
+    REQUIRE(file->imports[0].kind == AST::ImportKind::t_item);
+
+    AST::Namespace *surface = AST::imported_namespace_start(*file, bundle->collector, "buffer");
+    REQUIRE(surface != nullptr);
+    REQUIRE(surface->full_name() == "geometry::buffer");
+}
+
+TEST_CASE("use of a name that is both a namespace and a function is refused", "[use]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(R"(
+        namespace geometry;
+
+        function tools() : int32
+        {
+            return 1;
+        }
+
+        namespace geometry::tools;
+
+        function id() : int32
+        {
+            return 2;
+        }
+
+        namespace app;
+
+        use geometry::tools;
+    )");
+
+    REQUIRE(EchoTests::count_issues_containing(*bundle, "both a namespace and a declaration") == 1);
 }
 
 TEST_CASE("an aliased use looks the function up under its real name", "[use]")

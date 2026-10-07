@@ -64,8 +64,9 @@ namespace AST
     const ImportBinding *item_import_for(const File &file, Collector &collector, std::string_view name);
 
     // the namespace a leading identifier should start from after a `use`: the bound namespace
-    // itself for a prefix, the item's own namespace for an item. null when this file did not
-    // bind `name` that way
+    // itself for a prefix, the type's member surface for a type item (`use ns::T` then
+    // `T::CONST`), the item's holding namespace for a function or constant item. null when
+    // this file did not bind `name` that way
     Namespace *imported_namespace_start(
         const File &file,
         Collector &collector,

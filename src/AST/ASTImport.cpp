@@ -111,7 +111,11 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
     const bool as_function = collector.functions.declares(last, *parent);
     const bool as_item = as_type || as_constant || as_function;
 
-    if (as_namespace != nullptr && as_item) {
+    // a type's member surface is a child namespace of the same name, created when the type
+    // publishes a constant or a nested type. that is the type, not a second thing, so
+    // `use ns::T` of a T that has constants is an item import. a function or constant of
+    // the same name as a user namespace is a real collision
+    if (as_namespace != nullptr && as_item && !as_type) {
         binding.reported = true;
         collector.collect_issue<Issue::AmbiguousUse>(
             binding_ref(file, binding),
@@ -119,13 +123,6 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
                 "'{}' names both a namespace and a declaration. Qualify further, or pick one with 'as'.",
                 join_namespace_path(binding.path)));
         return false;
-    }
-
-    if (as_namespace != nullptr) {
-        binding.kind = ImportKind::t_namespace;
-        binding.target_namespace = as_namespace;
-        binding.target_name = last;
-        return true;
     }
 
     if (as_item) {
@@ -180,6 +177,13 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
             }
         }
 
+        return true;
+    }
+
+    if (as_namespace != nullptr) {
+        binding.kind = ImportKind::t_namespace;
+        binding.target_namespace = as_namespace;
+        binding.target_name = last;
         return true;
     }
 
@@ -238,8 +242,26 @@ Namespace *imported_namespace_start(
         return nullptr;
     }
 
-    if (imp->kind != ImportKind::t_namespace && imp->kind != ImportKind::t_item) {
+    if (imp->kind == ImportKind::t_namespace) {
+        return imp->target_namespace;
+    }
+
+    if (imp->kind != ImportKind::t_item) {
         return nullptr;
+    }
+
+    // a type item is a prefix of its member surface: `use ns::T` then `T::CONST` walks the
+    // same child a fully qualified `ns::T::CONST` does. a function or constant item has no
+    // surface; the parent stays the start
+    Symbol *symbol = collector.namespaces.find_symbol(imp->target_name, *imp->target_namespace);
+    if (symbol != nullptr && symbol->type() == SymbolType::t_type) {
+        auto *decl = symbol->node.unsafe_ptr<TypeDeclNode>();
+        if (decl != nullptr) {
+            if (Namespace *surface = member_surface_namespace(
+                    collector.namespaces, decl->complex_type())) {
+                return surface;
+            }
+        }
     }
 
     return imp->target_namespace;

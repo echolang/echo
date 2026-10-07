@@ -1,0 +1,26 @@
+// a type-scoped constant after `use` of that type. `Type::CONST` is the same namespace walk a
+// fully qualified `ns::Type::CONST` already is: the item import starts on the type's member surface,
+// so the short name stands in that role the way it already does for `Type(...)` and `Type::static()`.
+namespace geometry;
+
+struct buffer
+{
+    const usize CAPACITY = 4096;
+    usize $used;
+}
+
+struct sizes
+{
+    const usize SLOT = 64;
+    usize $unused;
+}
+
+namespace app;
+
+use geometry::buffer;
+use geometry::buffer as buf;
+use geometry::{sizes};
+
+echo buffer::CAPACITY;
+echo buf::CAPACITY;
+echo sizes::SLOT;
