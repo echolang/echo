@@ -14,10 +14,11 @@ REPO="echolang/echo"
 INSTALL_DIR="${ECHO_INSTALL_DIR:-/usr/local/bin}"
 
 # spelled out rather than derived: uname says Darwin where the release asset says macos, and these
-# three are the platforms the release workflow builds (windows is install.ps1)
+# four are the platforms the release workflow builds (windows is install.ps1)
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64)  asset="echo-macos-arm64" ;;
     Linux-x86_64)  asset="echo-linux-x86_64" ;;
+    Linux-aarch64) asset="echo-linux-arm64" ;;
     *)
         echo "echo: no prebuilt Echo for $(uname -s) $(uname -m)." >&2
         echo "build it from source instead: https://github.com/${REPO}" >&2

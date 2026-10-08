@@ -138,9 +138,10 @@ epm --version
 |---|---|
 | macOS on Apple Silicon | `echo-macos-arm64` |
 | Linux on x86_64 | `echo-linux-x86_64` |
+| Linux on ARM64 | `echo-linux-arm64` |
 | Windows on x86_64 | `echo-windows-x86_64` |
 
-No Intel Mac, no Linux on ARM, no Windows on ARM. The script says so and stops. On those machines, [build from source](#building-this-repo).
+No Intel Mac, no Windows on ARM. The script says so and stops. On those machines, [build from source](#building-this-repo).
 
 `epm` needs `git` on your `PATH`.
 
