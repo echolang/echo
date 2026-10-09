@@ -4,8 +4,6 @@
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 
-#include "eco.h"
-
 #include "AST/ASTFile.h"
 #include "AST/ASTMangler.h"
 #include "AST/ASTModule.h"
@@ -42,9 +40,9 @@ namespace
         return llvm::Triple(triple).isOSDarwin() ? 4 : 5;
     }
 
-    // what a debugger calls this kind of value. the *width* is deliberately not here -
-    // AST::get_primitive_size owns it, and TypeLowering picks its llvm width off the same answer, so
-    // a third table is a third thing to drift. 0 is "no encoding", which is void's answer
+    // what a debugger calls this kind of value. the *width* is deliberately not here:
+    // stored primitives use AST::get_primitive_size; usize/isize use size_int_ty so
+    // DWARF matches the DataLayout. 0 is "no encoding", which is void's answer
     unsigned basic_type_encoding(const AST::ValueType &type)
     {
         if (type.is_boolean_type()) {
@@ -72,9 +70,14 @@ namespace
 
     // an address whose pointee is deliberately not described - a vtable, a closure environment, the
     // type-info word. `p` still reads the address, which is the whole of what any of them is for
-    llvm::DIType *opaque_pointer(llvm::DIBuilder &builder)
+    unsigned pointer_bits(const CodegenContext &ctx)
     {
-        return builder.createPointerType(nullptr, ECO_TARGET_POINTER_SIZE * 8);
+        return ctx.size_int_ty()->getBitWidth();
+    }
+
+    llvm::DIType *opaque_pointer(llvm::DIBuilder &builder, const CodegenContext &ctx)
+    {
+        return builder.createPointerType(nullptr, pointer_bits(ctx));
     }
 
     // `DIType::getAlignInBits` is not safe on every derived type we mint (a class
@@ -279,7 +282,7 @@ void DebugInfoCodegen::begin_entry_point(llvm::Function *func)
     _subprogram = unit->builder->createFunction(
         di_file,
         "main",
-        ECO_ENTRY_SYMBOL_NAME,
+        _ctx.options.codegen.entry_symbol().value_or(""),
         di_file,
         /*LineNo=*/1,
         unit->builder->createSubroutineType(unit->builder->getOrCreateTypeArray({})),
@@ -624,14 +627,14 @@ void DebugInfoCodegen::append_property_members(
         // an access violation (the box pointer's align/size accessors, and uniquing
         // against a replaceable composite). the slot is pointer-sized either way
         if (property.type.is_class()) {
-            llvm::DIType *field_type = opaque_pointer(*unit.builder);
+            llvm::DIType *field_type = opaque_pointer(*unit.builder, _ctx);
             elements.push_back(unit.builder->createMemberType(
                 unit.cu,
                 property.name,
                 decl_file,
                 decl_line,
-                ECO_TARGET_POINTER_SIZE * 8,
-                ECO_TARGET_POINTER_SIZE * 8,
+                pointer_bits(_ctx),
+                pointer_bits(_ctx),
                 offset,
                 property.is_private() ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
                 field_type));
@@ -684,7 +687,7 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     // `replaceTemporary` does not reliably RAUW `DIDerivedType` bases, and a later `getAlignInBits`
     // on that dangling derived type is an access violation. An opaque stand-in is what a recursive
     // field sees during construction; the cache is overwritten with the real handle below
-    unit->types[type] = opaque_pointer(*unit->builder);
+    unit->types[type] = opaque_pointer(*unit->builder, _ctx);
 
     const llvm::StructLayout *box_layout = _ctx.layout().getStructLayout(class_layout.box);
     std::vector<llvm::Metadata *> elements;
@@ -698,7 +701,7 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     const std::array<std::pair<const char *, llvm::DIType *>, 3> header = {{
         { "__strong", counter },
         { "__weak", counter },
-        { "__typeinfo", opaque_pointer(*unit->builder) },
+        { "__typeinfo", opaque_pointer(*unit->builder, _ctx) },
     }};
 
     for (size_t i = 0; i < header.size(); i++) {
@@ -739,7 +742,7 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
         /*VTableHolder=*/nullptr,
         complex->mangled_token() + ".box");
 
-    llvm::DIType *handle = unit->builder->createPointerType(box, ECO_TARGET_POINTER_SIZE * 8);
+    llvm::DIType *handle = unit->builder->createPointerType(box, pointer_bits(_ctx));
     unit->types[type] = handle;
 
     return handle;
@@ -789,7 +792,7 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
         // difference between `p *$node` working and not
         llvm::DIType *pointee = type_of(AST::value_type_of(type), cmp_unit);
         llvm::DIType *result =
-            unit->builder->createPointerType(pointee, ECO_TARGET_POINTER_SIZE * 8);
+            unit->builder->createPointerType(pointee, pointer_bits(_ctx));
 
         unit->types[type] = result;
         return result;
@@ -826,7 +829,7 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
         llvm::DISubroutineType *subroutine =
             unit->builder->createSubroutineType(unit->builder->getOrCreateTypeArray(signature));
         llvm::DIType *result =
-            unit->builder->createPointerType(subroutine, ECO_TARGET_POINTER_SIZE * 8);
+            unit->builder->createPointerType(subroutine, pointer_bits(_ctx));
 
         unit->types[type] = result;
         return result;
@@ -835,7 +838,7 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
     // the two shapes that are a pair of addresses and nothing else. one call site, because they differ
     // only in what the two halves are called
     if (type.is_callable() || type.is_interface()) {
-        llvm::DIType *opaque = opaque_pointer(*unit->builder);
+        llvm::DIType *opaque = opaque_pointer(*unit->builder, _ctx);
 
         const bool callable = type.is_callable();
 
@@ -850,8 +853,13 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
 
     if (type.is_primitive()) {
         // **a `bool` is 8 bits here, not 1** - an `i1` is how it is computed and a byte is how it is
-        // stored, and a debugger reads storage. get_primitive_size already answers in stored bytes
-        const unsigned bits = AST::get_primitive_size(type.get_primitive_type()) * 8;
+        // stored, and a debugger reads storage. usize/isize follow the DataLayout so a wasm32
+        // compile does not describe i32 storage as 64-bit
+        const unsigned bits =
+            (type.get_primitive_type() == AST::ValueTypePrimitive::t_usize
+                || type.get_primitive_type() == AST::ValueTypePrimitive::t_isize)
+                ? _ctx.size_int_ty()->getBitWidth()
+                : AST::get_primitive_size(type.get_primitive_type()) * 8;
         const unsigned encoding = basic_type_encoding(type);
 
         // `void`, and anything else with no storage: a null DIType is how DWARF spells that, and it is

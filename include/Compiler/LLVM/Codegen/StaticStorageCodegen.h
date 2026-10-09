@@ -81,8 +81,9 @@ namespace Compiler::LLVM
         // look uninitialized or finished
         llvm::GlobalVariable *guard_for(const std::string &symbol);
 
-        // the slow path: CAS 0 → self, run the body, store ~0. one function for the program,
-        // linkonce_odr. the fast path stays an acquire load in `<sym>.init`
+        // the slow path: CAS 0 → self, run the body, store ~0. one function for the
+        // program, linkonce_odr. a row without OS threads is a load/store instead.
+        // the fast path stays an acquire load in `<sym>.init` when there are threads
         llvm::Function *once_helper();
 
         // the self-guarding init function, emitted on first reference in this unit. **the guard is

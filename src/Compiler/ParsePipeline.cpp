@@ -357,7 +357,8 @@ bool Compiler::module_declares_a_program(const Parser::ModuleManifest &manifest)
     return std::any_of(
         manifest.targets.begin(), manifest.targets.end(),
         [](const Parser::ModuleTarget &target) {
-            return target.kind == Parser::TargetKind::t_executable;
+            return target.kind == Parser::TargetKind::t_executable
+                || target.kind == Parser::TargetKind::t_library;
         });
 }
 

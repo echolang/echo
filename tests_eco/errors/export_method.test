@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_method.eco:6:14
+
+  cannot be exported because a method or constructor has a receiver C has nowhere to put.
+
+  5 |     #[export]
+  6 |     function get() : int32
+    :              ^^^
+  7 |     {
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] old_import_attribute.eco:1:3
+
+  unknown attribute 'import', expected one of: inline, implicit, intrinsic, builtin, core, unique, atomic, group, tests, export, wasm, module, version, depends, sources, target, link, cc, build_dir, requires
+
+  1 | #[import: "env"]
+    :   ^^^^^^
+  2 | extern {
+
+1 error, nothing was compiled.

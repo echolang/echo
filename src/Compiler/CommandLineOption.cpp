@@ -507,16 +507,17 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "evaluated against the name you give here, so the other platform's regions are the ones that "
             "get parsed:\n"
             "  echoc build --target-os linux -o app main.eco\n"
-            "One of 'darwin', 'linux', 'windows', 'ios' or 'android'. A name outside that list is an "
+            "One of 'darwin', 'linux', 'windows', 'ios', 'android' or 'wasi'. A name outside that list is an "
             "error rather than a condition that is quietly false, because '#[if: os == darwn]' should "
             "not be a region that vanishes in silence.\n"
             "On Darwin, 'echoc build --target-os ios' is a real cross-compile: objects and C "
             "sources target the iOS simulator SDK (`<arch>-apple-ios15.0-simulator`, this "
             "machine's arch unless '--target-arch' says otherwise). Pass '--ios-device' as "
-            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc run --target-os ios' "
-            "still only picks '#[if:]' arms and JITs for this machine, like every other "
-            "'--target-os'. Other names still only pick '#[if:]' arms on every subcommand - "
-            "there is no Linux sysroot on a Mac.\n"
+            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc build --target-os wasi' "
+            "is a real cross on every host (`wasm32-unknown-wasip1`, needs a WASI SDK or "
+            "`WASI_SDK_PATH`). 'echoc run --target-os ios' still only picks '#[if:]' arms and "
+            "JITs for this machine, like every other '--target-os'. Other names still only "
+            "pick '#[if:]' arms on every subcommand - there is no Linux sysroot on a Mac.\n"
             "'clean' takes it too, because a manifest may hide its '#[depends:]' behind a condition: "
             "without the same flag, the graph 'clean' walks is not the graph your build produced.",
             {}, check_target_os
@@ -530,10 +531,12 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
             "admits:\n"
             "  echoc build --target-arch x86_64 -o app main.eco\n"
-            "Same closed vocabulary a condition admits. Combined with '--target-os ios' on "
+            "One of 'arm64', 'x86_64' or 'wasm32'. Combined with '--target-os ios' on "
             "'build' it also chooses the simulator triple's arch. '--ios-device' is arm64: an "
             "explicit '--target-arch' other than arm64 is refused, while a host that is not "
-            "arm64 still emits arm64 and conditions see arm64 too. An unknown name is an error.",
+            "arm64 still emits arm64 and conditions see arm64 too. '--target-os wasi' on "
+            "'build' defaults to wasm32 when this flag is omitted, and refuses any other "
+            "arch. An unknown name is an error.",
             {}, check_target_arch
         },
         {

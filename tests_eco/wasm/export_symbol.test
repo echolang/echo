@@ -1,0 +1,7 @@
+# host: #[export] demangles to a raw C symbol. wasm-export-name is Catch2 [wasi]
+stdlib: off
+
+--- OUT --->
+6
+--- IR --->
+CHECK: define i32 @render(

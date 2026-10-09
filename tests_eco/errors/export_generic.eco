@@ -1,0 +1,7 @@
+#[export]
+function ident<T>(T $v) : T
+{
+    return $v;
+}
+
+echo ident(1);

@@ -63,8 +63,8 @@ namespace Compiler::LLVM
 
         // the counting allocator, one definition per compilation unit, created on first use
         //
-        //   ptr  __eco_alloc(i64 size)
-        //   ptr  __eco_realloc(ptr block, i64 size)
+        //   ptr  __eco_alloc(size_t size)
+        //   ptr  __eco_realloc(ptr block, size_t size)
         //   void __eco_free(ptr block)
         //
         // `linkonce_odr` for the reason the release thunks and __eco_abort are: every unit that

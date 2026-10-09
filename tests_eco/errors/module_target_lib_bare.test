@@ -1,0 +1,13 @@
+modules: modules/target_lib_bare
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  module.eco:4:11
+
+  a 'lib' target has nothing it can default - write its fields: name.
+
+  3 | #[sources: "src/*.eco"]
+  4 | #[target: lib]
+    :           ^^^
+  5 | 
+

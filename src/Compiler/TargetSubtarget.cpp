@@ -96,6 +96,13 @@ void ensure_native_target_registered()
         LLVMInitializeX86AsmPrinter();
         LLVMInitializeX86AsmParser();
 #endif
+        // wasi is a real cross on every host. CodegenTarget names
+        // `wasm32-unknown-wasip1`; without these, lookupTarget refuses it
+        LLVMInitializeWebAssemblyTargetInfo();
+        LLVMInitializeWebAssemblyTarget();
+        LLVMInitializeWebAssemblyTargetMC();
+        LLVMInitializeWebAssemblyAsmPrinter();
+        LLVMInitializeWebAssemblyAsmParser();
         return true;
     }();
 
@@ -126,6 +133,15 @@ bool resolve_subtarget(
         // name. The default must never reach here: `getHostCPUName()` is `-march=native`, which is an
         // object that may not run on the machine next to it, with an illegal instruction rather than a
         // diagnostic - and `echoc build` hands somebody a binary
+        const llvm::Triple host(llvm::sys::getDefaultTargetTriple());
+        const llvm::Triple target(triple);
+
+        if (target.getArch() != host.getArch() || target.getOS() != host.getOS()) {
+            out_error = fmt::format(
+                "--target-cpu native is this machine; the target '{}' is not", triple);
+            return false;
+        }
+
         out_subtarget.cpu = llvm::sys::getHostCPUName().str();
         out_subtarget.features = host_feature_string();
     }

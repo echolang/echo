@@ -1,0 +1,21 @@
+/**
+ * Why a library could not be opened.
+ *
+ * A sentence from `dlerror` or a fallback, not an errno: the two platforms do
+ * not share a code space and the host already has the path.
+ */
+
+namespace std::dynlib;
+
+public struct dynerror
+{
+    string $text;
+
+    /**
+     * The sentence `open` failed with.
+     */
+    const function message() : string
+    {
+        return $this->text;
+    }
+}

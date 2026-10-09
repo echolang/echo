@@ -1,0 +1,13 @@
+modules: modules/target_lib_with_entry
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  module.eco:4:34
+
+  'entry' is not something a 'target' knows, expected one of: name.
+
+  3 | #[sources: "src/*.eco"]
+  4 | #[target: lib { name: "greeter", entry: "src/lib.eco" }]
+    :                                  ^^^^^
+  5 | 
+

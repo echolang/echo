@@ -15,6 +15,7 @@ std::unique_ptr<llvm::TargetMachine> Compiler::LLVM::make_target_machine(
     const std::string &cpu,
     const std::string &features,
     bool no_optimize,
+    bool pic,
     std::string &error
 )
 {
@@ -30,12 +31,13 @@ std::unique_ptr<llvm::TargetMachine> Compiler::LLVM::make_target_machine(
         no_optimize ? llvm::CodeGenOptLevel::None : llvm::CodeGenOptLevel::Default;
 
     llvm::TargetOptions opt;
+    const llvm::Reloc::Model reloc = pic ? llvm::Reloc::PIC_ : llvm::Reloc::Static;
 #if LLVM_VERSION_MAJOR >= 21
     std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
-        llvm::Triple(triple), cpu, features, opt, llvm::Reloc::PIC_, std::nullopt, opt_level));
+        llvm::Triple(triple), cpu, features, opt, reloc, std::nullopt, opt_level));
 #else
     std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
-        triple, cpu, features, opt, llvm::Reloc::PIC_, std::nullopt, opt_level));
+        triple, cpu, features, opt, reloc, std::nullopt, opt_level));
 #endif
 
     if (!machine) {

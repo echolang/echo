@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
 #include "Compiler/LLVM/Codegen/Bitcode.h"
 #include "Compiler/LLVM/Codegen/IsolatedEmit.h"
+#include "Compiler/LLVM/Codegen/LibraryVisibility.h"
 #include "Compiler/LLVM/Codegen/Partition.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/CompilationUnit.h"
@@ -36,6 +37,7 @@ static IsolatedEmitRequest make_isolated_request(
     request.cpu = sub.cpu;
     request.features = sub.features;
     request.no_optimize = ctx.options.no_optimize;
+    request.pic = ctx.options.codegen.uses_pic();
     request.targeting_windows = ctx.targeting_windows();
     request.already_optimized = already_optimized;
     request.timings = timings;
@@ -89,6 +91,15 @@ bool emit_unit_objects(
 )
 {
     Compiler::ScopedPhase phase("emit objects");
+
+    // before partition and before an isolated snapshot, so every object of a
+    // native library is hidden-except-export even when prepare_unit runs in a
+    // worker that never sees this Backend
+    if (ctx.options.codegen.is_native_library()) {
+        for (auto &cmp_unit : ctx.cmp_units) {
+            hide_non_exported_symbols(*cmp_unit);
+        }
+    }
 
     const unsigned jobs = Compiler::job_count();
     const Compiler::Subtarget sub = backend.subtarget();
@@ -171,11 +182,13 @@ bool emit_unit_objects(
     }
 
     // a single live module, or `ECO_JOBS=1`, stays in this LLVMContext. the bitcode
-    // round-trip is the cost; run_jobs would keep one item on this thread either way
+    // round-trip is the cost; run_jobs would keep one item on this thread either way.
+    // wasm objects fail that round-trip (`Invalid record`) the way Windows does
 #if defined(_WIN32)
     const bool in_memory = true;
 #else
-    const bool in_memory = live.size() <= 1 || jobs <= 1;
+    const bool in_memory =
+        !ctx.options.codegen.snapshots_bitcode() || live.size() <= 1 || jobs <= 1;
 #endif
 
     if (in_memory) {

@@ -109,18 +109,18 @@ llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()
         return existing;
     }
 
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
 
     llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
 
-    llvm::Function *thunk = declare_thunk(k_alloc_symbol, opaque_ptr, { i64 }, { "size" });
+    llvm::Function *thunk = declare_thunk(k_alloc_symbol, opaque_ptr, { size_ty }, { "size" });
 
     // the byte count is the only argument
     mark_allocating_thunk(thunk, 0);
 
     llvm::Value *block = _ctx.builder->CreateCall(
-        _ctx.libc_callee("malloc", opaque_ptr, { i64 }), { thunk->getArg(0) }, "block");
+        _ctx.libc_callee("malloc", opaque_ptr, { size_ty }), { thunk->getArg(0) }, "block");
 
     // **a failed allocation is not an allocation.** `mem::alloc` is documented to hand back null when
     // the allocator could not, so counting the attempt would leave a program that survived an OOM
@@ -183,13 +183,13 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
         return existing;
     }
 
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
 
     llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
 
     llvm::Function *thunk =
-        declare_thunk(k_realloc_symbol, opaque_ptr, { opaque_ptr, i64 }, { "block", "size" });
+        declare_thunk(k_realloc_symbol, opaque_ptr, { opaque_ptr, size_ty }, { "block", "size" });
 
     // **`noalias` holds for a reseat too**, which is worth a sentence because `realloc` may hand back the
     // pointer it was given: the contract is that the old one is *dead* from that moment, so nothing the
@@ -201,7 +201,7 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
     llvm::Value *size = thunk->getArg(1);
 
     llvm::Value *new_block = _ctx.builder->CreateCall(
-        _ctx.libc_callee("realloc", opaque_ptr, { opaque_ptr, i64 }),
+        _ctx.libc_callee("realloc", opaque_ptr, { opaque_ptr, size_ty }),
         { old_block, size }, "block.new");
 
     // **the one thunk where the delta is not readable off the arguments.** `realloc` is four operations
@@ -259,29 +259,31 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
 
 llvm::Value *MemoryCodegen::gen_alloc(llvm::Value *size, const llvm::Twine &name)
 {
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
+    llvm::Value *n = _ctx.as_size(size);
 
     // with tracking off the seam is not a layer, it *is* the call - so an untracked build emits exactly
     // what it emitted before this subsystem existed, down to the symbol
     if (!_ctx.options.tracking_allocations()) {
         return _ctx.builder->CreateCall(
-            _ctx.libc_callee("malloc", _ctx.opaque_ptr_type(), { i64 }), { size }, name);
+            _ctx.libc_callee("malloc", _ctx.opaque_ptr_type(), { size_ty }), { n }, name);
     }
 
-    return _ctx.builder->CreateCall(get_or_create_alloc_thunk(), { size }, name);
+    return _ctx.builder->CreateCall(get_or_create_alloc_thunk(), { n }, name);
 }
 
 llvm::Value *MemoryCodegen::gen_realloc(llvm::Value *block, llvm::Value *size, const llvm::Twine &name)
 {
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+    llvm::Value *n = _ctx.as_size(size);
 
     if (!_ctx.options.tracking_allocations()) {
         return _ctx.builder->CreateCall(
-            _ctx.libc_callee("realloc", opaque_ptr, { opaque_ptr, i64 }), { block, size }, name);
+            _ctx.libc_callee("realloc", opaque_ptr, { opaque_ptr, size_ty }), { block, n }, name);
     }
 
-    return _ctx.builder->CreateCall(get_or_create_realloc_thunk(), { block, size }, name);
+    return _ctx.builder->CreateCall(get_or_create_realloc_thunk(), { block, n }, name);
 }
 
 void MemoryCodegen::gen_free(llvm::Value *block)

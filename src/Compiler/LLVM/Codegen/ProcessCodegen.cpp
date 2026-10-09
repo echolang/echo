@@ -2,6 +2,7 @@
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Type.h>
 
 #include <cassert>
@@ -20,7 +21,7 @@ namespace
 
 llvm::GlobalVariable *ProcessCodegen::get_or_create_argc()
 {
-    return _ctx.get_or_create_odr_global(k_argc_symbol, llvm::Type::getInt64Ty(*_ctx.llvm_context));
+    return _ctx.get_or_create_odr_global(k_argc_symbol, _ctx.size_int_ty());
 }
 
 llvm::GlobalVariable *ProcessCodegen::get_or_create_argv()
@@ -35,27 +36,36 @@ llvm::GlobalVariable *ProcessCodegen::get_or_create_envp()
 
 void ProcessCodegen::gen_capture(llvm::Function *entry)
 {
-    assert(entry->arg_size() == 3
-        && "the entry point takes argc, argv and envp - a capture over anything else is a mistake");
+    assert((entry->arg_size() == 3 || entry->arg_size() == 2)
+        && "the entry point takes argc and argv, and envp on native");
 
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
+    llvm::Value *argc = entry->getArg(0);
+    if (argc->getType() != size_ty) {
+        argc = _ctx.builder->CreateSExt(argc, size_ty, "argc.widened");
+    }
 
     // widened here rather than at every read, so `usize` is what the global holds
-    _ctx.builder->CreateStore(
-        _ctx.builder->CreateSExt(entry->getArg(0), i64, "argc.widened"),
-        get_or_create_argc());
+    _ctx.builder->CreateStore(argc, get_or_create_argc());
 
     _ctx.builder->CreateStore(entry->getArg(1), get_or_create_argv());
-    _ctx.builder->CreateStore(entry->getArg(2), get_or_create_envp());
+
+    if (entry->arg_size() == 3) {
+        _ctx.builder->CreateStore(entry->getArg(2), get_or_create_envp());
+    }
+    else {
+        _ctx.builder->CreateStore(
+            llvm::ConstantPointerNull::get(
+                llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())),
+            get_or_create_envp());
+    }
 
     _ctx.emit_unbuffer_stdio();
 }
 
 llvm::Value *ProcessCodegen::gen_argc(const llvm::Twine &name)
 {
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-
-    return _ctx.builder->CreateLoad(i64, get_or_create_argc(), name);
+    return _ctx.builder->CreateLoad(_ctx.size_int_ty(), get_or_create_argc(), name);
 }
 
 llvm::Value *ProcessCodegen::gen_argv(const llvm::Twine &name)

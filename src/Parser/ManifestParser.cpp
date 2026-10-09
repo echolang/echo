@@ -271,6 +271,7 @@ const std::vector<std::pair<std::string, Parser::TargetKind>> &target_kind_table
     static const std::vector<std::pair<std::string, Parser::TargetKind>> table = {
         { "exe", Parser::TargetKind::t_executable },
         { "test", Parser::TargetKind::t_test },
+        { "lib", Parser::TargetKind::t_library },
     };
 
     return table;
@@ -295,11 +296,19 @@ const TargetKindShape &target_kind_shape(Parser::TargetKind kind)
         std::string("tests")
     };
 
+    static const TargetKindShape library = {
+        { "name" },
+        { "name" },
+        std::nullopt
+    };
+
     switch (kind) {
     case Parser::TargetKind::t_executable:
         return executable;
     case Parser::TargetKind::t_test:
         return test;
+    case Parser::TargetKind::t_library:
+        return library;
     }
 
     return executable;
@@ -1008,7 +1017,8 @@ bool resolve_manifest_targets(
         // **a test target names no file**, so every path it does name is a *selection* - resolved against
         // the manifest like any other, and deliberately not checked against `sources`: a file: filter that
         // matches nothing is a refusal the runner makes, where it can say what there was to choose from
-        if (target.kind == Parser::TargetKind::t_test) {
+        if (target.kind == Parser::TargetKind::t_test
+            || target.kind == Parser::TargetKind::t_library) {
             for (const std::string &file : target.files) {
                 settled.files.push_back(Compiler::settled_path(out.directory, file));
             }

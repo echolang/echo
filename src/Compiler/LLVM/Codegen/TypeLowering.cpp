@@ -28,6 +28,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
@@ -308,6 +309,19 @@ void TypeLowering::apply_function_attributes(
         func->addFnAttr(llvm::Attribute::InlineHint);
     }
 
+    // wasm-ld exports a function that carries this attribute *and* roots it against gc, so
+    // no `--export` flags. a native library still plants DLLExport for the Windows .dll
+    // export table; hide_non_exported_symbols keys keep-visible on export_name
+    if (node->export_name) {
+        if (_ctx.targeting_wasm()) {
+            func->addFnAttr("wasm-export-name", *node->export_name);
+        }
+
+        if (_ctx.options.codegen.is_native_library()) {
+            func->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
+        }
+    }
+
     // **the `sret` attribute is what makes the hidden argument mean something to the optimizer**, and
     // Compiler::LLVM::indirect_return_attributes is the one place that spells it - every call site applies
     // the same builder, because a function and a call to it disagreeing about this is a miscompile rather
@@ -495,6 +509,11 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
                 "Every declaration of a C symbol must agree on its argument and return types.",
                 func_name, cmp_unit.ast_module->name
             ));
+        }
+
+        if (node->import_module && _ctx.targeting_wasm()) {
+            extern_llvm_func->addFnAttr("wasm-import-module", *node->import_module);
+            extern_llvm_func->addFnAttr("wasm-import-name", *node->extern_symbol);
         }
 
         cmp_unit.function_table.push_function(func_name, node, extern_llvm_func);
@@ -1598,11 +1617,10 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
             return llvm::Type::getInt32Ty(*_ctx.llvm_context);
         case AST::ValueTypePrimitive::t_uint64:
             return llvm::Type::getInt64Ty(*_ctx.llvm_context);
-        // pointer-width integers. the width comes from the same constant AST::get_primitive_size
-        // answers from, so the ast-level size and the lowered llvm type cannot disagree
+        // pointer-width integers. the DataLayout the TargetMachine published
         case AST::ValueTypePrimitive::t_usize:
         case AST::ValueTypePrimitive::t_isize:
-            return llvm::Type::getIntNTy(*_ctx.llvm_context, ECO_TARGET_POINTER_SIZE * 8);
+            return _ctx.size_int_ty();
         case AST::ValueTypePrimitive::t_bool:
             return llvm::Type::getInt1Ty(*_ctx.llvm_context);
         default:

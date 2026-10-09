@@ -87,6 +87,45 @@ namespace Compiler
         std::string &out_error
     );
 
+    // wasi-libc sysroot for `echoc build --target-os wasi`. `$WASI_SDK_PATH` first
+    // (the SDK's `share/wasi-sysroot` when that exists, else the path itself), then
+    // `/opt/wasi-sdk` and the Homebrew wasi-sdk / wasi-libc prefixes. empty when
+    // none of those is a sysroot. asked once: the path cannot change during a compile
+    std::filesystem::path wasi_sysroot();
+
+    // clang resource dir that holds `lib/<wasi triple>/libclang_rt.builtins.a`.
+    // Homebrew wasi-runtimes, or a WASI SDK's clang lib. empty when none is on
+    // this machine; the link then passes `-rtlib=none`
+    std::filesystem::path wasi_resource_dir();
+
+    // `-target` / `--sysroot` / `-fuse-ld=lld` for a WASI row. false with a
+    // sentence when a WASI sysroot is not on this machine
+    bool append_wasi_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // `-target` / `--sysroot` / `-isysroot` for this row. the dispatcher: WASI
+    // is append_wasi_target_args, everything else is append_apple_target_args.
+    // CBuild and link_executable both call this so they cannot disagree about
+    // the triple. false with a sentence when a WASI sysroot is not on this machine
+    bool append_codegen_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // compile args plus the link-only half of the row. `-mexec-model=reactor`,
+    // `-shared`, and `--export-memory` live here and not in
+    // append_codegen_target_args, because CBuild reuses that for C compiles.
+    // all three are columns of `target`
+    bool append_codegen_link_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt
     // Backend always links, then clang's resource include as `-isystem` so
     // emmintrin.h and friends stay ahead of the bundled MSVC copies, then

@@ -1,0 +1,6 @@
+# host: an extern block is legal and unused declarations still run. wasm-import-module
+# on every function in a `#[wasm: import]` block is Catch2 [wasi]
+stdlib: off
+
+--- OUT --->
+1

@@ -56,6 +56,15 @@ namespace AST
     // mints the node and binds a unique candidate, it does not report this
     std::optional<std::string> c_function_ref_refusal(const FunctionDeclNode &decl);
 
+    // **why may this function not be exported?** nullopt when it may.
+    //
+    // composed from c_function_ref_refusal (receiver, closure, generic, builtin, intrinsic) and
+    // c_function_signature_refusal over the written C signature, plus three of its own: an
+    // extern (that is imported), `#[inline]` (would turn it into t_odr_shared), and a
+    // synthesized declaration. composed reasons are wrapped as "cannot be exported because …"
+    // so an export is not diagnosed as an address-of. asked once by AST::check_wasm_surface
+    std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
+
     // the overload set `&name` denotes, re-derived from the node rather than stored - a stored
     // set goes stale the moment the tree is cloned for an instantiation, the same rule
     // CallResolver::candidates_for follows

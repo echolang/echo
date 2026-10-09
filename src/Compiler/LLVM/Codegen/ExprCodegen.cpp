@@ -733,7 +733,8 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 continue;
             }
 
-            const PrintfConversion conversion = printf_conversion_for(result_type);
+            const PrintfConversion conversion = printf_conversion_for(
+                result_type, _ctx.size_int_ty()->getBitWidth() / 8);
             if (conversion.format == nullptr) {
                 throw _ctx.error(fmt::format(
                     "Unsupported argument type '{}' for 'echo' {}",
@@ -1514,7 +1515,7 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
     if (kind == AST::BuiltinKind::t_process_argc) {
         _ctx.push(_ctx.types->coerce_value(
             CodegenValue::scalar(_ctx.process->gen_argc("argc")),
-            AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+            AST::ValueType(AST::ValueTypePrimitive::t_usize),
             node.decl->get_return_type(), *_ctx.current_cmp_unit));
         return;
     }

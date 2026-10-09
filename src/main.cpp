@@ -6,6 +6,7 @@
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTDiagnosticRenderer.h"
+#include "AST/ASTValueType.h"
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTMonomorphizer.h"
 #include "AST/ASTMangler.h"
@@ -112,9 +113,15 @@ static bool resolve_target_facts(
 {
     std::string error;
 
+    std::string arch = Compiler::facts_architecture(
+        driver.ios_device,
+        driver.target_arch,
+        driver.target_os,
+        driver.subcommand == Compiler::Subcommand::t_build);
+
     if (!Compiler::TargetFacts::resolve(
             driver.target_os,
-            Compiler::facts_architecture(driver.ios_device, driver.target_arch),
+            arch,
             driver.defines,
             out,
             error)) {
@@ -182,6 +189,12 @@ struct Program
     //
     // read only through Parser::module_contribution_for, which is the one owner of what a module compiles
     Parser::ActiveTargets active_targets;
+
+    Parser::TargetKind kind = Parser::TargetKind::t_executable;
+
+    // settled here with the Program, a column of the row the linker reads. a lib has
+    // no entry; everything else is a command
+    Compiler::ExecModel exec_model = Compiler::ExecModel::t_command;
 };
 
 // what an invocation settles once, before any program is compiled.
@@ -659,6 +672,11 @@ struct FrontEnd
 
     Compiler::CompilerOptions options;
 
+    // usize width for this program, from the emit row. lives as long as this FrontEnd
+    // so parse, typecheck, and codegen (integer literals) agree. restoring on destroy
+    // is what keeps an in-process wasm32 compile from poisoning later tests
+    std::optional<AST::PointerSizeScope> pointer_size;
+
     // empty unless something downstream reads one - see needs_cache_keys
     std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
 
@@ -836,28 +854,65 @@ static bool select_targets(
     // **the subcommand decides which kinds it is even looking at**, and without this arm `echoc build`
     // starts building the test targets a manifest declares: they are in the same list, and a target with no
     // entry file would then be handed to codegen as a program whose body is every file root
-    const Parser::TargetKind wanted = driver.subcommand == Compiler::Subcommand::t_test
-        ? Parser::TargetKind::t_test
-        : Parser::TargetKind::t_executable;
+    const auto accepts = [&](Parser::TargetKind kind) {
+        if (driver.subcommand == Compiler::Subcommand::t_test) {
+            return kind == Parser::TargetKind::t_test;
+        }
+
+        if (driver.subcommand == Compiler::Subcommand::t_run) {
+            return kind == Parser::TargetKind::t_executable;
+        }
+
+        return kind == Parser::TargetKind::t_executable
+            || kind == Parser::TargetKind::t_library;
+    };
 
     std::vector<Parser::ModuleTarget> candidates;
 
     for (const Parser::ModuleTarget &target : entry.targets) {
-        if (target.kind == wanted) {
+        if (accepts(target.kind)) {
             candidates.push_back(target);
         }
     }
 
+    const auto refuse_lib_run = [&](const Parser::ModuleTarget &target) {
+        diagnostics.render_untyped("No Entry To Run", fmt::format(
+            "'{}' is a lib target and has no entry to run. Build it with 'echoc build --target {}'.",
+            target.name, target.name));
+    };
+
     if (driver.targets.empty()) {
+        if (driver.subcommand == Compiler::Subcommand::t_run && candidates.empty()) {
+            for (const Parser::ModuleTarget &target : entry.targets) {
+                if (target.kind == Parser::TargetKind::t_library) {
+                    refuse_lib_run(target);
+                    return false;
+                }
+            }
+        }
+
         out = candidates;
         return true;
     }
 
     for (const std::string &named : driver.targets) {
-        auto found = std::find_if(candidates.begin(), candidates.end(),
+        auto declared = std::find_if(entry.targets.begin(), entry.targets.end(),
             [&named](const Parser::ModuleTarget &target) { return target.name == named; });
 
-        if (found == candidates.end()) {
+        if (declared == entry.targets.end()) {
+            diagnostics.render_untyped("No Such Target", fmt::format(
+                "'{}' declares no target called '{}'. It declares: {}.",
+                entry.name, named, target_name_list(candidates)));
+            return false;
+        }
+
+        if (!accepts(declared->kind)) {
+            if (driver.subcommand == Compiler::Subcommand::t_run
+                && declared->kind == Parser::TargetKind::t_library) {
+                refuse_lib_run(*declared);
+                return false;
+            }
+
             diagnostics.render_untyped("No Such Target", fmt::format(
                 "'{}' declares no target called '{}'. It declares: {}.",
                 entry.name, named, target_name_list(candidates)));
@@ -867,7 +922,7 @@ static bool select_targets(
         // a name written twice is one program, not two links over one path
         if (std::none_of(out.begin(), out.end(),
                 [&named](const Parser::ModuleTarget &target) { return target.name == named; })) {
-            out.push_back(*found);
+            out.push_back(*declared);
         }
     }
 
@@ -1068,7 +1123,7 @@ static bool resolve_programs(
             /*name=*/{},
             entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
             /*entry_file=*/{},
-            driver.output,
+            out.codegen.output_path(driver.output),
             /*active_targets=*/{}
         });
 
@@ -1100,13 +1155,29 @@ static bool resolve_programs(
     }
 
     for (const Parser::ModuleTarget &target : selected) {
+        Compiler::CodegenTarget row = out.codegen;
+
+        if (target.kind == Parser::TargetKind::t_library) {
+            if (out.target_facts.operating_system == "ios") {
+                diagnostics.render_untyped("Lib Needs Host",
+                    "a native 'lib' target is a loadable library, and iOS does not load "
+                    "one from an app");
+                return false;
+            }
+
+            row.exec_model = Compiler::ExecModel::t_library;
+        }
+
         Program program {
             target.name,
             entry->name,
             target.entry,
-            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output,
-            /*active_targets=*/{}
+            row.output_path(
+                driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output),
+            /*active_targets=*/{},
+            target.kind
         };
+        program.exec_model = row.exec_model;
 
         // **only the target being built, and only in the module that declared it.** Two targets of one
         // module are two programs here, so each opens its own scope and neither sees the other's - which
@@ -1218,6 +1289,16 @@ static bool run_front_end(
     out.program = &program;
     out.compiled = compiled_manifests(invocation, program);
 
+    // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
+    // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
+    // passes. exec_model is a column of this row, copied from the Program resolve_programs
+    // already settled
+    out.options = driver.options;
+    out.options.codegen = invocation.codegen;
+    out.options.codegen.exec_model = program.exec_model;
+
+    out.pointer_size.emplace(out.options.codegen.pointer_size());
+
     // **after the facts and not before**, which is why the parser is built here rather than handed in: it
     // takes them at construction, so there is no window in which one exists that has not been told what
     // platform it is reading for. Neither subcommand touches it once the front end is done
@@ -1230,18 +1311,14 @@ static bool run_front_end(
         }
     }
 
-    // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
-    // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
-    // passes, and that is the whole of what it owes
-    out.options = driver.options;
-    out.options.codegen = invocation.codegen;
-
     {
         Compiler::ScopedPhase phase("semantic passes");
         if (run_semantic_passes(driver, diagnostics, bundle, out.options) != 0) {
             return false;
         }
     }
+
+    out.options.codegen.export_memory = bundle.wasm_export_memory;
 
     if (needs_cache_keys(driver)
         && !compute_cache_keys(

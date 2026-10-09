@@ -403,6 +403,15 @@ namespace AST
             return extern_symbol.has_value();
         }
 
+        // `#[export]` / `#[export: "name"]`: this function's symbol is the raw unmangled name
+        // (default: its own unqualified name), C ABI. on a wasm row it is also in the module's
+        // export section
+        std::optional<std::string> export_name;
+
+        // `#[wasm: import "<module>"]` on an extern function: the wasm import module. the
+        // import *name* is extern_symbol
+        std::optional<std::string> import_module;
+
         // marked `#[builtin: size_of]`: the compiler answers a call to this function directly
         // instead of emitting one. distinct from `intrinsic`, which names an *LLVM* intrinsic and
         // therefore still produces an llvm::Function - a builtin has no symbol at all, and its

@@ -16,6 +16,12 @@ AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_de
         return func_decl->extern_symbol.value();
     }
 
+    // an export is a C-callable symbol under a name the host looks up, so it is the other
+    // kind whose name must survive untouched - beside extern_symbol, and for its reason
+    if (func_decl->export_name.has_value()) {
+        return func_decl->export_name.value();
+    }
+
     std::string mangled_name = "_";
 
     // root first, so a nested namespace reads in declaration order and the root contributes

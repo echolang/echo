@@ -154,7 +154,7 @@ internal function c_read(int32 $fd, ptr<uint8> $buf, usize $count) : isize
 internal extern {
     function __error as c_errno_location() : ptr<int32>;
 }
-#[elif: family == linux]
+#[elif: family == linux || family == wasi]
 internal extern {
     function __errno_location as c_errno_location() : ptr<int32>;
 }

@@ -739,6 +739,10 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     c->template_ref = nullptr;
     c->instances.clear();
 
+    // an instance is not the export: the template was already refused, and a later
+    // relaxation must not emit two bodies under one raw name
+    c->export_name.reset();
+
     // a clone is a new region. cc.shallow copy-constructs, so an instance of an already-owned
     // template would otherwise start t_owned and skip the ownership walk, and a cleared
     // live_calls_pending would hide the body's calls from bind

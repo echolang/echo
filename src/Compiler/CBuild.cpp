@@ -14,8 +14,6 @@
 
 #include <fmt/core.h>
 
-
-
 #include <fstream>
 #include <map>
 #include <set>
@@ -135,6 +133,11 @@ bool c_spec_digest(
     // while compiling against iPhoneOS is the unsound-cache case
     digest = Compiler::fnv1a64(
         Compiler::apple_sdk_root(options.codegen.apple_sdk).string(), digest);
+
+    if (options.codegen.is_wasm()) {
+        digest = Compiler::fnv1a64(Compiler::wasi_sysroot().string(), digest);
+        digest = Compiler::fnv1a64(Compiler::wasi_resource_dir().string(), digest);
+    }
 
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
@@ -545,13 +548,15 @@ bool Compiler::build_c_sources(
         job.argv = { "clang", "-c" };
 
         // PIC is the Unix loadable-object rule. Windows objects are already relocatable;
-        // clang-cl rejects `-fPIC`
-        if (TargetFacts::host().operating_system != "windows") {
+        // clang-cl rejects `-fPIC`. a WASI command module is static relocatable
+        if (TargetFacts::host().operating_system != "windows" && options.codegen.uses_pic()) {
             job.argv.push_back("-fPIC");
         }
 
-        Compiler::append_windows_sysroot_cc_args(job.argv);
-        if (!Compiler::append_apple_target_args(job.argv, options.codegen, out_error)) {
+        if (!options.codegen.is_cross()) {
+            Compiler::append_windows_sysroot_cc_args(job.argv);
+        }
+        if (!Compiler::append_codegen_target_args(job.argv, options.codegen, out_error)) {
             return false;
         }
 

@@ -14,6 +14,11 @@ namespace AST
         ModuleCollection modules;
         Collector collector;
 
+        // file-root `#[wasm: export "memory"]`, harvested by AST::check_wasm_surface.
+        // the driver copies this onto CodegenTarget::export_memory after typecheck,
+        // which is the link flag. a language fact, not an invocation option
+        bool wasm_export_memory = false;
+
         Bundle() {};
         ~Bundle() {};
 

@@ -1,5 +1,6 @@
 #include "Compiler/HostTool.h"
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/ProgressReporter.h"
 
 #include <llvm/Support/FileSystem.h>
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -487,6 +489,49 @@ void Compiler::append_windows_sysroot_link_args(std::vector<std::string> &argv)
     }
     argv.push_back("-L" + (sysroot / "lib").string());
 #endif
+}
+
+bool Compiler::append_codegen_target_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    std::string &out_error
+)
+{
+    if (target.is_wasm()) {
+        return append_wasi_target_args(argv, target, out_error);
+    }
+
+    return append_apple_target_args(argv, target, out_error);
+}
+
+bool Compiler::append_codegen_link_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    std::string &out_error
+)
+{
+    if (!append_codegen_target_args(argv, target, out_error)) {
+        return false;
+    }
+
+    // clang turns this into `wasm-ld ... crt1-reactor.o --entry _initialize`. a C
+    // compile must not see it: CBuild reuses append_codegen_target_args
+    if (target.is_wasm() && target.exec_model == ExecModel::t_library) {
+        argv.push_back("-mexec-model=reactor");
+    }
+
+    // native library: clang -shared, the same driver CBuild trusts for a loadable
+    // object. wasm stays the reactor flag above; the Darwin ld / lld-link fast
+    // path is skipped in Backend::link_executable for this kind
+    if (target.is_native_library()) {
+        argv.push_back("-shared");
+    }
+
+    if (target.is_wasm() && target.export_memory) {
+        argv.push_back("-Wl,--export-memory");
+    }
+
+    return true;
 }
 
 int Compiler::run_wait(const std::string &program, const std::vector<std::string> &argv)

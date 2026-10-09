@@ -13,10 +13,11 @@
 #include "AST/ASTCoreTypes.h"
 
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
 #include <llvm/TargetParser/Triple.h>
 
@@ -367,12 +368,37 @@ namespace Compiler::LLVM
             return llvm::Triple(target_triple).isOSWindows();
         }
 
-        // `write(fd, ptr, len)` on POSIX, `_write` on Windows UCRT. length is i64 in
-        // IR either way; Windows truncates to i32 because that is the CRT's count
+        bool targeting_wasm() const {
+            return options.codegen.is_wasm();
+        }
+
+        // size_t on this target: malloc, write, memcpy. follows the data layout so
+        // wasm32 is i32 and every host this compiler has shipped is i64
+        llvm::IntegerType *size_int_ty() const {
+            return layout().getIntPtrType(*llvm_context);
+        }
+
+        // trunc or zext onto size_int_ty(). malloc and write lengths are
+        // this question
+        llvm::Value *as_size(llvm::Value *size)
+        {
+            llvm::Type *size_ty = size_int_ty();
+            if (size->getType() == size_ty) {
+                return size;
+            }
+
+            if (size->getType()->getIntegerBitWidth() > size_ty->getIntegerBitWidth()) {
+                return builder->CreateTrunc(size, size_ty, "size");
+            }
+
+            return builder->CreateZExt(size, size_ty, "size");
+        }
+
+        // `write(fd, ptr, len)` on POSIX, `_write` on Windows UCRT. POSIX length
+        // is size_t; Windows truncates to i32 because that is the CRT's count
         void emit_libc_write(int fd, llvm::Value *ptr, llvm::Value *len)
         {
             llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
-            llvm::Type *i64 = llvm::Type::getInt64Ty(*llvm_context);
             llvm::Type *opaque_ptr = opaque_ptr_type();
             llvm::Value *fd_val = llvm::ConstantInt::get(i32, fd);
 
@@ -384,9 +410,10 @@ namespace Compiler::LLVM
                 return;
             }
 
+            llvm::Type *count_ty = size_int_ty();
             builder->CreateCall(
-                libc_callee("write", i64, { i32, opaque_ptr, i64 }),
-                { fd_val, ptr, len });
+                libc_callee("write", count_ty, { i32, opaque_ptr, count_ty }),
+                { fd_val, ptr, as_size(len) });
         }
 
         // stdout is fully buffered when it is a pipe. `echo` of a string goes through

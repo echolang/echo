@@ -23,8 +23,9 @@ namespace Compiler::LLVM
     // **the environment arrives as `main`'s third parameter rather than through the `environ` symbol**,
     // and that is what keeps this subsystem free of platform conditionals. `environ` is a *data*
     // symbol, which an `extern` block has no spelling for, and it is not portably addressable anyway -
-    // Darwin needs `_NSGetEnviron()`. The three-argument `main` is POSIX on both platforms and a
-    // documented CRT extension on Windows, so one seam serves all three
+    // Darwin needs `_NSGetEnviron()`. The three-argument `main` is POSIX and a documented CRT
+    // extension on Windows; WASI's crt takes argc and argv only, and the capture stores null for envp.
+    // `CodegenTarget::entry_arg_count` is the arity; this reads whatever function it was given
     class ProcessCodegen
     {
     public:
@@ -40,7 +41,7 @@ namespace Compiler::LLVM
         // and a wrong one is worth an assert
         void gen_capture(llvm::Function *entry);
 
-        // the three reads, as an i64 count and two opaque pointers. what the `process_argc` /
+        // the three reads, as a usize count and two opaque pointers. what the `process_argc` /
         // `process_argv` / `process_envp` builtins lower to, in the shape of
         // MemoryCodegen::gen_live_count - a load off a global and nothing else
         llvm::Value *gen_argc(const llvm::Twine &name);
@@ -50,7 +51,7 @@ namespace Compiler::LLVM
     private:
         CodegenContext &_ctx;
 
-        // i64 @__eco_argc, ptr @__eco_argv, ptr @__eco_envp - zero-initialized, one definition per
+        // usize @__eco_argc, ptr @__eco_argv, ptr @__eco_envp - zero-initialized, one definition per
         // compilation unit, created on first use
         //
         // `linkonce_odr` rather than one external definition in the entry module, for the reason
@@ -59,7 +60,7 @@ namespace Compiler::LLVM
         // The linker folds the copies, so the store in `main` and a load in the stdlib meet on one
         // symbol
         //
-        // argc is widened to i64 at the capture rather than stored as the i32 the platform passes,
+        // argc is widened to usize at the capture rather than stored as the i32 the platform passes,
         // because `usize` is what Echo counts with and one sext in the prologue is cheaper than one
         // at every read
         llvm::GlobalVariable *get_or_create_argc();

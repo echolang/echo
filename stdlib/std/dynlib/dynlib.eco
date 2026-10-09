@@ -1,0 +1,124 @@
+/**
+ * A loadable library: a `.dylib`, a `.so`, a `.dll`.
+ *
+ * The handle is closed when the last reference is gone. A looked-up symbol is a
+ * raw address into that image, so the `library` has to outlive every function
+ * pointer taken from it - the same rule as a `file` outliving a borrowed `fd`.
+ */
+
+namespace std::dynlib;
+
+/**
+ * An opened shared library.
+ *
+ * `open` is the constructor. `symbol` hands back a `ptr<uint8>` you recast to
+ * `extern function<...>` under `unsafe`, which is the promise a `dlsym` is.
+ */
+public class library
+{
+    private ptr<uint8> $handle;
+
+    private constructor(ptr<uint8> $handle)
+    {
+        $this->handle:$ = $handle;
+    }
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    /**
+     * Opens `$path`. The path is the path: no `lib` prefix, no suffix invented.
+     * `extension()` is how a host spells the suffix for this OS.
+     */
+    static function open(const string& $path) : result<library, dynerror>
+    {
+#[if: os == windows]
+        std::env::wide_string $wide = std::env::wide_string();
+        if (!$wide->load_utf8($path)) {
+            return .error(dynerror('could not convert the library path'));
+        }
+
+        ptr<uint8> $handle = c_LoadLibraryW($wide->data());
+        if ($handle:$ == null) {
+            return .error(dynerror('could not load the library'));
+        }
+#[else]
+        c_dlerror();
+        ptr<uint8> $handle = c_dlopen($path->cstr(), RTLD_NOW_LOCAL);
+        if ($handle:$ == null) {
+            ptr<uint8> $msg = c_dlerror();
+            if ($msg:$ == null) {
+                return .error(dynerror('could not load the library'));
+            }
+
+            return .error(dynerror(str::from($msg)));
+        }
+#[end]
+
+        return .ok(library($handle));
+    }
+
+    /**
+     * The address of `$name`, or `null` when the library does not export it.
+     *
+     * Recast under `unsafe` to the `extern function<...>` you mean. The
+     * signature is your promise.
+     */
+    const function symbol(const string& $name) : ptr<uint8>?
+    {
+        if ($this->handle:$ == null) {
+            return null;
+        }
+
+#[if: os == windows]
+        ptr<uint8> $p = c_GetProcAddress($this->handle, $name->cstr());
+#[else]
+        c_dlerror();
+        ptr<uint8> $p = c_dlsym($this->handle, $name->cstr());
+        if ($p:$ == null) {
+            c_dlerror();
+            return null;
+        }
+#[end]
+
+        if ($p:$ == null) {
+            return null;
+        }
+
+        return $p;
+    }
+
+    /**
+     * Closes the image. Safe to call twice. Function pointers taken from this
+     * library are then dangling.
+     */
+    function close() : void
+    {
+        if ($this->handle:$ == null) {
+            return;
+        }
+
+#[if: os == windows]
+        c_FreeLibrary($this->handle);
+#[else]
+        c_dlclose($this->handle);
+#[end]
+        $this->handle:$ = null;
+    }
+}
+
+/**
+ * The suffix this OS uses for a loadable library, including the dot.
+ */
+public function extension() : string
+{
+#[if: family == darwin]
+    return '.dylib';
+#[elif: os == windows]
+    return '.dll';
+#[else]
+    return '.so';
+#[end]
+}

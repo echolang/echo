@@ -1,0 +1,15 @@
+stdlib: off
+expect: fail
+mode: build
+flags: --target-os wasi
+
+--- OUT --->
+[error] wasm_export_function_name.eco:1:3
+
+  'render' is not a wasm object export, expected one of: memory. a function is exported with '#[export]'
+
+  1 | #[wasm: export "render"]
+    :   ^^^^
+  2 | 
+
+1 error, nothing was compiled.

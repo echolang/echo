@@ -176,7 +176,8 @@ namespace Compiler::LLVM
     bool CodegenContext::file_is_entry(const AST::File &file) const
     {
         // **no target named one, so all of them are.** A program's `main` is the concatenation of every
-        // file root of its entry module unless a `#[target:]` says which single file it is
+        // file root of its entry module unless a `#[target:]` says which single file it is.
+        // a library never asks: compile_bundle skips emit_entry_point when entry_symbol() is empty
         if (entry_file.empty()) {
             return true;
         }

@@ -1,0 +1,9 @@
+#[wasm: export "render"]
+
+#[export]
+function render() : int32
+{
+    return 1;
+}
+
+echo render();

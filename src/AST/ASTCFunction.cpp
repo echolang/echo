@@ -247,6 +247,37 @@ std::optional<std::string> AST::c_function_ref_refusal(const AST::FunctionDeclNo
     return std::nullopt;
 }
 
+std::optional<std::string> AST::export_refusal(
+    const AST::FunctionDeclNode &decl,
+    const AST::CoreTypes &core
+)
+{
+    if (decl.is_extern()) {
+        return std::string(
+            "an 'extern' function is imported, not exported");
+    }
+
+    if (decl.is_inline) {
+        return std::string(
+            "an exported function cannot be '#[inline]' - that would emit it into every unit "
+            "rather than once under a raw symbol");
+    }
+
+    if (decl.is_implicitly_generated) {
+        return std::string("a synthesized function cannot be exported");
+    }
+
+    if (auto reason = c_function_ref_refusal(decl)) {
+        return fmt::format("cannot be exported because {}", *reason);
+    }
+
+    if (auto reason = c_function_signature_refusal(decl.c_function_type().signature(), core)) {
+        return fmt::format("cannot be exported because {}", *reason);
+    }
+
+    return std::nullopt;
+}
+
 std::vector<AST::FunctionDeclNode *> AST::function_ref_candidates(
     const AST::FunctionRefExprNode &node,
     AST::Collector &collector

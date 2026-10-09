@@ -19,19 +19,24 @@ namespace
     // the vocabularies, spelled once. a condition's value is checked against these, an override on the
     // command line is checked against these, and the "expected one of" in both messages is built from
     // these - so a platform added here becomes sayable everywhere at once
-    const std::vector<std::string> k_operating_systems = { "darwin", "linux", "windows", "ios", "android" };
-    const std::vector<std::string> k_architectures = { "arm64", "x86_64" };
-    const std::vector<std::string> k_families = { "darwin", "linux", "windows" };
+    const std::vector<std::string> k_operating_systems = {
+        "darwin", "linux", "windows", "ios", "android", "wasi"
+    };
+    const std::vector<std::string> k_architectures = { "arm64", "x86_64", "wasm32" };
+    const std::vector<std::string> k_families = { "darwin", "linux", "windows", "wasi" };
 
     // which family an os belongs to. ios is Darwin the kernel (UIKit rather than AppKit); android is
-    // Linux the kernel (Bionic rather than glibc). a name added to k_operating_systems without a row
-    // here has an empty family, so `family == darwin` is false rather than silently matching
+    // Linux the kernel (Bionic rather than glibc); wasi is its own family so POSIX `extern` blocks
+    // gated on `family != windows` do not compile pthread and ioctl against wasi-libc. a name added
+    // to k_operating_systems without a row here has an empty family, so `family == darwin` is false
+    // rather than silently matching
     const std::pair<const char *, const char *> k_os_family[] = {
         { "darwin", "darwin" },
         { "ios", "darwin" },
         { "linux", "linux" },
         { "android", "linux" },
         { "windows", "windows" },
+        { "wasi", "wasi" },
     };
 
     constexpr const char *k_axis_os = "os";
@@ -97,6 +102,7 @@ namespace
             { &llvm::Triple::isAndroid, "android" },
             { &llvm::Triple::isiOS, "ios" },
             { &llvm::Triple::isOSDarwin, "darwin" },
+            { &llvm::Triple::isOSWASI, "wasi" },
             { &llvm::Triple::isOSLinux, "linux" },
             { &llvm::Triple::isOSWindows, "windows" },
         };
@@ -119,6 +125,9 @@ namespace
 
             case llvm::Triple::x86_64:
                 return "x86_64";
+
+            case llvm::Triple::wasm32:
+                return "wasm32";
 
             default:
                 return "";

@@ -56,7 +56,12 @@ namespace Parser
         // artifact at all**, which is what makes it unlike the kind above rather than a second flavour of
         // it: there is no entry file, no binary and nothing in the build directory - only `groups` and
         // `files`, which are the same selection `--filter` states on the command line
-        t_test
+        t_test,
+
+        // a program with no entry, whose surface is its `#[export]`s. on wasi a
+        // *reactor* (`crt1-reactor.o`, `_initialize`); on the host a shared library.
+        // `name` is required, `entry` is refused
+        t_library
     };
 
     // one `#[requires: "name" { version:, source: git "...", rev: }]`. the compiler reads
