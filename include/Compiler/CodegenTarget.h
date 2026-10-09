@@ -58,11 +58,6 @@ namespace Compiler
         bool wasm = false;
         unsigned pointer_bytes = 8;
 
-        // `#[wasm: export "memory"]` asked for linear memory in the wasm export
-        // section. a program fact on the same row as exec_model: the triple does
-        // not change, and the linker already reads this object
-        bool export_memory = false;
-
         bool is_cross() const {
             return !triple.empty();
         }

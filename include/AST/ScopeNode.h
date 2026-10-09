@@ -165,6 +165,10 @@ namespace AST
 
         void add_attribute(AttributeNode &attribute);
 
+        // a file-root fact: a child of the scope, not drained onto the next declaration.
+        // `#[wasm: export "memory"]` plants here so `#[export] function f()` cannot take it
+        void plant_attribute(AttributeNode &attribute);
+
         std::vector<AttributeNode *> collect_attributes();
 
         // attributes written at this scope that no declaration has drained yet.

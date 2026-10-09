@@ -37,15 +37,9 @@ namespace AST
     std::optional<WasmClause> wasm_clause_of(const AttributeNode &attribute);
 
     // leftover `#[wasm: import]`, file-scope `#[wasm: export "memory"]` (writes
-    // `bundle.wasm_export_memory`), `#[export]` / `#[wasm: import]` on every declaration,
-    // duplicate export names, and an export named the row's entry symbol. TypeChecker
-    // asks once, like check_enum_maps
-    void check_wasm_surface(
-        Collector &collector,
-        Bundle &bundle,
-        bool targeting_wasm,
-        std::optional<const char *> entry_symbol
-    );
+    // `bundle.wasm_export_memory`), `#[wasm: import]` on every declaration, and seating
+    // `FunctionDeclNode::import_module`. TypeChecker asks once, like check_exports
+    void check_wasm_surface(Collector &collector, Bundle &bundle, bool targeting_wasm);
 };
 
 #endif

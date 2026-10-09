@@ -213,11 +213,8 @@ const ComplexType *TypeChecker::enclosing_type() const
 
 void TypeChecker::run()
 {
-    AST::check_wasm_surface(
-        _collector,
-        _bundle,
-        _options.codegen.is_wasm(),
-        _options.codegen.entry_symbol());
+    AST::check_wasm_surface(_collector, _bundle, _options.codegen.is_wasm());
+    AST::check_exports(_collector, _bundle, _options.codegen.entry_symbol());
 
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();

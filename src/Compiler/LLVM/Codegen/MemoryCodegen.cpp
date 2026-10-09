@@ -91,16 +91,25 @@ void MemoryCodegen::gen_counter_delta(int64_t delta)
 {
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::GlobalVariable *counter = get_or_create_live_counter();
+    llvm::Constant *step = llvm::ConstantInt::get(i64, delta);
 
     // one global counter, existing only under --track-allocations. monotonic: it answers how
-    // many, at some moment, and licenses nothing. reachable from every thread the moment a
-    // program can spawn one
-    _ctx.builder->CreateAtomicRMW(
-        llvm::AtomicRMWInst::Add,
-        counter,
-        llvm::ConstantInt::get(i64, delta),
-        llvm::Align(8),
-        llvm::AtomicOrdering::Monotonic)->setName("live");
+    // many, at some moment, and licenses nothing. a row with OS threads is an RMW; a row
+    // without is a load and a store
+    if (_ctx.options.codegen.has_os_threads()) {
+        _ctx.builder->CreateAtomicRMW(
+            llvm::AtomicRMWInst::Add,
+            counter,
+            step,
+            llvm::Align(8),
+            llvm::AtomicOrdering::Monotonic)->setName("live");
+        return;
+    }
+
+    llvm::Value *current = _ctx.builder->CreateLoad(i64, counter, "live");
+    _ctx.builder->CreateStore(
+        _ctx.builder->CreateAdd(current, step, "live.next"),
+        counter);
 }
 
 llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()

@@ -1,0 +1,7 @@
+#[export]
+struct Foo
+{
+    int32 $n;
+}
+
+echo 1;

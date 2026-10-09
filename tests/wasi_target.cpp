@@ -327,6 +327,31 @@ TEST_CASE("wasi static init is a non-atomic once", "[target][wasi]")
     REQUIRE(ir.output.find("sched_yield") == std::string::npos);
 }
 
+TEST_CASE("wasi allocation counter is a non-atomic add", "[target][wasi]")
+{
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    ScopedProject project("alloc_once");
+    write_file(
+        project.root() / "hello.eco",
+        "class Point\n"
+        "{\n"
+        "    int32 $x;\n"
+        "    constructor(int32 $x) { $this->x = $x; }\n"
+        "}\n"
+        "Point $p = Point(1);\n"
+        "echo $p->x;\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --track-allocations --target-os wasi --target-arch wasm32 "
+        "-p ir -o hello.wasm hello.eco");
+    INFO(ir.output);
+    REQUIRE(ir.exit_code == 0);
+    REQUIRE(ir.output.find("atomicrmw") == std::string::npos);
+}
+
 TEST_CASE("wasm export memory does not attach to the next function", "[target][wasi]")
 {
     if (Compiler::wasi_sysroot().empty()) {
@@ -367,7 +392,6 @@ TEST_CASE("codegen link args pass --export-memory when asked", "[target][wasi]")
     target.triple = Compiler::k_wasi_triple;
     target.wasm = true;
     target.pointer_bytes = 4;
-    target.export_memory = true;
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
@@ -375,14 +399,13 @@ TEST_CASE("codegen link args pass --export-memory when asked", "[target][wasi]")
         SKIP("WASI SDK not found");
     }
 
-    REQUIRE(Compiler::append_codegen_link_args(argv, target, error));
+    REQUIRE(Compiler::append_codegen_link_args(argv, target, true, error));
     REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,--export-memory") != argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-mexec-model=reactor") == argv.end());
 
     argv = { "clang" };
     target.exec_model = Compiler::ExecModel::t_library;
-    target.export_memory = false;
-    REQUIRE(Compiler::append_codegen_link_args(argv, target, error));
+    REQUIRE(Compiler::append_codegen_link_args(argv, target, false, error));
     REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,--export-memory") == argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-mexec-model=reactor") != argv.end());
 }

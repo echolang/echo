@@ -61,7 +61,7 @@ std::string open_plugin(const fs::path &lib)
     return
         "use std::dynlib;\n"
         "\n"
-        "string $path = '" + lib.string() + "';\n"
+        "string $path = '" + EchoTests::echo_string_path(lib) + "';\n"
         "dynlib::library $plug = guard dynlib::library::open($path) else ($e) {\n"
         "    die($e->message());\n"
         "};\n";
@@ -110,7 +110,7 @@ TEST_CASE("open of a missing path is a dynerror", "[dynlib]")
     const ProcessResult ran = build_and_run_host(project,
         "use std::dynlib;\n"
         "\n"
-        "string $path = '" + missing.string() + "';\n"
+        "string $path = '" + EchoTests::echo_string_path(missing) + "';\n"
         "guard dynlib::library::open($path) else {\n"
         "    echo 'failed';\n"
         "    return 0;\n"

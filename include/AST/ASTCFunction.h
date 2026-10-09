@@ -11,6 +11,7 @@
 
 namespace AST
 {
+    class Bundle;
     class CoreTypes;
     class ExprNode;
     class Collector;
@@ -62,8 +63,17 @@ namespace AST
     // c_function_signature_refusal over the written C signature, plus three of its own: an
     // extern (that is imported), `#[inline]` (would turn it into t_odr_shared), and a
     // synthesized declaration. composed reasons are wrapped as "cannot be exported because …"
-    // so an export is not diagnosed as an address-of. asked once by AST::check_wasm_surface
+    // so an export is not diagnosed as an address-of. asked once by AST::check_exports
     std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
+
+    // leftover `#[export]` on a type or at file scope, `export_refusal` on every exported
+    // function, duplicate export names, and an export named the row's entry symbol.
+    // TypeChecker asks once, like check_wasm_surface
+    void check_exports(
+        Collector &collector,
+        Bundle &bundle,
+        std::optional<const char *> entry_symbol
+    );
 
     // the overload set `&name` denotes, re-derived from the node rather than stored - a stored
     // set goes stale the moment the tree is cloned for an instantiation, the same rule

@@ -2,7 +2,6 @@
 
 #include "AST/ASTAttributeReader.h"
 #include "AST/ASTBundle.h"
-#include "AST/ASTCFunction.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTFile.h"
@@ -10,10 +9,10 @@
 #include "AST/ASTModule.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ScopeNode.h"
+#include "AST/TypeDeclNode.h"
 
 #include <fmt/core.h>
 
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -22,11 +21,6 @@ namespace
 AST::CodeRef attr_ref(const AST::Module &module, const AST::AttributeNode &attr)
 {
     return AST::CodeRef { &module, attr.attribute_id.make_slice() };
-}
-
-AST::CodeRef name_ref(const AST::Module &module, const AST::FunctionDeclNode &node)
-{
-    return AST::CodeRef { &module, node.name_token.value().make_slice() };
 }
 
 // off-row and a malformed payload. kind-specific shape errors stay with the caller
@@ -56,6 +50,24 @@ void report_wasm_clause(
 constexpr const char *k_import_needs_extern =
     "only an 'extern' function is imported - a function with a body is exported with "
     "'#[export]'";
+
+void report_leftover_import(
+    AST::Collector &collector,
+    const AST::Module &module,
+    const AST::AttributeNode &attr,
+    const AST::WasmClause &clause,
+    bool targeting_wasm
+)
+{
+    report_wasm_clause(collector, module, attr, clause, targeting_wasm);
+
+    if (targeting_wasm && !clause.refusal.has_value()
+        && clause.kind == AST::WasmClauseKind::t_import) {
+        collector.collect_issue<AST::Issue::GenericError>(
+            attr_ref(module, attr),
+            k_import_needs_extern);
+    }
+}
 };
 
 std::optional<AST::WasmClause> AST::wasm_clause_of(const AttributeNode &attribute)
@@ -106,15 +118,8 @@ std::optional<AST::WasmClause> AST::wasm_clause_of(const AttributeNode &attribut
     return out;
 }
 
-void AST::check_wasm_surface(
-    Collector &collector,
-    Bundle &bundle,
-    bool targeting_wasm,
-    std::optional<const char *> entry_symbol
-)
+void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targeting_wasm)
 {
-    std::unordered_map<std::string, const FunctionDeclNode *> exported_names;
-
     for (auto &module_ptr : bundle.modules) {
         Module &module = *module_ptr;
 
@@ -133,14 +138,7 @@ void AST::check_wasm_surface(
                     continue;
                 }
 
-                report_wasm_clause(collector, module, *attr, *clause, targeting_wasm);
-
-                if (targeting_wasm && !clause->refusal.has_value()
-                    && clause->kind == WasmClauseKind::t_import) {
-                    collector.collect_issue<Issue::GenericError>(
-                        attr_ref(module, *attr),
-                        k_import_needs_extern);
-                }
+                report_leftover_import(collector, module, *attr, *clause, targeting_wasm);
             }
         }
 
@@ -172,57 +170,63 @@ void AST::check_wasm_surface(
             }
         }
 
+        for (TypeDeclNode *node : module.nodes.of_type<TypeDeclNode>()) {
+            if (node == nullptr) {
+                continue;
+            }
+
+            auto *wasm_attr = node->attributes.get_first("wasm");
+            if (wasm_attr == nullptr) {
+                continue;
+            }
+
+            auto clause = wasm_clause_of(*wasm_attr);
+            if (!clause.has_value()) {
+                continue;
+            }
+
+            report_leftover_import(collector, module, *wasm_attr, *clause, targeting_wasm);
+        }
+
         for (FunctionDeclNode *node : module.nodes.of_type<FunctionDeclNode>()) {
             if (node == nullptr) {
                 continue;
             }
 
-            if (auto *wasm_attr = node->attributes.get_first("wasm")) {
-                if (auto clause = wasm_clause_of(*wasm_attr)) {
-                    report_wasm_clause(collector, module, *wasm_attr, *clause, targeting_wasm);
-
-                    if (targeting_wasm && !clause->refusal.has_value()) {
-                        if (clause->kind == WasmClauseKind::t_import && !node->is_extern()) {
-                            collector.collect_issue<Issue::GenericError>(
-                                attr_ref(module, *wasm_attr),
-                                k_import_needs_extern);
-                        }
-                        else if (clause->kind == WasmClauseKind::t_export) {
-                            collector.collect_issue<Issue::GenericError>(
-                                attr_ref(module, *wasm_attr),
-                                "a wasm object export is not a function export");
-                        }
-                    }
-                }
-            }
-
-            if (!node->export_name.has_value() || !node->name_token.has_value()) {
+            auto *wasm_attr = node->attributes.get_first("wasm");
+            if (wasm_attr == nullptr) {
                 continue;
             }
 
-            if (auto refusal = export_refusal(*node, collector.core_types)) {
+            auto clause = wasm_clause_of(*wasm_attr);
+            if (!clause.has_value()) {
+                continue;
+            }
+
+            report_wasm_clause(collector, module, *wasm_attr, *clause, targeting_wasm);
+
+            if (clause->refusal.has_value()) {
+                continue;
+            }
+
+            if (clause->kind == WasmClauseKind::t_import && node->is_extern()) {
+                node->import_module = clause->payload;
+                continue;
+            }
+
+            if (!targeting_wasm) {
+                continue;
+            }
+
+            if (clause->kind == WasmClauseKind::t_import) {
                 collector.collect_issue<Issue::GenericError>(
-                    name_ref(module, *node),
-                    std::move(refusal.value()));
-                continue;
+                    attr_ref(module, *wasm_attr),
+                    k_import_needs_extern);
             }
-
-            if (entry_symbol.has_value() && *node->export_name == *entry_symbol) {
+            else if (clause->kind == WasmClauseKind::t_export) {
                 collector.collect_issue<Issue::GenericError>(
-                    name_ref(module, *node),
-                    fmt::format(
-                        "cannot export as '{}' - that name is the program's entry symbol",
-                        *entry_symbol));
-                continue;
-            }
-
-            auto [it, inserted] = exported_names.emplace(*node->export_name, node);
-
-            if (!inserted && it->second != node && it->second->name_token.has_value()) {
-                collector.collect_issue<Issue::DuplicateExportName>(
-                    name_ref(module, *node),
-                    *node->export_name,
-                    it->second->name_token.value());
+                    attr_ref(module, *wasm_attr),
+                    "a wasm object export is not a function export");
             }
         }
     }

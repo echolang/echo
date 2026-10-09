@@ -20,7 +20,6 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 #include "Parser/AttributeParser.h"
-#include "AST/ASTWasm.h"
 #include "Token.h"
 
 #include <fmt/core.h>
@@ -456,36 +455,12 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     return &closure_expr;
 }
 
-std::vector<AST::AttributeNode *> Parser::take_declaration_attributes(Parser::Payload &payload)
+void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into)
 {
     // each pass emplaces its own AttributeNode over the same tokens, so a declaration reached twice
     // accumulates two per attribute. that is already true of a TypeDeclNode, which drains in both
-    // passes, and AttributeList::get_first is what makes it not matter.
-    //
-    // a wasm object export is a file-root fact: skip attaching it so
-    // `#[wasm: export "memory"]` then `#[export] function f()` does not land the object
-    // export on f, and so `#[wasm: export "memory"]` ahead of `extern { }` does not copy
-    // onto every function in the block. the node stays a child of the scope;
-    // AST::check_wasm_surface harvests it
-    std::vector<AST::AttributeNode *> out;
-
+    // passes, and AttributeList::get_first is what makes it not matter
     for (auto &attr : payload.context.scope().collect_attributes()) {
-        if (attr != nullptr) {
-            if (auto clause = AST::wasm_clause_of(*attr);
-                clause.has_value() && clause->kind == AST::WasmClauseKind::t_export) {
-                continue;
-            }
-        }
-
-        out.push_back(attr);
-    }
-
-    return out;
-}
-
-void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into)
-{
-    for (AST::AttributeNode *attr : take_declaration_attributes(payload)) {
         into.push_back(attr);
     }
 }
@@ -1081,14 +1056,6 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         cursor.skip(); // the semicolon
 
         funcdecl->extern_symbol = extern_symbol;
-
-        if (auto *wasm_attr = funcdecl->attributes.get_first("wasm")) {
-            if (auto clause = AST::wasm_clause_of(*wasm_attr);
-                clause.has_value() && !clause->refusal.has_value()
-                && clause->kind == AST::WasmClauseKind::t_import) {
-                funcdecl->import_module = clause->payload;
-            }
-        }
 
         if (!symbol_only) {
             payload.context.declaration_scope().add_funcdecl(*funcdecl);

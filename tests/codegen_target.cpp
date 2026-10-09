@@ -252,7 +252,7 @@ TEST_CASE("native library link args pass -shared", "[target]")
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
-    REQUIRE(Compiler::append_codegen_link_args(argv, target, error));
+    REQUIRE(Compiler::append_codegen_link_args(argv, target, false, error));
     REQUIRE(std::find(argv.begin(), argv.end(), "-shared") != argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-mexec-model=reactor") == argv.end());
 }

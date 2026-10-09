@@ -98,6 +98,13 @@ namespace EchoTests
         return "\"" + path.string() + "\"";
     }
 
+    // a path an Echo `'...'` literal can hold. generic_string uses `/`, so a Windows
+    // `D:\a\...` cannot be read as the unknown escape `\a`
+    inline std::string echo_string_path(const std::filesystem::path &path)
+    {
+        return path.generic_string();
+    }
+
     // the one line of a report whose first whitespace-separated field is `first_field`, or "".
     //
     // both `--explain-cache` and `[clean]` print one whitespace-aligned row per module and both suites ask

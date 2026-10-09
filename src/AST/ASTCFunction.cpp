@@ -1,18 +1,27 @@
 #include "AST/ASTCFunction.h"
 
+#include "AST/ASTBundle.h"
+#include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTCompleteness.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTFile.h"
 #include "AST/ASTFunctionEmission.h"
+#include "AST/ASTIssue.h"
+#include "AST/ASTModule.h"
 #include "AST/ASTSimd.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTVariadic.h"
+#include "AST/AttributeNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/ScopeNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/VarDeclNode.h"
 
 #include <fmt/format.h>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace
@@ -276,6 +285,90 @@ std::optional<std::string> AST::export_refusal(
     }
 
     return std::nullopt;
+}
+
+void AST::check_exports(
+    Collector &collector,
+    Bundle &bundle,
+    std::optional<const char *> entry_symbol
+)
+{
+    constexpr const char *k_export_on_function = "an 'export' belongs on a function";
+
+    auto attr_ref = [](const Module &module, const AttributeNode &attr) {
+        return CodeRef { &module, attr.attribute_id.make_slice() };
+    };
+
+    auto name_ref = [](const Module &module, const FunctionDeclNode &node) {
+        return CodeRef { &module, node.name_token.value().make_slice() };
+    };
+
+    std::unordered_map<std::string, const FunctionDeclNode *> exported_names;
+
+    for (auto &module_ptr : bundle.modules) {
+        Module &module = *module_ptr;
+
+        for (File &file : module.files()) {
+            if (file.root == nullptr) {
+                continue;
+            }
+
+            for (AttributeNode *attr : file.root->pending_attributes()) {
+                if (attr != nullptr && attr->attribute_id.value() == "export") {
+                    collector.collect_issue<Issue::GenericError>(
+                        attr_ref(module, *attr),
+                        k_export_on_function);
+                }
+            }
+        }
+
+        for (TypeDeclNode *node : module.nodes.of_type<TypeDeclNode>()) {
+            if (node == nullptr) {
+                continue;
+            }
+
+            if (auto *export_attr = node->attributes.get_first("export")) {
+                collector.collect_issue<Issue::GenericError>(
+                    attr_ref(module, *export_attr),
+                    k_export_on_function);
+            }
+        }
+
+        for (FunctionDeclNode *node : module.nodes.of_type<FunctionDeclNode>()) {
+            if (node == nullptr) {
+                continue;
+            }
+
+            if (!node->export_name.has_value() || !node->name_token.has_value()) {
+                continue;
+            }
+
+            if (auto refusal = export_refusal(*node, collector.core_types)) {
+                collector.collect_issue<Issue::GenericError>(
+                    name_ref(module, *node),
+                    std::move(refusal.value()));
+                continue;
+            }
+
+            if (entry_symbol.has_value() && *node->export_name == *entry_symbol) {
+                collector.collect_issue<Issue::GenericError>(
+                    name_ref(module, *node),
+                    fmt::format(
+                        "cannot export as '{}' - that name is the program's entry symbol",
+                        *entry_symbol));
+                continue;
+            }
+
+            auto [it, inserted] = exported_names.emplace(*node->export_name, node);
+
+            if (!inserted && it->second != node && it->second->name_token.has_value()) {
+                collector.collect_issue<Issue::DuplicateExportName>(
+                    name_ref(module, *node),
+                    *node->export_name,
+                    it->second->name_token.value());
+            }
+        }
+    }
 }
 
 std::vector<AST::FunctionDeclNode *> AST::function_ref_candidates(

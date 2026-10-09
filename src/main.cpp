@@ -190,8 +190,6 @@ struct Program
     // read only through Parser::module_contribution_for, which is the one owner of what a module compiles
     Parser::ActiveTargets active_targets;
 
-    Parser::TargetKind kind = Parser::TargetKind::t_executable;
-
     // settled here with the Program, a column of the row the linker reads. a lib has
     // no entry; everything else is a command
     Compiler::ExecModel exec_model = Compiler::ExecModel::t_command;
@@ -1174,8 +1172,7 @@ static bool resolve_programs(
             target.entry,
             row.output_path(
                 driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output),
-            /*active_targets=*/{},
-            target.kind
+            /*active_targets=*/{}
         };
         program.exec_model = row.exec_model;
 
@@ -1318,7 +1315,7 @@ static bool run_front_end(
         }
     }
 
-    out.options.codegen.export_memory = bundle.wasm_export_memory;
+    out.options.export_memory = bundle.wasm_export_memory;
 
     if (needs_cache_keys(driver)
         && !compute_cache_keys(

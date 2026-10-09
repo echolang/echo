@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_on_struct.eco:1:3
+
+  an 'export' belongs on a function
+
+  1 | #[export]
+    :   ^^^^^^
+  2 | struct Foo
+
+1 error, nothing was compiled.

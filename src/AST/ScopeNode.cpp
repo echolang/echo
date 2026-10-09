@@ -73,9 +73,14 @@ void AST::ScopeNode::add_typedecl(AST::TypeDeclNode &structdecl)
     children.push_back(AST::make_ref(structdecl));
 }
 
-void AST::ScopeNode::add_attribute(AST::AttributeNode &attribute)
+void AST::ScopeNode::plant_attribute(AST::AttributeNode &attribute)
 {
     children.push_back(AST::make_ref(attribute));
+}
+
+void AST::ScopeNode::add_attribute(AST::AttributeNode &attribute)
+{
+    plant_attribute(attribute);
     _attribute_stack.push_back(&attribute);
 }
 

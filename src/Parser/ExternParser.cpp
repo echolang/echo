@@ -25,11 +25,9 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
 
     // attributes written ahead of the block belong to every function in it. drain them here,
     // before the `{`, so the first function cannot silently take them all: `#[wasm: import "env"]
-    // extern { a; b; }` used to attach to `a` only because that function drained the stack.
-    // take_declaration_attributes peels a file-root wasm object export so it does not copy
-    // onto every function in the block
+    // extern { a; b; }` used to attach to `a` only because that function drained the stack
     std::vector<AST::AttributeNode *> block_attributes =
-        Parser::take_declaration_attributes(payload);
+        payload.context.scope().collect_attributes();
 
     if (!cursor.is_type(Token::Type::t_open_brace)) {
         payload.collect_unexpected_token(Token::Type::t_open_brace);

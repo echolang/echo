@@ -29,17 +29,8 @@ namespace Parser
     // following `struct`. taken as an AttributeList rather than a FunctionDeclNode for exactly that
     // reason: the struct site is the other half of that bug and drains through here too. called once
     // the declaration node is in hand, which is also the earliest point at which an attribute has
-    // something to be read against.
-    //
-    // `#[wasm: export "memory"]` is peeled rather than attached: it is a file-root fact, and
-    // attaching it to the next function is the trap `#[wasm: export "memory"]` then `#[export]
-    // function f()` would otherwise hit. `take_declaration_attributes` is the peel;
-    // drain_attributes and an `extern { }` both go through it
+    // something to be read against
     void drain_attributes(Payload &payload, AST::AttributeList &into);
-
-    // pending attributes of this scope that attach to a declaration. wasm object
-    // exports are omitted and stay file-root children
-    std::vector<AST::AttributeNode *> take_declaration_attributes(Payload &payload);
 
     // publishes every marker a member declaration's attributes state about it, or reports why the
     // declaration cannot carry one.

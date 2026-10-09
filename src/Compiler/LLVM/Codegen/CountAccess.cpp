@@ -58,6 +58,13 @@ llvm::Value *apply_count_access(
     llvm::function_ref<llvm::Value *(bool atomic)> emit
 )
 {
+    // a row without OS threads has no atomicrmw. skip the typeinfo split so the
+    // atomic block is never planted; ISel without `+atomics` is the failure
+    // StaticStorageCodegen's once helper already refuses
+    if (!ctx.options.codegen.has_os_threads()) {
+        return emit(false);
+    }
+
     if (access != CountAccess::t_from_typeinfo) {
         return emit(access == CountAccess::t_atomic);
     }

@@ -598,7 +598,8 @@ bool Backend::link_executable(
         Compiler::append_windows_sysroot_link_args(fallback);
     }
     std::string target_error;
-    if (!Compiler::append_codegen_link_args(fallback, _ctx.options.codegen, target_error)) {
+    if (!Compiler::append_codegen_link_args(
+            fallback, _ctx.options.codegen, _ctx.options.export_memory, target_error)) {
         llvm::errs() << target_error << '\n';
         return false;
     }

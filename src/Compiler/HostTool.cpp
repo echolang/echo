@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -507,6 +506,7 @@ bool Compiler::append_codegen_target_args(
 bool Compiler::append_codegen_link_args(
     std::vector<std::string> &argv,
     const CodegenTarget &target,
+    bool export_memory,
     std::string &out_error
 )
 {
@@ -527,7 +527,7 @@ bool Compiler::append_codegen_link_args(
         argv.push_back("-shared");
     }
 
-    if (target.is_wasm() && target.export_memory) {
+    if (target.is_wasm() && export_memory) {
         argv.push_back("-Wl,--export-memory");
     }
 

@@ -25,9 +25,9 @@ namespace
     //               Compiler::run_test_isolated. not the `tests` *condition flag*
     //               (TargetFacts::tests / `#[if: tests]`): that is a directive value, this is an
     //               attribute name. directives never reach is_known_attribute
-    //   export      FuncDeclParser  -> FunctionDeclNode::export_name, refused by AST::export_refusal
-    //   wasm        FuncDeclParser / AST::check_wasm_surface: import module on an
-    //               extern, or a file-root object export (`memory`)
+    //   export      FuncDeclParser  -> FunctionDeclNode::export_name, AST::check_exports
+    //   wasm        Parser::parse_attribute plants object exports; AST::check_wasm_surface
+    //               seats import_module on an extern, or a file-root object export (`memory`)
     constexpr std::string_view k_declaration_attributes[] = {
         "inline", "implicit", "intrinsic", "builtin", "core", "unique", "atomic", "group", "tests",
         "export", "wasm" };

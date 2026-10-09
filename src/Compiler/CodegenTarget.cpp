@@ -58,16 +58,15 @@ const char *CodegenTarget::output_extension() const
         return "";
     }
 
-    const llvm::Triple triple(effective_triple());
-    if (triple.isOSDarwin()) {
-        return ".dylib";
-    }
-
-    if (triple.isOSWindows()) {
-        return ".dll";
-    }
-
+    // native lib is never a real cross (iOS is refused, wasi is `.wasm` above), so
+    // the suffix is this host's, the same rule `output_path` uses for `.exe`
+#if defined(__APPLE__)
+    return ".dylib";
+#elif defined(_WIN32)
+    return ".dll";
+#else
     return ".so";
+#endif
 }
 
 std::filesystem::path CodegenTarget::output_path(std::filesystem::path path) const

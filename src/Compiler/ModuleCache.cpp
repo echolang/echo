@@ -159,12 +159,13 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
 
-    // **and whether this program is a library.** hidden-except-export changes every
-    // defined symbol of a native lib, so an exe and a lib of the same module cannot
-    // share an object. folded here rather than in fold_target_environment: C objects
-    // are already PIC and do not change
+    // **and whether this program is a native library.** hidden-except-export changes
+    // every defined symbol of a native lib, so an exe and a lib of the same module
+    // cannot share an object. a wasm reactor's library objects alias a command's:
+    // entry lives in the uncached program unit and `--export-memory` is a link flag.
+    // folded here rather than in fold_target_environment: C objects are already PIC
     environment = fnv1a64(
-        options.codegen.is_library() ? std::string("lib") : std::string("cmd"), environment);
+        options.codegen.is_native_library() ? std::string("lib") : std::string("cmd"), environment);
 
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;

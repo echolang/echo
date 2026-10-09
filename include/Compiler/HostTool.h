@@ -116,13 +116,14 @@ namespace Compiler
         std::string &out_error
     );
 
-    // compile args plus the link-only half of the row. `-mexec-model=reactor`,
-    // `-shared`, and `--export-memory` live here and not in
-    // append_codegen_target_args, because CBuild reuses that for C compiles.
-    // all three are columns of `target`
+    // compile args plus the link-only half of the row. `-mexec-model=reactor` and
+    // `-shared` are columns of `target`. `--export-memory` is the program fact
+    // `CompilerOptions::export_memory`, not a row column, because CBuild reuses
+    // append_codegen_target_args for C compiles
     bool append_codegen_link_args(
         std::vector<std::string> &argv,
         const CodegenTarget &target,
+        bool export_memory,
         std::string &out_error
     );
 

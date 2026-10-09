@@ -500,27 +500,47 @@ void AbortCodegen::gen_abort_if(
 
 llvm::Value *AbortCodegen::swap_hook(llvm::Value *fn)
 {
-    // the slot is reachable from every thread the moment a program can spawn one
-    llvm::Value *old = _ctx.builder->CreateAtomicRMW(
-        llvm::AtomicRMWInst::Xchg,
-        hook_global(),
-        fn,
-        llvm::Align(8),
-        llvm::AtomicOrdering::SequentiallyConsistent);
-    old->setName("crash.prev");
+    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+    llvm::Value *slot = hook_global();
+
+    // the slot is reachable from every thread the moment a program can spawn one.
+    // a row without OS threads is a load and a store
+    if (_ctx.options.codegen.has_os_threads()) {
+        llvm::Value *old = _ctx.builder->CreateAtomicRMW(
+            llvm::AtomicRMWInst::Xchg,
+            slot,
+            fn,
+            llvm::Align(8),
+            llvm::AtomicOrdering::SequentiallyConsistent);
+        old->setName("crash.prev");
+        return old;
+    }
+
+    llvm::Value *old = _ctx.builder->CreateLoad(opaque_ptr, slot, "crash.prev");
+    _ctx.builder->CreateStore(fn, slot);
     return old;
 }
 
 llvm::Value *AbortCodegen::take_hook()
 {
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
-    llvm::Value *old = _ctx.builder->CreateAtomicRMW(
-        llvm::AtomicRMWInst::Xchg,
-        hook_global(),
-        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr)),
-        llvm::Align(8),
-        llvm::AtomicOrdering::SequentiallyConsistent);
-    old->setName("crash.prev");
+    llvm::Value *slot = hook_global();
+    llvm::Value *cleared = llvm::ConstantPointerNull::get(
+        llvm::cast<llvm::PointerType>(opaque_ptr));
+
+    if (_ctx.options.codegen.has_os_threads()) {
+        llvm::Value *old = _ctx.builder->CreateAtomicRMW(
+            llvm::AtomicRMWInst::Xchg,
+            slot,
+            cleared,
+            llvm::Align(8),
+            llvm::AtomicOrdering::SequentiallyConsistent);
+        old->setName("crash.prev");
+        return old;
+    }
+
+    llvm::Value *old = _ctx.builder->CreateLoad(opaque_ptr, slot, "crash.prev");
+    _ctx.builder->CreateStore(cleared, slot);
     return old;
 }
 

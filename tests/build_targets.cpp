@@ -33,6 +33,29 @@ public:
     {};
 };
 
+// PE export table vs ELF/Mach-O dynsym. llvm-nm --extern-only on a Windows .dll
+// with no COFF symbol table prints "no symbols" and exits 0
+ProcessResult exported_symbols(const fs::path &lib)
+{
+#if defined(_WIN32)
+    return EchoTests::run_process({ "llvm-readobj", "--coff-exports", lib.string() });
+#else
+    return EchoTests::run_process(
+        { "llvm-nm", "--extern-only", "--defined-only", lib.string() });
+#endif
+}
+
+bool has_export(const std::string &listing, const std::string &name)
+{
+#if defined(_WIN32)
+    // llvm-readobj prints `Name: bump`. a substring `bump` would also hit a
+    // scratch path that happens to contain the word
+    return listing.find("Name: " + name) != std::string::npos;
+#else
+    return listing.find(name) != std::string::npos;
+#endif
+}
+
 // a project with two programs over one shared function. **the two entries print different things**, which
 // is the whole assertion this suite exists for: before targets, `main` was the concatenation of every file
 // root of the module, so a second entry file would have run inside the first program rather than beside it
@@ -464,15 +487,14 @@ TEST_CASE("a native lib exports only its #[export]s", "[targets]")
     const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
     REQUIRE(EchoTests::file_exists(lib));
 
-    const ProcessResult nm = EchoTests::run_process(
-        { "llvm-nm", "--extern-only", "--defined-only", lib.string() });
+    const ProcessResult nm = exported_symbols(lib);
     INFO(nm.output);
     if (nm.exit_code != 0) {
-        SKIP("llvm-nm not available");
+        SKIP("no tool to list dynamic exports");
     }
 
-    REQUIRE(nm.output.find("add") != std::string::npos);
-    REQUIRE(nm.output.find("__eco_alloc") == std::string::npos);
+    REQUIRE(has_export(nm.output, "add"));
+    REQUIRE_FALSE(has_export(nm.output, "__eco_alloc"));
 }
 
 TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib]")
@@ -502,7 +524,7 @@ TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib
     write_file(project.root() / "host/src/main.eco",
         "use std::dynlib;\n"
         "\n"
-        "string $path = '" + lib.string() + "';\n"
+        "string $path = '" + EchoTests::echo_string_path(lib) + "';\n"
         "dynlib::library $plug = guard dynlib::library::open($path) else ($e) {\n"
         "    die($e->message());\n"
         "};\n"
@@ -611,15 +633,14 @@ TEST_CASE("a custom export name is the symbol nm and dlsym see", "[targets]")
     const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
     REQUIRE(EchoTests::file_exists(lib));
 
-    const ProcessResult nm = EchoTests::run_process(
-        { "llvm-nm", "--extern-only", "--defined-only", lib.string() });
+    const ProcessResult nm = exported_symbols(lib);
     INFO(nm.output);
     if (nm.exit_code != 0) {
-        SKIP("llvm-nm not available");
+        SKIP("no tool to list dynamic exports");
     }
 
-    REQUIRE(nm.output.find("sum") != std::string::npos);
-    REQUIRE(nm.output.find("add") == std::string::npos);
+    REQUIRE(has_export(nm.output, "sum"));
+    REQUIRE_FALSE(has_export(nm.output, "add"));
 }
 
 TEST_CASE("an unexported helper is hidden from the dynamic symbol table", "[targets]")
@@ -638,14 +659,13 @@ TEST_CASE("an unexported helper is hidden from the dynamic symbol table", "[targ
     const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
     const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
 
-    const ProcessResult nm = EchoTests::run_process(
-        { "llvm-nm", "--extern-only", "--defined-only", lib.string() });
+    const ProcessResult nm = exported_symbols(lib);
     INFO(nm.output);
     if (nm.exit_code != 0) {
-        SKIP("llvm-nm not available");
+        SKIP("no tool to list dynamic exports");
     }
 
-    REQUIRE(nm.output.find("bump") != std::string::npos);
-    REQUIRE(nm.output.find("helper") == std::string::npos);
-    REQUIRE(nm.output.find("__eco_alloc") == std::string::npos);
+    REQUIRE(has_export(nm.output, "bump"));
+    REQUIRE_FALSE(has_export(nm.output, "helper"));
+    REQUIRE_FALSE(has_export(nm.output, "__eco_alloc"));
 }
