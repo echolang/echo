@@ -63,35 +63,34 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
     unbuffer_stdio();
 }
 
-void ProcessCodegen::store_platform_envp()
+llvm::Value *ProcessCodegen::load_platform_envp()
 {
     llvm::Type *ptr = _ctx.opaque_ptr_type();
-    llvm::Module *module = _ctx.current_module();
-    llvm::Value *envp = nullptr;
 
     if (_ctx.targeting_wasm()) {
-        llvm::FunctionCallee get = module->getOrInsertFunction(
-            "__wasilibc_get_environ",
-            llvm::FunctionType::get(ptr, {}, false));
-        envp = _ctx.builder->CreateCall(get, {}, "environ");
-    }
-    else if (_ctx.options.codegen.is_darwin()) {
-        llvm::FunctionCallee get = module->getOrInsertFunction(
-            "_NSGetEnviron",
-            llvm::FunctionType::get(ptr, {}, false));
-        llvm::Value *slot = _ctx.builder->CreateCall(get, {}, "environ.slot");
-        envp = _ctx.builder->CreateLoad(ptr, slot, "environ");
-    }
-    else if (_ctx.targeting_windows()) {
-        envp = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
-    }
-    else {
-        llvm::GlobalVariable *environ = llvm::dyn_cast<llvm::GlobalVariable>(
-            module->getOrInsertGlobal("environ", ptr));
-        envp = _ctx.builder->CreateLoad(ptr, environ, "environ");
+        llvm::FunctionCallee get = _ctx.libc_callee(
+            Compiler::RuntimeSymbol::t_wasilibc_get_environ, ptr, {});
+        return _ctx.builder->CreateCall(get, {}, "environ");
     }
 
-    _ctx.builder->CreateStore(envp, get_or_create_envp());
+    if (_ctx.options.codegen.is_darwin()) {
+        llvm::FunctionCallee get = _ctx.libc_callee(
+            Compiler::RuntimeSymbol::t_ns_get_environ, ptr, {});
+        llvm::Value *slot = _ctx.builder->CreateCall(get, {}, "environ.slot");
+        return _ctx.builder->CreateLoad(ptr, slot, "environ");
+    }
+
+    if (_ctx.targeting_windows()) {
+        return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
+    }
+
+    llvm::GlobalVariable *environ = _ctx.libc_global(Compiler::RuntimeSymbol::t_environ, ptr);
+    return _ctx.builder->CreateLoad(ptr, environ, "environ");
+}
+
+void ProcessCodegen::store_platform_envp()
+{
+    _ctx.builder->CreateStore(load_platform_envp(), get_or_create_envp());
 }
 
 void ProcessCodegen::unbuffer_stdio()
@@ -128,9 +127,7 @@ void ProcessCodegen::unbuffer_stdio()
         return;
     }
 
-    llvm::Module *module = _ctx.current_module();
-    llvm::GlobalVariable *stdout_gv = llvm::dyn_cast<llvm::GlobalVariable>(
-        module->getOrInsertGlobal("stdout", ptr));
+    llvm::GlobalVariable *stdout_gv = _ctx.libc_global(Compiler::RuntimeSymbol::t_stdout, ptr);
 
     llvm::FunctionCallee setvbuf_fn = _ctx.libc_callee(
         Compiler::RuntimeSymbol::t_setvbuf,
@@ -165,7 +162,6 @@ void ProcessCodegen::gen_startup()
     _ctx.builder->SetInsertPoint(
         llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn));
 
-    store_platform_envp();
     unbuffer_stdio();
     _ctx.builder->CreateRetVoid();
 
@@ -184,6 +180,12 @@ llvm::Value *ProcessCodegen::gen_argv(const llvm::Twine &name)
 
 llvm::Value *ProcessCodegen::gen_envp(const llvm::Twine &name)
 {
+    if (_ctx.options.codegen.is_library()) {
+        llvm::Value *envp = load_platform_envp();
+        envp->setName(name);
+        return envp;
+    }
+
     return _ctx.builder->CreateLoad(_ctx.opaque_ptr_type(), get_or_create_envp(), name);
 }
 

@@ -15,6 +15,7 @@
 
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -363,6 +364,17 @@ namespace Compiler::LLVM
             return current_module()->getOrInsertFunction(
                 runtime_symbol_name(symbol),
                 llvm::FunctionType::get(return_type, parameter_types, variadic));
+        }
+
+        // a libc data symbol, the twin of libc_callee. environ and stdout are
+        // globals; inserting them by string would leave them unreserved
+        llvm::GlobalVariable *libc_global(RuntimeSymbol symbol, llvm::Type *type)
+        {
+            llvm::Constant *inserted = current_module()->getOrInsertGlobal(
+                runtime_symbol_name(symbol), type);
+            auto *global = llvm::dyn_cast<llvm::GlobalVariable>(inserted);
+            assert(global && "libc data symbol collided with a non-global of the same name");
+            return global;
         }
 
         // the object is for this machine, so CRT names follow the triple rather than

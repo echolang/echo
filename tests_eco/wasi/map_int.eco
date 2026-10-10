@@ -1,0 +1,8 @@
+map<int32, int32> $m = map<int32, int32>();
+$m[1] = 10;
+$m[2] = 20;
+echo $m->count();
+echo $m->get(1);
+echo $m->get(2);
+$m[1] = 11;
+echo $m->get(1);

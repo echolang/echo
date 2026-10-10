@@ -32,6 +32,10 @@ namespace Compiler
         t_get_current_thread_id,
         t_switch_to_thread,
         t_acrt_iob_func,
+        t_wasilibc_get_environ,
+        t_ns_get_environ,
+        t_environ,
+        t_stdout,
         t_count
     };
 

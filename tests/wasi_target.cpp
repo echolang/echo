@@ -627,7 +627,7 @@ TEST_CASE("wasmtime runs a wasi command that prints 1", "[target][wasi]")
     INFO(ran.output);
     require_wasmtime(ran);
     REQUIRE(ran.exit_code == 0);
-    REQUIRE(ran.output.find("1") != std::string::npos);
+    REQUIRE(EchoTests::output_has_line(ran.output, "1"));
 }
 
 TEST_CASE("wasmtime runs stdlib io, time and pid on wasi", "[target][wasi]")
@@ -781,5 +781,54 @@ TEST_CASE("a reactor with the stdlib echoes an int from an export", "[target][wa
     INFO(ran.output);
     require_wasmtime(ran);
     REQUIRE(ran.exit_code == 0);
-    REQUIRE(ran.output.find("1") != std::string::npos);
+    REQUIRE(EchoTests::output_has_line(ran.output, "1"));
+}
+
+TEST_CASE("wasmtime runs a host import through --preload", "[target][wasi]")
+{
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    ScopedProject project("import_preload");
+    write_file(
+        project.root() / "module.eco",
+        "#[module: \"reactor\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: lib { name: \"calls_host\" }]\n");
+    write_file(
+        project.root() / "src/lib.eco",
+        "#[wasm: import \"env\"]\n"
+        "extern {\n"
+        "    function host_log(ptr<const uint8> $text, usize $len) : void;\n"
+        "}\n"
+        "\n"
+        "#[export]\n"
+        "public function render() : int32\n"
+        "{\n"
+        "    host_log(null, 0);\n"
+        "    return 7;\n"
+        "}\n");
+    write_file(
+        project.root() / "env.wat",
+        "(module\n"
+        "  (func (export \"host_log\") (param i32 i32))\n"
+        ")\n");
+
+    const ProcessResult built = project.echoc(
+        "build --no-stdlib --target-os wasi --target-arch wasm32");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const std::filesystem::path wasm = project.root() / "ecobuild" / "calls_host.wasm";
+    REQUIRE(std::filesystem::is_regular_file(wasm));
+
+    const ProcessResult ran = run_wasmtime(
+        wasm,
+        project.root(),
+        { "--preload", "env=" + (project.root() / "env.wat").string(), "--invoke", "render" });
+    INFO(ran.output);
+    require_wasmtime(ran);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(EchoTests::output_has_line(ran.output, "7"));
 }

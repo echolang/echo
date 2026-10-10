@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -125,6 +126,54 @@ namespace EchoTests
         }
 
         return "";
+    }
+
+    // a whole captured line equals `want`, after stripping a trailing `\r`.
+    // `find("1")` is a substring of `10`; wasmtime and `echo` both write lines
+    inline bool output_has_line(const std::string &output, const std::string &want)
+    {
+        std::istringstream stream(output);
+        std::string line;
+        while (std::getline(stream, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (line == want) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // the captured stream is exactly these lines, in order. reopen / two-call
+    // cases need the sequence, not that each digit appears somewhere
+    inline bool output_equals_lines(
+        const std::string &output, std::initializer_list<std::string> want)
+    {
+        std::vector<std::string> lines;
+        std::istringstream stream(output);
+        std::string line;
+        while (std::getline(stream, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            lines.push_back(std::move(line));
+        }
+
+        if (lines.size() != want.size()) {
+            return false;
+        }
+
+        size_t i = 0;
+        for (const std::string &expected : want) {
+            if (lines[i] != expected) {
+                return false;
+            }
+            i += 1;
+        }
+
+        return true;
     }
 
     inline void write_file(const std::filesystem::path &path, const std::string &content)

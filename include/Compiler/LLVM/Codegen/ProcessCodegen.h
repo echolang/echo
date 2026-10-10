@@ -17,8 +17,8 @@ namespace Compiler::LLVM
     //
     // argc/argv arrive as `main`'s first two parameters on a command. a lib or reactor has
     // no entry, so argc stays 0. envp is the third argument on a native command; on wasi
-    // it is `__wasilibc_get_environ()`, on a native lib POSIX `environ` / Darwin
-    // `_NSGetEnviron()`, planted from `gen_startup` because there is no `main` to capture
+    // it is `__wasilibc_get_environ()`. a lib reads the platform source on every
+    // `process_envp` so a host `setenv` after `dlopen` is visible
     class ProcessCodegen
     {
     public:
@@ -35,12 +35,12 @@ namespace Compiler::LLVM
         void gen_capture(llvm::Function *entry);
 
         // a lib or reactor has no `main`. plant `__eco_startup` in `llvm.global_ctors`
-        // so wasi-libc's `_initialize` / dlopen fills envp and unbuffers stdio
+        // so wasi-libc's `_initialize` / dlopen unbuffers stdio
         void gen_startup();
 
         // the three reads, as a usize count and two opaque pointers. what the `process_argc` /
-        // `process_argv` / `process_envp` builtins lower to, in the shape of
-        // MemoryCodegen::gen_live_count - a load off a global and nothing else
+        // `process_argv` / `process_envp` builtins lower to. argc/argv load the capture
+        // globals. envp does too on a command; a lib reads the platform source live
         llvm::Value *gen_argc(const llvm::Twine &name);
         llvm::Value *gen_argv(const llvm::Twine &name);
         llvm::Value *gen_envp(const llvm::Twine &name);
@@ -64,6 +64,7 @@ namespace Compiler::LLVM
         llvm::GlobalVariable *get_or_create_argv();
         llvm::GlobalVariable *get_or_create_envp();
 
+        llvm::Value *load_platform_envp();
         void store_platform_envp();
 
         // Windows UCRT (stdout and stderr) and wasi-libc (stdout). one owner so

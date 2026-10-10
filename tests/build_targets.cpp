@@ -96,6 +96,31 @@ void write_lib_only(const ScopedProject &project, const std::string &source)
     write_file(project.root() / "src/lib.eco", source);
 }
 
+void require_lib_exports(const std::string &case_name, const std::string &echoc_args)
+{
+    ScopedProject project(case_name);
+    write_lib_only(project,
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+
+    const ProcessResult built = project.echoc(echoc_args);
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
+    const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
+    REQUIRE(EchoTests::file_exists(lib));
+
+    const ProcessResult nm = exported_symbols(lib);
+    INFO(nm.output);
+    if (nm.exit_code != 0) {
+        SKIP("no tool to list dynamic exports");
+    }
+
+    REQUIRE(has_export(nm.output, "add"));
+    REQUIRE_FALSE(has_export(nm.output, "__eco_abort"));
+}
+
 void write_exe_and_lib(const ScopedProject &project)
 {
     write_file(project.root() / "module.eco",
@@ -507,31 +532,17 @@ TEST_CASE("a wasi command and reactor share cache keys", "[targets][wasi]")
 
 TEST_CASE("a native lib exports only its #[export]s", "[targets]")
 {
-    ScopedProject project("lib_visibility");
-    write_file(project.root() / "module.eco",
-        "#[module: \"onlylib\"]\n"
-        "#[sources: \"src/*.eco\"]\n"
-        "#[target: lib { name: \"greeter\" }]\n");
-    write_file(project.root() / "src/lib.eco",
-        "#[export]\n"
-        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+    require_lib_exports("lib_visibility", "build");
+}
 
-    const ProcessResult built = project.echoc("build");
-    INFO(built.output);
-    REQUIRE(built.exit_code == 0);
+TEST_CASE("a native lib keeps its export under --optimize whole", "[targets]")
+{
+    require_lib_exports("lib_whole", "build --optimize whole");
+}
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
-    REQUIRE(EchoTests::file_exists(lib));
-
-    const ProcessResult nm = exported_symbols(lib);
-    INFO(nm.output);
-    if (nm.exit_code != 0) {
-        SKIP("no tool to list dynamic exports");
-    }
-
-    REQUIRE(has_export(nm.output, "add"));
-    REQUIRE_FALSE(has_export(nm.output, "__eco_abort"));
+TEST_CASE("a native lib with -g still exports", "[targets]")
+{
+    require_lib_exports("lib_debug", "build -g");
 }
 
 TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib]")

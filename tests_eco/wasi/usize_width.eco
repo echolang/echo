@@ -1,0 +1,6 @@
+use std::math;
+
+echo usize::max();
+echo math::MAX_USIZE;
+echo usize::max() == math::MAX_USIZE;
+echo math::MAX_ISIZE;
