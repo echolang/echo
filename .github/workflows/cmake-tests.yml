@@ -97,6 +97,8 @@ jobs:
       ECHOC_BINARY: ${{ github.workspace }}/build/echoc
       ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
       ECO_E2E_TMP_DIR: ${{ github.workspace }}/build/e2e_tmp
+      # this job installs the WASI SDK and wasmtime; missing tools then FAIL rather than SKIP
+      ECO_REQUIRE_WASI: 1
 
     steps:
     - name: Checkout repository
@@ -113,7 +115,6 @@ jobs:
         sudo apt install -y libc++-dev libc++abi-dev zlib1g-dev
 
     - name: Install WASI SDK and wasmtime
-      if: matrix.shard == 'unit'
       run: |
         case "${{ matrix.os.arch }}" in
           arm64) WASI_ARCH=arm64; WT_ARCH=aarch64 ;;
