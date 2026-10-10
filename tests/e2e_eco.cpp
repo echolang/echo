@@ -729,8 +729,8 @@ TEST_CASE("eco end-to-end", "[e2e]")
         }
 
         if (missing_cross_tools(entry.test)) {
-            if (std::getenv("GITHUB_ACTIONS") != nullptr) {
-                FAIL("WASI SDK and wasmtime required on CI for target: wasi");
+            if (EchoTests::wasi_tools_required()) {
+                FAIL("WASI SDK and wasmtime required (ECO_REQUIRE_WASI)");
             }
             continue;
         }

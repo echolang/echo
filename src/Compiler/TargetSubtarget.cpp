@@ -233,7 +233,11 @@ bool append_codegen_cc_cpu_args(
         return false;
     }
 
-    if (!sub.cpu.empty()) {
+    // clang's `-target-cpu` does not accept LLVM's floor name `generic` on x86
+    // (`x86-64` is the spelling). omitting the flag is the same floor: clang
+    // already compiles for the triple's baseline. a named CPU (apple-m1, a
+    // written `--target-cpu`) still has to be said
+    if (!sub.cpu.empty() && sub.cpu != k_generic_cpu) {
         argv.push_back("-Xclang");
         argv.push_back("-target-cpu");
         argv.push_back("-Xclang");

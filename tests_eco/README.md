@@ -52,7 +52,7 @@ test that quietly asserts less than its author wrote.
 | `stdlib` | `on` (default) / `off` | `off` passes `--no-stdlib`: `die`, `assert` and `mem::` / `std::` become undeclared names |
 | `expect` | `ok` (default) / `fail` / an exit status like `3` | the exit status the case must produce |
 | `mode` | `run` (default) / `build` / `test` | compile, link and execute; link a native binary and execute it; or run the case's `test` blocks |
-| `target` | omitted (host) / `wasi` | a real cross: `mode: build` plus `--target-os wasi`, then the `.wasm` is run under wasmtime. skipped locally without a WASI SDK; required on CI |
+| `target` | omitted (host) / `wasi` | a real cross: `mode: build` plus `--target-os wasi`, then the `.wasm` is run under wasmtime. skipped without a WASI SDK; `ECO_REQUIRE_WASI=1` (Linux CI) turns a miss into a fail |
 | `env` | space-separated `KEY=VALUE` pairs | set in the environment of everything the case spawns |
 | `args` | space-separated words | the program's own arguments — `argv[1]` onwards |
 | `stdin` | space-separated words | fed to the program on standard input, **one line per word** |
@@ -78,8 +78,9 @@ wants and it is the only shape that fits the whitespace-separated header the oth
 
 `target: wasi` is the other half: it actually cross-compiles and runs. `mode: build` is required
 (the driver refuses `run --target-os wasi`). The linked file is a `.wasm` and the runner invokes
-`wasmtime` on it. Without a WASI SDK the case is skipped locally and fails on CI, the same policy
-Catch2 `[wasi]` uses. That is how core (map, string, format, hash) is exercised with `usize = 4`.
+`wasmtime` on it. Without a WASI SDK the case is skipped; jobs that install the tools set
+`ECO_REQUIRE_WASI=1` so a miss FAILs instead. Catch2 `[wasi]` reads the same variable. That is how
+core (map, string, format, hash) is exercised with `usize = 4`.
 
 `flags: --target-os linux` compiles the Linux arm of a `#[if: os == ...]` region on whatever machine runs the
 suite — see [docs/projects/conditional-compilation.md](../docs/projects/conditional-compilation.md). The

@@ -35,7 +35,8 @@ namespace Compiler::LLVM
         void gen_capture(llvm::Function *entry);
 
         // a lib or reactor has no `main`. plant `__eco_startup` in `llvm.global_ctors`
-        // so wasi-libc's `_initialize` / dlopen unbuffers stdio
+        // so wasi-libc's `_initialize` / dlopen unbuffers stdio. a no-op off Windows
+        // and wasm, where there is nothing to unbuffer
         void gen_startup();
 
         // the three reads, as a usize count and two opaque pointers. what the `process_argc` /

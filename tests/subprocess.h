@@ -5,6 +5,7 @@
 
 #include "test_lane.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -39,6 +40,15 @@ namespace EchoTests
     // is still short enough that a hang is a located failure rather than a CI job sitting until its
     // own limit
     constexpr unsigned k_default_timeout_ms = 60000;
+
+    // jobs that install the WASI SDK and wasmtime set this. missing tools then
+    // FAIL rather than SKIP, so an e2e shard without the install cannot go green
+    // by skipping `target: wasi`. unset locally, and on Windows CI which does
+    // not install the tools
+    inline bool wasi_tools_required()
+    {
+        return std::getenv("ECO_REQUIRE_WASI") != nullptr;
+    }
 
     // runs a shell command, capturing merged stdout+stderr. A signal is reported as `128 + signo`, the way a
     // shell reports it, which keeps a JIT segfault distinguishable from a clean rejection in the failure

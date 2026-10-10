@@ -81,7 +81,9 @@ namespace Compiler
 
     // `-Xclang -target-cpu` / `-target-feature` for a C compile, from the same
     // resolve_subtarget Echo's TargetMachine uses. CBuild calls this after
-    // append_codegen_target_args so the two objects cannot disagree about the CPU
+    // append_codegen_target_args so the two objects cannot disagree about the CPU.
+    // `generic` is omitted: clang rejects that name on x86, and no flag is the
+    // triple's baseline, which is what `generic` means to LLVM
     bool append_codegen_cc_cpu_args(
         std::vector<std::string> &argv,
         const CodegenTarget &target,

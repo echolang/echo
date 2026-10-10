@@ -171,13 +171,24 @@ bool has_import(
     return false;
 }
 
+void require_wasi_sdk()
+{
+    if (!Compiler::wasi_sysroot().empty()) {
+        return;
+    }
+
+    if (EchoTests::wasi_tools_required()) {
+        FAIL("WASI SDK not found (ECO_REQUIRE_WASI)");
+    }
+
+    SKIP("WASI SDK not found");
+}
+
 };
 
 TEST_CASE("echoc build --target-os wasi emits a wasm module", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("hello");
     write_file(project.root() / "hello.eco", "echo 1;\n");
@@ -192,9 +203,7 @@ TEST_CASE("echoc build --target-os wasi emits a wasm module", "[target][wasi]")
 
 TEST_CASE("echoc build --target-os wasi with stdlib emits a wasm module", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("stdlib");
     write_file(project.root() / "hello.eco", "echo 1;\n");
@@ -208,9 +217,7 @@ TEST_CASE("echoc build --target-os wasi with stdlib emits a wasm module", "[targ
 
 TEST_CASE("echoc build --target-os wasi allocates a class box", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("class_box");
     write_file(
@@ -261,9 +268,7 @@ TEST_CASE("a lib target is a wasi reactor with exports and host imports", "[targ
     REQUIRE(ir.output.find("wasm-import-module") != std::string::npos);
     REQUIRE(ir.output.find("\"env\"") != std::string::npos);
 
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     REQUIRE(ir.exit_code == 0);
 
@@ -285,9 +290,7 @@ TEST_CASE("a lib target is a wasi reactor with exports and host imports", "[targ
 
 TEST_CASE("a suffix-less -o on wasi becomes .wasm", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("suffix");
     write_file(project.root() / "hello.eco", "echo 1;\n");
@@ -353,9 +356,7 @@ TEST_CASE("wasi allocation counter is a non-atomic add", "[target][wasi]")
 
 TEST_CASE("wasm export memory does not attach to the next function", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("memory_prefix");
     write_file(
@@ -394,9 +395,7 @@ TEST_CASE("codegen link args pass --export-memory when asked", "[target][wasi]")
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     REQUIRE(Compiler::append_codegen_link_args(argv, target, true, error));
     REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,--export-memory") != argv.end());
@@ -492,8 +491,8 @@ void require_wasmtime(const ProcessResult &ran)
         return;
     }
 
-    if (std::getenv("GITHUB_ACTIONS") != nullptr) {
-        FAIL("wasmtime not found on CI");
+    if (EchoTests::wasi_tools_required()) {
+        FAIL("wasmtime not found (ECO_REQUIRE_WASI)");
     }
 
     SKIP("wasmtime not found");
@@ -611,9 +610,7 @@ TEST_CASE("a cross-module C callback is a unit-local adapter", "[target][wasi]")
 
 TEST_CASE("wasmtime runs a wasi command that prints 1", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("wasmtime_echo");
     write_file(project.root() / "hello.eco", "echo 1;\n");
@@ -632,9 +629,7 @@ TEST_CASE("wasmtime runs a wasi command that prints 1", "[target][wasi]")
 
 TEST_CASE("wasmtime runs stdlib io, time and pid on wasi", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("wasmtime_stdlib");
     write_file(
@@ -716,9 +711,7 @@ TEST_CASE("wasmtime runs stdlib io, time and pid on wasi", "[target][wasi]")
 
 TEST_CASE("wasmtime die writes the message and exits 1", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("wasmtime_die");
     write_file(project.root() / "die.eco", "die('x');\n");
@@ -751,9 +744,7 @@ TEST_CASE("MAX_ISIZE is the 32-bit maximum on wasm32", "[target][wasi]")
 
 TEST_CASE("a reactor with the stdlib echoes an int from an export", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("reactor_echo");
     write_file(
@@ -786,9 +777,7 @@ TEST_CASE("a reactor with the stdlib echoes an int from an export", "[target][wa
 
 TEST_CASE("wasmtime runs a host import through --preload", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
+    require_wasi_sdk();
 
     ScopedProject project("import_preload");
     write_file(

@@ -84,8 +84,9 @@ llvm::Value *ProcessCodegen::load_platform_envp()
         return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
     }
 
-    llvm::GlobalVariable *environ = _ctx.libc_global(Compiler::RuntimeSymbol::t_environ, ptr);
-    return _ctx.builder->CreateLoad(ptr, environ, "environ");
+    // not `environ`: UCRT `#define`s that as `(*__p__environ())`
+    llvm::GlobalVariable *environ_gv = _ctx.libc_global(Compiler::RuntimeSymbol::t_environ, ptr);
+    return _ctx.builder->CreateLoad(ptr, environ_gv, "environ");
 }
 
 void ProcessCodegen::store_platform_envp()
@@ -144,6 +145,12 @@ void ProcessCodegen::unbuffer_stdio()
 
 void ProcessCodegen::gen_startup()
 {
+    // unbuffer_stdio is a no-op off Windows and wasm; an empty ctor on every
+    // POSIX lib is a global_ctors entry that does nothing
+    if (!_ctx.targeting_windows() && !_ctx.targeting_wasm()) {
+        return;
+    }
+
     llvm::Module *module = _ctx.current_module();
     constexpr const char *k_name = "__eco_startup";
 

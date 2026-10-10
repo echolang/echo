@@ -545,6 +545,45 @@ TEST_CASE("a native lib with -g still exports", "[targets]")
     require_lib_exports("lib_debug", "build -g");
 }
 
+TEST_CASE("a dependency #[export] stays visible under --optimize whole", "[targets]")
+{
+    ScopedProject project("lib_dep_export");
+    write_file(project.root() / "dep/module.eco",
+        "#[module: \"dep\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "dep/src/api.eco",
+        "#[export]\n"
+        "public function helper() : int32 { return 7; }\n");
+    write_file(project.root() / "lib/module.eco",
+        "#[module: \"onlylib\"]\n"
+        "#[depends: \"../dep\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: lib { name: \"greeter\" }]\n");
+    write_file(project.root() / "lib/src/lib.eco",
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return helper() + $a + $b; }\n");
+
+    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
+    const fs::path lib = project.root() / "lib" / "ecobuild" / ("greeter" + ext);
+
+    for (const char *args : { "build", "build --optimize whole" }) {
+        const ProcessResult built = project.echoc(args, project.root() / "lib");
+        INFO(args);
+        INFO(built.output);
+        REQUIRE(built.exit_code == 0);
+        REQUIRE(EchoTests::file_exists(lib));
+
+        const ProcessResult nm = exported_symbols(lib);
+        INFO(nm.output);
+        if (nm.exit_code != 0) {
+            SKIP("no tool to list dynamic exports");
+        }
+
+        REQUIRE(has_export(nm.output, "helper"));
+        REQUIRE(has_export(nm.output, "add"));
+    }
+}
+
 TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib]")
 {
     ScopedProject project("dynlib_load");
