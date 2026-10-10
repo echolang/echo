@@ -96,10 +96,10 @@ void LLVMCompiler::emit_test_dispatch()
     llvm::Type *void_ty = _ctx.builder->getVoidTy();
     llvm::PointerType *ptr = llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type());
 
-    llvm::FunctionCallee getenv_fn = _ctx.libc_callee("getenv", ptr, { ptr });
-    llvm::FunctionCallee strcmp_fn = _ctx.libc_callee("strcmp", i32, { ptr, ptr });
+    llvm::FunctionCallee getenv_fn = _ctx.libc_callee(Compiler::RuntimeSymbol::t_getenv, ptr, { ptr });
+    llvm::FunctionCallee strcmp_fn = _ctx.libc_callee(Compiler::RuntimeSymbol::t_strcmp, i32, { ptr, ptr });
     llvm::FunctionCallee exit_fn = _ctx.libc_callee(
-        "exit", void_ty, { i32 });
+        Compiler::RuntimeSymbol::t_exit, void_ty, { i32 });
 
     if (auto *exit_decl = llvm::dyn_cast<llvm::Function>(exit_fn.getCallee())) {
         exit_decl->addFnAttr(llvm::Attribute::NoReturn);
@@ -374,7 +374,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // symbols - `echo` fetches it back by name at the call site rather than through a getter
     for (auto &cmp_unit : _ctx.cmp_units) {
         _ctx.current_cmp_unit = cmp_unit.get();
-        _ctx.libc_callee("printf",
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_printf,
             llvm::Type::getInt32Ty(*_ctx.llvm_context),
             { _ctx.opaque_ptr_type() },
             /*variadic=*/true);
@@ -422,6 +422,10 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // body in a boolean
     if (auto symbol = _ctx.options.codegen.entry_symbol()) {
         emit_entry_point(*main_cmp_unit, *symbol);
+    }
+    else {
+        _ctx.current_cmp_unit = main_cmp_unit;
+        _process.gen_startup();
     }
 
     {

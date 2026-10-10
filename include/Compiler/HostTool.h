@@ -87,19 +87,33 @@ namespace Compiler
         std::string &out_error
     );
 
-    // wasi-libc sysroot for `echoc build --target-os wasi`. `$WASI_SDK_PATH` first
-    // (the SDK's `share/wasi-sysroot` when that exists, else the path itself), then
-    // `/opt/wasi-sdk` and the Homebrew wasi-sdk / wasi-libc prefixes. empty when
-    // none of those is a sysroot. asked once: the path cannot change during a compile
+    // one WASI SDK lookup. sysroot, resource dir, clang and wasm-ld are
+    // resolved together so CBuild and the wasm link cannot pick a sysroot
+    // from one prefix and a clang from another
+    struct WasiSdk
+    {
+        std::filesystem::path sysroot;
+        std::filesystem::path resource_dir;
+        std::filesystem::path clang;
+        std::filesystem::path wasm_ld;
+    };
+
+    const WasiSdk &wasi_sdk();
+
+    // columns of wasi_sdk(). kept as names CBuild, the cache key and the
+    // Catch2 suite already ask. wasm_ld is the linker append_wasi_target_args
+    // passes as `-fuse-ld=`
     std::filesystem::path wasi_sysroot();
-
-    // clang resource dir that holds `lib/<wasi triple>/libclang_rt.builtins.a`.
-    // Homebrew wasi-runtimes, or a WASI SDK's clang lib. empty when none is on
-    // this machine; the link then passes `-rtlib=none`
     std::filesystem::path wasi_resource_dir();
+    std::filesystem::path wasi_clang();
+    std::filesystem::path wasi_wasm_ld();
 
-    // `-target` / `--sysroot` / `-fuse-ld=lld` for a WASI row. false with a
-    // sentence when a WASI sysroot is not on this machine
+    // the clang that compiles C objects and drives the link for this row.
+    // a WASI SDK's clang when the row is wasm and one is installed, else PATH
+    std::string cc_driver(const CodegenTarget &target);
+
+    // `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` for a WASI row. false with a
+    // sentence when a WASI sysroot is not on this machine, or wasm-ld is missing
     bool append_wasi_target_args(
         std::vector<std::string> &argv,
         const CodegenTarget &target,
@@ -124,7 +138,8 @@ namespace Compiler
         std::vector<std::string> &argv,
         const CodegenTarget &target,
         bool export_memory,
-        std::string &out_error
+        std::string &out_error,
+        const std::string &output_basename = {}
     );
 
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt

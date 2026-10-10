@@ -591,18 +591,24 @@ bool Backend::link_executable(
         }
     }
 
-    std::vector<std::string> fallback = { "clang", "-o", executable_name };
+    std::vector<std::string> fallback = {
+        Compiler::cc_driver(_ctx.options.codegen), "-o", executable_name };
     // Windows CRT/sysroot flags are a host fact. a wasm clang line already
-    // carries `-target` / `--sysroot` / `-fuse-ld=lld` from the row
+    // carries `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` from the row
     if (!_ctx.options.codegen.is_cross()) {
         Compiler::append_windows_sysroot_link_args(fallback);
     }
     std::string target_error;
     if (!Compiler::append_codegen_link_args(
-            fallback, _ctx.options.codegen, _ctx.options.export_memory, target_error)) {
+            fallback,
+            _ctx.options.codegen,
+            _ctx.options.export_memory,
+            target_error,
+            std::filesystem::path(executable_name).filename().string())) {
         llvm::errs() << target_error << '\n';
         return false;
     }
+
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     for (const std::string &word : link_words) {
@@ -632,7 +638,7 @@ bool Backend::link_executable(
 void Backend::gen_debug_symbols(const std::string &executable_name)
 {
 #if defined(__APPLE__)
-    if (!_ctx.options.emitting_debug_info()) {
+    if (!_ctx.options.emitting_debug_info() || _ctx.options.codegen.is_wasm()) {
         return;
     }
 

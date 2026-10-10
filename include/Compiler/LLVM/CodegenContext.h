@@ -6,6 +6,7 @@
 #include "eco.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/CompilerOptions.h"
+#include "Compiler/RuntimeSymbols.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/Codegen/CodegenValue.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
@@ -135,7 +136,7 @@ namespace Compiler::LLVM
         // emitted.** echo, die and dprint convert a `string` through this, and every ordinary
         // call does too - one dance, because a site that allocated the slot and forgot the
         // attribute is a *miscompile*
-        void emit_call(
+        llvm::CallInst *emit_call(
             llvm::FunctionCallee callee,
             std::vector<llvm::Value *> &args,
             const ReturnAbi &abi);
@@ -351,15 +352,17 @@ namespace Compiler::LLVM
         // the RC runtime, the abort runtime and `echo` are all *emitted* rather than linked, so
         // each needs a handful of C symbols with no stdlib declaration behind them. spelled out per
         // symbol they had already drifted - `printf` still uses the legacy typed pointer, and only
-        // `exit` remembered its attributes - so this is the one spelling
+        // `exit` remembered its attributes - so this is the one spelling. the enumerator is the
+        // table RuntimeSymbols owns, so a name cannot be inserted without a row
         llvm::FunctionCallee libc_callee(
-            const char *name,
+            RuntimeSymbol symbol,
             llvm::Type *return_type,
             llvm::ArrayRef<llvm::Type *> parameter_types,
             bool variadic = false)
         {
             return current_module()->getOrInsertFunction(
-                name, llvm::FunctionType::get(return_type, parameter_types, variadic));
+                runtime_symbol_name(symbol),
+                llvm::FunctionType::get(return_type, parameter_types, variadic));
         }
 
         // the object is for this machine, so CRT names follow the triple rather than
@@ -405,44 +408,15 @@ namespace Compiler::LLVM
             if (targeting_windows()) {
                 llvm::Value *count = builder->CreateTrunc(len, i32, "write.n");
                 builder->CreateCall(
-                    libc_callee("_write", i32, { i32, opaque_ptr, i32 }),
+                    libc_callee(RuntimeSymbol::t_win_write, i32, { i32, opaque_ptr, i32 }),
                     { fd_val, ptr, count });
                 return;
             }
 
             llvm::Type *count_ty = size_int_ty();
             builder->CreateCall(
-                libc_callee("write", count_ty, { i32, opaque_ptr, count_ty }),
+                libc_callee(RuntimeSymbol::t_write, count_ty, { i32, opaque_ptr, count_ty }),
                 { fd_val, ptr, as_size(len) });
-        }
-
-        // stdout is fully buffered when it is a pipe. `echo` of a string goes through
-        // `_write` (unbuffered) after `fflush(NULL)`, and that fflush is a no-op from
-        // JIT'd code on Windows: MCJIT resolves UCRT but `fflush(NULL)` does not drain
-        // this process's FILE*. unbuffering stdout and stderr makes `printf` and
-        // `_write` the same kind of write, so program order is what the goldens record
-        void emit_unbuffer_stdio()
-        {
-            if (!targeting_windows()) {
-                return;
-            }
-
-            llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
-            llvm::Type *i64 = llvm::Type::getInt64Ty(*llvm_context);
-            llvm::Type *ptr = opaque_ptr_type();
-            llvm::FunctionCallee iob = libc_callee("__acrt_iob_func", ptr, { i32 });
-            llvm::FunctionCallee setvbuf_fn = libc_callee(
-                "setvbuf", i32, { ptr, ptr, i32, i64 });
-            llvm::Value *null = llvm::ConstantPointerNull::get(
-                llvm::cast<llvm::PointerType>(ptr));
-            llvm::Value *ionbf = llvm::ConstantInt::get(i32, 4);
-            llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
-
-            for (unsigned fd : { 1u, 2u }) {
-                llvm::Value *file = builder->CreateCall(
-                    iob, { llvm::ConstantInt::get(i32, fd) });
-                builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
-            }
         }
 
         // the opaque `ptr`, spelled once - it appears in almost every emitted runtime signature

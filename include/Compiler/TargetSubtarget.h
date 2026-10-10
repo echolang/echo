@@ -8,6 +8,8 @@
 
 namespace Compiler
 {
+    struct CodegenTarget;
+
     // **the sole answer to "which CPU is the backend compiling for".**
     //
     // a CPU name and a feature string, and between them everything llvm::TargetMachine needs beyond the
@@ -27,8 +29,9 @@ namespace Compiler
         // to its TargetMachine, and one of them auto-detects the host
         std::string cpu;
 
-        // `+feature,-feature,...`, empty for every baseline row. a feature the CPU already implies does
-        // not need saying, so this is only ever what a person asked for on top
+        // `+feature,-feature,...`. empty except wasm32, which carries `+simd128` so a
+        // 16-byte vector is not silently scalarized. a feature the CPU already implies
+        // does not need saying
         std::string features;
     };
 
@@ -75,6 +78,16 @@ namespace Compiler
     // TargetFacts::cache_signature() is. A field added above without a line here would silently share a
     // key with a build that did not have it, which is the one cache failure with no diagnostic
     std::string subtarget_signature(const Subtarget &subtarget);
+
+    // `-Xclang -target-cpu` / `-target-feature` for a C compile, from the same
+    // resolve_subtarget Echo's TargetMachine uses. CBuild calls this after
+    // append_codegen_target_args so the two objects cannot disagree about the CPU
+    bool append_codegen_cc_cpu_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        const std::string &cpu_request,
+        const std::string &features_request,
+        std::string &out_error);
 };
 
 #endif

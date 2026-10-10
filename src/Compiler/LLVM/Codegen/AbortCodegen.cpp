@@ -34,7 +34,7 @@ static std::string file_basename(const TokenReference &token)
 llvm::FunctionCallee AbortCodegen::get_exit()
 {
     llvm::FunctionCallee callee = _ctx.libc_callee(
-        "exit",
+        Compiler::RuntimeSymbol::t_exit,
         llvm::Type::getVoidTy(*_ctx.llvm_context),
         { llvm::Type::getInt32Ty(*_ctx.llvm_context) });
 
@@ -67,12 +67,12 @@ llvm::Function *AbortCodegen::get_or_create_abort_thunk()
 
     llvm::Type *void_ty = llvm::Type::getVoidTy(*_ctx.llvm_context);
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
 
     llvm::FunctionType *type = llvm::FunctionType::get(
         void_ty,
-        { opaque_ptr, i64, opaque_ptr, i64, opaque_ptr, i64, i32, opaque_ptr, i64 },
+        { opaque_ptr, size_ty, opaque_ptr, size_ty, opaque_ptr, size_ty, i32, opaque_ptr, size_ty },
         false);
 
     llvm::Function *thunk = llvm::Function::Create(
@@ -103,7 +103,7 @@ void AbortCodegen::write_pieces(
     llvm::Value *line_len
 )
 {
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
 
     write_stderr(headline, headline_len);
 
@@ -112,21 +112,30 @@ void AbortCodegen::write_pieces(
     llvm::BasicBlock *after_msg = llvm::BasicBlock::Create(*_ctx.llvm_context, "crash.loc", parent);
 
     _ctx.builder->CreateCondBr(
-        _ctx.builder->CreateICmpNE(message_len, llvm::ConstantInt::get(i64, 0), "crash.has_msg"),
+        _ctx.builder->CreateICmpNE(
+            message_len, llvm::ConstantInt::get(size_ty, 0), "crash.has_msg"),
         with_msg,
         after_msg);
 
     _ctx.set_insert_point(with_msg);
-    write_stderr(_ctx.builder->CreateGlobalStringPtr(": ", ".crash.sep"), llvm::ConstantInt::get(i64, 2));
+    write_stderr(
+        _ctx.builder->CreateGlobalStringPtr(": ", ".crash.sep"),
+        llvm::ConstantInt::get(size_ty, 2));
     write_stderr(message, message_len);
     _ctx.builder->CreateBr(after_msg);
 
     _ctx.set_insert_point(after_msg);
-    write_stderr(_ctx.builder->CreateGlobalStringPtr("\n  at ", ".crash.sep"), llvm::ConstantInt::get(i64, 6));
+    write_stderr(
+        _ctx.builder->CreateGlobalStringPtr("\n  at ", ".crash.sep"),
+        llvm::ConstantInt::get(size_ty, 6));
     write_stderr(file, file_len);
-    write_stderr(_ctx.builder->CreateGlobalStringPtr(":", ".crash.sep"), llvm::ConstantInt::get(i64, 1));
+    write_stderr(
+        _ctx.builder->CreateGlobalStringPtr(":", ".crash.sep"),
+        llvm::ConstantInt::get(size_ty, 1));
     write_stderr(line, line_len);
-    write_stderr(_ctx.builder->CreateGlobalStringPtr("\n", ".crash.sep"), llvm::ConstantInt::get(i64, 1));
+    write_stderr(
+        _ctx.builder->CreateGlobalStringPtr("\n", ".crash.sep"),
+        llvm::ConstantInt::get(size_ty, 1));
 }
 
 void AbortCodegen::crash_llvm_types(llvm::StructType *&info_ty, llvm::StructType *&view_ty)
@@ -337,7 +346,7 @@ void AbortCodegen::emit_default_print_body(llvm::Value *info)
         message.bytes, message.size,
         file.bytes, file.size,
         _ctx.builder->CreateInBoundsGEP(buf_ty, buf, { zero, start }, "crash.digits"),
-        len);
+        _ctx.as_size(len));
 }
 
 void AbortCodegen::flush_stdout()
@@ -346,7 +355,7 @@ void AbortCodegen::flush_stdout()
     llvm::PointerType *opaque_ptr = llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type());
 
     _ctx.builder->CreateCall(
-        _ctx.libc_callee("fflush", i32, { opaque_ptr }),
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_fflush, i32, { opaque_ptr }),
         { llvm::ConstantPointerNull::get(opaque_ptr) });
 }
 
@@ -366,21 +375,21 @@ void AbortCodegen::call_thunk(
 )
 {
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
 
     const std::string file = file_basename(at);
     const std::string line = std::to_string(at.line());
 
     _ctx.builder->CreateCall(get_or_create_abort_thunk(), {
         _ctx.builder->CreateGlobalStringPtr(headline, ""),
-        llvm::ConstantInt::get(i64, headline.size()),
+        llvm::ConstantInt::get(size_ty, headline.size()),
         detail_ptr,
-        detail_len,
+        _ctx.as_size(detail_len),
         _ctx.builder->CreateGlobalStringPtr(file, ""),
-        llvm::ConstantInt::get(i64, file.size()),
+        llvm::ConstantInt::get(size_ty, file.size()),
         llvm::ConstantInt::get(i32, at.line()),
         _ctx.builder->CreateGlobalStringPtr(line, ""),
-        llvm::ConstantInt::get(i64, line.size()),
+        llvm::ConstantInt::get(size_ty, line.size()),
     });
     _ctx.builder->CreateUnreachable();
 }
@@ -391,11 +400,10 @@ void AbortCodegen::gen_abort(
     const TokenReference &at
 )
 {
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     call_thunk(
         headline,
         _ctx.builder->CreateGlobalStringPtr(detail, ""),
-        llvm::ConstantInt::get(i64, detail.size()),
+        llvm::ConstantInt::get(_ctx.size_int_ty(), detail.size()),
         at);
 }
 
@@ -467,21 +475,21 @@ void AbortCodegen::emit_unlocated_abort(
 )
 {
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
 
     // "<runtime>" rather than a file: there is no source line that wrote this check, and a
     // per-unit basename here would be the same ODR hazard the named globals above avoid
     const std::string where = "<runtime>";
     _ctx.builder->CreateCall(get_or_create_abort_thunk(), {
         odr_string("__eco_msg_head_" + symbol_stem, headline),
-        llvm::ConstantInt::get(i64, headline.size()),
+        llvm::ConstantInt::get(size_ty, headline.size()),
         odr_string("__eco_msg_body_" + symbol_stem, detail),
-        llvm::ConstantInt::get(i64, detail.size()),
+        llvm::ConstantInt::get(size_ty, detail.size()),
         odr_string("__eco_msg_where", where),
-        llvm::ConstantInt::get(i64, where.size()),
+        llvm::ConstantInt::get(size_ty, where.size()),
         llvm::ConstantInt::get(i32, 0),
         odr_string("__eco_msg_zero", "0"),
-        llvm::ConstantInt::get(i64, 1),
+        llvm::ConstantInt::get(size_ty, 1),
     });
     _ctx.builder->CreateUnreachable();
 }

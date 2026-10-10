@@ -507,6 +507,8 @@ std::string Compiler::LLVM::partition_hex(
         env.no_optimize ? std::string("noopt") : std::string("opt"), hash.digest);
     hash.digest = Compiler::fnv1a64(
         env.targeting_windows ? std::string("coff") : std::string("notcoff"), hash.digest);
+    hash.digest = Compiler::fnv1a64(
+        env.native_library ? std::string("lib") : std::string("cmd"), hash.digest);
     hash.digest = Compiler::fnv1a64(std::string(ECO_MODULE_CACHE_VERSION), hash.digest);
     hash.digest = Compiler::fnv1a64(std::string(LLVM_VERSION_STRING), hash.digest);
 

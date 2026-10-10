@@ -190,6 +190,16 @@ internal const int32 O_CREAT = 256;
 internal const int32 O_TRUNC = 512;
 internal const int32 O_CLOEXEC = 0;
 internal const int32 O_BINARY = 32768;
+#[elif: family == wasi]
+// wasi-libc `__header_fcntl.h`. O_RDWR is the two access bits or'd, not 2
+internal const int32 O_APPEND = 1;
+internal const int32 O_CREAT = 4096;
+internal const int32 O_TRUNC = 32768;
+internal const int32 O_RDONLY = 67108864;
+internal const int32 O_WRONLY = 268435456;
+internal const int32 O_RDWR = 335544320;
+internal const int32 O_CLOEXEC = 0;
+internal const int32 O_BINARY = 0;
 #[else]
 internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
@@ -201,7 +211,18 @@ internal const int32 O_CLOEXEC = 524288;
 internal const int32 O_BINARY = 0;
 #[end]
 
-// these four, and EBADF, agree on every platform this compiler targets
+// POSIX numbers on Darwin/Linux/Windows. wasi-libc's `__errno_values.h` is a
+// different table (ENOENT is 44, EACCES is 2)
+#[if: family == wasi]
+internal const int32 EPERM = 63;
+internal const int32 ENOENT = 44;
+internal const int32 EBADF = 8;
+internal const int32 ENOMEM = 48;
+internal const int32 EACCES = 2;
+internal const int32 EEXIST = 20;
+internal const int32 ENOTDIR = 54;
+internal const int32 EINVAL = 28;
+#[else]
 internal const int32 EPERM = 1;
 internal const int32 ENOENT = 2;
 internal const int32 EBADF = 9;
@@ -210,6 +231,7 @@ internal const int32 EACCES = 13;
 internal const int32 EEXIST = 17;
 internal const int32 ENOTDIR = 20;
 internal const int32 EINVAL = 22;
+#[end]
 
 internal const int32 SEEK_SET = 0;
 internal const int32 SEEK_CUR = 1;
@@ -253,12 +275,21 @@ internal const usize DIRENT_NAME_OFF = 21;
 #[elif: family == linux]
 internal const usize DIRENT_TYPE_OFF = 18;
 internal const usize DIRENT_NAME_OFF = 19;
+#[elif: family == wasi]
+// wasi-libc `struct dirent`: ino_t (8) then unsigned char d_type, then d_name[]
+internal const usize DIRENT_TYPE_OFF = 8;
+internal const usize DIRENT_NAME_OFF = 9;
 #[elif: family != windows]
 internal const usize DIRENT_TYPE_OFF = 18;
 internal const usize DIRENT_NAME_OFF = 19;
 #[end]
 
-#[if: family != windows]
+#[if: family == wasi]
+// wasi-libc `__header_dirent.h`: DT_DIR = 3, DT_REG = 4
+internal const uint8 DT_UNKNOWN = 0;
+internal const uint8 DT_DIR = 3;
+internal const uint8 DT_REG = 4;
+#[elif: family != windows]
 internal const uint8 DT_UNKNOWN = 0;
 internal const uint8 DT_DIR = 4;
 internal const uint8 DT_REG = 8;

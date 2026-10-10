@@ -1,9 +1,12 @@
 #include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/RuntimeSymbols.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
+#include <llvm/Transforms/Utils/ModuleUtils.h>
 
 #include <cassert>
 
@@ -54,13 +57,119 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
         _ctx.builder->CreateStore(entry->getArg(2), get_or_create_envp());
     }
     else {
-        _ctx.builder->CreateStore(
-            llvm::ConstantPointerNull::get(
-                llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())),
-            get_or_create_envp());
+        store_platform_envp();
     }
 
-    _ctx.emit_unbuffer_stdio();
+    unbuffer_stdio();
+}
+
+void ProcessCodegen::store_platform_envp()
+{
+    llvm::Type *ptr = _ctx.opaque_ptr_type();
+    llvm::Module *module = _ctx.current_module();
+    llvm::Value *envp = nullptr;
+
+    if (_ctx.targeting_wasm()) {
+        llvm::FunctionCallee get = module->getOrInsertFunction(
+            "__wasilibc_get_environ",
+            llvm::FunctionType::get(ptr, {}, false));
+        envp = _ctx.builder->CreateCall(get, {}, "environ");
+    }
+    else if (_ctx.options.codegen.is_darwin()) {
+        llvm::FunctionCallee get = module->getOrInsertFunction(
+            "_NSGetEnviron",
+            llvm::FunctionType::get(ptr, {}, false));
+        llvm::Value *slot = _ctx.builder->CreateCall(get, {}, "environ.slot");
+        envp = _ctx.builder->CreateLoad(ptr, slot, "environ");
+    }
+    else if (_ctx.targeting_windows()) {
+        envp = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
+    }
+    else {
+        llvm::GlobalVariable *environ = llvm::dyn_cast<llvm::GlobalVariable>(
+            module->getOrInsertGlobal("environ", ptr));
+        envp = _ctx.builder->CreateLoad(ptr, environ, "environ");
+    }
+
+    _ctx.builder->CreateStore(envp, get_or_create_envp());
+}
+
+void ProcessCodegen::unbuffer_stdio()
+{
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::Type *ptr = _ctx.opaque_ptr_type();
+
+    // stdout is fully buffered when it is a pipe. `echo` of a string goes through
+    // `_write` (unbuffered) after `fflush(NULL)`, and that fflush is a no-op from
+    // JIT'd code on Windows: MCJIT resolves UCRT but `fflush(NULL)` does not drain
+    // this process's FILE*. unbuffering stdout and stderr makes `printf` and
+    // `_write` the same kind of write, so program order is what the goldens record
+    if (_ctx.targeting_windows()) {
+        llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+        llvm::FunctionCallee iob = _ctx.libc_callee(
+            Compiler::RuntimeSymbol::t_acrt_iob_func, ptr, { i32 });
+        llvm::FunctionCallee setvbuf_fn = _ctx.libc_callee(
+            Compiler::RuntimeSymbol::t_setvbuf, i32, { ptr, ptr, i32, i64 });
+        llvm::Value *null = llvm::ConstantPointerNull::get(
+            llvm::cast<llvm::PointerType>(ptr));
+        llvm::Value *ionbf = llvm::ConstantInt::get(i32, 4);
+        llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
+
+        for (unsigned fd : { 1u, 2u }) {
+            llvm::Value *file = _ctx.builder->CreateCall(
+                iob, { llvm::ConstantInt::get(i32, fd) });
+            _ctx.builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
+        }
+
+        return;
+    }
+
+    if (!_ctx.targeting_wasm()) {
+        return;
+    }
+
+    llvm::Module *module = _ctx.current_module();
+    llvm::GlobalVariable *stdout_gv = llvm::dyn_cast<llvm::GlobalVariable>(
+        module->getOrInsertGlobal("stdout", ptr));
+
+    llvm::FunctionCallee setvbuf_fn = _ctx.libc_callee(
+        Compiler::RuntimeSymbol::t_setvbuf,
+        i32,
+        { ptr, ptr, i32, _ctx.size_int_ty() });
+
+    llvm::Value *file = _ctx.builder->CreateLoad(ptr, stdout_gv, "stdout");
+    llvm::Value *null = llvm::ConstantPointerNull::get(
+        llvm::cast<llvm::PointerType>(ptr));
+    llvm::Value *ionbf = llvm::ConstantInt::get(i32, 2);
+    llvm::Value *zero = llvm::ConstantInt::get(_ctx.size_int_ty(), 0);
+    _ctx.builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
+}
+
+void ProcessCodegen::gen_startup()
+{
+    llvm::Module *module = _ctx.current_module();
+    constexpr const char *k_name = "__eco_startup";
+
+    if (module->getFunction(k_name) != nullptr) {
+        return;
+    }
+
+    llvm::Function *fn = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), false),
+        llvm::GlobalValue::InternalLinkage,
+        k_name,
+        module);
+
+    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    _ctx.builder->SetInsertPoint(
+        llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn));
+
+    store_platform_envp();
+    unbuffer_stdio();
+    _ctx.builder->CreateRetVoid();
+
+    llvm::appendToGlobalCtors(*module, fn, 65535);
 }
 
 llvm::Value *ProcessCodegen::gen_argc(const llvm::Twine &name)

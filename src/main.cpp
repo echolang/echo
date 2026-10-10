@@ -288,13 +288,13 @@ static int build_bundle(
     // regenerating the embeddable header is a build step, not a compile step. running it on
     // every `echoc run` would rewrite a tracked file as a side effect of compiling
     if (driver.emit_stdlib_header) {
-        if (AST::Module *stdlib = bundle.modules.find_module_ptr("stdlib")) {
-            AST::write_embedded_module(*stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
-        }
-        else {
+        if (bundle.modules.find_module_ptr("stdlib") == nullptr) {
             std::cerr << "--emit-stdlib-header needs the standard library in the build." << std::endl;
             return 1;
         }
+
+        AST::write_embedded_stdlib(
+            STDLIB_SOURCE_DIR, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
     }
 
     if (driver.prints(Compiler::PrintKind::t_symbols)) {
@@ -1263,7 +1263,22 @@ static bool resolve_invocation(
     // after the graph and the sources, both of which it reads, and before anything parses
     out.test_modules = resolve_test_modules(driver, out);
 
-    return resolve_programs(driver, diagnostics, out);
+    if (!resolve_programs(driver, diagnostics, out)) {
+        return false;
+    }
+
+    if (driver.options.track_allocations || driver.options.report_allocations) {
+        for (const Program &program : out.programs) {
+            if (program.exec_model == Compiler::ExecModel::t_library) {
+                diagnostics.render_untyped(
+                    "Nothing To Track",
+                    "'--track-allocations' reports from main's epilogue, and a lib has none");
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 // the front end for **one program**: parse the whole bundle, then run the semantic passes over it.

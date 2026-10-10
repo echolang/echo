@@ -37,8 +37,31 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <optional>
 #include <string>
 #include <vector>
+
+namespace
+{
+    std::optional<llvm::Attribute::AttrKind> c_integer_ext(const AST::ValueType &type)
+    {
+        if (!type.is_primitive()) {
+            return std::nullopt;
+        }
+
+        switch (type.get_primitive_type()) {
+        case AST::ValueTypePrimitive::t_bool:
+        case AST::ValueTypePrimitive::t_uint8:
+        case AST::ValueTypePrimitive::t_uint16:
+            return llvm::Attribute::ZExt;
+        case AST::ValueTypePrimitive::t_int8:
+        case AST::ValueTypePrimitive::t_int16:
+            return llvm::Attribute::SExt;
+        default:
+            return std::nullopt;
+        }
+    }
+};
 
 namespace Compiler::LLVM
 {
@@ -322,6 +345,12 @@ void TypeLowering::apply_function_attributes(
         }
     }
 
+    // C is FunctionCallingShape::t_c: an `extern` or an `#[export]`. without
+    // zeroext/signext a bool/int8/int16 leaves the upper bits of the register
+    // undefined, and a C caller (dlsym, JS) reads them. the shape is the
+    // decision; apply_c_integer_ext is a no-op for t_echo
+    apply_c_integer_ext(*func, *node, calling_shape_of(*node));
+
     // **the `sret` attribute is what makes the hidden argument mean something to the optimizer**, and
     // Compiler::LLVM::indirect_return_attributes is the one place that spells it - every call site applies
     // the same builder, because a function and a call to it disagreeing about this is a miscompile rather
@@ -419,6 +448,91 @@ void TypeLowering::apply_function_attributes(
         param->addAttrs(llvm::AttrBuilder(*_ctx.llvm_context)
             .addDereferenceableAttr(_ctx.layout().getTypeAllocSize(lowered))
             .addAlignmentAttr(_ctx.layout().getABITypeAlign(lowered)));
+    }
+}
+
+TypeLowering::FunctionCallingShape TypeLowering::calling_shape_of(const AST::FunctionDeclNode &node)
+{
+    if (node.is_extern() || node.export_name.has_value()) {
+        return FunctionCallingShape::t_c;
+    }
+
+    return FunctionCallingShape::t_echo;
+}
+
+void TypeLowering::apply_c_integer_ext(
+    llvm::Function &func,
+    const AST::FunctionDeclNode &node,
+    FunctionCallingShape shape
+)
+{
+    if (shape != FunctionCallingShape::t_c) {
+        return;
+    }
+
+    if (const auto ext = c_integer_ext(node.get_return_type())) {
+        func.addRetAttr(*ext);
+    }
+
+    for (size_t i = 0; i < node.args.size(); i++) {
+        const AST::VarDeclNode *arg = node.args[i];
+        if (arg == nullptr || !arg->has_type() || i >= func.arg_size()) {
+            continue;
+        }
+
+        if (const auto ext = c_integer_ext(arg->type())) {
+            func.getArg(static_cast<unsigned>(i))->addAttr(*ext);
+        }
+    }
+}
+
+void TypeLowering::apply_c_integer_ext(
+    llvm::Function &func,
+    const AST::CallableSignature &signature,
+    FunctionCallingShape shape
+)
+{
+    if (shape != FunctionCallingShape::t_c) {
+        return;
+    }
+
+    if (const auto ext = c_integer_ext(signature.return_type)) {
+        func.addRetAttr(*ext);
+    }
+
+    for (size_t i = 0; i < signature.parameter_types.size(); i++) {
+        if (i >= func.arg_size()) {
+            break;
+        }
+
+        if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
+            func.getArg(static_cast<unsigned>(i))->addAttr(*ext);
+        }
+    }
+}
+
+void TypeLowering::apply_c_integer_ext(
+    llvm::CallBase &call,
+    const AST::CallableSignature &signature,
+    FunctionCallingShape shape
+)
+{
+    if (shape != FunctionCallingShape::t_c) {
+        return;
+    }
+
+    if (const auto ext = c_integer_ext(signature.return_type)) {
+        call.addRetAttr(*ext);
+    }
+
+    for (size_t i = 0; i < signature.parameter_types.size(); i++) {
+        if (i >= call.arg_size()) {
+            break;
+        }
+
+        if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
+            call.addParamAttr(static_cast<unsigned>(i), *ext);
+        }
     }
 }
 

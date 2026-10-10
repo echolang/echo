@@ -70,7 +70,7 @@ std::string open_plugin(const fs::path &lib)
 ProcessResult build_plugin(const ScopedProject &project, const std::string &source)
 {
     write_plugin(project, source);
-    return project.echoc("build --no-stdlib", project.root() / "plugin");
+    return project.echoc("build", project.root() / "plugin");
 }
 
 ProcessResult build_and_run_host(const ScopedProject &project, const std::string &source)

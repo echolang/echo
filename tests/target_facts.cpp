@@ -16,6 +16,13 @@ TEST_CASE("ios and android are known operating systems", "[target]")
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_operating_system("macos"));
 }
 
+TEST_CASE("wasi is emit-only so run and test refuse it", "[target]")
+{
+    REQUIRE(Compiler::TargetFacts::is_emit_only_operating_system("wasi"));
+    REQUIRE_FALSE(Compiler::TargetFacts::is_emit_only_operating_system("ios"));
+    REQUIRE_FALSE(Compiler::TargetFacts::is_emit_only_operating_system("linux"));
+}
+
 TEST_CASE("family is a closed axis derived from os", "[target]")
 {
     REQUIRE(Compiler::TargetFacts::is_axis("family"));

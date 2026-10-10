@@ -696,7 +696,9 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     // anything the author declared, so `frame variable` keeps them out of the way while `p` can still
     // reach them when a leak is what is being chased
     llvm::DIType *counter = unit->builder->createBasicType(
-        "usize", 64, llvm::dwarf::DW_ATE_unsigned);
+        "usize",
+        _ctx.size_int_ty()->getBitWidth(),
+        llvm::dwarf::DW_ATE_unsigned);
 
     const std::array<std::pair<const char *, llvm::DIType *>, 3> header = {{
         { "__strong", counter },

@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -230,10 +232,6 @@ TEST_CASE("echoc build --target-os wasi allocates a class box", "[target][wasi]"
 
 TEST_CASE("a lib target is a wasi reactor with exports and host imports", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
-
     ScopedProject project("reactor");
     write_file(
         project.root() / "module.eco",
@@ -258,11 +256,16 @@ TEST_CASE("a lib target is a wasi reactor with exports and host imports", "[targ
     const ProcessResult ir = project.echoc(
         "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir");
     INFO(ir.output);
-    REQUIRE(ir.exit_code == 0);
     REQUIRE(ir.output.find("wasm-export-name") != std::string::npos);
     REQUIRE(ir.output.find("\"render\"") != std::string::npos);
     REQUIRE(ir.output.find("wasm-import-module") != std::string::npos);
     REQUIRE(ir.output.find("\"env\"") != std::string::npos);
+
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    REQUIRE(ir.exit_code == 0);
 
     const ProcessResult built = project.echoc(
         "build --no-stdlib --target-os wasi --target-arch wasm32");
@@ -299,10 +302,6 @@ TEST_CASE("a suffix-less -o on wasi becomes .wasm", "[target][wasi]")
 
 TEST_CASE("wasi static init is a non-atomic once", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
-
     ScopedProject project("static_once");
     write_file(
         project.root() / "hello.eco",
@@ -320,19 +319,17 @@ TEST_CASE("wasi static init is a non-atomic once", "[target][wasi]")
     const ProcessResult ir = project.echoc(
         "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir -o hello.wasm hello.eco");
     INFO(ir.output);
-    REQUIRE(ir.exit_code == 0);
     REQUIRE(ir.output.find("__eco_static_once") != std::string::npos);
     REQUIRE(ir.output.find("pthread_self") == std::string::npos);
     REQUIRE(ir.output.find("cmpxchg") == std::string::npos);
     REQUIRE(ir.output.find("sched_yield") == std::string::npos);
+    if (!Compiler::wasi_sysroot().empty()) {
+        REQUIRE(ir.exit_code == 0);
+    }
 }
 
 TEST_CASE("wasi allocation counter is a non-atomic add", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
-
     ScopedProject project("alloc_once");
     write_file(
         project.root() / "hello.eco",
@@ -348,8 +345,10 @@ TEST_CASE("wasi allocation counter is a non-atomic add", "[target][wasi]")
         "build --no-stdlib --track-allocations --target-os wasi --target-arch wasm32 "
         "-p ir -o hello.wasm hello.eco");
     INFO(ir.output);
-    REQUIRE(ir.exit_code == 0);
     REQUIRE(ir.output.find("atomicrmw") == std::string::npos);
+    if (!Compiler::wasi_sysroot().empty()) {
+        REQUIRE(ir.exit_code == 0);
+    }
 }
 
 TEST_CASE("wasm export memory does not attach to the next function", "[target][wasi]")
@@ -432,14 +431,20 @@ TEST_CASE("codegen target args for wasi come from append_wasi_target_args", "[ta
     REQUIRE(std::find(argv.begin(), argv.end(), "--sysroot") != argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-isysroot") == argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-fms-runtime-lib=static") == argv.end());
+    REQUIRE(std::find(argv.begin(), argv.end(), "-fuse-ld=lld") == argv.end());
+
+    bool fused_wasm_ld = false;
+    for (const std::string &arg : argv) {
+        if (arg.rfind("-fuse-ld=", 0) == 0 && arg.find("wasm-ld") != std::string::npos) {
+            fused_wasm_ld = true;
+        }
+    }
+    REQUIRE(fused_wasm_ld);
+    REQUIRE_FALSE(Compiler::wasi_wasm_ld().empty());
 }
 
 TEST_CASE("an extern block import attribute applies to every function", "[target][wasi]")
 {
-    if (Compiler::wasi_sysroot().empty()) {
-        SKIP("WASI SDK not found");
-    }
-
     ScopedProject project("block_import");
     write_file(project.root() / "host.eco",
         "#[wasm: export \"memory\"]\n"
@@ -460,10 +465,321 @@ TEST_CASE("an extern block import attribute applies to every function", "[target
     const ProcessResult ir = project.echoc(
         "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir -o host.wasm host.eco");
     INFO(ir.output);
-    REQUIRE(ir.exit_code == 0);
     REQUIRE(ir.output.find("wasm-import-module") != std::string::npos);
     REQUIRE(ir.output.find("\"env\"") != std::string::npos);
     REQUIRE(ir.output.find("wasm-import-name") != std::string::npos);
     REQUIRE(ir.output.find("\"host_a\"") != std::string::npos);
     REQUIRE(ir.output.find("\"host_b\"") != std::string::npos);
+    if (!Compiler::wasi_sysroot().empty()) {
+        REQUIRE(ir.exit_code == 0);
+    }
+}
+
+ProcessResult run_wasmtime(
+    const std::filesystem::path &wasm,
+    const std::filesystem::path &workdir,
+    const std::vector<std::string> &extra = {})
+{
+    std::vector<std::string> argv = { "wasmtime" };
+    argv.insert(argv.end(), extra.begin(), extra.end());
+    argv.push_back(wasm.string());
+    return EchoTests::run_process(argv, EchoTests::k_default_timeout_ms, workdir);
+}
+
+void require_wasmtime(const ProcessResult &ran)
+{
+    if (ran.exit_code != 127) {
+        return;
+    }
+
+    if (std::getenv("GITHUB_ACTIONS") != nullptr) {
+        FAIL("wasmtime not found on CI");
+    }
+
+    SKIP("wasmtime not found");
+}
+
+bool define_line_has(
+    const std::string &ir,
+    const std::string &name,
+    const std::string &attr)
+{
+    std::istringstream in(ir);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.find("define ") != std::string::npos
+            && line.find("@" + name) != std::string::npos
+            && line.find(attr) != std::string::npos) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+TEST_CASE("exported narrow integers carry signext and zeroext", "[target][wasi]")
+{
+    ScopedProject project("c_abi_ext");
+    write_file(
+        project.root() / "lib.eco",
+        "#[export]\n"
+        "function flag(int8 $n) : bool\n"
+        "{\n"
+        "    return $n != 0;\n"
+        "}\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir -o lib.wasm lib.eco");
+    INFO(ir.output);
+    REQUIRE(define_line_has(ir.output, "flag", "signext"));
+    REQUIRE(define_line_has(ir.output, "flag", "zeroext"));
+}
+
+TEST_CASE("a C function pointer call and callback carry signext", "[target][wasi]")
+{
+    ScopedProject project("c_abi_indirect");
+    write_file(
+        project.root() / "lib.eco",
+        "function cb(int8 $n) : bool\n"
+        "{\n"
+        "    return $n != 0;\n"
+        "}\n"
+        "\n"
+        "#[export]\n"
+        "function run(extern function<bool(int8)> $f) : bool\n"
+        "{\n"
+        "    return $f(1);\n"
+        "}\n"
+        "\n"
+        "#[export]\n"
+        "function callback() : extern function<bool(int8)>\n"
+        "{\n"
+        "    return &cb;\n"
+        "}\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir -o lib.wasm lib.eco");
+    INFO(ir.output);
+    REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "signext"));
+    REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "zeroext"));
+    const bool call_extends = ir.output.find("call zeroext i1 %") != std::string::npos;
+    REQUIRE(call_extends);
+}
+
+TEST_CASE("a cross-module C callback is a unit-local adapter", "[target][wasi]")
+{
+    ScopedProject project("c_abi_cross_module");
+    write_file(
+        project.root() / "lib/module.eco",
+        "#[module: \"cback\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(
+        project.root() / "lib/cb.eco",
+        "public function cb(int8 $n) : bool\n"
+        "{\n"
+        "    return $n != 0;\n"
+        "}\n"
+        "\n"
+        "#[inline]\n"
+        "public function flag(int8 $n) : bool\n"
+        "{\n"
+        "    return $n != 0;\n"
+        "}\n");
+    write_file(
+        project.root() / "app.eco",
+        "#[export]\n"
+        "function callback() : extern function<bool(int8)>\n"
+        "{\n"
+        "    return &cback::cb;\n"
+        "}\n"
+        "\n"
+        "#[export]\n"
+        "function inline_cb() : extern function<bool(int8)>\n"
+        "{\n"
+        "    return &cback::flag;\n"
+        "}\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir -o app.wasm "
+        "-m " + EchoTests::quoted(project.root() / "lib") + " app.eco");
+    INFO(ir.output);
+    REQUIRE(ir.exit_code == 0);
+    REQUIRE(ir.output.find("ODR") == std::string::npos);
+    REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "zeroext"));
+    REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "signext"));
+}
+
+TEST_CASE("wasmtime runs a wasi command that prints 1", "[target][wasi]")
+{
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    ScopedProject project("wasmtime_echo");
+    write_file(project.root() / "hello.eco", "echo 1;\n");
+
+    const ProcessResult built = project.echoc(
+        "build --no-stdlib --target-os wasi -o hello.wasm hello.eco");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const ProcessResult ran = run_wasmtime(project.root() / "hello.wasm", project.root());
+    INFO(ran.output);
+    require_wasmtime(ran);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("1") != std::string::npos);
+}
+
+TEST_CASE("wasmtime runs stdlib io, time and pid on wasi", "[target][wasi]")
+{
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    ScopedProject project("wasmtime_stdlib");
+    write_file(
+        project.root() / "hello.eco",
+        "use std::io;\n"
+        "use std::time;\n"
+        "use std::env;\n"
+        "\n"
+        "echo 'pid';\n"
+        "echo std::env::pid();\n"
+        "match (io::open('nope.txt', io::filemode::read)) {\n"
+        "    .ok($f) => { echo 'missing'; echo 0; }\n"
+        "    .error($e) => { echo 'missing'; echo $e->missing(); }\n"
+        "}\n"
+        "match (io::create('listed.txt')) {\n"
+        "    .ok($f) => { match ($f->write('ok')) { .ok($n) => {} .error($e) => {} } }\n"
+        "    .error($e) => {}\n"
+        "}\n"
+        "match (io::mkdir('sub')) { .ok($ok) => {} .error($e) => {} }\n"
+        "io::dir $listing = guard io::opendir('.') else {\n"
+        "    echo 'file';\n"
+        "    echo 0;\n"
+        "    echo 'dir';\n"
+        "    echo 0;\n"
+        "    return 1;\n"
+        "};\n"
+        "bool $file = false;\n"
+        "bool $dir = false;\n"
+        "foreach ($listing as $e) {\n"
+        "    if ($e->name() == 'listed.txt') {\n"
+        "        $file = $e->is_file();\n"
+        "    }\n"
+        "    if ($e->name() == 'sub') {\n"
+        "        $dir = $e->is_directory();\n"
+        "    }\n"
+        "}\n"
+        "echo 'file';\n"
+        "echo $file;\n"
+        "echo 'dir';\n"
+        "echo $dir;\n"
+        "time::instant $t = time::instant::now();\n"
+        "echo 'nanos';\n"
+        "echo $t->elapsed()->as_nanos() >= 0;\n");
+
+    const ProcessResult built = project.echoc("build --target-os wasi -o hello.wasm hello.eco");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const ProcessResult ran = run_wasmtime(
+        project.root() / "hello.wasm",
+        project.root(),
+        { "--dir=." });
+    INFO(ran.output);
+    require_wasmtime(ran);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("pid") != std::string::npos);
+    REQUIRE(ran.output.find("missing") != std::string::npos);
+    REQUIRE(ran.output.find("file") != std::string::npos);
+    REQUIRE(ran.output.find("dir") != std::string::npos);
+    REQUIRE(std::filesystem::is_regular_file(project.root() / "listed.txt"));
+
+    auto after = [&](const char *label) -> std::string {
+        const std::string needle = std::string(label) + "\n";
+        const auto pos = ran.output.find(needle);
+        if (pos == std::string::npos) {
+            return {};
+        }
+        const auto start = pos + needle.size();
+        const auto end = ran.output.find('\n', start);
+        return ran.output.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    };
+
+    REQUIRE(after("pid") == "1");
+    REQUIRE(after("missing") == "1");
+    REQUIRE(after("file") == "1");
+    REQUIRE(after("dir") == "1");
+    REQUIRE(after("nanos") == "1");
+}
+
+TEST_CASE("wasmtime die writes the message and exits 1", "[target][wasi]")
+{
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    ScopedProject project("wasmtime_die");
+    write_file(project.root() / "die.eco", "die('x');\n");
+
+    const ProcessResult built = project.echoc(
+        "build --target-os wasi -o die.wasm die.eco");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const ProcessResult ran = run_wasmtime(project.root() / "die.wasm", project.root());
+    INFO(ran.output);
+    require_wasmtime(ran);
+    REQUIRE(ran.exit_code == 1);
+    REQUIRE(ran.output.find("fatal error: x") != std::string::npos);
+}
+
+TEST_CASE("MAX_ISIZE is the 32-bit maximum on wasm32", "[target][wasi]")
+{
+    ScopedProject project("wasm_isize");
+    write_file(
+        project.root() / "hello.eco",
+        "echo std::math::MAX_ISIZE;\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --target-os wasi -p ir -o hello.wasm hello.eco");
+    INFO(ir.output);
+    REQUIRE(ir.output.find("cannot") == std::string::npos);
+    REQUIRE(ir.output.find("2147483647") != std::string::npos);
+}
+
+TEST_CASE("a reactor with the stdlib echoes an int from an export", "[target][wasi]")
+{
+    if (Compiler::wasi_sysroot().empty()) {
+        SKIP("WASI SDK not found");
+    }
+
+    ScopedProject project("reactor_echo");
+    write_file(
+        project.root() / "module.eco",
+        "#[module: \"reactor\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: lib { name: \"echoer\" }]\n");
+    write_file(
+        project.root() / "src/lib.eco",
+        "#[export]\n"
+        "public function echo_one() : void\n"
+        "{\n"
+        "    echo 1;\n"
+        "}\n");
+
+    const ProcessResult built = project.echoc("build --target-os wasi");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const std::filesystem::path wasm = project.root() / "ecobuild" / "echoer.wasm";
+    REQUIRE(std::filesystem::is_regular_file(wasm));
+
+    const ProcessResult ran = run_wasmtime(
+        wasm, project.root(), { "--invoke", "echo_one" });
+    INFO(ran.output);
+    require_wasmtime(ran);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("1") != std::string::npos);
 }

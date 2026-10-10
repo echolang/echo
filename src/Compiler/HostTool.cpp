@@ -309,6 +309,18 @@ std::string Compiler::host_clang()
     return resolve_program("clang");
 }
 
+std::string Compiler::cc_driver(const CodegenTarget &target)
+{
+    if (target.is_wasm()) {
+        const std::filesystem::path clang = wasi_sdk().clang;
+        if (!clang.empty()) {
+            return clang.string();
+        }
+    }
+
+    return "clang";
+}
+
 std::filesystem::path Compiler::process_directory()
 {
     static const std::filesystem::path dir = [] {
@@ -507,7 +519,8 @@ bool Compiler::append_codegen_link_args(
     std::vector<std::string> &argv,
     const CodegenTarget &target,
     bool export_memory,
-    std::string &out_error
+    std::string &out_error,
+    const std::string &output_basename
 )
 {
     if (!append_codegen_target_args(argv, target, out_error)) {
@@ -525,6 +538,19 @@ bool Compiler::append_codegen_link_args(
     // path is skipped in Backend::link_executable for this kind
     if (target.is_native_library()) {
         argv.push_back("-shared");
+
+        if (!output_basename.empty()) {
+            if (target.is_darwin()) {
+                argv.push_back("-Wl,-install_name,@rpath/" + output_basename);
+            }
+            else if (!target.is_windows()) {
+                argv.push_back("-Wl,-soname," + output_basename);
+                argv.push_back("-Wl,-z,defs");
+                // the lib's own calls to an export stay inside the image.
+                // without it, a plugin that exports `floor` binds to libm
+                argv.push_back("-Wl,-Bsymbolic-functions");
+            }
+        }
     }
 
     if (target.is_wasm() && export_memory) {

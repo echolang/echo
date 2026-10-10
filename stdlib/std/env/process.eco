@@ -16,7 +16,8 @@ public function pid() : int32
 /**
  * How many arguments the program was started with, including the program name at index 0.
  *
- * So a program invoked with no arguments answers 1, the way C's `argc` does.
+ * A command invoked with no extra arguments answers 1, the way C's `argc` does.
+ * A lib or a wasm reactor answers 0: there is no `main` to capture argv.
  */
 #[builtin: process_argc]
 public function argc() : usize;
@@ -268,6 +269,10 @@ public function exe() : string
 
     die('the executable path does not fit in 32 KiB of UTF-16');
 #[else]
+    if (argc() == 0) {
+        return '';
+    }
+
     return str::from(arg(0)->cstr());
 #[end]
 }

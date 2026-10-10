@@ -5,13 +5,13 @@
 
 namespace Compiler::LLVM
 {
-    struct CmpUnit;
+    struct CodegenContext;
 
     // a native library's defined symbols are hidden except `#[export]`.
-    // keyed on FunctionDeclNode::export_name through the unit's function table,
-    // so keep-visible is the language fact rather than a storage class Unix ignores.
-    // wasm and executables never call this
-    void hide_non_exported_symbols(CmpUnit &unit);
+    // export names are collected from every unit's function table, so a
+    // whole-program merge of a dependency's `#[export]` stays visible the
+    // same way the per-unit path keeps it. wasm and executables never call this
+    void hide_non_exported_symbols(CodegenContext &ctx);
 };
 
 #endif

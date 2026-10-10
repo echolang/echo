@@ -39,6 +39,10 @@ namespace Compiler
         static bool is_known_architecture(const std::string &name);
         static bool is_known_family(const std::string &name);
 
+        // wasi is a real cross: `run` / `test` would pick its constants and
+        // execute them on the host. the `--target-os` value mask reads this
+        static bool is_emit_only_operating_system(const std::string &name);
+
         // **the axes a condition may name**, and the whole of what routing on one costs a caller. closed,
         // so `#[if: cpu == arm64]` is caught rather than read as a flag called `cpu` that nobody defined -
         // which would be false, and silently so. one table in the .cpp: a fourth axis is a row, not a

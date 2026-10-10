@@ -89,6 +89,12 @@ public const uint16 MAX_UINT16 = 65535;
 public const uint32 MAX_UINT32 = 4294967295;
 public const uint64 MAX_UINT64 = 18446744073709551615;
 
+#[if: arch == wasm32]
+public const isize MAX_ISIZE = MAX_INT32 as isize;
+public const isize MIN_ISIZE = MIN_INT32 as isize;
+public const usize MAX_USIZE = MAX_UINT32 as usize;
+#[else]
 public const isize MAX_ISIZE = MAX_INT64 as isize;
 public const isize MIN_ISIZE = -MAX_ISIZE - 1;
 public const usize MAX_USIZE = MAX_UINT64 as usize;
+#[end]

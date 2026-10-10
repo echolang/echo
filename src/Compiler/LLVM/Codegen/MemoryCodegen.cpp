@@ -129,7 +129,7 @@ llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()
     mark_allocating_thunk(thunk, 0);
 
     llvm::Value *block = _ctx.builder->CreateCall(
-        _ctx.libc_callee("malloc", opaque_ptr, { size_ty }), { thunk->getArg(0) }, "block");
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_malloc, opaque_ptr, { size_ty }), { thunk->getArg(0) }, "block");
 
     // **a failed allocation is not an allocation.** `mem::alloc` is documented to hand back null when
     // the allocator could not, so counting the attempt would leave a program that survived an OOM
@@ -177,7 +177,7 @@ llvm::Function *MemoryCodegen::get_or_create_free_thunk()
 
     _ctx.set_insert_point(count_block);
     gen_counter_delta(-1);
-    _ctx.builder->CreateCall(_ctx.libc_callee("free", void_type, { opaque_ptr }), { block });
+    _ctx.builder->CreateCall(_ctx.libc_callee(Compiler::RuntimeSymbol::t_free, void_type, { opaque_ptr }), { block });
     _ctx.builder->CreateBr(done_block);
 
     _ctx.set_insert_point(done_block);
@@ -210,7 +210,7 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
     llvm::Value *size = thunk->getArg(1);
 
     llvm::Value *new_block = _ctx.builder->CreateCall(
-        _ctx.libc_callee("realloc", opaque_ptr, { opaque_ptr, size_ty }),
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_realloc, opaque_ptr, { opaque_ptr, size_ty }),
         { old_block, size }, "block.new");
 
     // **the one thunk where the delta is not readable off the arguments.** `realloc` is four operations
@@ -275,7 +275,7 @@ llvm::Value *MemoryCodegen::gen_alloc(llvm::Value *size, const llvm::Twine &name
     // what it emitted before this subsystem existed, down to the symbol
     if (!_ctx.options.tracking_allocations()) {
         return _ctx.builder->CreateCall(
-            _ctx.libc_callee("malloc", _ctx.opaque_ptr_type(), { size_ty }), { n }, name);
+            _ctx.libc_callee(Compiler::RuntimeSymbol::t_malloc, _ctx.opaque_ptr_type(), { size_ty }), { n }, name);
     }
 
     return _ctx.builder->CreateCall(get_or_create_alloc_thunk(), { n }, name);
@@ -289,7 +289,7 @@ llvm::Value *MemoryCodegen::gen_realloc(llvm::Value *block, llvm::Value *size, c
 
     if (!_ctx.options.tracking_allocations()) {
         return _ctx.builder->CreateCall(
-            _ctx.libc_callee("realloc", opaque_ptr, { opaque_ptr, size_ty }), { block, n }, name);
+            _ctx.libc_callee(Compiler::RuntimeSymbol::t_realloc, opaque_ptr, { opaque_ptr, size_ty }), { block, n }, name);
     }
 
     return _ctx.builder->CreateCall(get_or_create_realloc_thunk(), { block, n }, name);
@@ -301,7 +301,7 @@ void MemoryCodegen::gen_free(llvm::Value *block)
 
     if (!_ctx.options.tracking_allocations()) {
         _ctx.builder->CreateCall(
-            _ctx.libc_callee("free", void_type, { _ctx.opaque_ptr_type() }), { block });
+            _ctx.libc_callee(Compiler::RuntimeSymbol::t_free, void_type, { _ctx.opaque_ptr_type() }), { block });
         return;
     }
 

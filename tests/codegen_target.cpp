@@ -228,6 +228,33 @@ TEST_CASE("a library has no entry symbol", "[target]")
     REQUIRE(target.is_native_library());
 }
 
+TEST_CASE("reserved entry names always include main", "[target]")
+{
+    Compiler::CodegenTarget host;
+    auto names = host.reserved_entry_names();
+    REQUIRE(names.size() == 1);
+    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+
+    Compiler::CodegenTarget lib = host;
+    lib.exec_model = Compiler::ExecModel::t_library;
+    names = lib.reserved_entry_names();
+    REQUIRE(names.size() == 1);
+    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+
+    Compiler::CodegenTarget wasi;
+    wasi.triple = Compiler::k_wasi_triple;
+    wasi.wasm = true;
+    names = wasi.reserved_entry_names();
+    REQUIRE(names.size() == 2);
+    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+    REQUIRE(std::string(names[1]) == "__main_argc_argv");
+
+    wasi.exec_model = Compiler::ExecModel::t_library;
+    names = wasi.reserved_entry_names();
+    REQUIRE(names.size() == 1);
+    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+}
+
 TEST_CASE("a native library takes the host shared-library suffix", "[target]")
 {
     Compiler::CodegenTarget target;
@@ -252,9 +279,18 @@ TEST_CASE("native library link args pass -shared", "[target]")
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
-    REQUIRE(Compiler::append_codegen_link_args(argv, target, false, error));
+    REQUIRE(Compiler::append_codegen_link_args(argv, target, false, error, "greeter.dylib"));
     REQUIRE(std::find(argv.begin(), argv.end(), "-shared") != argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-mexec-model=reactor") == argv.end());
+    if (target.is_darwin()) {
+        REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-install_name,@rpath/greeter.dylib")
+            != argv.end());
+    }
+    else if (!target.is_windows()) {
+        REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-soname,greeter.dylib") != argv.end());
+        REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-z,defs") != argv.end());
+        REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-Bsymbolic-functions") != argv.end());
+    }
 }
 
 TEST_CASE("a wasm library keeps the .wasm suffix", "[target]")

@@ -151,12 +151,12 @@ namespace Compiler::LLVM
         if (_ctx.targeting_windows()) {
             // DWORD GetCurrentThreadId(void) - kernel32, already on the link line
             llvm::Value *tid = _ctx.builder->CreateCall(
-                _ctx.libc_callee("GetCurrentThreadId", i32, {}), {}, "tid");
+                _ctx.libc_callee(Compiler::RuntimeSymbol::t_get_current_thread_id, i32, {}), {}, "tid");
             self = _ctx.builder->CreateZExt(tid, i64, "self");
         }
         else {
             self = _ctx.builder->CreateCall(
-                _ctx.libc_callee("pthread_self", i64, {}), {}, "self");
+                _ctx.libc_callee(Compiler::RuntimeSymbol::t_pthread_self, i64, {}), {}, "self");
             _ctx.needs_pthread = true;
         }
         // 0 is uninitialized and ~0 is done. a tid that collides with either would skip
@@ -205,10 +205,10 @@ namespace Compiler::LLVM
 
         _ctx.builder->SetInsertPoint(wait);
         if (_ctx.targeting_windows()) {
-            _ctx.builder->CreateCall(_ctx.libc_callee("SwitchToThread", i32, {}));
+            _ctx.builder->CreateCall(_ctx.libc_callee(Compiler::RuntimeSymbol::t_switch_to_thread, i32, {}));
         }
         else {
-            _ctx.builder->CreateCall(_ctx.libc_callee("sched_yield", i32, {}));
+            _ctx.builder->CreateCall(_ctx.libc_callee(Compiler::RuntimeSymbol::t_sched_yield, i32, {}));
         }
         _ctx.builder->CreateBr(loop);
 

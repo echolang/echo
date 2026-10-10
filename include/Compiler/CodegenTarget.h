@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace Compiler
@@ -80,11 +81,24 @@ namespace Compiler
             return wasm;
         }
 
+        // the object is for this machine, so CRT names and visibility follow
+        // the emit triple rather than TargetFacts::host()
+        bool is_windows() const;
+
+        // host `#if`s for install_name vs soname. a native lib is never a
+        // real cross, so this is the emit triple
+        bool is_darwin() const;
+
         // the C symbol the entry module is emitted under. host and JIT are
         // `main`; wasi-libc's crt looks up `__main_argc_argv`. a library has
         // none: its surface is its exports. on wasm, crt1-reactor.o provides
         // `_initialize`
         std::optional<const char *> entry_symbol() const;
+
+        // names `#[export]` may not claim as the program's entry. always
+        // `ECO_ENTRY_SYMBOL_NAME` (`main`), even in a lib: C still owns that
+        // spelling. a wasm command also emits `__main_argc_argv`
+        std::span<const char *const> reserved_entry_names() const;
 
         bool is_library() const {
             return exec_model == ExecModel::t_library;

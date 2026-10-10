@@ -22,6 +22,7 @@ namespace
     const std::vector<std::string> k_operating_systems = {
         "darwin", "linux", "windows", "ios", "android", "wasi"
     };
+    const std::vector<std::string> k_emit_only_operating_systems = { "wasi" };
     const std::vector<std::string> k_architectures = { "arm64", "x86_64", "wasm32" };
     const std::vector<std::string> k_families = { "darwin", "linux", "windows", "wasi" };
 
@@ -153,6 +154,11 @@ const std::vector<std::string> &TargetFacts::known_families()
 bool TargetFacts::is_known_operating_system(const std::string &name)
 {
     return vocabulary_contains(k_operating_systems, name);
+}
+
+bool TargetFacts::is_emit_only_operating_system(const std::string &name)
+{
+    return vocabulary_contains(k_emit_only_operating_systems, name);
 }
 
 bool TargetFacts::is_known_architecture(const std::string &name)

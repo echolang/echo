@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <span>
 
 namespace Compiler
 {
@@ -24,6 +25,16 @@ std::string CodegenTarget::effective_triple() const
     return triple.empty() ? llvm::sys::getDefaultTargetTriple() : triple;
 }
 
+bool CodegenTarget::is_windows() const
+{
+    return llvm::Triple(effective_triple()).isOSWindows();
+}
+
+bool CodegenTarget::is_darwin() const
+{
+    return llvm::Triple(effective_triple()).isOSDarwin();
+}
+
 std::optional<const char *> CodegenTarget::entry_symbol() const
 {
     if (exec_model == ExecModel::t_library) {
@@ -31,6 +42,18 @@ std::optional<const char *> CodegenTarget::entry_symbol() const
     }
 
     return is_wasm() ? "__main_argc_argv" : ECO_ENTRY_SYMBOL_NAME;
+}
+
+std::span<const char *const> CodegenTarget::reserved_entry_names() const
+{
+    static const char *const k_main[] = { ECO_ENTRY_SYMBOL_NAME };
+    static const char *const k_wasi_command[] = { ECO_ENTRY_SYMBOL_NAME, "__main_argc_argv" };
+
+    if (is_wasm() && exec_model != ExecModel::t_library) {
+        return k_wasi_command;
+    }
+
+    return k_main;
 }
 
 unsigned CodegenTarget::entry_arg_count() const

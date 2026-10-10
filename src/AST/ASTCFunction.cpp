@@ -4,6 +4,7 @@
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTCompleteness.h"
+#include "AST/ASTDestruction.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTFunctionEmission.h"
@@ -26,6 +27,41 @@
 
 namespace
 {
+    bool name_is_listed(std::span<const char *const> names, std::string_view name)
+    {
+        for (const char *symbol : names) {
+            if (name == symbol) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    std::optional<std::string> reserved_c_export_refusal(
+        const std::string &name,
+        std::span<const char *const> reserved_runtime,
+        std::string_view reserved_runtime_prefix,
+        std::span<const char *const> reserved_wasm_crt
+    )
+    {
+        const bool runtime = name_is_listed(reserved_runtime, name)
+            || (!reserved_runtime_prefix.empty()
+                && name.rfind(reserved_runtime_prefix, 0) == 0);
+
+        if (runtime) {
+            return fmt::format(
+                "cannot export as '{}' - that name is a compiler runtime symbol", name);
+        }
+
+        if (name_is_listed(reserved_wasm_crt, name)) {
+            return fmt::format(
+                "cannot export as '{}' - that name is a wasm C runtime symbol", name);
+        }
+
+        return std::nullopt;
+    }
+
     std::optional<std::string> component_refusal(
         const AST::ValueType &type,
         bool is_return,
@@ -40,7 +76,37 @@ namespace
             return std::string("a parameter cannot be 'void'.");
         }
 
-        if (type.is_primitive() || type.is_pointer() || type.is_c_function()) {
+        if (type.is_primitive() || type.is_c_function()) {
+            return std::nullopt;
+        }
+
+        if (type.is_pointer()) {
+            const AST::ValueType pointee = AST::ValueType::make_mutable(
+                AST::ValueType::make_non_nullable(type.pointee()));
+
+            if (pointee.is_pointer()) {
+                return component_refusal(pointee, is_return, core);
+            }
+
+            if (pointee.is_primitive() || pointee.is_c_function()) {
+                return std::nullopt;
+            }
+
+            if (pointee.is_class() || pointee.is_weak() || pointee.is_interface()
+                || AST::needs_destruction(pointee)) {
+                return fmt::format(
+                    "'{}' names Echo-owned storage a C caller cannot keep alive or free. "
+                    "Pass a scalar or a pointer to bytes.",
+                    type.get_type_desciption());
+            }
+
+            if (pointee.is_enum() && pointee.has_complex_type()
+                && pointee.get_complex_type()->has_payload_case()) {
+                return fmt::format(
+                    "'{}' names an enum payload a C caller cannot copy. Pass a scalar.",
+                    type.get_type_desciption());
+            }
+
             return std::nullopt;
         }
 
@@ -86,9 +152,8 @@ namespace
         if (type.is_struct() || type.is_enum()) {
             return fmt::format(
                 "'{}' cannot cross a C function-pointer boundary by value - echoc and clang "
-                "classify a struct differently, and the disagreement is silent. Pass a "
-                "'ptr<{}>' instead.",
-                type.get_type_desciption(),
+                "classify a struct differently, and the disagreement is silent. Pass a scalar "
+                "or a pointer to bytes.",
                 type.get_type_desciption());
         }
 
@@ -261,6 +326,11 @@ std::optional<std::string> AST::export_refusal(
     const AST::CoreTypes &core
 )
 {
+    if (decl.is_static_method()) {
+        return std::string(
+            "cannot be exported because a static method belongs to a type C has no receiver for.");
+    }
+
     if (decl.is_extern()) {
         return std::string(
             "an 'extern' function is imported, not exported");
@@ -290,7 +360,10 @@ std::optional<std::string> AST::export_refusal(
 void AST::check_exports(
     Collector &collector,
     Bundle &bundle,
-    std::optional<const char *> entry_symbol
+    std::span<const char *const> reserved_entry,
+    std::span<const char *const> reserved_runtime,
+    std::string_view reserved_runtime_prefix,
+    std::span<const char *const> reserved_wasm_crt
 )
 {
     constexpr const char *k_export_on_function = "an 'export' belongs on a function";
@@ -304,6 +377,16 @@ void AST::check_exports(
     };
 
     std::unordered_map<std::string, const FunctionDeclNode *> exported_names;
+    std::unordered_set<std::string> extern_symbols;
+
+    for (auto &module_ptr : bundle.modules) {
+        Module &module = *module_ptr;
+        for (FunctionDeclNode *node : module.nodes.of_type<FunctionDeclNode>()) {
+            if (node != nullptr && node->extern_symbol.has_value()) {
+                extern_symbols.insert(*node->extern_symbol);
+            }
+        }
+    }
 
     for (auto &module_ptr : bundle.modules) {
         Module &module = *module_ptr;
@@ -350,12 +433,33 @@ void AST::check_exports(
                 continue;
             }
 
-            if (entry_symbol.has_value() && *node->export_name == *entry_symbol) {
+            if (const auto reserved = reserved_c_export_refusal(
+                    *node->export_name,
+                    reserved_runtime,
+                    reserved_runtime_prefix,
+                    reserved_wasm_crt)) {
+                collector.collect_issue<Issue::GenericError>(
+                    name_ref(module, *node),
+                    *reserved);
+                continue;
+            }
+
+            if (extern_symbols.count(*node->export_name) > 0) {
+                collector.collect_issue<Issue::GenericError>(
+                    name_ref(module, *node),
+                    fmt::format(
+                        "cannot export as '{}' - an 'extern' in this program already binds that "
+                        "C symbol",
+                        *node->export_name));
+                continue;
+            }
+
+            if (name_is_listed(reserved_entry, *node->export_name)) {
                 collector.collect_issue<Issue::GenericError>(
                     name_ref(module, *node),
                     fmt::format(
                         "cannot export as '{}' - that name is the program's entry symbol",
-                        *entry_symbol));
+                        *node->export_name));
                 continue;
             }
 

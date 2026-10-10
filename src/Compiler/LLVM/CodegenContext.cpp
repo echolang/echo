@@ -32,7 +32,7 @@ namespace Compiler::LLVM
         return types->create_llvm_func_decl(decl, *current_cmp_unit);
     }
 
-    void CodegenContext::emit_call(
+    llvm::CallInst *CodegenContext::emit_call(
         llvm::FunctionCallee callee,
         std::vector<llvm::Value *> &args,
         const ReturnAbi &abi
@@ -72,7 +72,7 @@ namespace Compiler::LLVM
                 push_scalar(builder->CreateLoad(abi.indirect_type, slot, "call.result"));
             }
 
-            return;
+            return call;
         }
 
         auto *call = builder->CreateCall(callee, args);
@@ -82,6 +82,8 @@ namespace Compiler::LLVM
         if (!call->getType()->isVoidTy()) {
             push_scalar(call);
         }
+
+        return call;
     }
 
     llvm::Value *CodegenContext::materialize(const CodegenValue &value, const char *name)

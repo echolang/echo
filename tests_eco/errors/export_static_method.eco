@@ -1,0 +1,10 @@
+struct Box
+{
+    #[export]
+    static function make() : int32
+    {
+        return 1;
+    }
+}
+
+echo Box::make();

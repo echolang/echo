@@ -52,7 +52,17 @@ bool has_export(const std::string &listing, const std::string &name)
     // scratch path that happens to contain the word
     return listing.find("Name: " + name) != std::string::npos;
 #else
-    return listing.find(name) != std::string::npos;
+    std::istringstream in(listing);
+    std::string line;
+    while (std::getline(in, line)) {
+        const auto pos = line.find_last_of(" \t");
+        std::string sym = pos == std::string::npos ? line : line.substr(pos + 1);
+        if (sym == name || sym == "_" + name) {
+            return true;
+        }
+    }
+
+    return false;
 #endif
 }
 
@@ -468,6 +478,33 @@ TEST_CASE("an exe and a lib of one module have different cache keys", "[targets]
     REQUIRE(exe_key != lib_key);
 }
 
+TEST_CASE("a wasi command and reactor share cache keys", "[targets][wasi]")
+{
+    ScopedProject project("wasi_exe_lib_keys");
+    write_file(project.root() / "module.eco",
+        "#[module: \"both\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"app\", entry: \"src/main.eco\" }]\n"
+        "#[target: lib { name: \"plug\" }]\n");
+    write_file(project.root() / "src/main.eco", "echo 1;\n");
+    write_file(project.root() / "src/plug.eco",
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+
+    const ProcessResult exe = project.echoc(
+        "build --target app --explain cache --no-stdlib --target-os wasi");
+    INFO(exe.output);
+    const ProcessResult lib = project.echoc(
+        "build --target plug --explain cache --no-stdlib --target-os wasi");
+    INFO(lib.output);
+
+    const std::string exe_key = cache_hex(EchoTests::line_starting_with(exe.output, "both"));
+    const std::string lib_key = cache_hex(EchoTests::line_starting_with(lib.output, "both"));
+    REQUIRE_FALSE(exe_key.empty());
+    REQUIRE_FALSE(lib_key.empty());
+    REQUIRE(exe_key == lib_key);
+}
+
 TEST_CASE("a native lib exports only its #[export]s", "[targets]")
 {
     ScopedProject project("lib_visibility");
@@ -479,7 +516,7 @@ TEST_CASE("a native lib exports only its #[export]s", "[targets]")
         "#[export]\n"
         "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
 
-    const ProcessResult built = project.echoc("build --no-stdlib");
+    const ProcessResult built = project.echoc("build");
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
@@ -494,7 +531,7 @@ TEST_CASE("a native lib exports only its #[export]s", "[targets]")
     }
 
     REQUIRE(has_export(nm.output, "add"));
-    REQUIRE_FALSE(has_export(nm.output, "__eco_alloc"));
+    REQUIRE_FALSE(has_export(nm.output, "__eco_abort"));
 }
 
 TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib]")
@@ -509,7 +546,7 @@ TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib
         "#[export]\n"
         "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
 
-    const ProcessResult plug = project.echoc("build --no-stdlib", project.root() / "plugin");
+    const ProcessResult plug = project.echoc("build", project.root() / "plugin");
     INFO(plug.output);
     REQUIRE(plug.exit_code == 0);
 
@@ -667,5 +704,79 @@ TEST_CASE("an unexported helper is hidden from the dynamic symbol table", "[targ
 
     REQUIRE(has_export(nm.output, "bump"));
     REQUIRE_FALSE(has_export(nm.output, "helper"));
-    REQUIRE_FALSE(has_export(nm.output, "__eco_alloc"));
+    REQUIRE_FALSE(has_export(nm.output, "__eco_abort"));
+}
+
+TEST_CASE("a native lib hides C globals from #[cc:]", "[targets][cbuild]")
+{
+#if defined(_WIN32)
+    SKIP("-fvisibility=hidden is not a Windows flag");
+#endif
+
+    ScopedProject project("lib_cc_hidden");
+    write_file(
+        project.root() / "module.eco",
+        "#[module: \"cclib\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[cc: sources \"c/*.c\"]\n"
+        "#[target: lib { name: \"cclib\" }]\n");
+    write_file(
+        project.root() / "src/lib.eco",
+        "#[export]\n"
+        "public function bump() : int32 { return 1; }\n");
+    write_file(
+        project.root() / "c/shim.c",
+        "int eco_cc_secret = 1;\n"
+        "int eco_cc_fn(void) { return eco_cc_secret; }\n");
+
+    const ProcessResult built = project.echoc("build");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
+    const fs::path lib = project.root() / "ecobuild" / ("cclib" + ext);
+    REQUIRE(EchoTests::file_exists(lib));
+
+    const ProcessResult nm = exported_symbols(lib);
+    INFO(nm.output);
+    if (nm.exit_code != 0) {
+        SKIP("no tool to list dynamic exports");
+    }
+
+    REQUIRE(has_export(nm.output, "bump"));
+    REQUIRE_FALSE(has_export(nm.output, "eco_cc_secret"));
+    REQUIRE_FALSE(has_export(nm.output, "eco_cc_fn"));
+}
+
+TEST_CASE("track-allocations is refused on a lib", "[targets]")
+{
+    ScopedProject project("lib_track");
+    write_file(
+        project.root() / "module.eco",
+        "#[module: \"greeter\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: lib { name: \"greeter\" }]\n");
+    write_file(
+        project.root() / "src/lib.eco",
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+
+    const ProcessResult built = project.echoc("build --track-allocations");
+    INFO(built.output);
+    REQUIRE(built.exit_code != 0);
+    REQUIRE(built.output.find("Nothing To Track") != std::string::npos);
+}
+
+TEST_CASE("exporting open is not a reserved runtime name", "[targets]")
+{
+    ScopedProject project("export_open");
+    write_file(
+        project.root() / "open.eco",
+        "#[export]\n"
+        "function open() : void {}\n");
+
+    const ProcessResult ir = project.echoc("build --no-stdlib -p ir -o open.o open.eco");
+    INFO(ir.output);
+    REQUIRE(ir.exit_code == 0);
+    REQUIRE(ir.output.find("cannot export as 'open'") == std::string::npos);
 }

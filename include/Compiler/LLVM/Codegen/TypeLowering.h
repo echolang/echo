@@ -11,6 +11,7 @@
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 
@@ -40,6 +41,15 @@ namespace Compiler::LLVM
     {
     public:
         TypeLowering(CodegenContext &ctx) : _ctx(ctx) {};
+
+        // the calling shape get_llvm_function_type prepends an environment for, or does not. one
+        // argument rather than a second function, so the unconditional env prepend keeps one owner
+        // and both callers say which they meant. t_c is also the integer-ext decision
+        enum class FunctionCallingShape
+        {
+            t_echo,
+            t_c,
+        };
 
         // one unit per module, **except the ones named in `cached_modules`**.
         //
@@ -80,6 +90,27 @@ namespace Compiler::LLVM
         void apply_function_attributes(
             const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit,
             const ReturnAbi &abi);
+
+        // zeroext/signext for a C-ABI i1/i8/i16. C reads the whole register; without
+        // the extend the upper bits are undef. a no-op unless `shape` is t_c, so the
+        // calling shape is the one decision: a declaration, a call through
+        // `extern function<...>`, and the unit-local adapter `&name` produces
+        void apply_c_integer_ext(
+            llvm::Function &func,
+            const AST::FunctionDeclNode &node,
+            FunctionCallingShape shape);
+        void apply_c_integer_ext(
+            llvm::Function &func,
+            const AST::CallableSignature &signature,
+            FunctionCallingShape shape);
+        void apply_c_integer_ext(
+            llvm::CallBase &call,
+            const AST::CallableSignature &signature,
+            FunctionCallingShape shape);
+
+        // t_c for an `extern` or an `#[export]`; t_echo otherwise. the declaration's
+        // own LLVM Function uses this, so integer-ext cannot be decided a second time
+        static FunctionCallingShape calling_shape_of(const AST::FunctionDeclNode &node);
 
         // **how *this declaration* hands its answer back**, which is the aggregate rule
         // Compiler::LLVM::return_abi_for owns plus the one thing it cannot see: whether the declaration
@@ -238,15 +269,6 @@ namespace Compiler::LLVM
             const AST::ValueType &interface,
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
-
-        // the calling shape get_llvm_function_type prepends an environment for, or does not. one
-        // argument rather than a second function, so the unconditional env prepend keeps one owner
-        // and both callers say which they meant
-        enum class FunctionCallingShape
-        {
-            t_echo,
-            t_c,
-        };
 
         // the llvm::FunctionType a callable's `fn` slot points at. the environment is parameter 0
         // under t_echo, always, exactly the way a method's `$this` is - a capturing closure has

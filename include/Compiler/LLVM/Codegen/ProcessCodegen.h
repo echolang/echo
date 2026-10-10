@@ -15,17 +15,10 @@ namespace Compiler::LLVM
 
     // the one owner of where a program's arguments and environment come from
     //
-    // the platform hands them to `main` and nowhere else, and Echo has no globals to put them in: a
-    // file-scope variable in a library module lowers to a stack slot in whichever function is being
-    // emitted, and in a non-entry unit it is dropped entirely. So the entry point records the three
-    // words it was given and everything else reads them back from here
-    //
-    // **the environment arrives as `main`'s third parameter rather than through the `environ` symbol**,
-    // and that is what keeps this subsystem free of platform conditionals. `environ` is a *data*
-    // symbol, which an `extern` block has no spelling for, and it is not portably addressable anyway -
-    // Darwin needs `_NSGetEnviron()`. The three-argument `main` is POSIX and a documented CRT
-    // extension on Windows; WASI's crt takes argc and argv only, and the capture stores null for envp.
-    // `CodegenTarget::entry_arg_count` is the arity; this reads whatever function it was given
+    // argc/argv arrive as `main`'s first two parameters on a command. a lib or reactor has
+    // no entry, so argc stays 0. envp is the third argument on a native command; on wasi
+    // it is `__wasilibc_get_environ()`, on a native lib POSIX `environ` / Darwin
+    // `_NSGetEnviron()`, planted from `gen_startup` because there is no `main` to capture
     class ProcessCodegen
     {
     public:
@@ -40,6 +33,10 @@ namespace Compiler::LLVM
         // takes the function rather than reading `_ctx` for it, because the arguments are the point
         // and a wrong one is worth an assert
         void gen_capture(llvm::Function *entry);
+
+        // a lib or reactor has no `main`. plant `__eco_startup` in `llvm.global_ctors`
+        // so wasi-libc's `_initialize` / dlopen fills envp and unbuffers stdio
+        void gen_startup();
 
         // the three reads, as a usize count and two opaque pointers. what the `process_argc` /
         // `process_argv` / `process_envp` builtins lower to, in the shape of
@@ -66,6 +63,12 @@ namespace Compiler::LLVM
         llvm::GlobalVariable *get_or_create_argc();
         llvm::GlobalVariable *get_or_create_argv();
         llvm::GlobalVariable *get_or_create_envp();
+
+        void store_platform_envp();
+
+        // Windows UCRT (stdout and stderr) and wasi-libc (stdout). one owner so
+        // gen_capture and gen_startup cannot each remember a different pair
+        void unbuffer_stdio();
     };
 };
 

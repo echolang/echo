@@ -6,6 +6,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <string>
 
 namespace
 {
@@ -107,8 +108,27 @@ bool Compiler::is_echo_build_directory(const std::filesystem::path &directory)
     return false;
 }
 
+bool Compiler::is_embedded_stdlib_path(const std::filesystem::path &path)
+{
+    return path.generic_string().rfind(k_embedded_stdlib_scheme, 0) == 0;
+}
+
+std::filesystem::path Compiler::embedded_stdlib_path(std::string_view relative)
+{
+    std::string spelled;
+    spelled.reserve(k_embedded_stdlib_scheme.size() + 1 + relative.size());
+    spelled.append(k_embedded_stdlib_scheme);
+    spelled.push_back('/');
+    spelled.append(relative);
+    return spelled;
+}
+
 bool Compiler::is_compiler_supplied_module(const Parser::ModuleManifest &manifest)
 {
+    if (is_embedded_stdlib_path(manifest.path)) {
+        return true;
+    }
+
     const std::filesystem::path stdlib_root(STDLIB_SOURCE_DIR);
 
     std::error_code ec;
@@ -300,6 +320,14 @@ std::filesystem::path Compiler::BuildLayout::module_dir(const Parser::ModuleMani
         if (!user_root.empty()) {
             return user_root / manifest.name;
         }
+
+        // no HOME/XDG: keep artifacts in this process's scratch, never a
+        // `stdlib:` directory in the working directory
+        if (!_scratch.empty()) {
+            return _scratch / manifest.name;
+        }
+
+        return std::filesystem::temp_directory_path() / "echo" / manifest.name;
     }
 
     // the module's own preference over its own artifacts, and never over a dependency's - the one-way rule

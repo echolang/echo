@@ -6,7 +6,9 @@
 #include "AST/ASTValueType.h"
 
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace AST
@@ -60,19 +62,27 @@ namespace AST
     // **why may this function not be exported?** nullopt when it may.
     //
     // composed from c_function_ref_refusal (receiver, closure, generic, builtin, intrinsic) and
-    // c_function_signature_refusal over the written C signature, plus three of its own: an
-    // extern (that is imported), `#[inline]` (would turn it into t_odr_shared), and a
-    // synthesized declaration. composed reasons are wrapped as "cannot be exported because …"
+    // c_function_signature_refusal over the written C signature, plus four of its own: a
+    // static method (`is_static_method()`), an extern (that is imported), `#[inline]`
+    // (would turn it into t_odr_shared), and a synthesized declaration. composed reasons
+    // are wrapped as "cannot be exported because …"
     // so an export is not diagnosed as an address-of. asked once by AST::check_exports
     std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
 
     // leftover `#[export]` on a type or at file scope, `export_refusal` on every exported
-    // function, duplicate export names, and an export named the row's entry symbol.
-    // TypeChecker asks once, like check_wasm_surface
+    // function, duplicate export names, an export named a reserved entry, and an
+    // export of a C symbol codegen itself declares. TypeChecker asks once, like
+    // check_wasm_surface, and passes the reserved names - this file does not include
+    // Compiler. `reserved_entry` is CodegenTarget::reserved_entry_names; `reserved_runtime`
+    // is reserved_c_export_names; `reserved_runtime_prefix` is `__eco_`;
+    // `reserved_wasm_crt` is empty off a wasm row
     void check_exports(
         Collector &collector,
         Bundle &bundle,
-        std::optional<const char *> entry_symbol
+        std::span<const char *const> reserved_entry,
+        std::span<const char *const> reserved_runtime,
+        std::string_view reserved_runtime_prefix,
+        std::span<const char *const> reserved_wasm_crt
     );
 
     // the overload set `&name` denotes, re-derived from the node rather than stored - a stored

@@ -5,27 +5,25 @@
 #include "AST/ASTConstantExpander.h"
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTIssue.h"
-#include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTMonomorphizer.h"
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeChecker.h"
+#include "Compiler/BuildLayout.h"
+#include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
 
-#if ECO_USE_EMBEDDED_STDLIB
-// this header *defines* EmbeddedModule::load_stdlib_module. one TU only
-#include "stdlib_embedded.h"
-#endif
-
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <optional>
+#include <utility>
 
 namespace
 {
-    Parser::ModuleParser::InputFile input_file_for(
+    std::optional<Parser::ModuleParser::InputFile> input_file_for(
         const std::filesystem::path &path,
         const Compiler::SourceOverride &overlay
     )
@@ -36,7 +34,26 @@ namespace
             }
         }
 
+        if (Compiler::is_embedded_stdlib_path(path)) {
+            if (const std::optional<std::string> content = Compiler::read_whole_file(path)) {
+                return Parser::ModuleParser::InputFile(path, content.value());
+            }
+
+            return std::nullopt;
+        }
+
         return Parser::ModuleParser::InputFile(path);
+    }
+
+    std::optional<Compiler::FrontEndFailure> missing_embedded_source(
+        const std::filesystem::path &path
+    )
+    {
+        return Compiler::FrontEndFailure{
+            "Read Failed",
+            fmt::format("{}: embedded stdlib source is missing", path.generic_string()),
+            path
+        };
     }
 
     std::optional<Compiler::FrontEndFailure> parse_one_input(
@@ -73,13 +90,34 @@ namespace
     }
 
 #if ECO_USE_EMBEDDED_STDLIB
-    void parse_embedded_stdlib_module(AST::Bundle &bundle, Parser::ModuleParser &parser)
+    bool read_embedded_stdlib_manifest(
+        Parser::ManifestScratch &scratch, Parser::ModuleManifest &out)
     {
-        AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
-        auto &stdlib = bundle.modules.get_module(stdlib_handle);
+        const std::filesystem::path manifest_path = Compiler::embedded_stdlib_path("module.eco");
+        const std::optional<std::string> text = Compiler::embedded_stdlib_manifest_text();
+        if (!text.has_value()) {
+            scratch.report<AST::Issue::NoSuchManifest>(
+                manifest_path.generic_string(),
+                1,
+                "embedded stdlib is missing module.eco");
+            return false;
+        }
 
-        EmbeddedModule::load_stdlib_module(bundle, stdlib);
-        parser.parse_module(stdlib, bundle.collector);
+        scratch.virtual_source_pool = Compiler::embedded_stdlib_relative_paths();
+        const bool ok = Parser::read_module_manifest(
+            manifest_path,
+            scratch,
+            out,
+            Parser::ManifestRead::t_full,
+            text);
+        scratch.virtual_source_pool.reset();
+
+        if (ok) {
+            out.path = manifest_path;
+            out.directory = Compiler::k_embedded_stdlib_scheme;
+        }
+
+        return ok;
     }
 #endif
 
@@ -155,7 +193,12 @@ namespace
                 Parser::module_contribution_for(manifest, active_targets);
 
             for (const auto &source : contribution.sources) {
-                input.files.push_back(input_file_for(source, overlay));
+                if (auto file = input_file_for(source, overlay)) {
+                    input.files.push_back(std::move(*file));
+                }
+                else {
+                    return missing_embedded_source(source);
+                }
             }
 
             step.summary(fmt::format(
@@ -248,8 +291,6 @@ bool Compiler::resolve_front_end_manifests(
     if (with_stdlib) {
         roots.push_back(std::filesystem::path(STDLIB_SOURCE_DIR) / "module.eco");
     }
-#else
-    (void)with_stdlib;
 #endif
 
     const size_t implicit_roots = roots.size();
@@ -274,10 +315,6 @@ bool Compiler::resolve_front_end_manifests(
             resolved.has_value() ? Compiler::canonical_or_absolute(resolved.value()) : *named);
     }
 
-    if (roots.empty()) {
-        return true;
-    }
-
     if (!out_roots.empty()) {
         scratch.entry_directory = Compiler::canonical_or_absolute(out_roots.front().parent_path());
         scratch.package_dir = Parser::resolve_package_dir(
@@ -287,7 +324,25 @@ bool Compiler::resolve_front_end_manifests(
         scratch.package_dir = Parser::resolve_package_dir({}, package_dir_override);
     }
 
-    return Parser::resolve_module_graph(roots, scratch, out);
+    bool ok = true;
+    if (!roots.empty()) {
+        ok = Parser::resolve_module_graph(roots, scratch, out);
+    }
+
+#if ECO_USE_EMBEDDED_STDLIB
+    if (ok && with_stdlib) {
+        Parser::ModuleManifest stdlib;
+        if (!read_embedded_stdlib_manifest(scratch, stdlib)) {
+            return false;
+        }
+
+        out.insert(out.begin(), std::move(stdlib));
+    }
+#else
+    (void)with_stdlib;
+#endif
+
+    return ok;
 }
 
 std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
@@ -296,13 +351,7 @@ std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
     Parser::ModuleParser &parser
 )
 {
-#if ECO_USE_EMBEDDED_STDLIB
-    if (request.with_stdlib) {
-        parse_embedded_stdlib_module(bundle, parser);
-    }
-#else
     (void)request.with_stdlib;
-#endif
 
     if (auto failure = parse_manifest_modules(
             request.manifests,
@@ -337,7 +386,12 @@ std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
     };
 
     for (const auto &source_file : request.loose_sources) {
-        input.files.push_back(input_file_for(source_file, request.overlay));
+        if (auto file = input_file_for(source_file, request.overlay)) {
+            input.files.push_back(std::move(*file));
+        }
+        else {
+            return missing_embedded_source(source_file);
+        }
     }
 
     step.summary(fmt::format(

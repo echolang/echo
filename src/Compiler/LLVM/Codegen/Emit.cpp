@@ -96,9 +96,7 @@ bool emit_unit_objects(
     // native library is hidden-except-export even when prepare_unit runs in a
     // worker that never sees this Backend
     if (ctx.options.codegen.is_native_library()) {
-        for (auto &cmp_unit : ctx.cmp_units) {
-            hide_non_exported_symbols(*cmp_unit);
-        }
+        hide_non_exported_symbols(ctx);
     }
 
     const unsigned jobs = Compiler::job_count();
@@ -112,6 +110,7 @@ bool emit_unit_objects(
     env.no_optimize = ctx.options.no_optimize;
     env.targeting_windows = ctx.targeting_windows();
     env.cross = ctx.options.codegen.is_cross();
+    env.native_library = ctx.options.codegen.is_native_library();
 
     struct Output
     {

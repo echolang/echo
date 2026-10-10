@@ -29,8 +29,9 @@ public class library
     }
 
     /**
-     * Opens `$path`. The path is the path: no `lib` prefix, no suffix invented.
-     * `extension()` is how a host spells the suffix for this OS.
+     * Opens `$path`. No `lib` prefix and no suffix are invented. A path that
+     * contains a slash is that file. A bare name is searched the way the OS
+     * searches (`dlopen` / `LoadLibrary`). `extension()` is the suffix for this OS.
      */
     static function open(const string& $path) : result<library, dynerror>
     {
@@ -91,8 +92,9 @@ public class library
     }
 
     /**
-     * Closes the image. Safe to call twice. Function pointers taken from this
-     * library are then dangling.
+     * Closes the image. Safe to call twice. This is an rc class: one holder
+     * calling close unloads the library for every copy. Prefer dropping the
+     * last reference. Function pointers taken from this library then dangle.
      */
     function close() : void
     {

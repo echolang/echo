@@ -42,6 +42,13 @@ namespace Compiler
     // before the hash ever saw them, once per file per build
     std::optional<std::string> read_whole_file(const std::filesystem::path &path);
 
+    // the embedded stdlib's file list and `module.eco` text. empty when this
+    // binary was not built with ECO_EMBED_STDLIB. the parser's virtual source
+    // pool and the cache key both read through here, so a `stdlib:` path that
+    // parses is a path that hashes
+    std::vector<std::string> embedded_stdlib_relative_paths();
+    std::optional<std::string> embedded_stdlib_manifest_text();
+
     // **which machine an object is being compiled for**, folded into `seed`.
     //
     // the triple and the CPU inside it, which the triple does not say. Shared by the two artifact stores

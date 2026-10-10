@@ -95,9 +95,8 @@ public struct var_iterator : contract::iterator<string::view>, contract::keyed<s
 
     function advance() : bool
     {
-        // absent on a platform that does not hand `main` an environment, which is not a thing either
-        // of the two supported ones does - but a null block is a legal answer and iterating it has to
-        // mean "nothing", not a crash
+        // a null block is a legal answer: a Windows lib has no `environ` yet, and iterating
+        // it has to mean "nothing", not a crash
         if ($this->block:$ == null) {
             return false;
         }
