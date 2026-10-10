@@ -83,7 +83,8 @@ namespace Parser
     AST::FunctionDeclNode *parse_funcdecl(
         Payload &payload,
         FuncDeclKind kind,
-        VisibilityPrefix visibility
+        VisibilityPrefix visibility,
+        const std::vector<AST::AttributeNode *> *block_attributes = nullptr
     );
 
     // consumes a declaration's body from its first token: either a braced body or the bare `;` of a

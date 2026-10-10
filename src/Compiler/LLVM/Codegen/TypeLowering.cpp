@@ -28,6 +28,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
@@ -36,8 +37,31 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <optional>
 #include <string>
 #include <vector>
+
+namespace
+{
+    std::optional<llvm::Attribute::AttrKind> c_integer_ext(const AST::ValueType &type)
+    {
+        if (!type.is_primitive()) {
+            return std::nullopt;
+        }
+
+        switch (type.get_primitive_type()) {
+        case AST::ValueTypePrimitive::t_bool:
+        case AST::ValueTypePrimitive::t_uint8:
+        case AST::ValueTypePrimitive::t_uint16:
+            return llvm::Attribute::ZExt;
+        case AST::ValueTypePrimitive::t_int8:
+        case AST::ValueTypePrimitive::t_int16:
+            return llvm::Attribute::SExt;
+        default:
+            return std::nullopt;
+        }
+    }
+};
 
 namespace Compiler::LLVM
 {
@@ -308,6 +332,26 @@ void TypeLowering::apply_function_attributes(
         func->addFnAttr(llvm::Attribute::InlineHint);
     }
 
+    // wasm-ld exports a function that carries this attribute *and* roots it against gc, so
+    // no `--export` flags. a native library still plants DLLExport for the Windows .dll
+    // export table; hide_non_exported_symbols keys keep-visible on export_name
+    if (node->export_name) {
+        if (_ctx.targeting_wasm()) {
+            func->addFnAttr("wasm-export-name", *node->export_name);
+        }
+
+        if (_ctx.options.codegen.is_native_library()) {
+            func->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
+        }
+    }
+
+    // C is FunctionCallingShape::t_c: an `extern` or an `#[export]`. without
+    // zeroext/signext a bool/int8/int16 leaves the upper bits of the register
+    // undefined, and a C caller (dlsym, JS) reads them. the shape is the
+    // decision; apply_c_integer_ext is a no-op for t_echo. a t_c declaration
+    // has no receiver, so c_function_type().signature() is the written parameters
+    apply_c_integer_ext(*func, node->c_function_type().signature(), calling_shape_of(*node));
+
     // **the `sret` attribute is what makes the hidden argument mean something to the optimizer**, and
     // Compiler::LLVM::indirect_return_attributes is the one place that spells it - every call site applies
     // the same builder, because a function and a call to it disagreeing about this is a miscompile rather
@@ -408,6 +452,65 @@ void TypeLowering::apply_function_attributes(
     }
 }
 
+TypeLowering::FunctionCallingShape TypeLowering::calling_shape_of(const AST::FunctionDeclNode &node)
+{
+    if (node.is_extern() || node.export_name.has_value()) {
+        return FunctionCallingShape::t_c;
+    }
+
+    return FunctionCallingShape::t_echo;
+}
+
+void TypeLowering::apply_c_integer_ext(
+    llvm::Function &func,
+    const AST::CallableSignature &signature,
+    FunctionCallingShape shape
+)
+{
+    if (shape != FunctionCallingShape::t_c) {
+        return;
+    }
+
+    if (const auto ext = c_integer_ext(signature.return_type)) {
+        func.addRetAttr(*ext);
+    }
+
+    for (size_t i = 0; i < signature.parameter_types.size(); i++) {
+        if (i >= func.arg_size()) {
+            break;
+        }
+
+        if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
+            func.getArg(static_cast<unsigned>(i))->addAttr(*ext);
+        }
+    }
+}
+
+void TypeLowering::apply_c_integer_ext(
+    llvm::CallBase &call,
+    const AST::CallableSignature &signature,
+    FunctionCallingShape shape
+)
+{
+    if (shape != FunctionCallingShape::t_c) {
+        return;
+    }
+
+    if (const auto ext = c_integer_ext(signature.return_type)) {
+        call.addRetAttr(*ext);
+    }
+
+    for (size_t i = 0; i < signature.parameter_types.size(); i++) {
+        if (i >= call.arg_size()) {
+            break;
+        }
+
+        if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
+            call.addParamAttr(static_cast<unsigned>(i), *ext);
+        }
+    }
+}
+
 llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
 {
     auto func_name = AST::mangle_function_name(node);
@@ -495,6 +598,11 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
                 "Every declaration of a C symbol must agree on its argument and return types.",
                 func_name, cmp_unit.ast_module->name
             ));
+        }
+
+        if (node->import_module && _ctx.targeting_wasm()) {
+            extern_llvm_func->addFnAttr("wasm-import-module", *node->import_module);
+            extern_llvm_func->addFnAttr("wasm-import-name", *node->extern_symbol);
         }
 
         cmp_unit.function_table.push_function(func_name, node, extern_llvm_func);
@@ -1598,11 +1706,10 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
             return llvm::Type::getInt32Ty(*_ctx.llvm_context);
         case AST::ValueTypePrimitive::t_uint64:
             return llvm::Type::getInt64Ty(*_ctx.llvm_context);
-        // pointer-width integers. the width comes from the same constant AST::get_primitive_size
-        // answers from, so the ast-level size and the lowered llvm type cannot disagree
+        // pointer-width integers. the DataLayout the TargetMachine published
         case AST::ValueTypePrimitive::t_usize:
         case AST::ValueTypePrimitive::t_isize:
-            return llvm::Type::getIntNTy(*_ctx.llvm_context, ECO_TARGET_POINTER_SIZE * 8);
+            return _ctx.size_int_ty();
         case AST::ValueTypePrimitive::t_bool:
             return llvm::Type::getInt1Ty(*_ctx.llvm_context);
         default:

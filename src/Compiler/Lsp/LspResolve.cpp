@@ -16,6 +16,7 @@
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
+#include "Compiler/BuildLayout.h"
 #include "Compiler/Lsp/LspUri.h"
 
 namespace

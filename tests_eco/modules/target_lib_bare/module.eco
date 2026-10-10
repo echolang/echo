@@ -1,0 +1,4 @@
+// a bare kind with no default name cannot stand in for a record
+#[module: "libbare"]
+#[sources: "src/*.eco"]
+#[target: lib]

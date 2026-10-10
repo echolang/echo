@@ -1,10 +1,13 @@
 #include "AST/ASTTypeChecker.h"
 
+#include "Compiler/RuntimeSymbols.h"
+
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTConstruction.h"
 #include "AST/ASTEnumMap.h"
 #include "AST/ASTAtomics.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTWasm.h"
 #include "AST/ASTSimd.h"
 #include "AST/ASTCompleteness.h"
 #include "AST/ASTVariadic.h"
@@ -48,6 +51,10 @@
 #include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
+
+#include <optional>
+#include <span>
+#include <vector>
 
 namespace AST
 {
@@ -210,6 +217,18 @@ const ComplexType *TypeChecker::enclosing_type() const
 
 void TypeChecker::run()
 {
+    AST::check_wasm_surface(_collector, _bundle, _options.codegen.is_wasm());
+
+    AST::check_exports(
+        _collector,
+        _bundle,
+        _options.codegen.reserved_entry_names(),
+        Compiler::reserved_c_export_names(),
+        Compiler::k_compiler_runtime_prefix,
+        _options.codegen.is_wasm()
+            ? Compiler::wasm_crt_names()
+            : std::span<const char *const>{});
+
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
         accept_semantic_roots(*module_ptr, *this, _current_file);

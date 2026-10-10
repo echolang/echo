@@ -1,5 +1,6 @@
 #include "Parser/ExternParser.h"
 
+#include "Parser/AttributeParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/OpaqueDeclParser.h"
 #include "Parser/TypeDeclParser.h"
@@ -22,6 +23,12 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
     // skip the extern keyword
     cursor.skip();
 
+    // attributes written ahead of the block belong to every function in it. drain them here,
+    // before the `{`, so the first function cannot silently take them all: `#[wasm: import "env"]
+    // extern { a; b; }` used to attach to `a` only because that function drained the stack
+    std::vector<AST::AttributeNode *> block_attributes =
+        payload.context.scope().collect_attributes();
+
     if (!cursor.is_type(Token::Type::t_open_brace)) {
         payload.collect_unexpected_token(Token::Type::t_open_brace);
         cursor.try_skip_to_next_statement();
@@ -38,6 +45,13 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
                 Token::Type::t_close_brace,
                 Token::Type::t_unknown);
             return declarations;
+        }
+
+        // per-function attributes inside the block: `#[wasm: import "env"] function f();`. a `#`
+        // here used to be an unexpected token, which made the natural spelling unwritable
+        if (cursor.is_type(Token::Type::t_hash)) {
+            parse_attribute(payload);
+            continue;
         }
 
         // C surface: incomplete types and bodyless functions. anything else is reported and skipped
@@ -59,7 +73,8 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
 
         // the block's modifier, handed to every declaration in it - one prefix forwarded rather than each
         // line taking its own, a C library's surface being exported or not as a whole
-        if (auto *funcdecl = parse_funcdecl(payload, FuncDeclKind::t_extern, visibility)) {
+        if (auto *funcdecl = parse_funcdecl(
+                payload, FuncDeclKind::t_extern, visibility, &block_attributes)) {
             declarations.push_back(funcdecl);
         }
     }

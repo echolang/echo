@@ -6,6 +6,7 @@
 #include "eco.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/CompilerOptions.h"
+#include "Compiler/RuntimeSymbols.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/Codegen/CodegenValue.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
@@ -13,12 +14,13 @@
 #include "AST/ASTCoreTypes.h"
 
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
-#include <llvm/TargetParser/Triple.h>
 
 #include <cassert>
 #include <filesystem>
@@ -134,7 +136,7 @@ namespace Compiler::LLVM
         // emitted.** echo, die and dprint convert a `string` through this, and every ordinary
         // call does too - one dance, because a site that allocated the slot and forgot the
         // attribute is a *miscompile*
-        void emit_call(
+        llvm::CallInst *emit_call(
             llvm::FunctionCallee callee,
             std::vector<llvm::Value *> &args,
             const ReturnAbi &abi);
@@ -350,72 +352,82 @@ namespace Compiler::LLVM
         // the RC runtime, the abort runtime and `echo` are all *emitted* rather than linked, so
         // each needs a handful of C symbols with no stdlib declaration behind them. spelled out per
         // symbol they had already drifted - `printf` still uses the legacy typed pointer, and only
-        // `exit` remembered its attributes - so this is the one spelling
+        // `exit` remembered its attributes - so this is the one spelling. the enumerator is the
+        // table RuntimeSymbols owns, so a name cannot be inserted without a row
         llvm::FunctionCallee libc_callee(
-            const char *name,
+            RuntimeSymbol symbol,
             llvm::Type *return_type,
             llvm::ArrayRef<llvm::Type *> parameter_types,
             bool variadic = false)
         {
             return current_module()->getOrInsertFunction(
-                name, llvm::FunctionType::get(return_type, parameter_types, variadic));
+                runtime_symbol_name(symbol),
+                llvm::FunctionType::get(return_type, parameter_types, variadic));
         }
 
-        // the object is for this machine, so CRT names follow the triple rather than
-        // `--target-os`. that flag only picks `#[if:]` arms; it does not retarget
+        // a libc data symbol, the twin of libc_callee. environ and stdout are
+        // globals; inserting them by string would leave them unreserved
+        llvm::GlobalVariable *libc_global(RuntimeSymbol symbol, llvm::Type *type)
+        {
+            llvm::Constant *inserted = current_module()->getOrInsertGlobal(
+                runtime_symbol_name(symbol), type);
+            auto *global = llvm::dyn_cast<llvm::GlobalVariable>(inserted);
+            assert(global && "libc data symbol collided with a non-global of the same name");
+            return global;
+        }
+
+        // the object is for this machine, so CRT names follow the emit row rather
+        // than `--target-os`. that flag only picks `#[if:]` arms; it does not retarget
         bool targeting_windows() const {
-            return llvm::Triple(target_triple).isOSWindows();
+            return options.codegen.is_windows();
         }
 
-        // `write(fd, ptr, len)` on POSIX, `_write` on Windows UCRT. length is i64 in
-        // IR either way; Windows truncates to i32 because that is the CRT's count
+        bool targeting_wasm() const {
+            return options.codegen.is_wasm();
+        }
+
+        // size_t on this target: malloc, write, memcpy. follows the data layout so
+        // wasm32 is i32 and every host this compiler has shipped is i64
+        llvm::IntegerType *size_int_ty() const {
+            return layout().getIntPtrType(*llvm_context);
+        }
+
+        // trunc or zext onto size_int_ty(). malloc and write lengths are
+        // this question
+        llvm::Value *as_size(llvm::Value *size)
+        {
+            llvm::Type *size_ty = size_int_ty();
+            if (size->getType() == size_ty) {
+                return size;
+            }
+
+            if (size->getType()->getIntegerBitWidth() > size_ty->getIntegerBitWidth()) {
+                return builder->CreateTrunc(size, size_ty, "size");
+            }
+
+            return builder->CreateZExt(size, size_ty, "size");
+        }
+
+        // `write(fd, ptr, len)` on POSIX, `_write` on Windows UCRT. POSIX length
+        // is size_t; Windows truncates to i32 because that is the CRT's count
         void emit_libc_write(int fd, llvm::Value *ptr, llvm::Value *len)
         {
             llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
-            llvm::Type *i64 = llvm::Type::getInt64Ty(*llvm_context);
             llvm::Type *opaque_ptr = opaque_ptr_type();
             llvm::Value *fd_val = llvm::ConstantInt::get(i32, fd);
 
             if (targeting_windows()) {
                 llvm::Value *count = builder->CreateTrunc(len, i32, "write.n");
                 builder->CreateCall(
-                    libc_callee("_write", i32, { i32, opaque_ptr, i32 }),
+                    libc_callee(RuntimeSymbol::t_win_write, i32, { i32, opaque_ptr, i32 }),
                     { fd_val, ptr, count });
                 return;
             }
 
+            llvm::Type *count_ty = size_int_ty();
             builder->CreateCall(
-                libc_callee("write", i64, { i32, opaque_ptr, i64 }),
-                { fd_val, ptr, len });
-        }
-
-        // stdout is fully buffered when it is a pipe. `echo` of a string goes through
-        // `_write` (unbuffered) after `fflush(NULL)`, and that fflush is a no-op from
-        // JIT'd code on Windows: MCJIT resolves UCRT but `fflush(NULL)` does not drain
-        // this process's FILE*. unbuffering stdout and stderr makes `printf` and
-        // `_write` the same kind of write, so program order is what the goldens record
-        void emit_unbuffer_stdio()
-        {
-            if (!targeting_windows()) {
-                return;
-            }
-
-            llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
-            llvm::Type *i64 = llvm::Type::getInt64Ty(*llvm_context);
-            llvm::Type *ptr = opaque_ptr_type();
-            llvm::FunctionCallee iob = libc_callee("__acrt_iob_func", ptr, { i32 });
-            llvm::FunctionCallee setvbuf_fn = libc_callee(
-                "setvbuf", i32, { ptr, ptr, i32, i64 });
-            llvm::Value *null = llvm::ConstantPointerNull::get(
-                llvm::cast<llvm::PointerType>(ptr));
-            llvm::Value *ionbf = llvm::ConstantInt::get(i32, 4);
-            llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
-
-            for (unsigned fd : { 1u, 2u }) {
-                llvm::Value *file = builder->CreateCall(
-                    iob, { llvm::ConstantInt::get(i32, fd) });
-                builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
-            }
+                libc_callee(RuntimeSymbol::t_write, count_ty, { i32, opaque_ptr, count_ty }),
+                { fd_val, ptr, as_size(len) });
         }
 
         // the opaque `ptr`, spelled once - it appears in almost every emitted runtime signature

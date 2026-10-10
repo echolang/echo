@@ -479,6 +479,21 @@ void Parser::publish_declaration_markers(
     // on every intrinsic in std/math/intrinsics.eco already. AST::function_emission_kind answers those before
     // it ever looks at this flag, so the combination costs nothing and refusing it would break that file
     funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
+
+    // both passes: the symbol name must agree between them, the reason the comment at the
+    // extern_symbol arm gives. a bare `#[export]` takes the name token; a valued one is a string
+    if (auto *export_attr = funcdecl->attributes.get_first("export")) {
+        if (export_attr->value.has_value()) {
+            funcdecl->export_name = read_attribute_value(
+                payload, export_attr, "export",
+                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                    return reader.string(written);
+                });
+        }
+        else {
+            funcdecl->export_name = nametoken.value();
+        }
+    }
 }
 
 // publishes a method or static marked `#[implicit]` as one of its owner's implicit conversions, and
@@ -686,7 +701,8 @@ void Parser::publish_implicit_conversion(
 AST::FunctionDeclNode * Parser::parse_funcdecl(
     Parser::Payload &payload,
     Parser::FuncDeclKind kind,
-    Parser::VisibilityPrefix visibility
+    Parser::VisibilityPrefix visibility,
+    const std::vector<AST::AttributeNode *> *block_attributes
 )
 {
     auto &cursor = payload.cursor;
@@ -961,6 +977,21 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // along (TypeDeclParser's own collect_attributes), landing on a type declaration that never
     // asked for it
     Parser::drain_attributes(payload, funcdecl->attributes);
+
+    // an `extern { }` may carry attributes for every function in it (`#[wasm: import "env"]
+    // extern { ... }`). the block parser drained those before the `{` and hands a copy here;
+    // a function's own attribute of the same name already sits on the list, so it wins
+    if (block_attributes != nullptr) {
+        for (AST::AttributeNode *attr : *block_attributes) {
+            if (attr == nullptr) {
+                continue;
+            }
+
+            if (funcdecl->attributes.get_first(attr->attribute_id.value()) == nullptr) {
+                funcdecl->attributes.push_back(attr);
+            }
+        }
+    }
 
     // the signature is complete, so this is the earliest point the declaration can join its
     // overload set. registering in *both* passes is intentional and cheap: the symbol pass makes

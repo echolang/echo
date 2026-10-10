@@ -1,0 +1,6 @@
+#[export]
+function greet(ptr<string> $name) : void
+{
+}
+
+echo 1;

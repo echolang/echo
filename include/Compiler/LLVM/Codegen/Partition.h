@@ -28,6 +28,7 @@ namespace Compiler::LLVM
         bool no_optimize = false;
         bool targeting_windows = false;
         bool cross = false;
+        bool native_library = false;
     };
 
     struct UnitPartition

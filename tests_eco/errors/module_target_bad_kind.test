@@ -4,7 +4,7 @@ expect: fail
 --- OUT --->
 [error] InvalidAttributeValue  module.eco:5:11
 
-  'binary' is not a target kind, expected one of: exe, test.
+  'binary' is not a target kind, expected one of: exe, test, lib.
 
   4 | #[sources: "src/*.eco"]
   5 | #[target: binary { name: "tool", entry: "src/main.eco" }]

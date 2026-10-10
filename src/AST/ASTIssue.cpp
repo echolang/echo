@@ -366,6 +366,19 @@ ISSUE_MESSAGE_FNC(DuplicateFunctionSignature)
     return _message;
 }
 
+ISSUE_MESSAGE_FNC(DuplicateExportName)
+{
+    return fmt::format(
+        "'{}' is already exported by another function - two exports cannot share a name, because "
+        "the name is the symbol the host looks up",
+        export_name);
+}
+
+std::vector<AST::IssueLabel> AST::Issue::DuplicateExportName::labels() const
+{
+    return label_outside_primary(code_ref, first_declaration, "first exported here");
+}
+
 ISSUE_MESSAGE_FNC(NoMatchingOverload)
 {
     return _message;

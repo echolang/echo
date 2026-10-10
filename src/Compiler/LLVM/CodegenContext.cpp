@@ -32,7 +32,7 @@ namespace Compiler::LLVM
         return types->create_llvm_func_decl(decl, *current_cmp_unit);
     }
 
-    void CodegenContext::emit_call(
+    llvm::CallInst *CodegenContext::emit_call(
         llvm::FunctionCallee callee,
         std::vector<llvm::Value *> &args,
         const ReturnAbi &abi
@@ -72,7 +72,7 @@ namespace Compiler::LLVM
                 push_scalar(builder->CreateLoad(abi.indirect_type, slot, "call.result"));
             }
 
-            return;
+            return call;
         }
 
         auto *call = builder->CreateCall(callee, args);
@@ -82,6 +82,8 @@ namespace Compiler::LLVM
         if (!call->getType()->isVoidTy()) {
             push_scalar(call);
         }
+
+        return call;
     }
 
     llvm::Value *CodegenContext::materialize(const CodegenValue &value, const char *name)
@@ -176,7 +178,8 @@ namespace Compiler::LLVM
     bool CodegenContext::file_is_entry(const AST::File &file) const
     {
         // **no target named one, so all of them are.** A program's `main` is the concatenation of every
-        // file root of its entry module unless a `#[target:]` says which single file it is
+        // file root of its entry module unless a `#[target:]` says which single file it is.
+        // a library never asks: compile_bundle skips emit_entry_point when entry_symbol() is empty
         if (entry_file.empty()) {
             return true;
         }

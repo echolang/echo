@@ -1,0 +1,6 @@
+#[wasm: import "env"]
+function host_log() : void
+{
+}
+
+host_log();

@@ -26,6 +26,8 @@
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Triple.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/JSON.h>
@@ -321,7 +323,13 @@ void Backend::init_target()
 
     std::string error;
     _target_machine = make_target_machine(
-        _ctx.target_triple, sub.cpu, sub.features, _ctx.options.no_optimize, error);
+        _ctx.target_triple,
+        sub.cpu,
+        sub.features,
+        _ctx.options.no_optimize,
+        _ctx.options.codegen.uses_pic(),
+        error
+    );
 
     if (!_target_machine) {
         throw Compiler::InternalCompilerException(error);
@@ -566,20 +574,14 @@ bool Backend::link_executable(
     std::vector<std::string> link_words;
     Compiler::partition_link_requirements(link, link_objects, link_words);
 
-    std::string output = executable_name;
-
-#if defined(_WIN32)
-    if (std::filesystem::path(output).extension().empty()) {
-        output += ".exe";
-    }
-#endif
-
     // a cross-compile is not a Darwin ld -syslibroot of the Mac SDK. the clang
-    // driver below is the one that knows `-target` / `-isysroot` for the row
-    if (!_ctx.options.codegen.is_cross()) {
-        if (const auto command = host_linker_command(output, objects, link_objects, link_words, _ctx.target_triple)) {
+    // driver below is the one that knows `-target` / `-isysroot` for the row.
+    // a native library is the other skip: those flags produce a command, and
+    // clang -shared is the loadable-object recipe CBuild already trusts
+    if (!_ctx.options.codegen.is_cross() && !_ctx.options.codegen.is_native_library()) {
+        if (const auto command = host_linker_command(executable_name, objects, link_objects, link_words, _ctx.target_triple)) {
             if (Compiler::run_tool(command.value())) {
-                gen_debug_symbols(output);
+                gen_debug_symbols(executable_name);
                 return true;
             }
 
@@ -589,20 +591,32 @@ bool Backend::link_executable(
         }
     }
 
-    std::vector<std::string> fallback = { "clang", "-o", output };
-    Compiler::append_windows_sysroot_link_args(fallback);
-    std::string apple_error;
-    if (!Compiler::append_apple_target_args(fallback, _ctx.options.codegen, apple_error)) {
-        llvm::errs() << apple_error << '\n';
+    std::vector<std::string> fallback = {
+        Compiler::cc_driver(_ctx.options.codegen), "-o", executable_name };
+    // Windows CRT/sysroot flags are a host fact. a wasm clang line already
+    // carries `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` from the row
+    if (!_ctx.options.codegen.is_cross()) {
+        Compiler::append_windows_sysroot_link_args(fallback);
+    }
+    std::string target_error;
+    if (!Compiler::append_codegen_link_args(
+            fallback,
+            _ctx.options.codegen,
+            _ctx.options.export_memory,
+            target_error,
+            std::filesystem::path(executable_name).filename().string())) {
+        llvm::errs() << target_error << '\n';
         return false;
     }
+
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     for (const std::string &word : link_words) {
 #if defined(_WIN32)
         // same skip host_linker_command makes: UCRT already has libm, and
-        // clang turning `-lm` into m.lib is a missing-library error
-        if (word == "-lm") {
+        // clang turning `-lm` into m.lib is a missing-library error. a cross
+        // still wants `-lm` (wasi-libc has it)
+        if (!_ctx.options.codegen.is_cross() && word == "-lm") {
             continue;
         }
 #endif
@@ -616,7 +630,7 @@ bool Backend::link_executable(
         return false;
     }
 
-    gen_debug_symbols(output);
+    gen_debug_symbols(executable_name);
 
     return true;
 }
@@ -624,7 +638,7 @@ bool Backend::link_executable(
 void Backend::gen_debug_symbols(const std::string &executable_name)
 {
 #if defined(__APPLE__)
-    if (!_ctx.options.emitting_debug_info()) {
+    if (!_ctx.options.emitting_debug_info() || _ctx.options.codegen.is_wasm()) {
         return;
     }
 

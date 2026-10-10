@@ -1,0 +1,19 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] DuplicateExportName  export_duplicate.eco:8:10
+
+  'render' is already exported by another function - two exports cannot share a name, because the name is the symbol the host looks up
+
+  7 | #[export: "render"]
+  8 | function draw() : int32
+    :          ^^^^
+  9 | {
+
+  1 | #[export]
+  2 | function render() : int32
+    :          ------ first exported here
+  3 | {
+
+1 error, nothing was compiled.

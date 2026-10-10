@@ -3,6 +3,10 @@
 #include "Compiler/TargetSubtarget.h"
 #include "eco.h"
 
+#if ECO_USE_EMBEDDED_STDLIB
+#include "stdlib_embedded.h"
+#endif
+
 #include <llvm/Config/llvm-config.h>
 
 #include <fmt/core.h>
@@ -27,8 +31,34 @@ std::string Compiler::to_hex(uint64_t value)
     return fmt::format("{:016x}", value);
 }
 
+std::vector<std::string> Compiler::embedded_stdlib_relative_paths()
+{
+#if ECO_USE_EMBEDDED_STDLIB
+    return EmbeddedModule::relative_paths();
+#else
+    return {};
+#endif
+}
+
+std::optional<std::string> Compiler::embedded_stdlib_manifest_text()
+{
+#if ECO_USE_EMBEDDED_STDLIB
+    return EmbeddedModule::manifest_text();
+#else
+    return std::nullopt;
+#endif
+}
+
 std::optional<std::string> Compiler::read_whole_file(const std::filesystem::path &path)
 {
+    if (is_embedded_stdlib_path(path)) {
+#if ECO_USE_EMBEDDED_STDLIB
+        return EmbeddedModule::content_of(path);
+#else
+        return std::nullopt;
+#endif
+    }
+
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) {
         return std::nullopt;
@@ -130,6 +160,19 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(std::string(ECO_MODULE_CACHE_VERSION), environment);
     environment = fnv1a64(std::string(LLVM_VERSION_STRING), environment);
 
+    // a release binary's stdlib paths are `stdlib:/...`; a checkout's are
+    // the build machine's STDLIB_SOURCE_DIR. they share `~/.cache/echo/stdlib`
+    // and the key otherwise folds only the filename, so without this a `-g`
+    // object from one is served to the other with DWARF that names the
+    // wrong files
+    environment = fnv1a64(
+#if ECO_USE_EMBEDDED_STDLIB
+        std::string("embed"),
+#else
+        std::string("disk"),
+#endif
+        environment);
+
     // the triple and the CPU inside it, shared with the C object cache - see fold_target_environment
     if (!fold_target_environment(options, environment, out_error)) {
         return false;
@@ -158,6 +201,15 @@ bool Compiler::compute_module_keys(
     // with nothing anywhere saying why, since a stripped object is a perfectly valid one
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
+
+    // **and whether this program is a native library.** hidden-except-export changes
+    // every defined symbol of a native lib, so an exe and a lib of the same module
+    // cannot share an object. a wasm reactor's library objects alias a command's:
+    // entry lives in the uncached program unit and `--export-memory` is a link flag.
+    // C objects fold the same bit in c_spec_digest: `-fvisibility=hidden` on a
+    // native lib changes the object
+    environment = fnv1a64(
+        options.codegen.is_native_library() ? std::string("lib") : std::string("cmd"), environment);
 
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;

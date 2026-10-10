@@ -60,7 +60,10 @@ LLVMCompiler::~LLVMCompiler()
 {
 }
 
-void LLVMCompiler::set_entry(const std::string &module_name, const std::filesystem::path &entry_file)
+void LLVMCompiler::set_entry(
+    const std::string &module_name,
+    const std::filesystem::path &entry_file
+)
 {
     _ctx.entry_module_name = module_name;
     _ctx.entry_file = entry_file;
@@ -93,10 +96,10 @@ void LLVMCompiler::emit_test_dispatch()
     llvm::Type *void_ty = _ctx.builder->getVoidTy();
     llvm::PointerType *ptr = llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type());
 
-    llvm::FunctionCallee getenv_fn = _ctx.libc_callee("getenv", ptr, { ptr });
-    llvm::FunctionCallee strcmp_fn = _ctx.libc_callee("strcmp", i32, { ptr, ptr });
+    llvm::FunctionCallee getenv_fn = _ctx.libc_callee(Compiler::RuntimeSymbol::t_getenv, ptr, { ptr });
+    llvm::FunctionCallee strcmp_fn = _ctx.libc_callee(Compiler::RuntimeSymbol::t_strcmp, i32, { ptr, ptr });
     llvm::FunctionCallee exit_fn = _ctx.libc_callee(
-        "exit", void_ty, { i32 });
+        Compiler::RuntimeSymbol::t_exit, void_ty, { i32 });
 
     if (auto *exit_decl = llvm::dyn_cast<llvm::Function>(exit_fn.getCallee())) {
         exit_decl->addFnAttr(llvm::Attribute::NoReturn);
@@ -147,6 +150,95 @@ void LLVMCompiler::emit_test_dispatch()
     _ctx.builder->CreateUnreachable();
 
     _ctx.builder->SetInsertPoint(after);
+}
+
+void LLVMCompiler::emit_entry_point(Compiler::LLVM::CmpUnit &main_cmp_unit, const char *symbol)
+{
+    // `int main(int argc, char **argv, char **envp)` on native - POSIX and a
+    // documented CRT extension on Windows, and the *only* way the arguments and
+    // the environment reach Echo. WASI's crt looks up `__main_argc_argv(int, char **)`
+    // by name and signature; a third envp parameter does not bind. the row owns
+    // both the symbol and the arity so DebugInfo and Partition follow it
+    const Compiler::CodegenTarget &row = _ctx.options.codegen;
+    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+    llvm::Type *i32 = _ctx.builder->getInt32Ty();
+    static constexpr const char *k_entry_arg_names[] = { "argc", "argv", "envp" };
+    const unsigned arg_count = row.entry_arg_count();
+    std::vector<llvm::Type *> params;
+    params.reserve(arg_count);
+    params.push_back(i32);
+    for (unsigned i = 1; i < arg_count; i++) {
+        params.push_back(opaque_ptr);
+    }
+    llvm::FunctionType *funcType = llvm::FunctionType::get(i32, params, false);
+    llvm::Function *function = llvm::Function::Create(
+        funcType,
+        llvm::Function::ExternalLinkage,
+        symbol,
+        main_cmp_unit.llvm_module.get());
+    for (unsigned i = 0; i < arg_count; i++) {
+        function->getArg(i)->setName(k_entry_arg_names[i]);
+    }
+    llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", function);
+    _ctx.set_insert_point(entry);
+
+    _ctx.current_cmp_unit = &main_cmp_unit;
+
+    // the entry point is built here with a bare Function::Create rather than through gen_function_decl,
+    // so it needs its own subprogram - and its own prologue location, because gen_capture below emits
+    // stores and gen_report emits calls, and a call inside a subprogram-carrying function with no !dbg
+    // is a verifier error rather than a missing line
+    _debug_info.begin_entry_point(function);
+    _debug_info.set_function_scope_location();
+
+    // before the file-root walk below, because a module-scope `env::arg(1)` is one of the statements it
+    // emits and would otherwise read a global nothing had filled in yet
+    _process.gen_capture(function);
+
+    {
+        Compiler::ScopedPhase entry_phase("entry point");
+
+        emit_entry_file_roots(main_cmp_unit);
+
+        // terminate the function, unless the program already stopped itself
+        //
+        // the `[memory]` section goes inside this guard rather than before it, and the terminated case
+        // printing nothing is the point: a `die` at module scope already ran the abort runtime's exit(1),
+        // so there is no post-teardown moment left to report on. this *is* that moment on the other path -
+        // the file-root walk above emitted every module-scope release, which `-ar` shows as the last
+        // statements inside the root scope
+        if (!_ctx.block_is_terminated()) {
+            // the epilogue is the function's own, not the last file-root statement's - and gen_report emits
+            // `printf` calls, which must carry a location like every other call here
+            _debug_info.set_function_scope_location();
+
+            // a linked test runner cannot share the parent's JIT, so `main` itself looks the
+            // test up and calls it. the JIT path does not emit this, so a leftover
+            // `ECO_INTERNAL_RUN_TEST` cannot hijack the prologue
+            emit_test_dispatch();
+
+            // **before the report, and that ordering is the whole reason teardown is not `atexit`.**
+            // `--track-allocations` is on for every corpus case, so a static torn down after gen_report
+            // would read as a live allocation - and an atexit handler runs after this by construction.
+            // it also runs after `~Backend` has deleted the JIT's engine, which is a call into unmapped
+            // memory rather than merely a wrong number
+            //
+            // inside the terminated-block guard with everything else here, so `die`, a failed `assert`
+            // and `std::env::exit` skip it - the same thing module-scope releases already do
+            _statics.gen_teardown();
+
+            // **no report on a test run**, because the moment it describes has not happened: the report is what
+            // a program prints as it ends, and what ends here is a prologue that ran no statement of anybody's.
+            // A test that wants the number asks `mem::live_allocations()` inside itself
+            if (!_ctx.test_mode) {
+                _memory.gen_report();
+            }
+
+            _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+        }
+
+        _debug_info.end_function();
+    }
 }
 
 void LLVMCompiler::emit_entry_file_roots(Compiler::LLVM::CmpUnit &main_cmp_unit)
@@ -282,7 +374,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // symbols - `echo` fetches it back by name at the call site rather than through a getter
     for (auto &cmp_unit : _ctx.cmp_units) {
         _ctx.current_cmp_unit = cmp_unit.get();
-        _ctx.libc_callee("printf",
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_printf,
             llvm::Type::getInt32Ty(*_ctx.llvm_context),
             { _ctx.opaque_ptr_type() },
             /*variadic=*/true);
@@ -325,82 +417,15 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
             "no entry module '{}' in the bundle", _ctx.entry_module_name), nullptr);
     }
 
-    // `int main(int argc, char **argv, char **envp)` - the three-argument form, always, whether or not
-    // this program reads any of them. It is POSIX on both platforms we target and a documented CRT
-    // extension on Windows, and it is the *only* way the arguments and the environment reach Echo:
-    // `environ` is a data symbol an extern block cannot bind, `argv` is not a symbol at all, and the
-    // language has no globals to cache either in
-    //
-    // unconditional rather than widened only for programs that ask, which was considered and is worse:
-    // it would trade three stores of registers already in hand for a whole-program AST query, an entry
-    // point whose signature varies per program, and a silent failure - a call the query missed leaves
-    // ProcessCodegen's globals reading the zero they were initialized with
-    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
-    llvm::FunctionType *funcType = llvm::FunctionType::get(
-        _ctx.builder->getInt32Ty(), { _ctx.builder->getInt32Ty(), opaque_ptr, opaque_ptr }, false);
-    llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, ECO_ENTRY_SYMBOL_NAME, main_cmp_unit->llvm_module.get());
-    function->getArg(0)->setName("argc");
-    function->getArg(1)->setName("argv");
-    function->getArg(2)->setName("envp");
-    llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", function);
-    _ctx.set_insert_point(entry);
-
-    _ctx.current_cmp_unit = main_cmp_unit;
-
-    // the entry point is built here with a bare Function::Create rather than through gen_function_decl,
-    // so it needs its own subprogram - and its own prologue location, because gen_capture below emits
-    // stores and gen_report emits calls, and a call inside a subprogram-carrying function with no !dbg
-    // is a verifier error rather than a missing line
-    _debug_info.begin_entry_point(function);
-    _debug_info.set_function_scope_location();
-
-    // before the file-root walk below, because a module-scope `env::arg(1)` is one of the statements it
-    // emits and would otherwise read a global nothing had filled in yet
-    _process.gen_capture(function);
-
-    {
-    Compiler::ScopedPhase entry_phase("entry point");
-
-    emit_entry_file_roots(*main_cmp_unit);
-
-    // terminate the function, unless the program already stopped itself
-    //
-    // the `[memory]` section goes inside this guard rather than before it, and the terminated case
-    // printing nothing is the point: a `die` at module scope already ran the abort runtime's exit(1),
-    // so there is no post-teardown moment left to report on. this *is* that moment on the other path -
-    // the file-root walk above emitted every module-scope release, which `-ar` shows as the last
-    // statements inside the root scope
-    if (!_ctx.block_is_terminated()) {
-        // the epilogue is the function's own, not the last file-root statement's - and gen_report emits
-        // `printf` calls, which must carry a location like every other call here
-        _debug_info.set_function_scope_location();
-
-        // a linked test runner cannot share the parent's JIT, so `main` itself looks the
-        // test up and calls it. the JIT path does not emit this, so a leftover
-        // `ECO_INTERNAL_RUN_TEST` cannot hijack the prologue
-        emit_test_dispatch();
-
-        // **before the report, and that ordering is the whole reason teardown is not `atexit`.**
-        // `--track-allocations` is on for every corpus case, so a static torn down after gen_report
-        // would read as a live allocation - and an atexit handler runs after this by construction.
-        // it also runs after `~Backend` has deleted the JIT's engine, which is a call into unmapped
-        // memory rather than merely a wrong number
-        //
-        // inside the terminated-block guard with everything else here, so `die`, a failed `assert`
-        // and `std::env::exit` skip it - the same thing module-scope releases already do
-        _statics.gen_teardown();
-
-        // **no report on a test run**, because the moment it describes has not happened: the report is what
-        // a program prints as it ends, and what ends here is a prologue that ran no statement of anybody's.
-        // A test that wants the number asks `mem::live_allocations()` inside itself
-        if (!_ctx.test_mode) {
-            _memory.gen_report();
-        }
-
-        _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+    // a reactor has no entry: crt1-reactor.o provides `_initialize`, and the
+    // surface is the module's exports. skip the call rather than wrapping the
+    // body in a boolean
+    if (auto symbol = _ctx.options.codegen.entry_symbol()) {
+        emit_entry_point(*main_cmp_unit, *symbol);
     }
-
-    _debug_info.end_function();
+    else {
+        _ctx.current_cmp_unit = main_cmp_unit;
+        _process.gen_startup();
     }
 
     {

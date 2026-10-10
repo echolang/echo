@@ -42,6 +42,12 @@ namespace AST
         // written on an attribute that cannot carry one has to be refused whether or not anyone is in it
         bool opens_scope = false;
 
+        // true when this was written at the file root (or a file-level namespace), not inside a type
+        // body, a function, or a nested block. a type body shares the file-root ScopeNode, so being a
+        // child of `file.root` does not answer this. Parser::parse_attribute is the writer;
+        // AST::check_wasm_surface is the reader - a wasm object export is a file-root fact
+        bool written_at_file_scope = false;
+
         AttributeNode(const TokenSlice &attribute_tokens, const TokenReference &attribute_id) :
             attribute_tokens(attribute_tokens),
             attribute_id(attribute_id)

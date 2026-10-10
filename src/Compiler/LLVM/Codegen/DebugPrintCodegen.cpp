@@ -438,7 +438,8 @@ void DebugPrintCodegen::render_primitive(llvm::Value *value, const AST::ValueTyp
         return;
     }
 
-    PrintfConversion conversion = printf_conversion_for(type);
+    PrintfConversion conversion = printf_conversion_for(
+        type, _ctx.size_int_ty()->getBitWidth() / 8);
 
     if (conversion.format == nullptr) {
         throw _ctx.error(fmt::format(

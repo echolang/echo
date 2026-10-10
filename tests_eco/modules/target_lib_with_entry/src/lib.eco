@@ -1,0 +1,5 @@
+#[export]
+function add(int32 $a, int32 $b) : int32
+{
+    return $a + $b;
+}

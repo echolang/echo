@@ -25,7 +25,12 @@
 #[sources: "std/math/*.eco"]
 #[sources: "std/env/*.eco"]
 #[sources: "std/io/*.eco"]
+#[if: os != wasi]
 #[sources: "std/thread/*.eco"]
+#[end]
+#[if: os != wasi]
+#[sources: "std/dynlib/*.eco"]
+#[end]
 #[sources: "std/time/*.eco"]
 
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
@@ -40,7 +45,14 @@
 // echoc is itself linked against libm, and `--target-os linux` on Windows
 // must not try to open `libm.dll`. Windows UCRT already has the symbols;
 // lld-link looking for m.lib is a missing-library error.
-#[if: os != windows]
+#[if: os != windows && os != wasi]
 #[link: lib { name: "pthread", runtime: process }]
 #[link: lib { name: "m", runtime: process }]
+#[end]
+
+// glibc keeps libdl out of libc. Darwin's dlopen is libSystem.
+// `runtime: process` is the JIT half: there is no loadable `libdl.so` on
+// some hosts, and the symbols are already mapped. Native `build` still gets `-ldl`.
+#[if: os == linux]
+#[link: lib { name: "dl", runtime: process }]
 #[end]

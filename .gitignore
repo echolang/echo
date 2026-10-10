@@ -24,5 +24,6 @@ notes/
 todo/
 tools/ucd/
 build/
+build-test/
 build-release/
 build-linux/

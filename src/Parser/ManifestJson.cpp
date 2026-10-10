@@ -159,6 +159,7 @@ const char *target_kind_name(Parser::TargetKind kind)
     switch (kind) {
     case Parser::TargetKind::t_executable: return "exe";
     case Parser::TargetKind::t_test: return "test";
+    case Parser::TargetKind::t_library: return "lib";
     }
 
     return "exe";

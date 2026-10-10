@@ -98,6 +98,11 @@ namespace Compiler
         // resolved twice
         CodegenTarget codegen;
 
+        // file-root `#[wasm: export "memory"]`, copied from the bundle after typecheck.
+        // a program fact, not a column of the emit row: the triple does not change, and
+        // CBuild must not see `--export-memory`
+        bool export_memory = false;
+
         // one predicate, because more than one emitter asks it - the `assert` builtin and the
         // `ptr<T>` -> `T&` narrowing today, whatever check comes next tomorrow. never compare the
         // enum at a call site, or the next check added answers the question its own way

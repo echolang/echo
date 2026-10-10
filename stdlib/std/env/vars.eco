@@ -7,9 +7,10 @@
  *
  * **Every answer is a `string::view` that borrows the environment block.** That is what makes the
  * above true: a copy would need an allocation, and the bytes already live as long as the process
- * does. The one thing it costs is that a view is stale after a `setenv` - which this module does not
- * offer, so today the only way to reach that is through a C binding of your own. Take a `clone()`
- * if you are going to.
+ * does. A view is stale after a `setenv` - which this module does not offer, so today the only way
+ * to reach that is through a C binding of your own. Take a `clone()` if you are going to.
+ * `vars()` itself re-reads the platform block on each construction, so a lib sees a host
+ * `setenv` that ran after `dlopen`.
  */
 
 namespace std::env;
@@ -95,9 +96,8 @@ public struct var_iterator : contract::iterator<string::view>, contract::keyed<s
 
     function advance() : bool
     {
-        // absent on a platform that does not hand `main` an environment, which is not a thing either
-        // of the two supported ones does - but a null block is a legal answer and iterating it has to
-        // mean "nothing", not a crash
+        // a null block is a legal answer: a Windows lib has no `environ` yet, and iterating
+        // it has to mean "nothing", not a crash
         if ($this->block:$ == null) {
             return false;
         }

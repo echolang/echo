@@ -56,7 +56,12 @@ namespace Parser
         // artifact at all**, which is what makes it unlike the kind above rather than a second flavour of
         // it: there is no entry file, no binary and nothing in the build directory - only `groups` and
         // `files`, which are the same selection `--filter` states on the command line
-        t_test
+        t_test,
+
+        // a program with no entry, whose surface is its `#[export]`s. on wasi a
+        // *reactor* (`crt1-reactor.o`, `_initialize`); on the host a shared library.
+        // `name` is required, `entry` is refused
+        t_library
     };
 
     // one `#[requires: "name" { version:, source: git "...", rev: }]`. the compiler reads
@@ -277,6 +282,12 @@ namespace Parser
 
         explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
 
+        // when set, `#[sources:]` patterns match these relative posix paths
+        // (`core/array.eco`) instead of globbing the filesystem. the embedded
+        // stdlib uses it so a released echoc can still honour `#[if:]` on
+        // `module.eco` without the sources being on disk
+        std::optional<std::vector<std::string>> virtual_source_pool;
+
         AST::Module &fresh_module()
         {
             AST::module_handle_t handle =
@@ -330,7 +341,8 @@ namespace Parser
         const std::filesystem::path &path,
         ManifestScratch &scratch,
         ModuleManifest &out,
-        ManifestRead read = ManifestRead::t_full);
+        ManifestRead read = ManifestRead::t_full,
+        const std::optional<std::string> &content = std::nullopt);
 
     // the directory `#[requires:]` names are resolved against. `--package-dir` wins; otherwise
     // `vendor/` beside the entry, or the ancestor named `vendor` when the entry itself sits

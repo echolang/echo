@@ -18,6 +18,7 @@ namespace Compiler::LLVM
         const std::string &cpu,
         const std::string &features,
         bool no_optimize,
+        bool pic,
         std::string &error
     );
 };

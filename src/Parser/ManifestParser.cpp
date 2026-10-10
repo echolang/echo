@@ -271,6 +271,7 @@ const std::vector<std::pair<std::string, Parser::TargetKind>> &target_kind_table
     static const std::vector<std::pair<std::string, Parser::TargetKind>> table = {
         { "exe", Parser::TargetKind::t_executable },
         { "test", Parser::TargetKind::t_test },
+        { "lib", Parser::TargetKind::t_library },
     };
 
     return table;
@@ -295,11 +296,19 @@ const TargetKindShape &target_kind_shape(Parser::TargetKind kind)
         std::string("tests")
     };
 
+    static const TargetKindShape library = {
+        { "name" },
+        { "name" },
+        std::nullopt
+    };
+
     switch (kind) {
     case Parser::TargetKind::t_executable:
         return executable;
     case Parser::TargetKind::t_test:
         return test;
+    case Parser::TargetKind::t_library:
+        return library;
     }
 
     return executable;
@@ -723,13 +732,63 @@ bool read_manifest_attributes(
 // **a pattern matching nothing is an error here**, unlike a wildcard on the command line. On the command
 // line an empty glob is a pattern the user typed loosely; in a manifest it is a declaration that this module
 // is made of files, and finding none of them means the module is silently empty
+// `core/*.eco` against `core/array.eco`. one `*` and it cannot cross a slash,
+// which is every pattern the stdlib manifest writes
+bool match_relative_source_pattern(const std::string &pattern, const std::string &path)
+{
+    const size_t star = pattern.find('*');
+    if (star == std::string::npos) {
+        return pattern == path;
+    }
+
+    if (pattern.find('*', star + 1) != std::string::npos) {
+        return false;
+    }
+
+    const std::string prefix = pattern.substr(0, star);
+    const std::string suffix = pattern.substr(star + 1);
+
+    if (path.size() < prefix.size() + suffix.size()) {
+        return false;
+    }
+
+    if (path.compare(0, prefix.size(), prefix) != 0) {
+        return false;
+    }
+
+    if (path.compare(path.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return false;
+    }
+
+    const std::string mid = path.substr(
+        prefix.size(), path.size() - prefix.size() - suffix.size());
+
+    return !mid.empty() && mid.find('/') == std::string::npos;
+}
+
+std::filesystem::path virtual_source_path(
+    const std::filesystem::path &directory, const std::string &relative)
+{
+    std::string dir = directory.generic_string();
+    while (!dir.empty() && dir.back() == '/') {
+        dir.pop_back();
+    }
+
+    if (Compiler::is_embedded_stdlib_path(dir)) {
+        return Compiler::embedded_stdlib_path(relative);
+    }
+
+    return directory / relative;
+}
+
 bool expand_manifest_patterns(
     const std::vector<std::string> &patterns,
     const Parser::ModuleManifest &out,
     const std::string &noun,
     const std::filesystem::path &exclude,
     std::vector<std::filesystem::path> &out_files,
-    const ManifestReport &into
+    const ManifestReport &into,
+    const std::vector<std::string> *virtual_rel = nullptr
 )
 {
     Compiler::ScopedPhase glob_phase("sources glob");
@@ -740,19 +799,38 @@ bool expand_manifest_patterns(
     for (const std::string &pattern : patterns) {
         size_t kept = 0;
 
-        for (const std::filesystem::path &match : Parser::expand_source_pattern(out.directory / pattern)) {
-            if (!std::filesystem::is_regular_file(match, ec)) {
-                continue;
+        if (virtual_rel != nullptr) {
+            for (const std::string &rel : *virtual_rel) {
+                if (!match_relative_source_pattern(pattern, rel)) {
+                    continue;
+                }
+
+                const std::filesystem::path resolved = virtual_source_path(out.directory, rel);
+
+                if (!exclude.empty() && resolved == exclude) {
+                    continue;
+                }
+
+                unique_sources.insert(resolved);
+                kept++;
             }
+        }
+        else {
+            for (const std::filesystem::path &match :
+                    Parser::expand_source_pattern(out.directory / pattern)) {
+                if (!std::filesystem::is_regular_file(match, ec)) {
+                    continue;
+                }
 
-            const std::filesystem::path resolved = Compiler::canonical_or_absolute(match);
+                const std::filesystem::path resolved = Compiler::canonical_or_absolute(match);
 
-            if (!exclude.empty() && resolved == exclude) {
-                continue;
+                if (!exclude.empty() && resolved == exclude) {
+                    continue;
+                }
+
+                unique_sources.insert(resolved);
+                kept++;
             }
-
-            unique_sources.insert(resolved);
-            kept++;
         }
 
         if (kept == 0) {
@@ -870,7 +948,8 @@ bool resolve_manifest_require_paths(
 bool expand_manifest_sources(
     const std::vector<std::string> &patterns,
     Parser::ModuleManifest &out,
-    const ManifestReport &into)
+    const ManifestReport &into,
+    const std::vector<std::string> *virtual_rel)
 {
     if (patterns.empty()) {
         report_at<AST::Issue::EmptySourcePattern>(into, 1,
@@ -878,7 +957,8 @@ bool expand_manifest_sources(
         return false;
     }
 
-    return expand_manifest_patterns(patterns, out, "sources", out.path, out.sources, into);
+    return expand_manifest_patterns(
+        patterns, out, "sources", out.path, out.sources, into, virtual_rel);
 }
 
 // spec.sources, through the same expander and the same policy `#[sources:]` uses - so `*` means one thing
@@ -925,16 +1005,18 @@ bool resolve_manifest_targets(
     Parser::ModuleManifest &out,
     const std::filesystem::path &package_dir,
     const std::filesystem::path &entry_directory,
-    const ManifestReport &into
+    const ManifestReport &into,
+    const std::vector<std::string> *virtual_rel
 )
 {
     // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
     // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
-    const auto expand_scope = [&out, &into, &package_dir, &entry_directory](
+    const auto expand_scope = [&out, &into, &package_dir, &entry_directory, virtual_rel](
         const WrittenTarget &target, Parser::ModuleTarget &settled) {
         if (!target.scoped_sources.empty()
             && !expand_manifest_patterns(
-                target.scoped_sources, out, "sources", out.path, settled.sources, into)) {
+                target.scoped_sources, out, "sources", out.path, settled.sources, into,
+                virtual_rel)) {
             return false;
         }
 
@@ -1008,7 +1090,8 @@ bool resolve_manifest_targets(
         // **a test target names no file**, so every path it does name is a *selection* - resolved against
         // the manifest like any other, and deliberately not checked against `sources`: a file: filter that
         // matches nothing is a refusal the runner makes, where it can say what there was to choose from
-        if (target.kind == Parser::TargetKind::t_test) {
+        if (target.kind == Parser::TargetKind::t_test
+            || target.kind == Parser::TargetKind::t_library) {
             for (const std::string &file : target.files) {
                 settled.files.push_back(Compiler::settled_path(out.directory, file));
             }
@@ -1082,33 +1165,45 @@ bool read_manifest_with(
     Parser::ManifestScratch &scratch,
     const std::filesystem::path &path,
     Parser::ModuleManifest &out,
-    Parser::ManifestRead read)
+    Parser::ManifestRead read,
+    const std::optional<std::string> &content)
 {
     AST::Module &module = scratch.fresh_module();
     AST::File &file = module.add_file(path);
     const ManifestReport into{ scratch.bundle.collector, module, &file };
 
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec)) {
-        report_at<AST::Issue::NoSuchManifest>(into, 1, fmt::format(
-            "{}: no such manifest file.", path.string()));
-        return false;
-    }
-
     out = Parser::ModuleManifest{};
-    out.path = Compiler::canonical_or_absolute(path);
-    out.directory = out.path.parent_path();
+
+    if (content.has_value()) {
+        file.set_content(*content);
+        out.path = path;
+        out.directory = path.parent_path();
+        if (out.directory.empty() || out.directory == ".") {
+            out.directory = path;
+        }
+    }
+    else {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec)) {
+            report_at<AST::Issue::NoSuchManifest>(into, 1, fmt::format(
+                "{}: no such manifest file.", path.string()));
+            return false;
+        }
+
+        out.path = Compiler::canonical_or_absolute(path);
+        out.directory = out.path.parent_path();
+
+        std::string io_error;
+        if (!file.read_from_disk(io_error)) {
+            report_at<AST::Issue::NoSuchManifest>(into, 1, io_error);
+            return false;
+        }
+    }
 
     // where this manifest's own issues start. The collector is shared across a graph walk, so "did *this*
     // manifest parse" cannot be asked as has_critical_issues() - that answers for every manifest read so
     // far
     const size_t issues_before = scratch.bundle.collector.issues.size();
-
-    std::string io_error;
-    if (!file.read_from_disk(io_error)) {
-        report_at<AST::Issue::NoSuchManifest>(into, 1, io_error);
-        return false;
-    }
 
     Parser::ModuleParser &parser = scratch.parser;
 
@@ -1162,9 +1257,12 @@ bool read_manifest_with(
 
     // targets after the sources they name, and before everything else - an entry has to be checked
     // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
-    return expand_manifest_sources(sources_written, out, into)
+    const std::vector<std::string> *virtual_rel =
+        scratch.virtual_source_pool ? &*scratch.virtual_source_pool : nullptr;
+
+    return expand_manifest_sources(sources_written, out, into, virtual_rel)
         && resolve_manifest_targets(
-            targets_written, out, scratch.package_dir, scratch.entry_directory, into)
+            targets_written, out, scratch.package_dir, scratch.entry_directory, into, virtual_rel)
         && expand_cc_sources(out.cc, out, "this module", into)
         && resolve_manifest_depend_paths(depends_written, out, out.depends, into)
         && resolve_manifest_require_paths(
@@ -1298,14 +1396,24 @@ void Parser::ManifestScratch::report(
     report_manifest<Issue>(bundle.collector, module, &file, line == 0 ? 1 : line, std::move(message));
 }
 
+// ParsePipeline instantiates NoSuchManifest for a missing embedded module.eco.
+// the definition lives in this TU, so the instantiations have to be here too
+template void Parser::ManifestScratch::report<AST::Issue::NoSuchManifest>(
+    const std::filesystem::path &, uint32_t, std::string);
+template void Parser::ManifestScratch::report<AST::Issue::DuplicateModuleName>(
+    const std::filesystem::path &, uint32_t, std::string);
+template void Parser::ManifestScratch::report<AST::Issue::ModuleDependencyCycle>(
+    const std::filesystem::path &, uint32_t, std::string);
+
 bool Parser::read_module_manifest(
     const std::filesystem::path &path,
     Parser::ManifestScratch &scratch,
     Parser::ModuleManifest &out,
-    Parser::ManifestRead read
+    Parser::ManifestRead read,
+    const std::optional<std::string> &content
 )
 {
-    return read_manifest_with(scratch, path, out, read);
+    return read_manifest_with(scratch, path, out, read, content);
 }
 
 bool Parser::resolve_module_graph(
@@ -1349,7 +1457,13 @@ bool Parser::resolve_module_graph(
         }
 
         ModuleManifest manifest;
-        if (!read_manifest_with(scratch, next, manifest, Parser::ManifestRead::t_full)) {
+        if (!read_manifest_with(
+                scratch,
+                next,
+                manifest,
+                Parser::ManifestRead::t_full,
+                std::nullopt
+            )) {
             return false;
         }
 

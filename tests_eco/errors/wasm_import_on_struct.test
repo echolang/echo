@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] wasm_import_on_struct.eco:1:3
+
+  a '#[wasm:]' attribute is for '--target-os wasi'
+
+  1 | #[wasm: import "env"]
+    :   ^^^^
+  2 | struct Foo
+
+1 error, nothing was compiled.

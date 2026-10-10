@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] export_string_param.eco:2:10
+
+  cannot be exported because 'string' cannot cross a C function-pointer boundary by value - echoc and clang classify a struct differently, and the disagreement is silent. Pass a scalar or a pointer to bytes.
+
+  1 | #[export]
+  2 | function greet(string $name) : void
+    :          ^^^^^
+  3 | {
+
+1 error, nothing was compiled.

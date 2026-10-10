@@ -6,7 +6,7 @@ expect: fail
 --- OUT --->
 [error] c_function_generic_struct_instance.eco:10:41
 
-  'extern function<Point(Point)>' is not a C-callable signature - 'Point' cannot cross a C function-pointer boundary by value - echoc and clang classify a struct differently, and the disagreement is silent. Pass a 'ptr<Point>' instead.
+  'extern function<Point(Point)>' is not a C-callable signature - 'Point' cannot cross a C function-pointer boundary by value - echoc and clang classify a struct differently, and the disagreement is silent. Pass a scalar or a pointer to bytes.
 
    9 | 
   10 | function apply<T>(extern function<T(T)> $f, T $v) : T

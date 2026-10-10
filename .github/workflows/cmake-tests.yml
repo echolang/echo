@@ -97,6 +97,8 @@ jobs:
       ECHOC_BINARY: ${{ github.workspace }}/build/echoc
       ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
       ECO_E2E_TMP_DIR: ${{ github.workspace }}/build/e2e_tmp
+      # this job installs the WASI SDK and wasmtime; missing tools then FAIL rather than SKIP
+      ECO_REQUIRE_WASI: 1
 
     steps:
     - name: Checkout repository
@@ -111,6 +113,20 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y libc++-dev libc++abi-dev zlib1g-dev
+
+    - name: Install WASI SDK and wasmtime
+      run: |
+        case "${{ matrix.os.arch }}" in
+          arm64) WASI_ARCH=arm64; WT_ARCH=aarch64 ;;
+          *)     WASI_ARCH=x86_64; WT_ARCH=x86_64 ;;
+        esac
+        curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-${WASI_ARCH}-linux.tar.gz" \
+          | sudo tar xz -C /opt
+        sudo ln -sfn "/opt/wasi-sdk-27.0-${WASI_ARCH}-linux" /opt/wasi-sdk
+        echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
+        curl -sL "https://github.com/bytecodealliance/wasmtime/releases/download/v29.0.1/wasmtime-v29.0.1-${WT_ARCH}-linux.tar.xz" \
+          | tar xJ
+        sudo mv "wasmtime-v29.0.1-${WT_ARCH}-linux/wasmtime" /usr/local/bin/
 
     - name: Download test binaries
       uses: actions/download-artifact@v4
@@ -346,6 +362,13 @@ jobs:
             exit 1
           fi
 
+      - name: Install WASI SDK
+        run: |
+          curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-x86_64-linux.tar.gz" \
+            | sudo tar xz -C /opt
+          sudo ln -sfn /opt/wasi-sdk-27.0-x86_64-linux /opt/wasi-sdk
+          echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
+
       # stage two: the binary that ships. The stdlib goes inside it, because the path stage one reads
       # it from is this runner's and means nothing to whoever downloads the result
       - name: Configure release build
@@ -381,6 +404,13 @@ jobs:
           cd "$RUNNER_TEMP"
           printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
           ./echoc run smoke.eco
+          if [ -n "${WASI_SDK_PATH:-}" ]; then
+            ./echoc build --target-os wasi -p ir -o smoke.wasm smoke.eco > smoke.ir
+            if grep -q pthread smoke.ir; then
+              echo "embedded wasi IR still names pthread; stdlib thread should be dropped." >&2
+              exit 1
+            fi
+          fi
 
       # the smoke test above runs on the machine that built the binary, so it cannot see a dependency
       # on something only that machine has - which the loader turns into a process that never starts
@@ -493,6 +523,13 @@ jobs:
       # the committed-header byte check stays on the x86_64 Linux job: glob expansion is filesystem
       # order, so a second Linux host would flake the same way a Mac would
 
+      - name: Install WASI SDK
+        run: |
+          curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-arm64-linux.tar.gz" \
+            | sudo tar xz -C /opt
+          sudo ln -sfn /opt/wasi-sdk-27.0-arm64-linux /opt/wasi-sdk
+          echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
+
       # stage two: the binary that ships. The stdlib goes inside it, because the path stage one reads
       # it from is this runner's and means nothing to whoever downloads the result
       - name: Configure release build
@@ -528,6 +565,13 @@ jobs:
           cd "$RUNNER_TEMP"
           printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
           ./echoc run smoke.eco
+          if [ -n "${WASI_SDK_PATH:-}" ]; then
+            ./echoc build --target-os wasi -p ir -o smoke.wasm smoke.eco > smoke.ir
+            if grep -q pthread smoke.ir; then
+              echo "embedded wasi IR still names pthread; stdlib thread should be dropped." >&2
+              exit 1
+            fi
+          fi
 
       # the smoke test above runs on the machine that built the binary, so it cannot see a dependency
       # on something only that machine has - which the loader turns into a process that never starts
@@ -658,6 +702,13 @@ jobs:
           cd "$RUNNER_TEMP"
           printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
           ./echoc run smoke.eco
+          if [ -n "${WASI_SDK_PATH:-}" ]; then
+            ./echoc build --target-os wasi -p ir -o smoke.wasm smoke.eco > smoke.ir
+            if grep -q pthread smoke.ir; then
+              echo "embedded wasi IR still names pthread; stdlib thread should be dropped." >&2
+              exit 1
+            fi
+          fi
 
       # this runner has Homebrew and the machine downloading the result does not, so a /opt/homebrew
       # load command is invisible to every step above and fatal on arrival

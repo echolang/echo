@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_as_main.eco:2:10
+
+  cannot export as 'main' - that name is the program's entry symbol
+
+  1 | #[export]
+  2 | function main() : int32
+    :          ^^^^
+  3 | {
+
+1 error, nothing was compiled.

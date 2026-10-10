@@ -9,6 +9,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <mutex>
@@ -34,6 +35,26 @@ namespace
     // the shared process primitive - see subprocess.h
     using EchoTests::ProcessResult;
     using EchoTests::quoted;
+
+    bool wasi_corpus_ready()
+    {
+        if (Compiler::wasi_sysroot().empty()) {
+            return false;
+        }
+
+        static const bool wasmtime = [] {
+            return EchoTests::run_process({ "wasmtime", "--version" }).exit_code == 0;
+        }();
+
+        return wasmtime;
+    }
+
+    // one skip for both the pool and the Catch2 loop. the FAIL on CI lives at
+    // the TEST_CASE because that is the assertion site
+    bool missing_cross_tools(const EchoTests::EcoTestFile &test)
+    {
+        return test.needs_cross_tools() && !wasi_corpus_ready();
+    }
 
     // `echoc <run|build -o bin> [dump] [flags] <file>`.
     //
@@ -393,7 +414,7 @@ namespace
             if (outcome.primary.exit_code == 0 && outcome.binary_exists) {
                 // the environment goes on both spawns and the arguments only on this one: a linked binary
                 // is the program, so its argv *is* the program's, with no `--` needed to say so
-                std::vector<std::string> argv = { EchoTests::with_exe(entry.binary).string() };
+                std::vector<std::string> argv = entry.test.program_argv(entry.binary);
                 argv.insert(argv.end(), entry.test.arguments.begin(), entry.test.arguments.end());
 
                 outcome.program = EchoTests::run_process(argv, deadline, {}, env, input);
@@ -466,7 +487,8 @@ namespace
                 if (!EchoTests::e2e_case_selected(_cases[i].rel, i)
                     || !_cases[i].runnable()
                     || (EchoTests::is_dev_lane()
-                        && _cases[i].test.mode == EchoTests::RunMode::t_build)) {
+                        && _cases[i].test.mode == EchoTests::RunMode::t_build)
+                    || missing_cross_tools(_cases[i].test)) {
                     _slots[i].state = Slot::State::t_done;
                     continue;
                 }
@@ -639,7 +661,8 @@ namespace
                 discovered.scratch = case_scratch_dir(eco, root);
 
                 if (discovered.test.mode == EchoTests::RunMode::t_build) {
-                    discovered.binary = discovered.scratch / eco.stem();
+                    discovered.binary = discovered.test.linked_binary(
+                        discovered.scratch, eco.stem());
                 }
             }
 
@@ -702,6 +725,13 @@ TEST_CASE("eco end-to-end", "[e2e]")
 
         if (EchoTests::is_dev_lane()
             && entry.test.mode == EchoTests::RunMode::t_build) {
+            continue;
+        }
+
+        if (missing_cross_tools(entry.test)) {
+            if (EchoTests::wasi_tools_required()) {
+                FAIL("WASI SDK and wasmtime required (ECO_REQUIRE_WASI)");
+            }
             continue;
         }
 

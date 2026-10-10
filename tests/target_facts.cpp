@@ -12,7 +12,15 @@ TEST_CASE("ios and android are known operating systems", "[target]")
 {
     REQUIRE(Compiler::TargetFacts::is_known_operating_system("ios"));
     REQUIRE(Compiler::TargetFacts::is_known_operating_system("android"));
+    REQUIRE(Compiler::TargetFacts::is_known_operating_system("wasi"));
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_operating_system("macos"));
+}
+
+TEST_CASE("wasi is emit-only so run and test refuse it", "[target]")
+{
+    REQUIRE(Compiler::TargetFacts::is_emit_only_operating_system("wasi"));
+    REQUIRE_FALSE(Compiler::TargetFacts::is_emit_only_operating_system("ios"));
+    REQUIRE_FALSE(Compiler::TargetFacts::is_emit_only_operating_system("linux"));
 }
 
 TEST_CASE("family is a closed axis derived from os", "[target]")
@@ -21,6 +29,7 @@ TEST_CASE("family is a closed axis derived from os", "[target]")
     REQUIRE(Compiler::TargetFacts::is_known_family("darwin"));
     REQUIRE(Compiler::TargetFacts::is_known_family("linux"));
     REQUIRE(Compiler::TargetFacts::is_known_family("windows"));
+    REQUIRE(Compiler::TargetFacts::is_known_family("wasi"));
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_family("unix"));
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_family("apple"));
 
@@ -40,6 +49,9 @@ TEST_CASE("family is a closed axis derived from os", "[target]")
 
     facts.operating_system = "windows";
     REQUIRE(facts.family() == "windows");
+
+    facts.operating_system = "wasi";
+    REQUIRE(facts.family() == "wasi");
 
     facts.operating_system = "";
     REQUIRE(facts.family().empty());
@@ -77,6 +89,11 @@ TEST_CASE("from_triple maps Android before Linux and iOS before Darwin", "[targe
     const Compiler::TargetFacts windows = Compiler::TargetFacts::from_triple("x86_64-pc-windows-msvc");
     REQUIRE(windows.operating_system == "windows");
     REQUIRE(windows.family() == "windows");
+
+    const Compiler::TargetFacts wasi = Compiler::TargetFacts::from_triple("wasm32-unknown-wasip1");
+    REQUIRE(wasi.operating_system == "wasi");
+    REQUIRE(wasi.family() == "wasi");
+    REQUIRE(wasi.architecture == "wasm32");
 }
 
 TEST_CASE("shared_library_extension follows family, not os", "[target]")
@@ -105,6 +122,11 @@ TEST_CASE("resolve accepts ios and android as a target os", "[target]")
     REQUIRE(Compiler::TargetFacts::resolve("android", "", {}, facts, error));
     REQUIRE(facts.operating_system == "android");
     REQUIRE(facts.family() == "linux");
+
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "wasm32", {}, facts, error));
+    REQUIRE(facts.operating_system == "wasi");
+    REQUIRE(facts.family() == "wasi");
+    REQUIRE(facts.architecture == "wasm32");
 }
 
 TEST_CASE("resolve refuses a target os outside the vocabulary", "[target]")

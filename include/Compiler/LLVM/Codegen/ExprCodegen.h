@@ -5,6 +5,7 @@
 
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
+#include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Token.h"
 
 #include <llvm/IR/DerivedTypes.h>
@@ -131,10 +132,13 @@ namespace Compiler::LLVM
     private:
         CodegenContext &_ctx;
 
-        // `&name` seated as `function<R(P...)>`: an Echo-shaped thunk that ignores its
-        // environment and calls the named function, so the indirect call's convention
-        // does not fork
-        llvm::Function *ensure_callable_adapt(AST::FunctionDeclNode *decl);
+        // `&name` as an Echo callable or as a C function pointer. one chassis: look
+        // up, mint, forward, return. t_echo is linkonce_odr and skips the
+        // environment; t_c is unit-local InternalLinkage with integer-ext and a
+        // tail call, so an `#[inline]` body defined in every unit stays ODR-identical
+        llvm::Function *ensure_function_adapt(
+            AST::FunctionDeclNode *decl,
+            TypeLowering::FunctionCallingShape shape);
 
         // a call whose declaration is an interface **requirement**: the callee is loaded out of the
         // receiver's own vtable rather than looked up in the function table, because a requirement has no

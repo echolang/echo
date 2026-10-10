@@ -1,0 +1,6 @@
+mode: build
+target: wasi
+
+--- OUT --->
+n=41
+sum=42

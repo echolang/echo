@@ -171,6 +171,11 @@ namespace Compiler::LLVM
 
             return 0;
         }
+
+        // includes the dummy at index 0. walk from 1
+        size_t size() const {
+            return _functions.size();
+        }
     };
 };
 

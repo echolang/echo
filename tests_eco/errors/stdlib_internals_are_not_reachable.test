@@ -58,10 +58,10 @@ expect: fail
      :                                    ^^^^^^^^
   18 | 
 
-  32 | #[builtin: process_argv]
-  33 | private function raw_argv() : ptr<ptr<uint8>>;
+  33 | #[builtin: process_argv]
+  34 | private function raw_argv() : ptr<ptr<uint8>>;
      :                  -------- declared here
-  34 | 
+  35 | 
 
 [error] PrivateMember  stdlib_internals_are_not_reachable.eco:21:10
 

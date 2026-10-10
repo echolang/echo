@@ -3,6 +3,7 @@
 #include "Parser/AttributeValueParser.h"
 
 #include "AST/ASTAttributes.h"
+#include "AST/ASTWasm.h"
 
 #include <fmt/core.h>
 
@@ -114,6 +115,24 @@ AST::AttributeNode *Parser::parse_attribute(
                 + AST::known_attribute_list());
     }
 
+    // a type body shares the file-root ScopeNode, so "child of file.root" is not "written at file
+    // scope". AST::check_wasm_surface reads this for object exports. a wasm object export is a
+    // file-root fact: plant it as a child and leave it off the drain stack, so
+    // `#[wasm: export "memory"]` then `#[export] function f()` cannot attach the object export to f
+    const auto seat_attribute = [&](AST::AttributeNode &node) {
+        node.written_at_file_scope = payload.context.self_struct_ptr == nullptr
+            && payload.context.current_function_ptr == nullptr
+            && payload.context.scope().is_root();
+
+        if (auto clause = AST::wasm_clause_of(node);
+            clause.has_value() && clause->kind == AST::WasmClauseKind::t_export) {
+            payload.context.scope().plant_attribute(node);
+            return;
+        }
+
+        payload.context.scope().add_attribute(node);
+    };
+
     // if the next token is a closing square bracket, then we have a simple attribute
     if (payload.cursor.is_type(Token::Type::t_close_bracket)) {
         payload.cursor.skip(); // skip the closing square bracket
@@ -123,7 +142,7 @@ AST::AttributeNode *Parser::parse_attribute(
         // the floor, so `#[inline]` never reached the declaration that followed it
         auto &node = payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
         node.scope_owner = scope_owner;
-        payload.context.scope().add_attribute(node);
+        seat_attribute(node);
 
         return &node;
     }
@@ -151,8 +170,7 @@ AST::AttributeNode *Parser::parse_attribute(
 
     payload.cursor.skip(); // skip the closing square bracket
 
-    // attach the attribute node to the current scope
-    payload.context.scope().add_attribute(node);
+    seat_attribute(node);
 
     return &node;
 }

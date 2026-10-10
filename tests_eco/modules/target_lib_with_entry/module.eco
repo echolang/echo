@@ -1,0 +1,4 @@
+// a lib has no entry file: its surface is #[export]
+#[module: "libentry"]
+#[sources: "src/*.eco"]
+#[target: lib { name: "greeter", entry: "src/lib.eco" }]

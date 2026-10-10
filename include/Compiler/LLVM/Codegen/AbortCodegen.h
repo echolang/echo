@@ -110,7 +110,8 @@ namespace Compiler::LLVM
         // the one abort implementation per compilation unit, created on first use
         //
         // always piece-wise:
-        //   void __eco_abort(ptr headline, i64, ptr msg, i64, ptr file, i64, i32 line, ptr line.text, i64)
+        //   void __eco_abort(ptr headline, usize, ptr msg, usize, ptr file, usize,
+        //                    i32 line, ptr line.text, usize)
         //
         // `#[core: crash_info]` decides whether the *body* loads `__eco_crash_hook`, not the
         // signature. `--no-stdlib` is not a second ABI - unwrap_abort never needed a `string`

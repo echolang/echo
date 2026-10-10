@@ -165,7 +165,17 @@ namespace AST
 
         void add_attribute(AttributeNode &attribute);
 
+        // a file-root fact: a child of the scope, not drained onto the next declaration.
+        // `#[wasm: export "memory"]` plants here so `#[export] function f()` cannot take it
+        void plant_attribute(AttributeNode &attribute);
+
         std::vector<AttributeNode *> collect_attributes();
+
+        // attributes written at this scope that no declaration has drained yet.
+        // AST::check_wasm_surface harvests leftover `#[wasm: import]` from the file root here
+        const std::vector<AttributeNode *> &pending_attributes() const {
+            return _attribute_stack;
+        }
 
         // resolves a variable name outward through the enclosing scopes, reporting whether it had to
         // leave this frame to find it. the one variable lookup - a plain "did you find it" would make

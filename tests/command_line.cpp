@@ -521,8 +521,11 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     // the vocabulary another owner holds still reports through that owner's own table
     REQUIRE(contains(refusal({ "run", "--color", "alwyas", "a.eco" }), "Unknown '--color' value"));
 
-    REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "unknown --target-os 'macos'"));
+    REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "Unknown '--target-os' value 'macos'"));
     REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "ios"));
+    REQUIRE(contains(refusal({ "run", "--target-os", "wasi", "a.eco" }), "'run --target-os wasi'"));
+    REQUIRE(contains(refusal({ "test", "--target-os", "wasi", "a.eco" }), "'test --target-os wasi'"));
+    REQUIRE(refusal({ "lsp", "--target-os", "wasi" }) == "<accepted>");
     REQUIRE(contains(refusal({ "run", "--target-arch", "x86", "a.eco" }), "unknown --target-arch 'x86'"));
 
     REQUIRE(refusal({ "run", "--ios-device", "a.eco" }) == "'run' does not take '--ios-device'.");

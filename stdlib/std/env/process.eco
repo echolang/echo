@@ -16,7 +16,8 @@ public function pid() : int32
 /**
  * How many arguments the program was started with, including the program name at index 0.
  *
- * So a program invoked with no arguments answers 1, the way C's `argc` does.
+ * A command invoked with no extra arguments answers 1, the way C's `argc` does.
+ * A lib or a wasm reactor answers 0: there is no `main` to capture argv.
  */
 #[builtin: process_argc]
 public function argc() : usize;
@@ -35,9 +36,10 @@ private function raw_argv() : ptr<ptr<uint8>>;
 /**
  * The raw environment block: a null-terminated run of pointers to `KEY=VALUE` strings.
  *
- * The seam `vars` is built on, and the reason this module needs no platform conditionals - the block
- * arrives as the entry point's third argument rather than through `environ`, which is a data symbol
- * an `extern` block has no way to bind and which Darwin does not export under that name anyway.
+ * The seam `vars` is built on, and the reason this module needs no platform conditionals. A command
+ * captures the block from `main`'s third argument. A lib or reactor reads the platform source
+ * (`environ` / `_NSGetEnviron` / `__wasilibc_get_environ`) on each call, so a host `setenv`
+ * after `dlopen` is visible.
  *
  * **`internal` and not `private`**, which is the whole difference between this and `raw_argv` above:
  * `var_iterator` walks it, and that lives in vars.eco.
@@ -268,6 +270,10 @@ public function exe() : string
 
     die('the executable path does not fit in 32 KiB of UTF-16');
 #[else]
+    if (argc() == 0) {
+        return '';
+    }
+
     return str::from(arg(0)->cstr());
 #[end]
 }

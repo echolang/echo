@@ -213,6 +213,10 @@ std::string EcoTestFile::compiler_flags(const std::filesystem::path &corpus_root
         result += "--no-stdlib ";
     }
 
+    if (target == CorpusTarget::t_wasi) {
+        result += "--target-os wasi ";
+    }
+
     // one `-m` per manifest, resolved against the corpus root so the case reads as a path relative to
     // the test file rather than to whatever directory the tests binary was launched from
     for (const std::string &manifest : modules) {
@@ -224,6 +228,32 @@ std::string EcoTestFile::compiler_flags(const std::filesystem::path &corpus_root
     }
 
     return result;
+}
+
+std::filesystem::path EcoTestFile::linked_binary(
+    const std::filesystem::path &scratch,
+    const std::filesystem::path &stem) const
+{
+    std::filesystem::path binary = scratch / stem;
+    if (target == CorpusTarget::t_wasi) {
+        binary += ".wasm";
+    }
+
+    return binary;
+}
+
+std::vector<std::string> EcoTestFile::program_argv(const std::filesystem::path &binary) const
+{
+    if (target == CorpusTarget::t_wasi) {
+        return { "wasmtime", binary.string() };
+    }
+
+    return { with_exe(binary).string() };
+}
+
+bool EcoTestFile::needs_cross_tools() const
+{
+    return target == CorpusTarget::t_wasi;
 }
 
 std::string strip_trailing_newline(std::string s)
@@ -285,7 +315,7 @@ namespace
     // name. a key added to the dispatch and forgotten here would leave the error telling an author
     // that a valid key is invalid
     constexpr std::string_view k_setting_keys[] = {
-        "flags", "modules", "stdlib", "expect", "mode", "env", "args", "stdin", "timeout" };
+        "flags", "modules", "stdlib", "expect", "mode", "target", "env", "args", "stdin", "timeout" };
 
     // whitespace separated into `out_list`. the shape `modules`, `env` and `args` share - three settings
     // that each mean a list because the header forbids a repeated key
@@ -459,6 +489,11 @@ namespace
                 out_file.mode, out_error);
         }
 
+        if (key == "target") {
+            return read_enumerated<CorpusTarget>(origin, record, key, value,
+                { { "wasi", CorpusTarget::t_wasi } }, out_file.target, out_error);
+        }
+
         if (key == "timeout") {
             unsigned parsed = 0;
             const auto *first = value.data();
@@ -549,6 +584,12 @@ bool parse_eco_test_file(
         if (!read_setting(origin, record, seen_settings, out_file, out_error)) {
             return false;
         }
+    }
+
+    if (out_file.target == CorpusTarget::t_wasi && out_file.mode != RunMode::t_build) {
+        out_error = origin + ": 'target: wasi' needs 'mode: build' "
+            "('run' and 'test' refuse --target-os wasi)";
+        return false;
     }
 
     bool has_output = false;

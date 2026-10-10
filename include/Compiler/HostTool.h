@@ -87,6 +87,62 @@ namespace Compiler
         std::string &out_error
     );
 
+    // one WASI SDK lookup. WASI_SDK_PATH is a unit; discovery takes the
+    // first complete SDK prefix. Homebrew wasi-libc / wasi-runtimes fill a
+    // leftover sysroot or resource dir. wasm-ld sits next to clang, or on
+    // PATH only when no clang was chosen
+    struct WasiSdk
+    {
+        std::filesystem::path sysroot;
+        std::filesystem::path resource_dir;
+        std::filesystem::path clang;
+        std::filesystem::path wasm_ld;
+    };
+
+    const WasiSdk &wasi_sdk();
+
+    // columns of wasi_sdk(). kept as names CBuild, the cache key and the
+    // Catch2 suite already ask. wasm_ld is the linker append_wasi_target_args
+    // passes as `-fuse-ld=`
+    std::filesystem::path wasi_sysroot();
+    std::filesystem::path wasi_resource_dir();
+    std::filesystem::path wasi_clang();
+    std::filesystem::path wasi_wasm_ld();
+
+    // the clang that compiles C objects and drives the link for this row.
+    // a WASI SDK's clang when the row is wasm and one is installed, else PATH
+    std::string cc_driver(const CodegenTarget &target);
+
+    // `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` for a WASI row. false with a
+    // sentence when a WASI sysroot is not on this machine, or wasm-ld is missing
+    bool append_wasi_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // `-target` / `--sysroot` / `-isysroot` for this row. the dispatcher: WASI
+    // is append_wasi_target_args, everything else is append_apple_target_args.
+    // CBuild and link_executable both call this so they cannot disagree about
+    // the triple. false with a sentence when a WASI sysroot is not on this machine
+    bool append_codegen_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // compile args plus the link-only half of the row. `-mexec-model=reactor` and
+    // `-shared` are columns of `target`. `--export-memory` is the program fact
+    // `CompilerOptions::export_memory`, not a row column, because CBuild reuses
+    // append_codegen_target_args for C compiles
+    bool append_codegen_link_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        bool export_memory,
+        std::string &out_error,
+        const std::string &output_basename = {}
+    );
+
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt
     // Backend always links, then clang's resource include as `-isystem` so
     // emmintrin.h and friends stay ahead of the bundled MSVC copies, then

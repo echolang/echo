@@ -733,7 +733,8 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 continue;
             }
 
-            const PrintfConversion conversion = printf_conversion_for(result_type);
+            const PrintfConversion conversion = printf_conversion_for(
+                result_type, _ctx.size_int_ty()->getBitWidth() / 8);
             if (conversion.format == nullptr) {
                 throw _ctx.error(fmt::format(
                     "Unsupported argument type '{}' for 'echo' {}",
@@ -989,7 +990,15 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
         : return_abi_for(
             _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit));
 
-    _ctx.emit_call({ fn_type, fn }, args, abi);
+    llvm::CallInst *call = _ctx.emit_call({ fn_type, fn }, args, abi);
+    if (call != nullptr) {
+        _ctx.types->apply_c_integer_ext(
+            *call,
+            signature,
+            c_function
+                ? TypeLowering::FunctionCallingShape::t_c
+                : TypeLowering::FunctionCallingShape::t_echo);
+    }
 }
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
@@ -1163,12 +1172,11 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
     const auto [bytes, size] = _ctx.gen_string_window(_ctx.string_as_view(value, type, ""), "");
 
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
 
     // stdout is buffered and this write is not, so flushing first keeps a string in order with the
     // printf every other `echo` emits. AbortCodegen flushes for the same reason before its own write
     _ctx.builder->CreateCall(
-        _ctx.libc_callee("fflush", i32, { _ctx.opaque_ptr_type() }),
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_fflush, i32, { _ctx.opaque_ptr_type() }),
         { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())) });
 
     _ctx.emit_libc_write(1, bytes, size);
@@ -1177,7 +1185,9 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
     // whatever it is handed. writing it separately rather than copying the bytes to append it: the
     // bytes may be a shared substring, and there is nowhere to put a longer copy
     _ctx.emit_libc_write(
-        1, _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"), llvm::ConstantInt::get(i64, 1));
+        1,
+        _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"),
+        llvm::ConstantInt::get(_ctx.size_int_ty(), 1));
 }
 
 void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
@@ -1514,7 +1524,7 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
     if (kind == AST::BuiltinKind::t_process_argc) {
         _ctx.push(_ctx.types->coerce_value(
             CodegenValue::scalar(_ctx.process->gen_argc("argc")),
-            AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+            AST::ValueType(AST::ValueTypePrimitive::t_usize),
             node.decl->get_return_type(), *_ctx.current_cmp_unit));
         return;
     }
@@ -1592,11 +1602,13 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
     }
 
     if (!node.as_callable) {
-        _ctx.push_scalar(fn);
+        _ctx.push_scalar(ensure_function_adapt(
+            node.decl, TypeLowering::FunctionCallingShape::t_c));
         return;
     }
 
-    llvm::Function *adapt = ensure_callable_adapt(node.decl);
+    llvm::Function *adapt = ensure_function_adapt(
+        node.decl, TypeLowering::FunctionCallingShape::t_echo);
     llvm::StructType *callable_type = _ctx.types->callable_llvm_type();
     llvm::Value *value = llvm::UndefValue::get(callable_type);
     value = _ctx.builder->CreateInsertValue(value, adapt, 0, "ref.fn");
@@ -1608,9 +1620,14 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
     _ctx.push_scalar(value);
 }
 
-llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
+llvm::Function *ExprCodegen::ensure_function_adapt(
+    AST::FunctionDeclNode *decl,
+    TypeLowering::FunctionCallingShape shape
+)
 {
-    const std::string name = "__eco_adapt." + AST::mangle_function_name(decl);
+    const bool c_abi = shape == TypeLowering::FunctionCallingShape::t_c;
+    const std::string name = std::string(c_abi ? "__eco_c_adapt." : "__eco_adapt.")
+        + AST::mangle_function_name(decl);
 
     if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
         return existing;
@@ -1624,33 +1641,41 @@ llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
             _ctx.function_context()));
     }
 
+    const AST::ValueType fn_type = c_abi
+        ? decl->c_function_type()
+        : decl->callable_type();
+    const AST::CallableSignature &signature = fn_type.signature();
+
     llvm::FunctionType *adapt_ty = _ctx.types->get_llvm_function_type(
-        decl->callable_type().signature(),
+        signature,
         *_ctx.current_cmp_unit,
-        TypeLowering::FunctionCallingShape::t_echo);
+        shape);
 
     llvm::Function *adapt = llvm::Function::Create(
         adapt_ty,
-        llvm::GlobalValue::LinkOnceODRLinkage,
+        c_abi ? llvm::GlobalValue::InternalLinkage : llvm::GlobalValue::LinkOnceODRLinkage,
         name,
         _ctx.current_module());
+
+    _ctx.types->apply_c_integer_ext(*adapt, signature, shape);
 
     llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
     _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
     _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", adapt));
 
-    const ReturnAbi abi = _ctx.types->return_abi_of(decl, *_ctx.current_cmp_unit);
-
     std::vector<llvm::Value *> forwarded;
     unsigned i = 0;
 
-    if (abi.is_indirect()) {
-        forwarded.push_back(adapt->getArg(i++));
-    }
+    if (!c_abi) {
+        const ReturnAbi abi = _ctx.types->return_abi_of(decl, *_ctx.current_cmp_unit);
+        if (abi.is_indirect()) {
+            forwarded.push_back(adapt->getArg(i++));
+        }
 
-    // skip the environment the indirect call always passes
-    if (i < adapt->arg_size()) {
-        i++;
+        // skip the environment the indirect call always passes
+        if (i < adapt->arg_size()) {
+            i++;
+        }
     }
 
     for (; i < adapt->arg_size(); i++) {
@@ -1658,8 +1683,11 @@ llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
     }
 
     llvm::CallInst *call = _ctx.builder->CreateCall(target, forwarded);
+    if (c_abi) {
+        call->setTailCall(true);
+    }
 
-    if (abi.is_indirect() || decl->get_return_type().is_void()) {
+    if (adapt->getReturnType()->isVoidTy()) {
         _ctx.builder->CreateRetVoid();
     }
     else {

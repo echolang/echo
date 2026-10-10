@@ -52,6 +52,16 @@ namespace EchoTests
         t_test
     };
 
+    // which machine the case actually runs on. omitted is the host. `wasi` is a
+    // real cross: `mode: build` plus `--target-os wasi`, then the linked `.wasm`
+    // is run under wasmtime. a closed enum for `mode`'s reason: the runner must
+    // not re-derive what a setting means
+    enum class CorpusTarget
+    {
+        t_host,
+        t_wasi
+    };
+
     // what the case asserts about the exit status of the processes it spawns
     //
     // `ok` and `fail` are the two the corpus almost always wants - zero, and anything but zero. An exact
@@ -99,6 +109,7 @@ namespace EchoTests
         bool stdlib = true;
         Expectation expect;
         RunMode mode = RunMode::t_run;
+        CorpusTarget target = CorpusTarget::t_host;
 
         // deadline for every spawn this case starts, in milliseconds. defaulted so an existing
         // case is untouched; `timeout: 0` waits forever. EchoTests::run_capturing is the owner
@@ -138,6 +149,20 @@ namespace EchoTests
         // is the format's, and a setting whose meaning is spelled in the runner is a setting the
         // README's table can silently disagree with
         std::string compiler_flags(const std::filesystem::path &corpus_root) const;
+
+        // `scratch / stem`, plus `.wasm` on a wasi case. the one spelling of where
+        // `mode: build` writes the program the runner then executes
+        std::filesystem::path linked_binary(
+            const std::filesystem::path &scratch,
+            const std::filesystem::path &stem) const;
+
+        // argv that executes a successfully linked binary. host: the binary
+        // itself (with `.exe` on Windows); wasi: `wasmtime <binary>`
+        std::vector<std::string> program_argv(const std::filesystem::path &binary) const;
+
+        // true when this case needs a WASI SDK and wasmtime to run. the runner
+        // skips locally and fails on CI
+        bool needs_cross_tools() const;
 
         // `KEY=VALUE KEY2=VALUE2 ` to prefix a command with, empty when the case sets none. A shell
         // assignment prefix rather than a `setenv` in the test process, because every spawn here goes

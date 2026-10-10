@@ -222,10 +222,12 @@ namespace AST
         t_uint16,
         t_uint32,
         t_uint64,
-        // pointer-width integers, the width coming from ECO_TARGET_POINTER_SIZE. deliberately
-        // their own primitives rather than aliases of t_uint64/t_int64: every count, length and
-        // capacity in the stdlib is spelled with these, and a distinct type identity is what
-        // keeps those signatures stable when the width changes
+        // pointer-width integers, the width coming from AST::target_pointer_size() during
+        // parse/typecheck (installed from CodegenTarget via PointerSizeScope). codegen
+        // usize is size_int_ty(). deliberately their own primitives rather than aliases
+        // of t_uint64/t_int64: every count, length and capacity in the stdlib is spelled
+        // with these, and a distinct type identity is what keeps those signatures stable
+        // when the width changes
         t_usize,
         t_isize,
         t_float32,
@@ -291,6 +293,29 @@ namespace AST
     uint8_t get_primitive_size(ValueTypePrimitive primitive);
     char get_primitive_id_char(ValueTypePrimitive primitive);
     IntegerSize get_integer_size(ValueTypePrimitive primitive);
+
+    // **the width of a pointer on the target this compile type-checks**, in bytes.
+    // default ECO_TARGET_POINTER_SIZE (host). PointerSizeScope installs
+    // CodegenTarget::pointer_size() for the duration of parse+sema; codegen usize
+    // is size_int_ty() and does not read this
+    unsigned target_pointer_size();
+
+    // installs `bytes` as target_pointer_size() until destroyed. the driver holds
+    // one around parse and the semantic passes, copied from the emit row. restoring
+    // on unwind is what keeps an in-process wasm32 compile from poisoning later tests
+    class PointerSizeScope
+    {
+    public:
+        explicit PointerSizeScope(unsigned bytes);
+        ~PointerSizeScope();
+        PointerSizeScope(const PointerSizeScope &) = delete;
+        PointerSizeScope &operator=(const PointerSizeScope &) = delete;
+        PointerSizeScope(PointerSizeScope &&) = delete;
+        PointerSizeScope &operator=(PointerSizeScope &&) = delete;
+
+    private:
+        unsigned _previous;
+    };
 
     // what a `function<R(P...)>` is: a return type and a parameter list, and nothing else. defined
     // below ValueType, which it is made of; only the handle appears inside the class

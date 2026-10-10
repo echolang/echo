@@ -1,4 +1,5 @@
 #include "Compiler/TargetSubtarget.h"
+#include "Compiler/CodegenTarget.h"
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/MC/MCSubtargetInfo.h>
@@ -96,6 +97,13 @@ void ensure_native_target_registered()
         LLVMInitializeX86AsmPrinter();
         LLVMInitializeX86AsmParser();
 #endif
+        // wasi is a real cross on every host. CodegenTarget names
+        // `wasm32-unknown-wasip1`; without these, lookupTarget refuses it
+        LLVMInitializeWebAssemblyTargetInfo();
+        LLVMInitializeWebAssemblyTarget();
+        LLVMInitializeWebAssemblyTargetMC();
+        LLVMInitializeWebAssemblyAsmPrinter();
+        LLVMInitializeWebAssemblyAsmParser();
         return true;
     }();
 
@@ -105,10 +113,15 @@ void ensure_native_target_registered()
 Subtarget baseline_subtarget_for(const std::string &triple)
 {
     Subtarget subtarget;
-    subtarget.cpu = baseline_cpu_of(llvm::Triple(triple));
+    const llvm::Triple parsed(triple);
+    subtarget.cpu = baseline_cpu_of(parsed);
 
-    // no baseline row carries features: a feature the CPU already implies does not need saying, and
-    // one it does not imply is not a baseline
+    // wasm SIMD is 16 bytes, which is the language's vector cap. without +simd128
+    // LLVM scalarizes every `simd<T, N>` on that row
+    if (parsed.isWasm()) {
+        subtarget.features = "+simd128";
+    }
+
     return subtarget;
 }
 
@@ -126,6 +139,15 @@ bool resolve_subtarget(
         // name. The default must never reach here: `getHostCPUName()` is `-march=native`, which is an
         // object that may not run on the machine next to it, with an illegal instruction rather than a
         // diagnostic - and `echoc build` hands somebody a binary
+        const llvm::Triple host(llvm::sys::getDefaultTargetTriple());
+        const llvm::Triple target(triple);
+
+        if (target.getArch() != host.getArch() || target.getOS() != host.getOS()) {
+            out_error = fmt::format(
+                "--target-cpu native is this machine; the target '{}' is not", triple);
+            return false;
+        }
+
         out_subtarget.cpu = llvm::sys::getHostCPUName().str();
         out_subtarget.features = host_feature_string();
     }
@@ -192,6 +214,44 @@ std::vector<std::string> split_target_features(const std::string &features)
 std::string subtarget_signature(const Subtarget &subtarget)
 {
     return "cpu=" + subtarget.cpu + ";features=" + subtarget.features + ";";
+}
+
+bool append_codegen_cc_cpu_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    const std::string &cpu_request,
+    const std::string &features_request,
+    std::string &out_error)
+{
+    Subtarget sub;
+    if (!resolve_subtarget(
+            target.effective_triple(),
+            cpu_request,
+            features_request,
+            sub,
+            out_error)) {
+        return false;
+    }
+
+    // clang's `-target-cpu` does not accept LLVM's floor name `generic` on x86
+    // (`x86-64` is the spelling). omitting the flag is the same floor: clang
+    // already compiles for the triple's baseline. a named CPU (apple-m1, a
+    // written `--target-cpu`) still has to be said
+    if (!sub.cpu.empty() && sub.cpu != k_generic_cpu) {
+        argv.push_back("-Xclang");
+        argv.push_back("-target-cpu");
+        argv.push_back("-Xclang");
+        argv.push_back(sub.cpu);
+    }
+
+    for (const std::string &feature : split_target_features(sub.features)) {
+        argv.push_back("-Xclang");
+        argv.push_back("-target-feature");
+        argv.push_back("-Xclang");
+        argv.push_back(feature);
+    }
+
+    return true;
 }
 
 };

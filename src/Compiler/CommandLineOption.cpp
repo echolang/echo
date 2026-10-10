@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -38,16 +39,32 @@ namespace
         return Compiler::parse_test_filter(value, filter, out_error);
     }
 
-    bool check_target_os(const std::string &value, std::string &out_error)
+    std::vector<Compiler::OptionValue> target_os_values()
     {
-        if (Compiler::TargetFacts::is_known_operating_system(value)) {
-            return true;
+        std::vector<Compiler::OptionValue> out;
+        for (const std::string &name : Compiler::TargetFacts::known_operating_systems()) {
+            unsigned int mask = Compiler::accepts::all;
+            const char *summary = "evaluate conditions as this OS";
+            const char *description =
+                "Picks the '#[if: os == ...]' arms. 'build' of ios or wasi is a real cross.";
+            if (Compiler::TargetFacts::is_emit_only_operating_system(name)) {
+                mask = Compiler::accepts::build
+                    | Compiler::accepts::lsp
+                    | Compiler::accepts::clean;
+                summary = "cross-compile; 'run' and 'test' refuse this OS";
+                description =
+                    "'build', 'lsp' and 'clean' only. 'run' and 'test' would pick this OS's "
+                    "constants and then execute them on the host.";
+            }
+            out.push_back({
+                name.c_str(),
+                mask,
+                0,
+                summary,
+                description
+            });
         }
-
-        out_error = fmt::format(
-            "unknown --target-os '{}', expected one of: {}",
-            value, fmt::join(Compiler::TargetFacts::known_operating_systems(), ", "));
-        return false;
+        return out;
     }
 
     bool check_target_arch(const std::string &value, std::string &out_error)
@@ -507,19 +524,21 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "evaluated against the name you give here, so the other platform's regions are the ones that "
             "get parsed:\n"
             "  echoc build --target-os linux -o app main.eco\n"
-            "One of 'darwin', 'linux', 'windows', 'ios' or 'android'. A name outside that list is an "
+            "One of 'darwin', 'linux', 'windows', 'ios', 'android' or 'wasi'. A name outside that list is an "
             "error rather than a condition that is quietly false, because '#[if: os == darwn]' should "
             "not be a region that vanishes in silence.\n"
             "On Darwin, 'echoc build --target-os ios' is a real cross-compile: objects and C "
             "sources target the iOS simulator SDK (`<arch>-apple-ios15.0-simulator`, this "
             "machine's arch unless '--target-arch' says otherwise). Pass '--ios-device' as "
-            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc run --target-os ios' "
-            "still only picks '#[if:]' arms and JITs for this machine, like every other "
-            "'--target-os'. Other names still only pick '#[if:]' arms on every subcommand - "
-            "there is no Linux sysroot on a Mac.\n"
+            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc build --target-os wasi' "
+            "is a real cross on every host (`wasm32-unknown-wasip1`, needs a WASI SDK or "
+            "`WASI_SDK_PATH`). 'wasi' is refused on 'run' and 'test': those would pick wasi "
+            "constants and then execute them on the host. 'echoc run --target-os ios' still "
+            "only picks '#[if:]' arms and JITs for this machine.\n"
             "'clean' takes it too, because a manifest may hide its '#[depends:]' behind a condition: "
-            "without the same flag, the graph 'clean' walks is not the graph your build produced.",
-            {}, check_target_os
+            "without the same flag, the graph 'clean' walks is not the graph your build produced.\n"
+            "'lsp' takes 'wasi' so a wasi-only project's '#[wasm:]' is accepted in the editor.",
+            target_os_values(), nullptr
         },
         {
             Opt::t_target_arch, "target-arch", nullptr, '\0',
@@ -530,10 +549,12 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
             "admits:\n"
             "  echoc build --target-arch x86_64 -o app main.eco\n"
-            "Same closed vocabulary a condition admits. Combined with '--target-os ios' on "
+            "One of 'arm64', 'x86_64' or 'wasm32'. Combined with '--target-os ios' on "
             "'build' it also chooses the simulator triple's arch. '--ios-device' is arm64: an "
             "explicit '--target-arch' other than arm64 is refused, while a host that is not "
-            "arm64 still emits arm64 and conditions see arm64 too. An unknown name is an error.",
+            "arm64 still emits arm64 and conditions see arm64 too. '--target-os wasi' on "
+            "'build' defaults to wasm32 when this flag is omitted, and refuses any other "
+            "arch. An unknown name is an error.",
             {}, check_target_arch
         },
         {

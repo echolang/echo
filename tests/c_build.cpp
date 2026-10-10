@@ -7,6 +7,7 @@
 #include <Compiler/TargetFacts.h>
 
 #include <filesystem>
+#include <sstream>
 #include <vector>
 
 #include "subprocess.h"
@@ -248,6 +249,36 @@ TEST_CASE("editing only a header moves the key", "[cbuild][cache]")
 
     REQUIRE(key_of(unchanged) != key_of(after));
     REQUIRE(after.front().find("miss") != std::string::npos);
+}
+
+TEST_CASE("a native lib's C objects do not share an exe's", "[cbuild][cache]")
+{
+    ScopedProject project("lib_vs_exe_cc");
+
+    write_shim(project, "#define ANSWER 42\n");
+
+    const Compiler::CBuildSpec spec = spec_for(project, "shimtest");
+
+    Compiler::CompilerOptions exe;
+    Compiler::CompilerOptions lib;
+    lib.codegen.exec_model = Compiler::ExecModel::t_library;
+
+    std::vector<std::string> exe_explain;
+    Compiler::CBuildResult exe_result;
+    std::string error;
+    REQUIRE(Compiler::build_c_sources(
+        spec, exe, project.build_dir() / "exe", project.root() / "scratch",
+        exe_explain, exe_result, error));
+    REQUIRE(error.empty());
+
+    std::vector<std::string> lib_explain;
+    Compiler::CBuildResult lib_result;
+    REQUIRE(Compiler::build_c_sources(
+        spec, lib, project.build_dir() / "lib", project.root() / "scratch",
+        lib_explain, lib_result, error));
+    REQUIRE(error.empty());
+
+    REQUIRE(key_of(exe_explain) != key_of(lib_explain));
 }
 
 TEST_CASE("a define changes the key without touching a file", "[cbuild][cache]")

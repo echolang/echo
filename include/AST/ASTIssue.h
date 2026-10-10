@@ -243,6 +243,13 @@ namespace AST
         // overload resolution. a name that is not declared at all stays UnknownFunction - these
         // three are the cases where candidates exist but none or several of them answer the call
         MAKE_ISSUE_DEF1(DuplicateFunctionSignature, IssueSeverity::Error, const std::string, _message);
+
+        // two `#[export]`s of one name in the bundle. its own kind rather than a GenericError
+        // because the first site is a *label*: the sentence says the name is taken, and the
+        // collector's dedup key is that sentence - so a second location folded into the English
+        // would make two clashes at one line read as one
+        MAKE_ISSUE_DEF2(DuplicateExportName, IssueSeverity::Error, const std::string, export_name, const TokenReference, first_declaration,
+            std::vector<IssueLabel> labels() const override;);
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
 

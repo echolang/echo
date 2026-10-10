@@ -11,10 +11,9 @@
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
 #include "Compiler/TargetFacts.h"
+#include "Compiler/TargetSubtarget.h"
 
 #include <fmt/core.h>
-
-
 
 #include <fstream>
 #include <map>
@@ -136,6 +135,11 @@ bool c_spec_digest(
     digest = Compiler::fnv1a64(
         Compiler::apple_sdk_root(options.codegen.apple_sdk).string(), digest);
 
+    if (options.codegen.is_wasm()) {
+        digest = Compiler::fnv1a64(Compiler::wasi_sysroot().string(), digest);
+        digest = Compiler::fnv1a64(Compiler::wasi_resource_dir().string(), digest);
+    }
+
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
     }
@@ -147,6 +151,11 @@ bool c_spec_digest(
     for (const std::string &flag : spec.flags) {
         digest = Compiler::fnv1a64(flag, digest);
     }
+
+    // `-fvisibility=hidden` on a native lib changes every defined C global, so
+    // an exe and a lib of the same module cannot share a C object
+    digest = Compiler::fnv1a64(
+        options.codegen.is_native_library() ? std::string("lib") : std::string("cmd"), digest);
 
     out_digest = digest;
 
@@ -542,16 +551,34 @@ bool Compiler::build_c_sources(
         out_explain.push_back(fmt::format("  {}  {}  miss", source.filename().string(), key));
 
         job.miss = true;
-        job.argv = { "clang", "-c" };
+        job.argv = { Compiler::cc_driver(options.codegen), "-c" };
 
         // PIC is the Unix loadable-object rule. Windows objects are already relocatable;
-        // clang-cl rejects `-fPIC`
-        if (TargetFacts::host().operating_system != "windows") {
+        // clang-cl rejects `-fPIC`. a WASI command module is static relocatable
+        if (!options.codegen.is_windows() && options.codegen.uses_pic()) {
             job.argv.push_back("-fPIC");
         }
 
-        Compiler::append_windows_sysroot_cc_args(job.argv);
-        if (!Compiler::append_apple_target_args(job.argv, options.codegen, out_error)) {
+        // a native lib's C objects would otherwise export every defined global.
+        // Echo units go through hide_non_exported_symbols; C has to say it here.
+        // authors who want a C symbol exported mark it `visibility("default")`
+        if (options.codegen.is_native_library() && !options.codegen.is_windows()) {
+            job.argv.push_back("-fvisibility=hidden");
+        }
+
+        if (!options.codegen.is_cross()) {
+            Compiler::append_windows_sysroot_cc_args(job.argv);
+        }
+        if (!Compiler::append_codegen_target_args(job.argv, options.codegen, out_error)) {
+            return false;
+        }
+
+        if (!Compiler::append_codegen_cc_cpu_args(
+                job.argv,
+                options.codegen,
+                options.target_cpu,
+                options.target_features,
+                out_error)) {
             return false;
         }
 
