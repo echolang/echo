@@ -93,12 +93,8 @@ namespace Compiler::LLVM
 
         // zeroext/signext for a C-ABI i1/i8/i16. C reads the whole register; without
         // the extend the upper bits are undef. a no-op unless `shape` is t_c, so the
-        // calling shape is the one decision: a declaration, a call through
-        // `extern function<...>`, and the unit-local adapter `&name` produces
-        void apply_c_integer_ext(
-            llvm::Function &func,
-            const AST::FunctionDeclNode &node,
-            FunctionCallingShape shape);
+        // calling shape is the one decision. two spellings of one loop: a Function
+        // (declaration or the unit-local adapter `&name` produces) and a CallBase
         void apply_c_integer_ext(
             llvm::Function &func,
             const AST::CallableSignature &signature,

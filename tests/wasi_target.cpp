@@ -442,6 +442,21 @@ TEST_CASE("codegen target args for wasi come from append_wasi_target_args", "[ta
     REQUIRE_FALSE(Compiler::wasi_wasm_ld().empty());
 }
 
+TEST_CASE("wasi clang and wasm-ld sit in the same bin", "[target][wasi]")
+{
+    const std::filesystem::path clang = Compiler::wasi_clang();
+    const std::filesystem::path wasm_ld = Compiler::wasi_wasm_ld();
+    if (clang.empty()) {
+        return;
+    }
+
+    if (wasm_ld.empty()) {
+        return;
+    }
+
+    REQUIRE(wasm_ld.parent_path() == clang.parent_path());
+}
+
 TEST_CASE("an extern block import attribute applies to every function", "[target][wasi]")
 {
     ScopedProject project("block_import");
@@ -602,10 +617,12 @@ TEST_CASE("a cross-module C callback is a unit-local adapter", "[target][wasi]")
         "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir -o app.wasm "
         "-m " + EchoTests::quoted(project.root() / "lib") + " app.eco");
     INFO(ir.output);
-    REQUIRE(ir.exit_code == 0);
     REQUIRE(ir.output.find("ODR") == std::string::npos);
     REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "zeroext"));
     REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "signext"));
+    if (!Compiler::wasi_sysroot().empty()) {
+        REQUIRE(ir.exit_code == 0);
+    }
 }
 
 TEST_CASE("wasmtime runs a wasi command that prints 1", "[target][wasi]")

@@ -103,31 +103,22 @@ namespace
         "/usr/local/opt/wasi-sdk",
     };
 
-    void fill_from_prefix(Compiler::WasiSdk &out, const std::filesystem::path &prefix)
-    {
-        if (out.sysroot.empty()) {
-            out.sysroot = wasi_sysroot_at(prefix);
-        }
-        if (out.resource_dir.empty()) {
-            out.resource_dir = resource_dir_in_sdk(prefix);
-        }
-        if (out.clang.empty()) {
-            out.clang = clang_in_sdk(prefix);
-        }
-    }
-
-    Compiler::WasiSdk resolve_wasi_sdk()
+    Compiler::WasiSdk sdk_from_prefix(const std::filesystem::path &prefix)
     {
         Compiler::WasiSdk out;
+        out.sysroot = wasi_sysroot_at(prefix);
+        out.resource_dir = resource_dir_in_sdk(prefix);
+        out.clang = clang_in_sdk(prefix);
+        return out;
+    }
 
-        if (const char *asked = std::getenv("WASI_SDK_PATH")) {
-            fill_from_prefix(out, asked);
-        }
+    bool is_complete_sdk(const Compiler::WasiSdk &sdk)
+    {
+        return !sdk.sysroot.empty() && !sdk.clang.empty();
+    }
 
-        for (const std::filesystem::path &prefix : k_sdk_prefixes) {
-            fill_from_prefix(out, prefix);
-        }
-
+    void fill_split_install(Compiler::WasiSdk &out)
+    {
         if (out.sysroot.empty()) {
             const std::filesystem::path libc_prefixes[] = {
                 "/opt/homebrew/opt/wasi-libc",
@@ -155,27 +146,42 @@ namespace
                 }
             }
         }
+    }
 
-        // wasm-ld belongs next to the clang this row already chose, so a
-        // later prefix cannot mix a linker from a different SDK
+    void seat_wasm_ld(Compiler::WasiSdk &out)
+    {
         if (!out.clang.empty()) {
-            std::filesystem::path beside = out.clang.parent_path() / "wasm-ld";
-#if defined(_WIN32)
-            beside += ".exe";
-#endif
-            std::error_code ec;
-            if (std::filesystem::is_regular_file(beside, ec)) {
-                out.wasm_ld = beside;
+            out.wasm_ld = tool_in_sdk(out.clang.parent_path().parent_path(), "wasm-ld");
+            return;
+        }
+
+        auto found = llvm::sys::findProgramByName("wasm-ld");
+        if (found) {
+            out.wasm_ld = found.get();
+        }
+    }
+
+    Compiler::WasiSdk resolve_wasi_sdk()
+    {
+        Compiler::WasiSdk out;
+
+        // WASI_SDK_PATH is a unit: take that prefix and do not scavenge
+        // another full SDK for the columns it left empty
+        if (const char *asked = std::getenv("WASI_SDK_PATH"); asked && *asked) {
+            out = sdk_from_prefix(asked);
+        }
+        else {
+            for (const std::filesystem::path &prefix : k_sdk_prefixes) {
+                Compiler::WasiSdk candidate = sdk_from_prefix(prefix);
+                if (is_complete_sdk(candidate)) {
+                    out = candidate;
+                    break;
+                }
             }
         }
 
-        if (out.wasm_ld.empty()) {
-            auto found = llvm::sys::findProgramByName("wasm-ld");
-            if (found) {
-                out.wasm_ld = found.get();
-            }
-        }
-
+        fill_split_install(out);
+        seat_wasm_ld(out);
         return out;
     }
 };

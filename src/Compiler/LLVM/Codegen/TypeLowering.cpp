@@ -348,8 +348,9 @@ void TypeLowering::apply_function_attributes(
     // C is FunctionCallingShape::t_c: an `extern` or an `#[export]`. without
     // zeroext/signext a bool/int8/int16 leaves the upper bits of the register
     // undefined, and a C caller (dlsym, JS) reads them. the shape is the
-    // decision; apply_c_integer_ext is a no-op for t_echo
-    apply_c_integer_ext(*func, *node, calling_shape_of(*node));
+    // decision; apply_c_integer_ext is a no-op for t_echo. a t_c declaration
+    // has no receiver, so c_function_type().signature() is the written parameters
+    apply_c_integer_ext(*func, node->c_function_type().signature(), calling_shape_of(*node));
 
     // **the `sret` attribute is what makes the hidden argument mean something to the optimizer**, and
     // Compiler::LLVM::indirect_return_attributes is the one place that spells it - every call site applies
@@ -458,32 +459,6 @@ TypeLowering::FunctionCallingShape TypeLowering::calling_shape_of(const AST::Fun
     }
 
     return FunctionCallingShape::t_echo;
-}
-
-void TypeLowering::apply_c_integer_ext(
-    llvm::Function &func,
-    const AST::FunctionDeclNode &node,
-    FunctionCallingShape shape
-)
-{
-    if (shape != FunctionCallingShape::t_c) {
-        return;
-    }
-
-    if (const auto ext = c_integer_ext(node.get_return_type())) {
-        func.addRetAttr(*ext);
-    }
-
-    for (size_t i = 0; i < node.args.size(); i++) {
-        const AST::VarDeclNode *arg = node.args[i];
-        if (arg == nullptr || !arg->has_type() || i >= func.arg_size()) {
-            continue;
-        }
-
-        if (const auto ext = c_integer_ext(arg->type())) {
-            func.getArg(static_cast<unsigned>(i))->addAttr(*ext);
-        }
-    }
 }
 
 void TypeLowering::apply_c_integer_ext(

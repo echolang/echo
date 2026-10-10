@@ -42,13 +42,7 @@ void hide_non_exported_symbols(CodegenContext &ctx)
                 continue;
             }
 
-            bool keep = exported.count(fn.getName().str()) > 0;
-            if (!keep && fn.hasFnAttribute("wasm-export-name")) {
-                keep = exported.count(
-                    fn.getFnAttribute("wasm-export-name").getValueAsString().str()) > 0;
-            }
-
-            if (keep) {
+            if (exported.count(fn.getName().str()) > 0) {
                 fn.setVisibility(llvm::GlobalValue::DefaultVisibility);
                 continue;
             }

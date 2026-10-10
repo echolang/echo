@@ -21,7 +21,6 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
-#include <llvm/TargetParser/Triple.h>
 
 #include <cassert>
 #include <filesystem>
@@ -377,10 +376,10 @@ namespace Compiler::LLVM
             return global;
         }
 
-        // the object is for this machine, so CRT names follow the triple rather than
-        // `--target-os`. that flag only picks `#[if:]` arms; it does not retarget
+        // the object is for this machine, so CRT names follow the emit row rather
+        // than `--target-os`. that flag only picks `#[if:]` arms; it does not retarget
         bool targeting_windows() const {
-            return llvm::Triple(target_triple).isOSWindows();
+            return options.codegen.is_windows();
         }
 
         bool targeting_wasm() const {

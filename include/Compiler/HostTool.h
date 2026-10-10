@@ -87,9 +87,10 @@ namespace Compiler
         std::string &out_error
     );
 
-    // one WASI SDK lookup. sysroot, resource dir, clang and wasm-ld are
-    // resolved together so CBuild and the wasm link cannot pick a sysroot
-    // from one prefix and a clang from another
+    // one WASI SDK lookup. WASI_SDK_PATH is a unit; discovery takes the
+    // first complete SDK prefix. Homebrew wasi-libc / wasi-runtimes fill a
+    // leftover sysroot or resource dir. wasm-ld sits next to clang, or on
+    // PATH only when no clang was chosen
     struct WasiSdk
     {
         std::filesystem::path sysroot;
