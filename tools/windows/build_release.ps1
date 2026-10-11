@@ -18,6 +18,21 @@ function Invoke-Checked {
     }
 }
 
+# native stderr through `2>&1 | ForEach-Object` becomes ErrorRecords; with
+# `$ErrorActionPreference = "Stop"` the first byte on stderr kills the step
+# and GHA logs only "Process completed with exit code 1". inherit the
+# streams, snapshot LASTEXITCODE before the next cmdlet runs
+function Invoke-Native {
+    param([string]$What, [string]$File, [string[]]$Arguments = @())
+    Write-Host $What
+    & $File @Arguments
+    $code = $LASTEXITCODE
+    Write-Host "${What}: exit $code"
+    if ($code -ne 0) {
+        exit $code
+    }
+}
+
 foreach ($name in @("LLVM_PATH", "BUILD_TYPE", "VERSION", "BIN_NAME", "EPM_BIN_NAME")) {
     $value = [Environment]::GetEnvironmentVariable($name)
     if ([string]::IsNullOrEmpty($value)) {
@@ -143,17 +158,14 @@ Invoke-WithCleanPath -BinDir $stageBin -Block {
     $scratch = Join-Path $env:RUNNER_TEMP "echo-smoke"
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     Set-Location $scratch
-    Set-Content -Path smoke.eco -Value "assert(1 == 1);`nvar `$xs = [1, 2, 3];`ndprint(`$xs[1]);`n" -NoNewline
-    & $echoc run smoke.eco 2>&1 | ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & $echoc build smoke.eco -o smoke.exe 2>&1 | ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Set-Content -Path smoke.eco -Value "assert(1 == 1);`nvar `$xs = [1, 2, 3];`ndprint(`$xs[1]);`n" -NoNewline -Encoding ascii
+    Invoke-Native -What "echoc run" -File $echoc -Arguments @("run", "smoke.eco")
+    Invoke-Native -What "echoc build" -File $echoc -Arguments @("build", "smoke.eco", "-o", "smoke.exe")
     if (-not (Test-Path -LiteralPath "smoke.exe")) {
         Write-Error "echoc build did not write smoke.exe"
         exit 1
     }
-    & .\smoke.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Invoke-Native -What "smoke.exe" -File (Join-Path $scratch "smoke.exe") -Arguments @()
 }
 Set-Location $root
 
@@ -277,11 +289,9 @@ Invoke-WithCleanPath -BinDir (Join-Path $setupDir "bin") -Block {
     $scratch = Join-Path $env:RUNNER_TEMP "echo-setup-build"
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     Set-Location $scratch
-    Set-Content -Path hello.eco -Value "echo 1;`n" -NoNewline
-    & $installed build hello.eco -o hello.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & .\hello.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Set-Content -Path hello.eco -Value "echo 1;`n" -NoNewline -Encoding ascii
+    Invoke-Native -What "setup echoc build" -File $installed -Arguments @("build", "hello.eco", "-o", "hello.exe")
+    Invoke-Native -What "hello.exe" -File (Join-Path $scratch "hello.exe") -Arguments @()
 }
 Set-Location $root
 
