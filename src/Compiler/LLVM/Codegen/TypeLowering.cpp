@@ -24,6 +24,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/ASTWasm.h"
 
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/BasicBlock.h>
@@ -45,6 +46,7 @@
 
 namespace
 {
+    // C ABI promotion of an integer narrower than `int`. switch with no tail
     std::optional<llvm::Attribute::AttrKind> c_integer_ext(const AST::ValueType &type)
     {
         if (!type.is_primitive()) {
@@ -59,8 +61,35 @@ namespace
         case AST::ValueTypePrimitive::t_int8:
         case AST::ValueTypePrimitive::t_int16:
             return llvm::Attribute::SExt;
-        default:
+        case AST::ValueTypePrimitive::t_int32:
+        case AST::ValueTypePrimitive::t_int64:
+        case AST::ValueTypePrimitive::t_uint32:
+        case AST::ValueTypePrimitive::t_uint64:
+        case AST::ValueTypePrimitive::t_usize:
+        case AST::ValueTypePrimitive::t_isize:
+        case AST::ValueTypePrimitive::t_float32:
+        case AST::ValueTypePrimitive::t_float64:
+        case AST::ValueTypePrimitive::t_void:
+        case AST::ValueTypePrimitive::t_complex:
             return std::nullopt;
+        }
+
+        assert(false && "unhandled ValueTypePrimitive in c_integer_ext");
+        return std::nullopt;
+    }
+
+    // a declaration and a call spell the same attributes through this
+    template <typename Callable>
+    void attach_c_integer_ext(Callable &target, const AST::CallableSignature &signature)
+    {
+        if (const auto ext = c_integer_ext(signature.return_type)) {
+            target.addRetAttr(*ext);
+        }
+
+        for (size_t i = 0; i < signature.parameter_types.size() && i < target.arg_size(); i++) {
+            if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
+                target.addParamAttr(static_cast<unsigned>(i), *ext);
+            }
         }
     }
 };
@@ -546,22 +575,8 @@ void TypeLowering::apply_c_integer_ext(
     FunctionCallingShape shape
 )
 {
-    if (shape != FunctionCallingShape::t_c) {
-        return;
-    }
-
-    if (const auto ext = c_integer_ext(signature.return_type)) {
-        func.addRetAttr(*ext);
-    }
-
-    for (size_t i = 0; i < signature.parameter_types.size(); i++) {
-        if (i >= func.arg_size()) {
-            break;
-        }
-
-        if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
-            func.getArg(static_cast<unsigned>(i))->addAttr(*ext);
-        }
+    if (shape == FunctionCallingShape::t_c) {
+        attach_c_integer_ext(func, signature);
     }
 }
 
@@ -571,22 +586,8 @@ void TypeLowering::apply_c_integer_ext(
     FunctionCallingShape shape
 )
 {
-    if (shape != FunctionCallingShape::t_c) {
-        return;
-    }
-
-    if (const auto ext = c_integer_ext(signature.return_type)) {
-        call.addRetAttr(*ext);
-    }
-
-    for (size_t i = 0; i < signature.parameter_types.size(); i++) {
-        if (i >= call.arg_size()) {
-            break;
-        }
-
-        if (const auto ext = c_integer_ext(signature.parameter_types[i])) {
-            call.addParamAttr(static_cast<unsigned>(i), *ext);
-        }
+    if (shape == FunctionCallingShape::t_c) {
+        attach_c_integer_ext(call, signature);
     }
 }
 
@@ -679,9 +680,11 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
             ));
         }
 
-        if (node->import_module && _ctx.targeting_wasm()) {
-            extern_llvm_func->addFnAttr("wasm-import-module", *node->import_module);
-            extern_llvm_func->addFnAttr("wasm-import-name", *node->extern_symbol);
+        if (_ctx.targeting_wasm()) {
+            if (const std::optional<std::string> import_module = AST::wasm_import_module_of(*node)) {
+                extern_llvm_func->addFnAttr("wasm-import-module", *import_module);
+                extern_llvm_func->addFnAttr("wasm-import-name", *node->extern_symbol);
+            }
         }
 
         cmp_unit.function_table.push_function(func_name, node, extern_llvm_func);

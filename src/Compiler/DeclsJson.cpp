@@ -2,6 +2,7 @@
 
 #include "AST/ASTAttributes.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTExternInterface.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTTypeParam.h"
@@ -13,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cassert>
+#include <cstdint>
 #include <filesystem>
 #include <unordered_set>
 
@@ -122,7 +124,7 @@ Json json_location(
 Json json_tools(const AST::AttributeList &attributes)
 {
     Json out = Json::array();
-    std::unordered_set<std::string> seen;
+    std::unordered_set<uint64_t> seen;
 
     for (AST::AttributeNode *attr : attributes.all()) {
         if (attr == nullptr) {
@@ -135,8 +137,10 @@ Json json_tools(const AST::AttributeList &attributes)
             continue;
         }
 
-        // each parse pass drains a fresh AttributeNode over the same tokens
-        if (!seen.insert(attr->attribute_id.value()).second) {
+        // keyed on position: one tool attribute written twice is two entries
+        const uint64_t position =
+            (static_cast<uint64_t>(attr->attribute_id.line()) << 32) | attr->attribute_id.column();
+        if (!seen.insert(position).second) {
             continue;
         }
 
@@ -462,15 +466,9 @@ Json json_type_decl(AST::TypeDeclNode &decl, const AST::CoreTypes &core)
     if (type.is_extern_interface_kind()) {
         Json requirements = Json::array();
 
-        for (AST::FunctionDeclNode *member : type.methods()) {
-            if (member == nullptr) {
-                continue;
-            }
-
+        for (AST::FunctionDeclNode *member : AST::extern_interface_requirements(type)) {
             Json req = json_function(*member, core);
-            req["link"] = member->abi_link_name.has_value()
-                ? Json(*member->abi_link_name)
-                : Json(member->func_name());
+            req["link"] = Json(member->requirement_link_name());
             requirements.push_back(std::move(req));
         }
 

@@ -57,6 +57,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <cassert>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -65,6 +66,17 @@
 
 namespace Compiler::LLVM
 {
+
+namespace
+{
+    // the row's own entry symbol. `run` refuses a library, so every JIT program has one
+    std::string jit_entry_symbol(const CodegenContext &ctx)
+    {
+        const std::optional<const char *> entry = ctx.options.codegen.entry_symbol();
+        assert(entry.has_value() && "the JIT executes a command, and a command has an entry symbol");
+        return entry.value_or("");
+    }
+}
 
 Backend::Backend(CodegenContext &ctx) : _ctx(ctx)
 {
@@ -277,9 +289,10 @@ int Backend::run_main(const std::vector<std::string> &arguments, const char *con
             "run_main was called before prepare_execution built the engine", nullptr);
     }
 
-    auto *func = _engine->FindFunctionNamed(ECO_ENTRY_SYMBOL_NAME);
+    const std::string entry = jit_entry_symbol(_ctx);
+    auto *func = _engine->FindFunctionNamed(entry);
     if (!func) {
-        llvm::errs() << "Function '" ECO_ENTRY_SYMBOL_NAME "' not found in module.\n";
+        llvm::errs() << "Function '" << entry << "' not found in module.\n";
         return 1;
     }
 
@@ -637,8 +650,9 @@ bool Backend::link_program(
 
 void Backend::gen_debug_symbols(const std::string &executable_name)
 {
+    // Mach-O object on a host that has dsymutil
 #if defined(__APPLE__)
-    if (!_ctx.options.emitting_debug_info() || _ctx.options.codegen.is_wasm()) {
+    if (!_ctx.options.emitting_debug_info() || !_ctx.options.codegen.is_darwin()) {
         return;
     }
 
@@ -907,14 +921,16 @@ void Backend::prune_to_entry()
         roots.insert(name);
     }
 
-    Compiler::LLVM::run_module_passes(*_ctx.current_module(), _target_machine.get(), [&roots](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
+    const std::string entry = jit_entry_symbol(_ctx);
+
+    Compiler::LLVM::run_module_passes(*_ctx.current_module(), _target_machine.get(), [&roots, &entry](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
         //
         // declarations are left alone by InternalizePass, which is what keeps the JIT able to resolve
         // printf, malloc, free and every `extern` symbol out of the host process
-        modulePM.addPass(llvm::InternalizePass([&roots](const llvm::GlobalValue &gv) {
-            if (gv.getName() == ECO_ENTRY_SYMBOL_NAME) {
+        modulePM.addPass(llvm::InternalizePass([&roots, &entry](const llvm::GlobalValue &gv) {
+            if (gv.getName() == entry) {
                 return true;
             }
 
@@ -935,8 +951,8 @@ void Backend::prune_to_entry()
     _prune_report = fmt::format("[prune]\n  {} function definitions, {} reachable from {}\n",
         before, survivors.size(),
         _jit_roots.empty()
-            ? std::string(ECO_ENTRY_SYMBOL_NAME)
-            : fmt::format("{} and {} root{}", ECO_ENTRY_SYMBOL_NAME, _jit_roots.size(),
+            ? entry
+            : fmt::format("{} and {} root{}", entry, _jit_roots.size(),
                 _jit_roots.size() == 1 ? "" : "s"));
 
     for (const std::string &name : survivors) {

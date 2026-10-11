@@ -1,5 +1,6 @@
 #include "Compiler/CodegenTarget.h"
 
+#include "Compiler/RuntimeSymbols.h"
 #include "Compiler/TargetFacts.h"
 
 #include "eco.h"
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <utility>
 
 namespace Compiler
 {
@@ -19,46 +21,147 @@ namespace Compiler
 static constexpr const char *k_ios_min_version = "15.0";
 static constexpr const char *k_ios_device_arch = "arm64";
 static constexpr const char *k_wasi_arch = "wasm32";
+static constexpr const char *k_wasi_os = "wasi";
+
+namespace
+{
+    // the os column, from a triple. asked when a row is built
+    TargetOs os_of(const llvm::Triple &triple)
+    {
+        if (triple.isWasm()) {
+            return TargetOs::t_wasi;
+        }
+
+        if (triple.isiOS()) {
+            return TargetOs::t_ios;
+        }
+
+        if (triple.isOSDarwin()) {
+            return TargetOs::t_darwin;
+        }
+
+        if (triple.isOSWindows()) {
+            return TargetOs::t_windows;
+        }
+
+        if (triple.isOSLinux()) {
+            return TargetOs::t_linux;
+        }
+
+        return TargetOs::t_other;
+    }
+
+    const char *const k_entry_main[] = { ECO_ENTRY_SYMBOL_NAME };
+    const char *const k_entry_wasi[] = { ECO_ENTRY_SYMBOL_NAME, "__main_argc_argv" };
+}
+
+CodegenTarget::CodegenTarget()
+    : CodegenTarget(std::string(), std::string())
+{
+}
+
+CodegenTarget::CodegenTarget(std::string triple, std::string apple_sdk)
+    : _triple(std::move(triple))
+    , _apple_sdk(std::move(apple_sdk))
+{
+    const llvm::Triple parsed(effective_triple());
+    _os = os_of(parsed);
+    _pointer_bytes = parsed.isArch32Bit() ? 4 : 8;
+}
+
+CodegenTarget CodegenTarget::wasi()
+{
+    return for_triple(k_wasi_triple);
+}
+
+CodegenTarget CodegenTarget::for_triple(std::string triple)
+{
+    return CodegenTarget(std::move(triple), std::string());
+}
+
+CodegenTarget CodegenTarget::ios_simulator(const std::string &arch)
+{
+    return CodegenTarget(arch + "-apple-ios" + k_ios_min_version + "-simulator", "iphonesimulator");
+}
+
+CodegenTarget CodegenTarget::ios_device()
+{
+    return CodegenTarget(std::string(k_ios_device_arch) + "-apple-ios" + k_ios_min_version, "iphoneos");
+}
+
+CodegenTarget CodegenTarget::for_program(ExecModel model) const
+{
+    CodegenTarget row = *this;
+    row._exec_model = model;
+    return row;
+}
 
 std::string CodegenTarget::effective_triple() const
 {
-    return triple.empty() ? llvm::sys::getDefaultTargetTriple() : triple;
-}
-
-bool CodegenTarget::is_windows() const
-{
-    return llvm::Triple(effective_triple()).isOSWindows();
-}
-
-bool CodegenTarget::is_darwin() const
-{
-    return llvm::Triple(effective_triple()).isOSDarwin();
+    return _triple.empty() ? llvm::sys::getDefaultTargetTriple() : _triple;
 }
 
 std::optional<const char *> CodegenTarget::entry_symbol() const
 {
-    if (exec_model == ExecModel::t_library) {
+    if (is_library()) {
         return std::nullopt;
     }
 
-    return is_wasm() ? "__main_argc_argv" : ECO_ENTRY_SYMBOL_NAME;
+    return is_wasm() ? k_entry_wasi[1] : ECO_ENTRY_SYMBOL_NAME;
 }
 
-std::span<const char *const> CodegenTarget::reserved_entry_names() const
+ReservedExportNames CodegenTarget::reserved_export_names() const
 {
-    static const char *const k_main[] = { ECO_ENTRY_SYMBOL_NAME };
-    static const char *const k_wasi_command[] = { ECO_ENTRY_SYMBOL_NAME, "__main_argc_argv" };
+    ReservedExportNames out;
 
-    if (is_wasm() && exec_model != ExecModel::t_library) {
-        return k_wasi_command;
+    // wasm command: `__main_argc_argv`. everything else: `main`
+    out.entry = is_wasm() && !is_library()
+        ? std::span<const char *const>(k_entry_wasi)
+        : std::span<const char *const>(k_entry_main);
+
+    out.runtime = reserved_c_export_names();
+    out.runtime_prefix = k_compiler_runtime_prefix;
+
+    if (is_wasm()) {
+        out.wasm_crt = wasm_crt_names();
     }
 
-    return k_main;
+    return out;
 }
 
 unsigned CodegenTarget::entry_arg_count() const
 {
     return is_wasm() ? 2u : 3u;
+}
+
+EnvironSource CodegenTarget::environ_source() const
+{
+    switch (_os) {
+        case TargetOs::t_wasi: return EnvironSource::t_wasilibc_get_environ;
+        case TargetOs::t_darwin: return EnvironSource::t_ns_get_environ;
+        case TargetOs::t_ios: return EnvironSource::t_ns_get_environ;
+        case TargetOs::t_windows: return EnvironSource::t_none;
+        case TargetOs::t_linux: return EnvironSource::t_libc_environ;
+        case TargetOs::t_other: return EnvironSource::t_libc_environ;
+    }
+
+    assert(false && "unhandled TargetOs in environ_source");
+    return EnvironSource::t_libc_environ;
+}
+
+StdioUnbuffering CodegenTarget::stdio_unbuffering() const
+{
+    switch (_os) {
+        case TargetOs::t_windows: return StdioUnbuffering::t_ucrt_stdout_stderr;
+        case TargetOs::t_wasi: return StdioUnbuffering::t_wasi_libc_stdout;
+        case TargetOs::t_darwin: return StdioUnbuffering::t_none;
+        case TargetOs::t_ios: return StdioUnbuffering::t_none;
+        case TargetOs::t_linux: return StdioUnbuffering::t_none;
+        case TargetOs::t_other: return StdioUnbuffering::t_none;
+    }
+
+    assert(false && "unhandled TargetOs in stdio_unbuffering");
+    return StdioUnbuffering::t_none;
 }
 
 bool CodegenTarget::uses_pic() const
@@ -68,23 +171,23 @@ bool CodegenTarget::uses_pic() const
 
 bool CodegenTarget::snapshots_bitcode() const
 {
+    // wasm stays in this LLVMContext. a Windows-hosted round-trip failure is
+    // Emit.cpp's: a fact about this process, not this row
     return !is_wasm();
 }
 
 const char *CodegenTarget::library_suffix() const
 {
-    if (is_wasm()) {
-        return ".wasm";
+    switch (_os) {
+        case TargetOs::t_wasi: return ".wasm";
+        case TargetOs::t_darwin: return ".dylib";
+        case TargetOs::t_ios: return ".dylib";
+        case TargetOs::t_windows: return ".dll";
+        case TargetOs::t_linux: return ".so";
+        case TargetOs::t_other: return ".so";
     }
 
-    if (is_darwin()) {
-        return ".dylib";
-    }
-
-    if (is_windows()) {
-        return ".dll";
-    }
-
+    assert(false && "unhandled TargetOs in library_suffix");
     return ".so";
 }
 
@@ -94,7 +197,7 @@ const char *CodegenTarget::output_extension() const
         return ".wasm";
     }
 
-    if (exec_model != ExecModel::t_library) {
+    if (!is_library()) {
         return "";
     }
 
@@ -114,12 +217,10 @@ std::string CodegenTarget::library_file_name(const std::string &stem) const
     return std::string("lib") + stem + ext;
 }
 
-std::optional<const char *> CodegenTarget::library_refusal() const
+std::optional<const char *> library_refusal(const TargetFacts &facts)
 {
-    // a native lib is a loadable image and iOS does not load one from an app.
-    // `ios` covers the facts-only host row (`--target-os ios` off Darwin);
-    // apple_sdk covers the real Darwin cross
-    if (ios || !apple_sdk.empty()) {
+    // a phone does not dlopen an app-side dylib, host row included
+    if (facts.operating_system == "ios") {
         return "a native 'lib' target is a loadable library, and iOS does not load "
             "one from an app";
     }
@@ -145,26 +246,36 @@ std::filesystem::path CodegenTarget::output_path(std::filesystem::path path) con
     return path;
 }
 
-bool CodegenTarget::has_os_threads() const
-{
-    return !is_wasm();
-}
-
-std::string facts_architecture(
+bool facts_architecture(
     bool ios_device,
     const std::string &arch_override,
     const std::string &target_os,
-    bool emitting)
+    std::string &out_arch,
+    std::string &out_error)
 {
+    out_arch = arch_override;
+
+    if (target_os == k_wasi_os) {
+        // an explicit `--target-arch arm64` would emit a module that is not wasm
+        if (!arch_override.empty() && arch_override != k_wasi_arch) {
+            out_error = fmt::format("wasi is wasm32; --target-arch '{}' is not", arch_override);
+            return false;
+        }
+
+        out_arch = k_wasi_arch;
+        return true;
+    }
+
+    if (arch_override == k_wasi_arch) {
+        out_error = "wasm32 is only emitted for wasi - pass '--target-os wasi' as well";
+        return false;
+    }
+
     if (ios_device && arch_override.empty()) {
-        return k_ios_device_arch;
+        out_arch = k_ios_device_arch;
     }
 
-    if (emitting && target_os == "wasi" && arch_override.empty()) {
-        return k_wasi_arch;
-    }
-
-    return arch_override;
+    return true;
 }
 
 bool resolve_codegen_target(
@@ -174,8 +285,7 @@ bool resolve_codegen_target(
     CodegenTarget &out_target,
     std::string &out_error)
 {
-    out_target = {};
-    out_target.ios = facts.operating_system == "ios";
+    out_target = CodegenTarget();
 
     const bool host_is_darwin = TargetFacts::host().operating_system == "darwin";
 
@@ -201,18 +311,9 @@ bool resolve_codegen_target(
         }
     }
 
-    if (facts.operating_system == "wasi") {
-        // wasi is wasm32 on every host. an explicit `--target-arch arm64` would
-        // emit a module that is not wasm while conditions still said wasi
-        if (!arch_override.empty() && arch_override != k_wasi_arch) {
-            out_error = fmt::format(
-                "wasi is wasm32; --target-arch '{}' is not", arch_override);
-            return false;
-        }
-
-        out_target.triple = k_wasi_triple;
-        out_target.wasm = true;
-        out_target.pointer_bytes = 4;
+    // facts_architecture already refused any arch but wasm32 beside wasi
+    if (facts.operating_system == k_wasi_os) {
+        out_target = CodegenTarget::wasi();
         return true;
     }
 
@@ -221,15 +322,11 @@ bool resolve_codegen_target(
     }
 
     if (ios_device) {
-        out_target.triple = std::string("arm64-apple-ios") + k_ios_min_version;
-        out_target.apple_sdk = "iphoneos";
+        out_target = CodegenTarget::ios_device();
         return true;
     }
 
-    const std::string arch = facts.architecture.empty() ? "arm64" : facts.architecture;
-    out_target.triple = arch + "-apple-ios" + k_ios_min_version + "-simulator";
-    out_target.apple_sdk = "iphonesimulator";
-
+    out_target = CodegenTarget::ios_simulator(facts.architecture.empty() ? "arm64" : facts.architecture);
     return true;
 }
 

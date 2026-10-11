@@ -17,6 +17,8 @@
 
 #include <fmt/core.h>
 
+#include <cassert>
+
 namespace
 {
 AST::VarDeclNode *declare_slot(
@@ -45,11 +47,10 @@ void plant_forwarder_body(
 )
 {
     requirement.body = &payload.context.emplace_node<AST::ScopeNode>();
-    requirement.is_implicitly_generated = true;
+    requirement.body_is_synthesized = true;
 
-    if (requirement.args.empty()) {
-        return;
-    }
+    // a requirement is a method, so `$this` is always its first parameter
+    assert(!requirement.args.empty() && "an extern-interface requirement has a receiver");
 
     auto *this_var = payload.context.emplace_nodep<AST::VarNode>(requirement.args[0]);
     auto *this_read = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
@@ -85,22 +86,14 @@ void Parser::finalize_extern_interface(
     AST::ComplexType &owner = type->complex_type();
     const TokenReference at = type->name_token.value();
 
-    size_t ordinal = 0;
+    const std::vector<AST::FunctionDeclNode *> requirements = AST::extern_interface_requirements(owner);
 
-    for (AST::FunctionDeclNode *requirement : owner.methods()) {
-        if (requirement == nullptr) {
-            continue;
-        }
-
-        if (!requirement->abi_link_name.has_value()) {
-            requirement->abi_link_name = requirement->func_name();
-        }
-
+    for (size_t ordinal = 0; ordinal < requirements.size(); ++ordinal) {
+        AST::FunctionDeclNode *requirement = requirements[ordinal];
         const std::string slot_name = AST::extern_slot_property_name(ordinal, requirement->func_name());
         const AST::ValueType slot_type = requirement->c_function_type();
 
         declare_slot(payload, type, slot_name, slot_type, at);
-        ++ordinal;
     }
 
     AST::ValueType image_type = AST::ValueType::make_unknown();
@@ -119,15 +112,11 @@ void Parser::plant_extern_interface_bodies(Payload &payload, AST::TypeDeclNode *
     }
 
     const TokenReference at = type->name_token.value();
-    size_t ordinal = 0;
+    const std::vector<AST::FunctionDeclNode *> requirements =
+        AST::extern_interface_requirements(type->complex_type());
 
-    for (AST::FunctionDeclNode *requirement : type->complex_type().methods()) {
-        if (requirement == nullptr) {
-            continue;
-        }
-
-        const std::string slot_name = AST::extern_slot_property_name(ordinal, requirement->func_name());
-        plant_forwarder_body(payload, *requirement, slot_name, at);
-        ++ordinal;
+    for (size_t ordinal = 0; ordinal < requirements.size(); ++ordinal) {
+        const std::string slot_name = AST::extern_slot_property_name(ordinal, requirements[ordinal]->func_name());
+        plant_forwarder_body(payload, *requirements[ordinal], slot_name, at);
     }
 }

@@ -1,2 +1,13 @@
+expect: fail
+
 --- OUT --->
-1
+[error] MisplacedAttribute  group_on_a_non_test.eco:2:3
+
+  '#[group]' cannot be written on a function. It belongs on a test.
+
+  1 | // `#[group:]` on a function is refused
+  2 | #[group: "arithmetic"]
+    :   ^^^^^^^^^^^^^^^^^^^^
+  3 | function helper() : int32
+
+1 error, nothing was compiled.

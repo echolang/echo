@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -331,6 +332,84 @@ TEST_CASE("wasi static init is a non-atomic once", "[target][wasi]")
     }
 }
 
+namespace
+{
+    // every IR line that mentions all of `needles`
+    std::vector<std::string> lines_with(const std::string &ir, std::initializer_list<std::string> needles)
+    {
+        std::vector<std::string> out;
+        std::istringstream in(ir);
+        std::string line;
+        while (std::getline(in, line)) {
+            bool all = true;
+            for (const std::string &needle : needles) {
+                all = all && line.find(needle) != std::string::npos;
+            }
+            if (all) {
+                out.push_back(line);
+            }
+        }
+        return out;
+    }
+}
+
+// a pointer is 4 bytes on wasm32, and so is its ABI alignment
+TEST_CASE("wasm32 pointer globals are accessed at pointer alignment", "[target][wasi]")
+{
+    ScopedProject project("pointer_alignment");
+    write_file(
+        project.root() / "hello.eco",
+        "struct Owns\n"
+        "{\n"
+        "    int32 $n;\n"
+        "    destructor() {}\n"
+        "}\n"
+        "struct Holder\n"
+        "{\n"
+        "    static Owns $x = Owns(3);\n"
+        "}\n"
+        "echo Holder::$x->n;\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --target-os wasi -p ir -o hello.wasm hello.eco");
+    INFO(ir.output);
+
+    const std::vector<std::string> head_loads = lines_with(ir.output, { "load ptr, ptr @__eco_static_chain," });
+    REQUIRE_FALSE(head_loads.empty());
+    for (const std::string &line : head_loads) {
+        INFO(line);
+        REQUIRE(line.find("align 4") != std::string::npos);
+    }
+}
+
+// counts are i64, `__typeinfo` is a pointer: on wasm32 the header is 8 + 8 + 4
+TEST_CASE("wasm32 class header debug info matches its storage", "[target][wasi]")
+{
+    ScopedProject project("class_header_dwarf");
+    write_file(
+        project.root() / "hello.eco",
+        "class Box\n"
+        "{\n"
+        "    public int32 $v;\n"
+        "}\n"
+        "Box $b = Box(1);\n"
+        "echo $b->v;\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --target-os wasi -g -p ir -o hello.wasm hello.eco");
+    INFO(ir.output);
+
+    const std::vector<std::string> strong = lines_with(ir.output, { "name: \"__strong\"" });
+    const std::vector<std::string> typeinfo = lines_with(ir.output, { "name: \"__typeinfo\"" });
+    REQUIRE_FALSE(strong.empty());
+    REQUIRE_FALSE(typeinfo.empty());
+
+    REQUIRE(strong[0].find("size: 64") != std::string::npos);
+    REQUIRE(typeinfo[0].find("size: 32") != std::string::npos);
+    REQUIRE(typeinfo[0].find("align: 32") != std::string::npos);
+    REQUIRE(typeinfo[0].find("offset: 128") != std::string::npos);
+}
+
 TEST_CASE("wasi allocation counter is a non-atomic add", "[target][wasi]")
 {
     ScopedProject project("alloc_once");
@@ -388,10 +467,7 @@ TEST_CASE("wasm export memory does not attach to the next function", "[target][w
 
 TEST_CASE("codegen link args pass --export-memory when asked", "[target][wasi]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = Compiler::k_wasi_triple;
-    target.wasm = true;
-    target.pointer_bytes = 4;
+    Compiler::CodegenTarget target = Compiler::CodegenTarget::wasi();
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
@@ -402,7 +478,7 @@ TEST_CASE("codegen link args pass --export-memory when asked", "[target][wasi]")
     REQUIRE(std::find(argv.begin(), argv.end(), "-mexec-model=reactor") == argv.end());
 
     argv = { "clang" };
-    target.exec_model = Compiler::ExecModel::t_library;
+    target = target.for_program(Compiler::ExecModel::t_library);
     REQUIRE(Compiler::append_codegen_link_args(argv, target, false, error));
     REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,--export-memory") == argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-mexec-model=reactor") != argv.end());
@@ -410,10 +486,7 @@ TEST_CASE("codegen link args pass --export-memory when asked", "[target][wasi]")
 
 TEST_CASE("codegen target args for wasi come from append_wasi_target_args", "[target][wasi]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = Compiler::k_wasi_triple;
-    target.wasm = true;
-    target.pointer_bytes = 4;
+    Compiler::CodegenTarget target = Compiler::CodegenTarget::wasi();
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
@@ -426,7 +499,7 @@ TEST_CASE("codegen target args for wasi come from append_wasi_target_args", "[ta
     REQUIRE(Compiler::append_codegen_target_args(argv, target, error));
     REQUIRE(error.empty());
     REQUIRE(std::find(argv.begin(), argv.end(), "-target") != argv.end());
-    REQUIRE(std::find(argv.begin(), argv.end(), target.triple) != argv.end());
+    REQUIRE(std::find(argv.begin(), argv.end(), target.triple()) != argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "--sysroot") != argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-isysroot") == argv.end());
     REQUIRE(std::find(argv.begin(), argv.end(), "-fms-runtime-lib=static") == argv.end());
@@ -790,6 +863,49 @@ TEST_CASE("a reactor with the stdlib echoes an int from an export", "[target][wa
     require_wasmtime(ran);
     REQUIRE(ran.exit_code == 0);
     REQUIRE(EchoTests::output_has_line(ran.output, "1"));
+}
+
+// command built first: a shared key would serve the command's stdlib object, whose
+// `process_envp` reads a global only a command's `main` fills
+TEST_CASE("a reactor built after a command still sees the environment", "[target][wasi]")
+{
+    require_wasi_sdk();
+
+    ScopedProject project("reactor_after_command_env");
+    write_file(
+        project.root() / "module.eco",
+        "#[module: \"both\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"app\", entry: \"src/main.eco\" }]\n"
+        "#[target: lib { name: \"plug\" }]\n");
+    write_file(
+        project.root() / "src/main.eco",
+        "foreach (std::env::vars() as $k => $v) { if ($k == 'ECO_REACTOR_KEY') { echo $v; } }\n");
+    write_file(
+        project.root() / "src/plug.eco",
+        "#[export]\n"
+        "public function show() : void\n"
+        "{\n"
+        "    foreach (std::env::vars() as $k => $v) { if ($k == 'ECO_REACTOR_KEY') { echo $v; } }\n"
+        "}\n");
+
+    const ProcessResult command = project.echoc("build --target app --target-os wasi");
+    INFO(command.output);
+    REQUIRE(command.exit_code == 0);
+
+    const ProcessResult reactor = project.echoc("build --target plug --target-os wasi");
+    INFO(reactor.output);
+    REQUIRE(reactor.exit_code == 0);
+
+    const std::filesystem::path wasm = project.root() / "ecobuild" / "plug.wasm";
+    REQUIRE(std::filesystem::is_regular_file(wasm));
+
+    const ProcessResult ran = run_wasmtime(
+        wasm, project.root(), { "--env", "ECO_REACTOR_KEY=seen", "--invoke", "show" });
+    INFO(ran.output);
+    require_wasmtime(ran);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(EchoTests::output_has_line(ran.output, "seen"));
 }
 
 TEST_CASE("wasmtime runs a host import through --preload", "[target][wasi]")

@@ -89,7 +89,7 @@ namespace Compiler
         // condition can see - Compiler::CodegenTarget is the emission half. it does
         // imply arm64 for facts when `--target-arch` was not stated, via
         // Compiler::facts_architecture, so a condition cannot still see the host arch.
-        // wasi on `build` is the same door: facts default to wasm32
+        // wasi is the same door: facts are wasm32 on every subcommand
         bool ios_device = false;
 
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order

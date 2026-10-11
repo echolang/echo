@@ -297,15 +297,10 @@ namespace AST
     char get_primitive_id_char(ValueTypePrimitive primitive);
     IntegerSize get_integer_size(ValueTypePrimitive primitive);
 
-    // **the width of a pointer on the target this compile type-checks**, in bytes.
-    // default ECO_TARGET_POINTER_SIZE (host). PointerSizeScope installs
-    // CodegenTarget::pointer_size() for the duration of parse+sema; codegen usize
-    // is size_int_ty() and does not read this
+    // pointer width this compile type-checks, in bytes. default ECO_TARGET_POINTER_SIZE
     unsigned target_pointer_size();
 
-    // installs `bytes` as target_pointer_size() until destroyed. the driver holds
-    // one around parse and the semantic passes, copied from the emit row. restoring
-    // on unwind is what keeps an in-process wasm32 compile from poisoning later tests
+    // installs `bytes` as target_pointer_size() until destroyed
     class PointerSizeScope
     {
     public:

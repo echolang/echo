@@ -24,8 +24,9 @@ std::vector<AST::FunctionDeclNode *> AST::extern_interface_requirements(const Co
 {
     std::vector<FunctionDeclNode *> out;
 
+    // allow-list: a requirement is a written method. anything else in `_methods` is not a slot
     for (FunctionDeclNode *requirement : ct.methods()) {
-        if (requirement != nullptr) {
+        if (requirement != nullptr && requirement->member_kind == MemberKind::t_method) {
             out.push_back(requirement);
         }
     }
@@ -43,8 +44,11 @@ std::optional<std::string> AST::extern_interface_uninitialized_refusal(const Var
         return std::nullopt;
     }
 
-    const ValueType type = decl.type_node()->type;
+    return extern_interface_zero_refusal(decl.type_node()->type);
+}
 
+std::optional<std::string> AST::extern_interface_zero_refusal(const ValueType &type)
+{
     if (type.is_nullable() || type.is_type_param() || !type.has_complex_type()) {
         return std::nullopt;
     }
@@ -183,10 +187,11 @@ void AST::check_extern_conformances(Collector &collector, Bundle &bundle)
 
             const ComplexType &conformer = node->complex_type();
 
+            // the parser admits only an extern interface to this list
             for (const ValueType &iface_type : conformer.extern_conformances()) {
                 const ComplexType *iface = iface_type.get_complex_type();
 
-                if (iface == nullptr || !iface->is_extern_interface_kind()) {
+                if (iface == nullptr) {
                     continue;
                 }
 

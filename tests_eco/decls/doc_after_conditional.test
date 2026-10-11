@@ -1,0 +1,49 @@
+flags: -p decls
+stdlib: off
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "function",
+          "name": "after_region",
+          "qualified": "after_region",
+          "visibility": "public",
+          "file": "doc_after_conditional.eco",
+          "line": 11,
+          "column": 17,
+          "doc": "/** after a dropped region */",
+          "tools": [],
+          "export": null,
+          "params": [],
+          "return": {
+            "kind": "prim",
+            "name": "void"
+          },
+          "generics": []
+        },
+        {
+          "kind": "function",
+          "name": "inside_region",
+          "qualified": "inside_region",
+          "visibility": "public",
+          "file": "doc_after_conditional.eco",
+          "line": 17,
+          "column": 17,
+          "doc": "/** above a region that is kept */",
+          "tools": [],
+          "export": null,
+          "params": [],
+          "return": {
+            "kind": "prim",
+            "name": "void"
+          },
+          "generics": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] MisplacedAttribute  attribute_on_wrong_declaration.eco:2:3
+
+  '#[unique]' cannot be written on a function. It belongs on a type.
+
+  1 | // `#[unique]` belongs on a type, `#[inline]` on a function, `#[group]` on a test
+  2 | #[unique]
+    :   ^^^^^^^
+  3 | function copied() : void
+    : ^^^^^^^^
+  4 | {
+
+[error] MisplacedAttribute  attribute_on_wrong_declaration.eco:7:3
+
+  '#[inline]' cannot be written on a type. It belongs on a function.
+
+  6 | 
+  7 | #[inline]
+    :   ^^^^^^^
+  8 | struct Box
+    : ^^^^^^
+  9 | {
+
+[error] MisplacedAttribute  attribute_on_wrong_declaration.eco:13:3
+
+  '#[group]' cannot be written on a function. It belongs on a test.
+
+  12 | 
+  13 | #[group: "math"]
+     :   ^^^^^^^^^^^^^^
+  14 | function grouped() : void
+
+3 errors, nothing was compiled.

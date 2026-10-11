@@ -612,7 +612,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // after the return type, for parse_funcdecl's reason: the return type is the last thing an
     // attribute could have something to say about, and leaving them staged lets the next `struct`
     // drain them
-    Parser::drain_attributes(payload, funcdecl->attributes);
+    Parser::drain_attributes(payload, funcdecl->attributes, AST::AttributeSite::t_function);
     funcdecl->doc_comment = doc;
 
     // an operator is an expression, so a void one is a statement written as an operator. refused

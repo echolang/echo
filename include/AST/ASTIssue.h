@@ -429,6 +429,9 @@ namespace AST
         // in a module.eco", which is a different sentence from "unknown attribute"
         MAKE_ISSUE_DEF1(ManifestAttributeInSource, IssueSeverity::Error, const std::string, _message);
 
+        // `#[unique]` on a function, `#[export]` on a property
+        MAKE_ISSUE_DEF1(MisplacedAttribute, IssueSeverity::Error, const std::string, _message);
+
         // -- M9 manifest -------------------------------------------------------------------------
 
         MAKE_ISSUE_DEF1(UnknownManifestAttribute, IssueSeverity::Error, const std::string, _message);

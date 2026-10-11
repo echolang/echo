@@ -75,24 +75,16 @@ namespace AST
     // so an export is not diagnosed as an address-of. asked once by AST::check_exports
     std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
 
-    // leftover `#[export]` at file scope (a type's `#[export]` is
-    // AST::check_abi_exports), `export_refusal` on every exported function,
-    // duplicate export names (function symbols and `__eco_abi_<mangled>`
-    // table symbols share the map; table names come from
-    // AST::type_exports_abi_table), an export named a reserved entry, and
-    // an export of a C symbol codegen itself declares.
-    // TypeChecker asks once, like check_wasm_surface, and passes the reserved
-    // names - this file does not include Compiler. `reserved_entry` is
-    // CodegenTarget::reserved_entry_names; `reserved_runtime` is
-    // reserved_c_export_names; `reserved_runtime_prefix` is `__eco_`;
-    // `reserved_wasm_crt` is empty off a wasm row
+    // leftover `#[export]`, duplicate names, reserved C names. TypeChecker asks once.
+    // `wasm` is the row types emit a table for
     void check_exports(
         Collector &collector,
         Bundle &bundle,
         std::span<const char *const> reserved_entry,
         std::span<const char *const> reserved_runtime,
         std::string_view reserved_runtime_prefix,
-        std::span<const char *const> reserved_wasm_crt
+        std::span<const char *const> reserved_wasm_crt,
+        bool wasm
     );
 
     // the overload set `&name` denotes, re-derived from the node rather than stored - a stored

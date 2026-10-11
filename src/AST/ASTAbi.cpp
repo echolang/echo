@@ -18,17 +18,21 @@
 
 namespace
 {
+    // length-prefixed so `P` of 12 properties and `P1` of 2 are not one fingerprint
     uint64_t fold(uint64_t hash, const std::string &text)
     {
-        return Compiler::fnv1a64(text, hash);
+        return Compiler::fnv1a64(fmt::format("{}:{}", text.size(), text), hash);
     }
 
+    // every level, qualifiers included. what a signature drops is AST::c_abi_erased alone
     void fold_type(
         uint64_t &hash,
         const AST::ValueType &type,
         std::unordered_set<std::string> &seen
     )
     {
+        hash = fold(hash, fmt::format("{}{}", type.is_const() ? "c" : "-", type.is_nullable() ? "?" : "-"));
+
         const AST::ValueType bare = AST::ValueType::make_mutable(
             AST::ValueType::make_non_nullable(type));
 
@@ -96,24 +100,17 @@ uint64_t AST::abi_fingerprint(const ComplexType &ct)
 
     for (FunctionDeclNode *requirement : extern_interface_requirements(ct)) {
         hash = fold(hash, requirement->func_name());
-        if (requirement->abi_link_name.has_value() && *requirement->abi_link_name != requirement->func_name()) {
-            hash = fold(hash, *requirement->abi_link_name);
-        }
+        hash = fold(hash, requirement->requirement_link_name());
         fold_type(hash, requirement->c_function_type(), seen);
     }
 
     return hash;
 }
 
-bool AST::type_exports_abi_table(const TypeDeclNode &node)
+bool AST::type_exports_abi_table(const TypeDeclNode &node, bool wasm)
 {
-    const AttributeNode *export_attr = node.attributes.get_first("export");
-
-    if (export_attr == nullptr || export_attr->value.has_value()) {
-        return false;
-    }
-
-    return !node.complex_type().extern_conformances().empty();
+    return node.attributes.get_first("export") != nullptr
+        && !abi_table_export_refusal(node, wasm).has_value();
 }
 
 std::optional<std::string> AST::abi_table_export_refusal(const TypeDeclNode &node, bool wasm)

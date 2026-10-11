@@ -45,9 +45,7 @@ TEST_CASE("wasm32-unknown-wasip1 resolves as generic", "[target]")
 
 TEST_CASE("C compile cpu flags come from append_codegen_cc_cpu_args", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = Compiler::k_wasi_triple;
-    target.wasm = true;
+    const Compiler::CodegenTarget target = Compiler::CodegenTarget::wasi();
     std::vector<std::string> argv;
     std::string error;
 
@@ -63,8 +61,7 @@ TEST_CASE("C compile omits -target-cpu generic on x86_64", "[target]")
 {
     REQUIRE(Compiler::baseline_subtarget_for("x86_64-unknown-linux-gnu").cpu == "generic");
 
-    Compiler::CodegenTarget target;
-    target.triple = "x86_64-unknown-linux-gnu";
+    const Compiler::CodegenTarget target = Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
     std::vector<std::string> argv;
     std::string error;
 

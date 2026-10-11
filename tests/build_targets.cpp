@@ -508,7 +508,9 @@ TEST_CASE("an exe and a lib of one module have different cache keys", "[targets]
     REQUIRE(exe_key != lib_key);
 }
 
-TEST_CASE("a wasi command and reactor share cache keys", "[targets][wasi]")
+// a library reads the environment from the platform, a command from `main`'s capture.
+// that builtin lives in an ordinary function body, so the two kinds cannot share an object
+TEST_CASE("a wasi command and reactor do not share cache keys", "[targets][wasi]")
 {
     ScopedProject project("wasi_exe_lib_keys");
     write_file(project.root() / "module.eco",
@@ -532,7 +534,7 @@ TEST_CASE("a wasi command and reactor share cache keys", "[targets][wasi]")
     const std::string lib_key = cache_hex(EchoTests::line_starting_with(lib.output, "both"));
     REQUIRE_FALSE(exe_key.empty());
     REQUIRE_FALSE(lib_key.empty());
-    REQUIRE(exe_key == lib_key);
+    REQUIRE(exe_key != lib_key);
 }
 
 TEST_CASE("a native lib exports only its #[export]s", "[targets]")

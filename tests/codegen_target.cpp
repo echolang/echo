@@ -37,8 +37,8 @@ TEST_CASE("linux target-os stays the host triple even on build", "[target]")
     REQUIRE(Compiler::TargetFacts::resolve("linux", "", {}, facts, error));
     REQUIRE(Compiler::resolve_codegen_target(facts, false, "", target, error));
     REQUIRE_FALSE(target.is_cross());
-    REQUIRE(target.triple.empty());
-    REQUIRE(target.apple_sdk.empty());
+    REQUIRE(target.triple().empty());
+    REQUIRE(target.apple_sdk().empty());
 }
 
 TEST_CASE("ios build on Darwin is the simulator on this arch", "[target]")
@@ -52,11 +52,11 @@ TEST_CASE("ios build on Darwin is the simulator on this arch", "[target]")
 
 #if defined(__APPLE__)
     REQUIRE(target.is_cross());
-    REQUIRE(target.triple == facts.architecture + "-apple-ios15.0-simulator");
-    REQUIRE(target.apple_sdk == "iphonesimulator");
+    REQUIRE(target.triple() == facts.architecture + "-apple-ios15.0-simulator");
+    REQUIRE(target.apple_sdk() == "iphonesimulator");
 #else
     REQUIRE_FALSE(target.is_cross());
-    REQUIRE(target.triple.empty());
+    REQUIRE(target.triple().empty());
 #endif
 }
 
@@ -71,9 +71,9 @@ TEST_CASE("ios-device on Darwin is iphoneos arm64", "[target]")
 
 #if defined(__APPLE__)
     REQUIRE(resolved);
-    REQUIRE(target.triple == "arm64-apple-ios15.0");
-    REQUIRE(target.apple_sdk == "iphoneos");
-    REQUIRE(target.effective_triple() == target.triple);
+    REQUIRE(target.triple() == "arm64-apple-ios15.0");
+    REQUIRE(target.apple_sdk() == "iphoneos");
+    REQUIRE(target.effective_triple() == target.triple());
 #else
     REQUIRE_FALSE(resolved);
     REQUIRE(error.find("Darwin") != std::string::npos);
@@ -98,19 +98,33 @@ TEST_CASE("ios-device with a non-arm64 arch override is refused", "[target]")
 #endif
 }
 
+namespace
+{
+    // the arch facts_architecture settles, or "refused: <sentence>"
+    std::string facts_arch(bool ios_device, const std::string &arch, const std::string &os = {})
+    {
+        std::string out;
+        std::string error;
+        if (!Compiler::facts_architecture(ios_device, arch, os, out, error)) {
+            return "refused: " + error;
+        }
+        return out;
+    }
+}
+
 TEST_CASE("ios-device with no arch override is arm64 for facts too", "[target]")
 {
-    REQUIRE(Compiler::facts_architecture(true, "") == "arm64");
-    REQUIRE(Compiler::facts_architecture(true, "arm64") == "arm64");
-    REQUIRE(Compiler::facts_architecture(true, "x86_64") == "x86_64");
-    REQUIRE(Compiler::facts_architecture(false, "").empty());
-    REQUIRE(Compiler::facts_architecture(false, "x86_64") == "x86_64");
+    REQUIRE(facts_arch(true, "") == "arm64");
+    REQUIRE(facts_arch(true, "arm64") == "arm64");
+    REQUIRE(facts_arch(true, "x86_64") == "x86_64");
+    REQUIRE(facts_arch(false, "").empty());
+    REQUIRE(facts_arch(false, "x86_64") == "x86_64");
 
     Compiler::TargetFacts facts;
     std::string error;
 
     REQUIRE(Compiler::TargetFacts::resolve(
-        "ios", Compiler::facts_architecture(true, ""), {}, facts, error));
+        "ios", facts_arch(true, ""), {}, facts, error));
     REQUIRE(facts.architecture == "arm64");
 
     Compiler::CodegenTarget target;
@@ -118,7 +132,7 @@ TEST_CASE("ios-device with no arch override is arm64 for facts too", "[target]")
 
 #if defined(__APPLE__)
     REQUIRE(resolved);
-    REQUIRE(target.triple == "arm64-apple-ios15.0");
+    REQUIRE(target.triple() == "arm64-apple-ios15.0");
 #else
     REQUIRE_FALSE(resolved);
 #endif
@@ -144,13 +158,13 @@ TEST_CASE("wasi build is a real cross to wasm32-wasip1", "[target]")
     REQUIRE(Compiler::resolve_codegen_target(facts, false, "wasm32", target, error));
     REQUIRE(target.is_cross());
     REQUIRE(target.is_wasm());
-    REQUIRE(target.triple == "wasm32-unknown-wasip1");
-    REQUIRE(target.apple_sdk.empty());
+    REQUIRE(target.triple() == "wasm32-unknown-wasip1");
+    REQUIRE(target.apple_sdk().empty());
     REQUIRE(target.pointer_size() == 4);
-    REQUIRE(target.effective_triple() == target.triple);
+    REQUIRE(target.effective_triple() == target.triple());
     REQUIRE(target.entry_symbol().has_value());
     REQUIRE(std::string(*target.entry_symbol()) == "__main_argc_argv");
-    REQUIRE(target.exec_model == Compiler::ExecModel::t_command);
+    REQUIRE(target.exec_model() == Compiler::ExecModel::t_command);
     REQUIRE(target.entry_arg_count() == 2);
     REQUIRE_FALSE(target.uses_pic());
     REQUIRE_FALSE(target.snapshots_bitcode());
@@ -160,10 +174,7 @@ TEST_CASE("wasi build is a real cross to wasm32-wasip1", "[target]")
 
 TEST_CASE("output_path appends the row suffix to a suffix-less name", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = Compiler::k_wasi_triple;
-    target.wasm = true;
-    target.pointer_bytes = 4;
+    const Compiler::CodegenTarget target = Compiler::CodegenTarget::wasi();
     REQUIRE(target.output_path("hello") == std::filesystem::path("hello.wasm"));
     REQUIRE(target.output_path("hello.wasm") == std::filesystem::path("hello.wasm"));
     REQUIRE(target.output_path("hello.exe") == std::filesystem::path("hello.exe"));
@@ -180,35 +191,52 @@ TEST_CASE("host output_path is suffix-less except Windows .exe", "[target]")
 #endif
 }
 
-TEST_CASE("wasi with a non-wasm32 arch override is refused", "[target]")
+// a row's columns are read off its triple when it is built
+TEST_CASE("a row reads its os and pointer width off its triple", "[target]")
 {
-    Compiler::TargetFacts facts;
-    Compiler::CodegenTarget target;
-    std::string error;
+    const Compiler::CodegenTarget wasi = Compiler::CodegenTarget::wasi();
+    REQUIRE(wasi.os() == Compiler::TargetOs::t_wasi);
+    REQUIRE(wasi.is_wasm());
+    REQUIRE(wasi.pointer_size() == 4);
 
-    REQUIRE(Compiler::TargetFacts::resolve("wasi", "arm64", {}, facts, error));
-    REQUIRE_FALSE(Compiler::resolve_codegen_target(facts, false, "arm64", target, error));
-    REQUIRE(error.find("wasm32") != std::string::npos);
-    REQUIRE(error.find("arm64") != std::string::npos);
+    const Compiler::CodegenTarget device = Compiler::CodegenTarget::ios_device();
+    REQUIRE(device.os() == Compiler::TargetOs::t_ios);
+    REQUIRE(device.is_darwin());
+    REQUIRE(device.apple_sdk() == "iphoneos");
+    REQUIRE(device.pointer_size() == 8);
+
+    const Compiler::CodegenTarget host;
+    REQUIRE_FALSE(host.is_wasm());
+    REQUIRE(host.pointer_size() == ECO_TARGET_POINTER_SIZE);
 }
 
-TEST_CASE("is_wasm and pointer_size read the row columns", "[target]")
+TEST_CASE("a row's capabilities follow its os", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = Compiler::k_wasi_triple;
-    REQUIRE_FALSE(target.is_wasm());
-    REQUIRE(target.pointer_size() == 8);
+    const Compiler::CodegenTarget wasi = Compiler::CodegenTarget::wasi();
+    REQUIRE(wasi.environ_source() == Compiler::EnvironSource::t_wasilibc_get_environ);
+    REQUIRE(wasi.stdio_unbuffering() == Compiler::StdioUnbuffering::t_wasi_libc_stdout);
+    REQUIRE_FALSE(wasi.has_unload());
+    REQUIRE_FALSE(wasi.entry_receives_envp());
+    REQUIRE_FALSE(wasi.c_objects_use_fpic());
 
-    target.wasm = true;
-    target.pointer_bytes = 4;
-    REQUIRE(target.is_wasm());
-    REQUIRE(target.pointer_size() == 4);
+    const Compiler::CodegenTarget host;
+    REQUIRE(host.has_unload());
+    REQUIRE(host.entry_receives_envp());
+#if defined(__APPLE__)
+    REQUIRE(host.environ_source() == Compiler::EnvironSource::t_ns_get_environ);
+    REQUIRE(host.stdio_unbuffering() == Compiler::StdioUnbuffering::t_none);
+    REQUIRE(host.c_objects_use_fpic());
+#elif defined(_WIN32)
+    REQUIRE(host.environ_source() == Compiler::EnvironSource::t_none);
+    REQUIRE(host.stdio_unbuffering() == Compiler::StdioUnbuffering::t_ucrt_stdout_stderr);
+    REQUIRE_FALSE(host.c_objects_use_fpic());
+#endif
 }
 
 TEST_CASE("host row keeps main and pic", "[target]")
 {
     Compiler::CodegenTarget target;
-    REQUIRE(target.pointer_size() == 8);
+    REQUIRE(target.pointer_size() == ECO_TARGET_POINTER_SIZE);
     REQUIRE_FALSE(target.is_wasm());
     REQUIRE(target.entry_symbol().has_value());
     REQUIRE(std::string(*target.entry_symbol()) == ECO_ENTRY_SYMBOL_NAME);
@@ -221,44 +249,44 @@ TEST_CASE("host row keeps main and pic", "[target]")
 
 TEST_CASE("a library has no entry symbol", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.exec_model = Compiler::ExecModel::t_library;
+    const Compiler::CodegenTarget target =
+        Compiler::CodegenTarget().for_program(Compiler::ExecModel::t_library);
     REQUIRE_FALSE(target.entry_symbol().has_value());
     REQUIRE(target.is_library());
     REQUIRE(target.is_native_library());
 }
 
-TEST_CASE("reserved entry names always include main", "[target]")
+TEST_CASE("reserved export names follow the row", "[target]")
 {
-    Compiler::CodegenTarget host;
-    auto names = host.reserved_entry_names();
-    REQUIRE(names.size() == 1);
-    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+    const Compiler::CodegenTarget host;
+    Compiler::ReservedExportNames names = host.reserved_export_names();
+    REQUIRE(names.entry.size() == 1);
+    REQUIRE(std::string(names.entry[0]) == ECO_ENTRY_SYMBOL_NAME);
+    REQUIRE(names.wasm_crt.empty());
+    REQUIRE_FALSE(names.runtime.empty());
+    REQUIRE(names.runtime_prefix == "__eco_");
 
-    Compiler::CodegenTarget lib = host;
-    lib.exec_model = Compiler::ExecModel::t_library;
-    names = lib.reserved_entry_names();
-    REQUIRE(names.size() == 1);
-    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+    names = host.for_program(Compiler::ExecModel::t_library).reserved_export_names();
+    REQUIRE(names.entry.size() == 1);
+    REQUIRE(std::string(names.entry[0]) == ECO_ENTRY_SYMBOL_NAME);
 
-    Compiler::CodegenTarget wasi;
-    wasi.triple = Compiler::k_wasi_triple;
-    wasi.wasm = true;
-    names = wasi.reserved_entry_names();
-    REQUIRE(names.size() == 2);
-    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
-    REQUIRE(std::string(names[1]) == "__main_argc_argv");
+    const Compiler::CodegenTarget wasi = Compiler::CodegenTarget::wasi();
+    names = wasi.reserved_export_names();
+    REQUIRE(names.entry.size() == 2);
+    REQUIRE(std::string(names.entry[0]) == ECO_ENTRY_SYMBOL_NAME);
+    REQUIRE(std::string(names.entry[1]) == "__main_argc_argv");
+    REQUIRE_FALSE(names.wasm_crt.empty());
 
-    wasi.exec_model = Compiler::ExecModel::t_library;
-    names = wasi.reserved_entry_names();
-    REQUIRE(names.size() == 1);
-    REQUIRE(std::string(names[0]) == ECO_ENTRY_SYMBOL_NAME);
+    names = wasi.for_program(Compiler::ExecModel::t_library).reserved_export_names();
+    REQUIRE(names.entry.size() == 1);
+    REQUIRE(std::string(names.entry[0]) == ECO_ENTRY_SYMBOL_NAME);
+    REQUIRE_FALSE(names.wasm_crt.empty());
 }
 
 TEST_CASE("a native library takes the host shared-library suffix", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.exec_model = Compiler::ExecModel::t_library;
+    const Compiler::CodegenTarget target =
+        Compiler::CodegenTarget().for_program(Compiler::ExecModel::t_library);
 #if defined(__APPLE__)
     REQUIRE(std::string(target.output_extension()) == ".dylib");
     REQUIRE(target.output_path("greeter") == std::filesystem::path("greeter.dylib"));
@@ -287,24 +315,23 @@ TEST_CASE("library_file_name does not need exec_model set", "[target]")
 #endif
 }
 
-TEST_CASE("an iOS row refuses a native library", "[target]")
+// `--target-os ios` off Darwin emits for the host and is still refused
+TEST_CASE("an iOS target refuses a native library", "[target]")
 {
-    Compiler::CodegenTarget ios;
-    ios.ios = true;
-    REQUIRE(ios.library_refusal().has_value());
+    Compiler::TargetFacts ios;
+    std::string error;
+    REQUIRE(Compiler::TargetFacts::resolve("ios", "", {}, ios, error));
+    REQUIRE(Compiler::library_refusal(ios).has_value());
 
-    Compiler::CodegenTarget simulator;
-    simulator.apple_sdk = "iphonesimulator";
-    REQUIRE(simulator.library_refusal().has_value());
-
-    Compiler::CodegenTarget host;
-    REQUIRE_FALSE(host.library_refusal().has_value());
+    Compiler::TargetFacts linux_facts;
+    REQUIRE(Compiler::TargetFacts::resolve("linux", "", {}, linux_facts, error));
+    REQUIRE_FALSE(Compiler::library_refusal(linux_facts).has_value());
 }
 
 TEST_CASE("native library link args pass -shared", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.exec_model = Compiler::ExecModel::t_library;
+    const Compiler::CodegenTarget target =
+        Compiler::CodegenTarget().for_program(Compiler::ExecModel::t_library);
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
@@ -333,11 +360,8 @@ TEST_CASE("native library link args pass -shared", "[target]")
 
 TEST_CASE("a wasm library keeps the .wasm suffix", "[target]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = Compiler::k_wasi_triple;
-    target.wasm = true;
-    target.pointer_bytes = 4;
-    target.exec_model = Compiler::ExecModel::t_library;
+    const Compiler::CodegenTarget target =
+        Compiler::CodegenTarget::wasi().for_program(Compiler::ExecModel::t_library);
     REQUIRE(target.is_library());
     REQUIRE_FALSE(target.is_native_library());
     REQUIRE(std::string(target.output_extension()) == ".wasm");
@@ -345,11 +369,14 @@ TEST_CASE("a wasm library keeps the .wasm suffix", "[target]")
     REQUIRE(target.library_file_name("plot") == "plot.wasm");
 }
 
-TEST_CASE("wasi on build defaults facts arch to wasm32", "[target]")
+// wasi is wasm32 on every subcommand. `run --target-arch wasm32` would otherwise type usize as 32-bit
+TEST_CASE("wasi and wasm32 imply each other for facts", "[target]")
 {
-    REQUIRE(Compiler::facts_architecture(false, "", "wasi", true) == "wasm32");
-    REQUIRE(Compiler::facts_architecture(false, "", "wasi", false).empty());
-    REQUIRE(Compiler::facts_architecture(false, "arm64", "wasi", true) == "arm64");
+    REQUIRE(facts_arch(false, "", "wasi") == "wasm32");
+    REQUIRE(facts_arch(false, "wasm32", "wasi") == "wasm32");
+    REQUIRE(facts_arch(false, "arm64", "wasi").starts_with("refused: wasi is wasm32"));
+    REQUIRE(facts_arch(false, "wasm32").starts_with("refused: wasm32 is only emitted for wasi"));
+    REQUIRE(facts_arch(false, "wasm32", "linux").starts_with("refused: wasm32 is only emitted for wasi"));
 }
 
 TEST_CASE("usize defaults to the host pointer size", "[target]")

@@ -9,7 +9,6 @@
 #include "AST/ASTModule.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ScopeNode.h"
-#include "AST/TypeDeclNode.h"
 
 #include <fmt/core.h>
 
@@ -118,6 +117,45 @@ std::optional<AST::WasmClause> AST::wasm_clause_of(const AttributeNode &attribut
     return out;
 }
 
+std::optional<std::string> AST::wasm_import_module_of(const FunctionDeclNode &decl)
+{
+    if (!decl.is_extern()) {
+        return std::nullopt;
+    }
+
+    const AttributeNode *attr = decl.attributes.get_first("wasm");
+    if (attr == nullptr) {
+        return std::nullopt;
+    }
+
+    const std::optional<WasmClause> clause = wasm_clause_of(*attr);
+    if (!clause.has_value() || clause->refusal.has_value() || clause->kind != WasmClauseKind::t_import) {
+        return std::nullopt;
+    }
+
+    return clause->payload;
+}
+
+bool AST::wasm_exports_memory(Bundle &bundle)
+{
+    // of_type: written_at_file_scope survives both parse passes
+    for (auto &module_ptr : bundle.modules) {
+        for (AttributeNode *attr : module_ptr->nodes.of_type<AttributeNode>()) {
+            if (attr == nullptr || !attr->written_at_file_scope) {
+                continue;
+            }
+
+            const std::optional<WasmClause> clause = wasm_clause_of(*attr);
+            if (clause.has_value() && !clause->refusal.has_value()
+                && clause->kind == WasmClauseKind::t_export) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targeting_wasm)
 {
     for (auto &module_ptr : bundle.modules) {
@@ -161,32 +199,14 @@ void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targetin
                 continue;
             }
 
-            if (attr->written_at_file_scope) {
-                bundle.wasm_export_memory = true;
-            } else {
+            if (!attr->written_at_file_scope) {
                 collector.collect_issue<Issue::GenericError>(
                     attr_ref(module, *attr),
                     "a wasm object export belongs at file scope");
             }
         }
 
-        for (TypeDeclNode *node : module.nodes.of_type<TypeDeclNode>()) {
-            if (node == nullptr) {
-                continue;
-            }
-
-            auto *wasm_attr = node->attributes.get_first("wasm");
-            if (wasm_attr == nullptr) {
-                continue;
-            }
-
-            auto clause = wasm_clause_of(*wasm_attr);
-            if (!clause.has_value()) {
-                continue;
-            }
-
-            report_leftover_import(collector, module, *wasm_attr, *clause, targeting_wasm);
-        }
+        // `#[wasm:]` on a type is refused where it is drained
 
         for (FunctionDeclNode *node : module.nodes.of_type<FunctionDeclNode>()) {
             if (node == nullptr) {
@@ -210,7 +230,6 @@ void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targetin
             }
 
             if (clause->kind == WasmClauseKind::t_import && node->is_extern()) {
-                node->import_module = clause->payload;
                 continue;
             }
 

@@ -34,20 +34,9 @@ namespace Compiler::LLVM
         // and a wrong one is worth an assert
         void gen_capture(llvm::Function *entry);
 
-        // a lib or reactor has no `main`. plant `__eco_startup` in `llvm.global_ctors`
-        // so wasi-libc's `_initialize` / dlopen unbuffers stdio. a no-op off Windows
-        // and wasm, where there is nothing to unbuffer
         void gen_startup();
 
-        // replaces gen_startup on a program with no entry. a native lib also
-        // plants `__eco_lib_fini` so a `dlclose` / `FreeLibrary` walks static
-        // teardown. ELF and Mach-O put it in `llvm.global_dtors`; COFF's
-        // `.CRT$XTX` is process-exit only, so Windows registers `atexit` from a
-        // ctor instead — the CRT's module-local onexit table, which DllMain
-        // walks on PROCESS_DETACH. linkonce_odr so the entry-unit partition's
-        // GlobalDCE keeps it (internal would be skipped by keep_odr_from_dce).
-        // a wasm reactor has no fini: the image lives with the page.
-        // `fini_walker` is null when there is nothing to walk
+        // `fini_walker` is null when nothing is owed a teardown
         void gen_library_lifecycle(llvm::Function *fini_walker);
 
         // the three reads, as a usize count and two opaque pointers. what the `process_argc` /
@@ -78,6 +67,10 @@ namespace Compiler::LLVM
 
         llvm::Value *load_platform_envp();
         void store_platform_envp();
+
+        // the two arms of unbuffer_stdio, one per StdioUnbuffering that does something
+        void unbuffer_ucrt(llvm::Type *i32, llvm::Type *ptr);
+        void unbuffer_wasi_libc(llvm::Type *i32, llvm::Type *ptr);
 
         // Windows UCRT (stdout and stderr) and wasi-libc (stdout). one owner so
         // gen_capture and gen_startup cannot each remember a different pair

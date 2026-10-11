@@ -10,6 +10,7 @@
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTMonomorphizer.h"
 #include "AST/ASTMangler.h"
+#include "AST/ASTWasm.h"
 #include "AST/FunctionDeclNode.h"
 #include "Parser/ManifestParser.h"
 #include "Parser/ModuleParser.h"
@@ -114,12 +115,13 @@ static bool resolve_target_facts(
 )
 {
     std::string error;
+    std::string arch;
 
-    std::string arch = Compiler::facts_architecture(
-        driver.ios_device,
-        driver.target_arch,
-        driver.target_os,
-        driver.subcommand == Compiler::Subcommand::t_build);
+    if (!Compiler::facts_architecture(
+            driver.ios_device, driver.target_arch, driver.target_os, arch, error)) {
+        diagnostics.render_untyped("Invalid Target", error);
+        return false;
+    }
 
     if (!Compiler::TargetFacts::resolve(
             driver.target_os,
@@ -336,19 +338,37 @@ static void print_resolved_ast(const Compiler::DriverOptions &driver, AST::Bundl
     }
 }
 
-static std::unordered_set<std::string> decls_user_modules(const Invocation &invocation)
+// manifest roots plus loose `.eco` files as a module of their own
+static std::set<std::string> invocation_root_modules(const Invocation &invocation)
 {
-    std::unordered_set<std::string> names;
+    std::set<std::string> result;
 
     for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        if (Compiler::manifest_is_a_root(manifest, invocation.roots)
-            && !Compiler::is_compiler_supplied_module(manifest)) {
-            names.insert(manifest.name);
+        if (Compiler::manifest_is_a_root(manifest, invocation.roots)) {
+            result.insert(manifest.name);
         }
     }
 
     if (!invocation.sources.empty()) {
-        names.insert(ECO_MAIN_MODULE_NAME);
+        result.insert(ECO_MAIN_MODULE_NAME);
+    }
+
+    return result;
+}
+
+// the roots, minus the toolchain. `-p decls` describes the program
+static std::unordered_set<std::string> decls_user_modules(const Invocation &invocation)
+{
+    std::unordered_set<std::string> names;
+
+    for (const std::string &name : invocation_root_modules(invocation)) {
+        const auto manifest = std::find_if(
+            invocation.manifests.begin(), invocation.manifests.end(),
+            [&name](const Parser::ModuleManifest &m) { return m.name == name; });
+
+        if (manifest == invocation.manifests.end() || !Compiler::is_compiler_supplied_module(*manifest)) {
+            names.insert(name);
+        }
     }
 
     return names;
@@ -976,24 +996,11 @@ static std::set<std::string> resolve_test_modules(
     const Invocation &invocation
 )
 {
-    std::set<std::string> result;
-
     if (driver.subcommand != Compiler::Subcommand::t_test) {
-        return result;
+        return {};
     }
 
-    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        if (Compiler::manifest_is_a_root(manifest, invocation.roots)) {
-            result.insert(manifest.name);
-        }
-    }
-
-    // loose `.eco` files are a module of their own, and the one an invocation pointed at most directly
-    if (!invocation.sources.empty()) {
-        result.insert(ECO_MAIN_MODULE_NAME);
-    }
-
-    return result;
+    return invocation_root_modules(invocation);
 }
 
 // **which programs this invocation produces, and where each one goes.**
@@ -1189,12 +1196,13 @@ static bool resolve_programs(
     }
 
     for (const Parser::ModuleTarget &target : selected) {
-        Compiler::CodegenTarget row = out.codegen;
+        const Compiler::CodegenTarget row = out.codegen.for_program(
+            target.kind == Parser::TargetKind::t_library
+                ? Compiler::ExecModel::t_library
+                : Compiler::ExecModel::t_command);
 
-        if (target.kind == Parser::TargetKind::t_library) {
-            row.exec_model = Compiler::ExecModel::t_library;
-
-            if (auto refusal = row.library_refusal()) {
+        if (row.is_library()) {
+            if (auto refusal = Compiler::library_refusal(out.target_facts)) {
                 diagnostics.render_untyped("Lib Needs Host", *refusal);
                 return false;
             }
@@ -1367,7 +1375,8 @@ static bool run_front_end(
         }
     }
 
-    out.options.export_memory = bundle.wasm_export_memory;
+    // the link flag, read off the checked bundle
+    out.options.export_memory = AST::wasm_exports_memory(bundle);
 
     if (needs_cache_keys(driver)
         && !compute_cache_keys(

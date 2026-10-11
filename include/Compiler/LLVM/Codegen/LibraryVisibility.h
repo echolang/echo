@@ -3,16 +3,18 @@
 
 #pragma once
 
+namespace llvm
+{
+    class Module;
+};
+
 namespace Compiler::LLVM
 {
     struct CodegenContext;
 
-    // a native library's defined symbols are hidden except those that carry
-    // `DLLExport`, which TypeLowering plants on every native-lib `#[export]`.
-    // the marker is the keep-visible rule so a later ABI table global with the
-    // same storage class is kept without a name set. wasm and executables
-    // never call this
+    // hide defined symbols except those with DLLExport
     void hide_non_exported_symbols(CodegenContext &ctx);
+    void hide_non_exported_symbols(llvm::Module &module);
 };
 
 #endif

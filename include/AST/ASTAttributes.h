@@ -74,6 +74,21 @@ namespace AST
         bool compiler_attributes_allowed
     );
 
+    // which declaration an attribute landed on. asked at the drain
+    enum class AttributeSite
+    {
+        t_function,
+        t_type,
+        t_property,
+        t_test
+    };
+
+    // empty when this name may sit here, otherwise the sentence
+    std::optional<std::string> attribute_site_refusal(std::string_view name, AttributeSite site);
+
+    // "a function or a type". empty for a name the table does not hold
+    std::string attribute_site_list(std::string_view name);
+
     // the names themselves, in table order: the public declaration attributes (`#[inline]`) and the
     // manifest's (`#[module: ...]`). the language server's `#[` completion reads these so the
     // tables stay the one list. compiler names are not here: a program cannot write them

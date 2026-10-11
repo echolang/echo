@@ -518,7 +518,7 @@ llvm::Value *AbortCodegen::swap_hook(llvm::Value *fn)
             llvm::AtomicRMWInst::Xchg,
             slot,
             fn,
-            llvm::Align(8),
+            _ctx.layout().getABITypeAlign(opaque_ptr),
             llvm::AtomicOrdering::SequentiallyConsistent);
         old->setName("crash.prev");
         return old;
@@ -541,7 +541,7 @@ llvm::Value *AbortCodegen::take_hook()
             llvm::AtomicRMWInst::Xchg,
             slot,
             cleared,
-            llvm::Align(8),
+            _ctx.layout().getABITypeAlign(opaque_ptr),
             llvm::AtomicOrdering::SequentiallyConsistent);
         old->setName("crash.prev");
         return old;

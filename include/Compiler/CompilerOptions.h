@@ -138,7 +138,7 @@ namespace Compiler
 
     inline const char *exec_model_environment(const CompilerOptions &options)
     {
-        return exec_model_environment(options.codegen.is_native_library());
+        return exec_model_environment(options.codegen);
     }
 };
 

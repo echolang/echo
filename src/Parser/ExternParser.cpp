@@ -29,6 +29,13 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
     std::vector<AST::AttributeNode *> block_attributes =
         payload.context.scope().collect_attributes();
 
+    // ask once here, not once per function that receives a copy
+    for (AST::AttributeNode *attr : block_attributes) {
+        if (attr != nullptr) {
+            Parser::check_attribute_site(payload, *attr, AST::AttributeSite::t_function);
+        }
+    }
+
     if (!cursor.is_type(Token::Type::t_open_brace)) {
         payload.collect_unexpected_token(Token::Type::t_open_brace);
         cursor.try_skip_to_next_statement();

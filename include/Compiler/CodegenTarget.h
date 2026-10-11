@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <cassert>
 #include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace Compiler
 {
@@ -16,176 +18,180 @@ namespace Compiler
     // and resolve_codegen_target cannot drift
     inline constexpr const char *k_wasi_triple = "wasm32-unknown-wasip1";
 
-    // **the sole answer to "what LLVM triple and sysroot this invocation emits".**
-    //
-    // deliberately **not** on Compiler::TargetFacts. That one answers what a `#[if:]` can see
-    // and does not cross-compile; this one changes what is emitted. Folding them is what
-    // would make `--target-os linux` start choosing instruction sets.
-    //
-    // empty `triple` is the host, which is also what a default-constructed CompilerOptions
-    // means - the same rule CompilerOptions already states for target_cpu. Backend and the
-    // C build both read it off CompilerOptions, so a C object and an Echo object cannot
-    // disagree about the triple or the SDK.
-    //
-    // a **row**, not a bool: tvOS or the Android NDK is another row in resolve_codegen_target
-    // rather than another flag recovered from a triple string later. the min version lives
-    // in the triple (`arm64-apple-ios15.0`), so LLVM's object and clang's `-target` cannot
-    // pin different iOS versions.
-
-    // how a program is entered. a column of the row, like apple_sdk: per *program*,
-    // not per invocation, because one module can declare an exe (command) and a lib
-    // and `echoc build` produces both. a library has no entry; its surface is its
-    // `#[export]`s. on wasm that is a reactor (`crt1-reactor.o`, `_initialize`);
-    // on the host it is a shared library
+    // LLVM triple and sysroot this invocation emits. not TargetFacts: that is `#[if:]`
     enum class ExecModel
     {
         t_command,
         t_library,
     };
 
-    struct CodegenTarget
+    // the OS a row emits for. read off the triple when the row is built
+    enum class TargetOs
     {
-        // LLVM triple objects are emitted for. empty means the host
-        std::string triple;
+        t_darwin,
+        t_ios,
+        t_linux,
+        t_windows,
+        t_wasi,
+        t_other,
+    };
+
+    // where a program reads its environment when no entry captured it
+    enum class EnvironSource
+    {
+        t_libc_environ,
+        t_ns_get_environ,
+        t_wasilibc_get_environ,
+        t_none,
+    };
+
+    enum class StdioUnbuffering
+    {
+        t_none,
+        t_ucrt_stdout_stderr,
+        t_wasi_libc_stdout,
+    };
+
+    struct ReservedExportNames
+    {
+        std::span<const char *const> entry;
+        std::span<const char *const> runtime;
+        std::string_view runtime_prefix;
+        std::span<const char *const> wasm_crt;
+    };
+
+    // LLVM triple and sysroot this invocation emits
+    class CodegenTarget
+    {
+    public:
+        CodegenTarget();
+        static CodegenTarget wasi();
+        static CodegenTarget for_triple(std::string triple);
+        static CodegenTarget ios_simulator(const std::string &arch);
+        static CodegenTarget ios_device();
+        CodegenTarget for_program(ExecModel model) const;
+
+        // the LLVM triple objects are emitted for. empty means the host
+        const std::string &triple() const {
+            return _triple;
+        }
 
         // `xcrun --sdk` name. empty means the Mac SDK (`darwin_sdk_root`) or none.
         // `iphonesimulator` / `iphoneos` are the two iOS rows
-        std::string apple_sdk;
+        const std::string &apple_sdk() const {
+            return _apple_sdk;
+        }
 
-        ExecModel exec_model = ExecModel::t_command;
+        ExecModel exec_model() const {
+            return _exec_model;
+        }
 
-        // columns of the row, set in resolve_codegen_target. empty/host is not wasm
-        // and 8-byte pointers; the wasi arm sets both
-        bool wasm = false;
-        unsigned pointer_bytes = 8;
-
-        // facts asked for ios, even when the emit triple is still the host
-        // (`--target-os ios` off Darwin). a native lib is refused either way
-        bool ios = false;
+        TargetOs os() const {
+            return _os;
+        }
 
         bool is_cross() const {
-            return !triple.empty();
+            return !_triple.empty();
         }
 
-        // the triple Backend::init_target and fold_target_environment fold.
-        // empty falls back to the host, so a default-constructed CompilerOptions
-        // and an invocation with no `--target-os` agree
+        // empty falls back to the host
         std::string effective_triple() const;
 
-        // width of a pointer on this row, in bytes. wasm32 is 4; every host this
-        // compiler has shipped is 8. parse/typecheck installs this via
-        // AST::PointerSizeScope; codegen usize is size_int_ty()
         unsigned pointer_size() const {
-            return pointer_bytes;
+            return _pointer_bytes;
         }
 
-        // wasi is the other real cross on every host. a column, so LLVMCompiler,
-        // the linker, PIC, and the entry symbol do not each invent `Triple::isWasm()`
         bool is_wasm() const {
-            return wasm;
+            return _os == TargetOs::t_wasi;
         }
 
-        // the object is for this machine, so CRT names and visibility follow
-        // the emit triple rather than TargetFacts::host()
-        bool is_windows() const;
+        bool is_windows() const {
+            return _os == TargetOs::t_windows;
+        }
 
-        // host `#if`s for install_name vs soname. a native lib is never a
-        // real cross, so this is the emit triple
-        bool is_darwin() const;
+        bool is_darwin() const {
+            return _os == TargetOs::t_darwin || _os == TargetOs::t_ios;
+        }
 
-        // the C symbol the entry module is emitted under. host and JIT are
-        // `main`; wasi-libc's crt looks up `__main_argc_argv`. a library has
-        // none: its surface is its exports. on wasm, crt1-reactor.o provides
-        // `_initialize`
+        // `main`, or `__main_argc_argv` on wasi. a library has none
         std::optional<const char *> entry_symbol() const;
 
-        // names `#[export]` may not claim as the program's entry. always
-        // `ECO_ENTRY_SYMBOL_NAME` (`main`), even in a lib: C still owns that
-        // spelling. a wasm command also emits `__main_argc_argv`
-        std::span<const char *const> reserved_entry_names() const;
+        ReservedExportNames reserved_export_names() const;
 
         bool is_library() const {
-            return exec_model == ExecModel::t_library;
+            return _exec_model == ExecModel::t_library;
         }
 
-        // a host shared library, so hidden-except-export and `clang -shared`.
-        // a wasm library is a reactor and uses the export section instead
         bool is_native_library() const {
             return is_library() && !is_wasm();
         }
 
-        // 3 on native (argc, argv, envp), 2 on wasi (argc, argv). envp is
-        // stored as null on the two-argument row
+        // 3 on native (argc, argv, envp), 2 on wasi (argc, argv)
         unsigned entry_arg_count() const;
 
-        // PIC is the native loadable-object rule. a WASI command module is a
-        // static relocatable; PIC is a different wasm ABI
+        bool entry_receives_envp() const {
+            return entry_arg_count() == 3;
+        }
+
+        EnvironSource environ_source() const;
+        StdioUnbuffering stdio_unbuffering() const;
+
+        bool has_unload() const {
+            return !is_wasm();
+        }
+
         bool uses_pic() const;
 
-        // wasm objects fail the same-process bitcode round-trip (`Invalid
-        // record`) the way Windows does, so they stay in-memory
+        bool c_objects_use_fpic() const {
+            return uses_pic() && !is_windows();
+        }
+
         bool snapshots_bitcode() const;
 
-        // appended when `-o` has no extension. empty on a native command
-        // (Windows `.exe` is the host fallback in output_path, not a row fact).
-        // a library uses library_suffix()
         const char *output_extension() const;
-
-        // `.dylib` / `.so` / `.dll` / `.wasm` - the suffix a loadable image
-        // takes on this row, independent of exec_model. library_file_name
-        // appends it; CBuild and LinkRequirement ask it of `CodegenTarget{}`
-        // for a file this machine's dlopen will open
         const char *library_suffix() const;
-
-        // the file a `#[target: lib { name: }]` writes: `libgreeter.dylib` /
-        // `libgreeter.so` / `greeter.dll` / `greeter.wasm`. `-o` does not go
-        // through this; it stays the path the user wrote
         std::string library_file_name(const std::string &stem) const;
-
-        // why this row cannot produce a loadable library. iOS: apple_sdk is
-        // set, and a phone does not dlopen an app-side dylib. empty when it can
-        std::optional<const char *> library_refusal() const;
-
-        // the path a suffix-less `-o` or target name becomes. the row's
-        // output_extension is the only suffix; Windows `.exe` applies only
-        // when that is empty. a path that already has an extension is left
         std::filesystem::path output_path(std::filesystem::path path) const;
 
-        // WASI preview 1 has no OS threads. the once helper and the static
-        // teardown chain are then ordinary loads and stores
-        bool has_os_threads() const;
+        bool has_os_threads() const {
+            return !is_wasm();
+        }
+
+    private:
+        CodegenTarget(std::string triple, std::string apple_sdk);
+
+        std::string _triple;
+        std::string _apple_sdk;
+        ExecModel _exec_model = ExecModel::t_command;
+        TargetOs _os = TargetOs::t_other;
+        unsigned _pointer_bytes = 8;
     };
 
-    // the one bit compute_module_keys, c_spec_digest and PartitionHash fold for
-    // "is this a native library". hidden-except-export changes every defined
-    // symbol, so an exe and a lib of the same module cannot share an object
-    inline const char *exec_model_environment(bool native_library)
+    // why this program cannot be a loadable library. empty when it can
+    std::optional<const char *> library_refusal(const TargetFacts &facts);
+
+    // cache-key spelling of exec_model. every kind is its own key
+    inline const char *exec_model_environment(const CodegenTarget &row)
     {
-        return native_library ? "lib" : "cmd";
+        switch (row.exec_model()) {
+            case ExecModel::t_command: return "cmd";
+            case ExecModel::t_library: return row.is_wasm() ? "reactor" : "lib";
+        }
+
+        assert(false && "unhandled ExecModel in exec_model_environment");
+        return "cmd";
     }
 
-    // `--target-arch` as TargetFacts::resolve should see it. `--ios-device` with
-    // no arch override is arm64, so a condition cannot still see the Intel host
-    // while the row emits a phone. `emitting` is `build`: wasi then defaults to
-    // wasm32 the same way, and `run --target-os wasi` keeps the host arch
-    std::string facts_architecture(
+    // `--target-arch` as TargetFacts::resolve should see it. wasi is wasm32 on every subcommand
+    bool facts_architecture(
         bool ios_device,
         const std::string &arch_override,
-        const std::string &target_os = {},
-        bool emitting = false
+        const std::string &target_os,
+        std::string &out_arch,
+        std::string &out_error
     );
 
-    // what this invocation emits objects for, given the facts a condition can see
-    // and the `--ios-device` request. asked only by `build`: `run` / `test` / `clean`
-    // / `lsp` never call it, so an empty CodegenTarget (the host) is what they emit.
-    //
-    // Darwin `echoc build --target-os ios` is a real cross-compile (simulator by
-    // default, iPhoneOS with `--ios-device`). `echoc build --target-os wasi` is
-    // the other real cross: `wasm32-unknown-wasip1` on every host. every other
-    // override stays the host triple: there is no Linux sysroot on a Mac.
-    //
-    // false with a sentence when `--ios-device` cannot retarget: without
-    // `--target-os ios`, off Darwin, or with `--target-arch` other than arm64
+    // what `build` emits. `run` / `test` / `clean` / `lsp` keep the host row
     bool resolve_codegen_target(
         const TargetFacts &facts,
         bool ios_device,

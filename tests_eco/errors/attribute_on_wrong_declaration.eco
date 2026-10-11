@@ -1,0 +1,18 @@
+// `#[unique]` belongs on a type, `#[inline]` on a function, `#[group]` on a test
+#[unique]
+function copied() : void
+{
+}
+
+#[inline]
+struct Box
+{
+    public int32 $v;
+}
+
+#[group: "math"]
+function grouped() : void
+{
+}
+
+echo 1;

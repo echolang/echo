@@ -456,13 +456,34 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     return &closure_expr;
 }
 
-void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into)
+void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into, AST::AttributeSite site)
 {
-    // each pass emplaces its own AttributeNode over the same tokens, so a declaration reached twice
-    // accumulates two per attribute. that is already true of a TypeDeclNode, which drains in both
-    // passes, and AttributeList::get_first is what makes it not matter
+    // each pass emplaces its own AttributeNode. AttributeList::get_first and collector dedup cover it
     for (auto &attr : payload.context.scope().collect_attributes()) {
+        if (attr != nullptr) {
+            Parser::check_attribute_site(payload, *attr, site);
+        }
+
         into.push_back(attr);
+    }
+}
+
+void Parser::discard_attributes(Parser::Payload &payload)
+{
+    payload.context.scope().collect_attributes();
+}
+
+void Parser::check_attribute_site(
+    Parser::Payload &payload,
+    const AST::AttributeNode &attribute,
+    AST::AttributeSite site)
+{
+    const std::optional<std::string> refusal =
+        AST::attribute_site_refusal(attribute.attribute_id.value(), site);
+
+    if (refusal.has_value()) {
+        payload.collector.collect_issue<AST::Issue::MisplacedAttribute>(
+            payload.context.code_ref(attribute.attribute_tokens), *refusal);
     }
 }
 
@@ -1008,7 +1029,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // around one: an attribute a method left on the stack was drained by the next `struct` to come
     // along (TypeDeclParser's own collect_attributes), landing on a type declaration that never
     // asked for it
-    Parser::drain_attributes(payload, funcdecl->attributes);
+    Parser::drain_attributes(payload, funcdecl->attributes, AST::AttributeSite::t_function);
     funcdecl->doc_comment = doc;
 
     // an `extern { }` may carry attributes for every function in it (`#[wasm: import "env"]

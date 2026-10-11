@@ -413,7 +413,7 @@ namespace
     {
         static const std::filesystem::path dir = [] {
             const Compiler::CapturedProcess printed =
-                Compiler::run_captured({ "clang", "-print-resource-dir" });
+                Compiler::run_captured({ Compiler::cc_driver(Compiler::CodegenTarget{}), "-print-resource-dir" });
 
             if (printed.exit_code == 0) {
                 const std::string root = trim_right(printed.output);
@@ -529,7 +529,7 @@ bool Compiler::append_codegen_link_args(
 
     // clang turns this into `wasm-ld ... crt1-reactor.o --entry _initialize`. a C
     // compile must not see it: CBuild reuses append_codegen_target_args
-    if (target.is_wasm() && target.exec_model == ExecModel::t_library) {
+    if (target.is_wasm() && target.is_library()) {
         argv.push_back("-mexec-model=reactor");
     }
 

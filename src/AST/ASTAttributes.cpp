@@ -27,17 +27,42 @@ namespace
     //   export      FuncDeclParser  -> FunctionDeclNode::export_name, AST::check_exports.
     //               on a type that answers an extern interface: AST::type_exports_abi_table,
     //               AST::check_abi_exports, AbiCodegen::emit_tables
-    //   wasm        Parser::parse_attribute plants object exports; AST::check_wasm_surface
-    //               seats import_module on an extern, or a file-root object export (`memory`)
-    constexpr std::string_view k_declaration_attributes[] = {
-        "inline", "implicit", "unique", "atomic", "group", "tests", "export", "wasm" };
+    //   wasm        Parser::parse_attribute plants object exports; TypeLowering and the driver
+    //               read them; AST::check_wasm_surface reports. `wasm` is a function's only
+    //               drained site: a file-scope object export is planted, not drained, so it
+    //               never sits on `_attribute_stack` and never takes a type site bit
+    constexpr unsigned site_bit(AST::AttributeSite site)
+    {
+        return 1u << static_cast<unsigned>(site);
+    }
+
+    constexpr unsigned k_on_function = site_bit(AST::AttributeSite::t_function);
+    constexpr unsigned k_on_type = site_bit(AST::AttributeSite::t_type);
+    constexpr unsigned k_on_test = site_bit(AST::AttributeSite::t_test);
+
+    struct DeclarationAttribute
+    {
+        std::string_view name;
+        unsigned sites;
+    };
+
+    constexpr DeclarationAttribute k_declaration_attributes[] = {
+        { "inline",   k_on_function },
+        { "implicit", k_on_function },
+        { "unique",   k_on_type },
+        { "atomic",   k_on_type },
+        { "group",    k_on_test },
+        { "tests",    k_on_test },
+        { "export",   k_on_function | k_on_type },
+        { "wasm",     k_on_function },
+    };
 
     // the compiler's private contract with its stdlib. one spelling, used by every lookup and
     // message. gated on AST::Module::writes_compiler_attributes
-    constexpr std::string_view k_compiler_attributes[] = {
-        AST::compiler_attribute::core,
-        AST::compiler_attribute::builtin,
-        AST::compiler_attribute::intrinsic
+    constexpr DeclarationAttribute k_compiler_attributes[] = {
+        { AST::compiler_attribute::core,      k_on_type },
+        { AST::compiler_attribute::builtin,   k_on_function },
+        { AST::compiler_attribute::intrinsic, k_on_function },
     };
 
     // and the manifest's nine, which reach this parser too: a `module.eco` is **Echo**, read by the real
@@ -77,6 +102,52 @@ namespace
         return std::find(std::begin(names), std::end(names), name) != std::end(names);
     }
 
+    template <size_t N>
+    const DeclarationAttribute *find_row(const DeclarationAttribute (&rows)[N], std::string_view name)
+    {
+        const auto found = std::find_if(std::begin(rows), std::end(rows),
+            [name](const DeclarationAttribute &row) { return row.name == name; });
+
+        return found == std::end(rows) ? nullptr : found;
+    }
+
+    template <size_t N>
+    std::vector<std::string_view> names_of(const DeclarationAttribute (&rows)[N])
+    {
+        std::vector<std::string_view> names;
+        for (const DeclarationAttribute &row : rows) {
+            names.push_back(row.name);
+        }
+        return names;
+    }
+
+    const char *site_noun(AST::AttributeSite site)
+    {
+        switch (site) {
+            case AST::AttributeSite::t_function: return "a function";
+            case AST::AttributeSite::t_type: return "a type";
+            case AST::AttributeSite::t_property: return "a property";
+            case AST::AttributeSite::t_test: return "a test";
+        }
+
+        assert(false && "unhandled AttributeSite in site_noun");
+        return "a declaration";
+    }
+
+    // the sites a row admits, as prose ("a function or a type")
+    std::string site_list(unsigned sites)
+    {
+        std::vector<std::string_view> nouns;
+        for (AST::AttributeSite site : { AST::AttributeSite::t_function, AST::AttributeSite::t_type,
+                                         AST::AttributeSite::t_property, AST::AttributeSite::t_test }) {
+            if ((sites & site_bit(site)) != 0) {
+                nouns.push_back(site_noun(site));
+            }
+        }
+
+        return fmt::format("{}", fmt::join(nouns, " or "));
+    }
+
     bool split_tool_attribute_name(
         std::string_view name,
         std::string_view &ns,
@@ -100,7 +171,7 @@ namespace
 
 std::vector<std::string_view> AST::declaration_attribute_names()
 {
-    return std::vector<std::string_view>(std::begin(k_declaration_attributes), std::end(k_declaration_attributes));
+    return names_of(k_declaration_attributes);
 }
 
 std::vector<std::string_view> AST::manifest_attribute_names()
@@ -110,7 +181,7 @@ std::vector<std::string_view> AST::manifest_attribute_names()
 
 std::string AST::known_attribute_list()
 {
-    return fmt::format("{}", fmt::join(k_declaration_attributes, ", "));
+    return fmt::format("{}", fmt::join(names_of(k_declaration_attributes), ", "));
 }
 
 std::string AST::known_manifest_attribute_list()
@@ -120,7 +191,7 @@ std::string AST::known_manifest_attribute_list()
 
 std::string AST::compiler_attribute_list()
 {
-    return fmt::format("{}", fmt::join(k_compiler_attributes, ", "));
+    return fmt::format("{}", fmt::join(names_of(k_compiler_attributes), ", "));
 }
 
 std::optional<std::pair<std::string, std::string>> AST::tool_attribute_name(const std::string &name)
@@ -150,7 +221,7 @@ AST::AttributeAdmission AST::attribute_admission(
                 return AttributeAdmission::t_reserved_namespace;
             }
 
-            return contains(k_compiler_attributes, name)
+            return find_row(k_compiler_attributes, name) != nullptr
                 ? AttributeAdmission::t_compiler
                 : AttributeAdmission::t_unknown_compiler;
         }
@@ -160,7 +231,7 @@ AST::AttributeAdmission AST::attribute_admission(
 
     switch (medium) {
     case AttributeMedium::t_source:
-        if (contains(k_declaration_attributes, name)) {
+        if (find_row(k_declaration_attributes, name) != nullptr) {
             return AttributeAdmission::t_language;
         }
 
@@ -181,6 +252,34 @@ AST::AttributeAdmission AST::attribute_admission(
     // no tail: a third medium is a compile error here rather than a name that silently attaches
     assert(false && "unhandled AttributeMedium in attribute_admission");
     return AttributeAdmission::t_unknown;
+}
+
+std::string AST::attribute_site_list(std::string_view name)
+{
+    const DeclarationAttribute *row = find_row(k_declaration_attributes, name);
+
+    if (row == nullptr) {
+        row = find_row(k_compiler_attributes, name);
+    }
+
+    return row == nullptr ? std::string() : site_list(row->sites);
+}
+
+std::optional<std::string> AST::attribute_site_refusal(std::string_view name, AST::AttributeSite site)
+{
+    const DeclarationAttribute *row = find_row(k_declaration_attributes, name);
+
+    if (row == nullptr) {
+        row = find_row(k_compiler_attributes, name);
+    }
+
+    // a tool attribute, or a name admission already refused
+    if (row == nullptr || (row->sites & site_bit(site)) != 0) {
+        return std::nullopt;
+    }
+
+    return fmt::format(
+        "'#[{}]' cannot be written on {}. It belongs on {}.", name, site_noun(site), site_list(row->sites));
 }
 
 AST::AttributeScoping AST::manifest_attribute_scoping(const std::string &name)

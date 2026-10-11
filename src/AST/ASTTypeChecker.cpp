@@ -1,7 +1,5 @@
 #include "AST/ASTTypeChecker.h"
 
-#include "Compiler/RuntimeSymbols.h"
-
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTConstruction.h"
 #include "AST/ASTEnumMap.h"
@@ -227,15 +225,16 @@ void TypeChecker::run()
 
     AST::check_abi_exports(_collector, _bundle, _options.codegen.is_wasm());
 
+    const Compiler::ReservedExportNames reserved = _options.codegen.reserved_export_names();
+
     AST::check_exports(
         _collector,
         _bundle,
-        _options.codegen.reserved_entry_names(),
-        Compiler::reserved_c_export_names(),
-        Compiler::k_compiler_runtime_prefix,
-        _options.codegen.is_wasm()
-            ? Compiler::wasm_crt_names()
-            : std::span<const char *const>{});
+        reserved.entry,
+        reserved.runtime,
+        reserved.runtime_prefix,
+        reserved.wasm_crt,
+        _options.codegen.is_wasm());
 
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
@@ -2652,13 +2651,13 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
         }
     }
 
-    // user locals only. `_in_parameter` and `_in_type_properties` skip those
-    // walks, and a synthesized body is skipped via `is_implicitly_generated`.
+    // user locals only. a parameter arrives with a value, a property is construction's,
+    // a static is OwnershipPass::ensure_static_init.
     // file-scope statements become locals of `main` and `_current_function`
     // is still null here
     if (!_in_parameter
         && !_in_type_properties
-        && (_current_function == nullptr || !_current_function->is_implicitly_generated)) {
+        && (_current_function == nullptr || !_current_function->has_synthesized_body())) {
         if (auto refusal = extern_interface_uninitialized_refusal(node)) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.token_varname), *refusal);

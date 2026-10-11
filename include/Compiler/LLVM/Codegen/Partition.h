@@ -28,7 +28,8 @@ namespace Compiler::LLVM
         bool no_optimize = false;
         bool targeting_windows = false;
         bool cross = false;
-        bool native_library = false;
+        // Compiler::exec_model_environment
+        std::string exec_model;
     };
 
     struct UnitPartition

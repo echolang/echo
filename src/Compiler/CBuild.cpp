@@ -133,7 +133,7 @@ bool c_spec_digest(
     // iOS rows are iphonesimulator / iphoneos. hashing darwin_sdk_root here
     // while compiling against iPhoneOS is the unsound-cache case
     digest = Compiler::fnv1a64(
-        Compiler::apple_sdk_root(options.codegen.apple_sdk).string(), digest);
+        Compiler::apple_sdk_root(options.codegen.apple_sdk()).string(), digest);
 
     if (options.codegen.is_wasm()) {
         digest = Compiler::fnv1a64(Compiler::wasi_sysroot().string(), digest);
@@ -555,7 +555,7 @@ bool Compiler::build_c_sources(
 
         // PIC is the Unix loadable-object rule. Windows objects are already relocatable;
         // clang-cl rejects `-fPIC`. a WASI command module is static relocatable
-        if (!options.codegen.is_windows() && options.codegen.uses_pic()) {
+        if (options.codegen.c_objects_use_fpic()) {
             job.argv.push_back("-fPIC");
         }
 
@@ -692,7 +692,8 @@ bool Compiler::build_c_shared_library(
     // through the clang driver rather than the system linker: a shared library's platform flags are
     // considerably fussier than an executable's, and this path is not the one Backend::link_program's
     // fast path exists to speed up - it runs once per module per change, not once per build
-    std::vector<std::string> argv = { "clang", "-shared", "-o", out_library.string() };
+    std::vector<std::string> argv = {
+        Compiler::cc_driver(CodegenTarget{}), "-shared", "-o", out_library.string() };
     Compiler::append_windows_sysroot_link_args(argv);
     Compiler::append_darwin_sdk_args(argv);
 

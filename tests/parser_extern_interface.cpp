@@ -39,7 +39,8 @@ TEST_CASE("an extern interface is a declared type whose values are structs", "[e
     REQUIRE(methods[0]->func_name() == "add");
     REQUIRE(methods[1]->func_name() == "answer");
     REQUIRE(methods[0]->body != nullptr);
-    REQUIRE(methods[0]->is_implicitly_generated);
+    REQUIRE(methods[0]->body_is_synthesized);
+    REQUIRE_FALSE(methods[0]->is_implicitly_generated);
 
     REQUIRE(greeter->complex_type().property_count() == 3);
     REQUIRE(greeter->properties()[0]->name() == AST::extern_slot_property_name(0, "add"));
@@ -74,7 +75,7 @@ TEST_CASE("a user property named like an extern slot is still typechecked", "[ex
 TEST_CASE("an exported conformer is refused on a wasm row", "[extern_interface][export]")
 {
     Compiler::CompilerOptions options = EchoTests::tests_compiler_options();
-    options.codegen.wasm = true;
+    options.codegen = Compiler::CodegenTarget::wasi();
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "public extern interface greeter {\n"
         "    function add(int32 $a, int32 $b) : int32;\n"

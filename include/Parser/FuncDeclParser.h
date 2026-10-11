@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTAttributes.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/ASTContext.h"
@@ -20,17 +21,13 @@ namespace AST
 
 namespace Parser
 {
-    // moves the attributes staged on the current scope onto `into`, so the declaration they were
-    // written ahead of is the one that consumes them.
-    //
-    // shared by every declaration that can carry one - a function, a method, a constructor, a
-    // destructor, a struct - because a declaration that does *not* drain leaves its attributes on the
-    // stack for whatever comes along next, which is how a method's `#[implicit]` would land on the
-    // following `struct`. taken as an AttributeList rather than a FunctionDeclNode for exactly that
-    // reason: the struct site is the other half of that bug and drains through here too. called once
-    // the declaration node is in hand, which is also the earliest point at which an attribute has
-    // something to be read against
-    void drain_attributes(Payload &payload, AST::AttributeList &into);
+    // move staged attributes onto `into`, checking they may sit on `site`
+    void drain_attributes(Payload &payload, AST::AttributeList &into, AST::AttributeSite site);
+
+    // drain without attaching, so they do not land on the next declaration
+    void discard_attributes(Payload &payload);
+
+    void check_attribute_site(Payload &payload, const AST::AttributeNode &attribute, AST::AttributeSite site);
 
     // if a `/** ... */` sits immediately before the current token, copy its text onto
     // `payload.pending_doc`. a second call while one is already pending is a no-op, which is

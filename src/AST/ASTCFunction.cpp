@@ -1,6 +1,7 @@
 #include "AST/ASTCFunction.h"
 
 #include "AST/ASTAbi.h"
+#include "AST/ASTAttributes.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
@@ -362,10 +363,12 @@ void AST::check_exports(
     std::span<const char *const> reserved_entry,
     std::span<const char *const> reserved_runtime,
     std::string_view reserved_runtime_prefix,
-    std::span<const char *const> reserved_wasm_crt
+    std::span<const char *const> reserved_wasm_crt,
+    bool wasm
 )
 {
-    constexpr const char *k_export_on_function = "an 'export' belongs on a function";
+    const std::string export_without_declaration = fmt::format(
+        "'#[export]' has no declaration after it. It belongs on {}.", attribute_site_list("export"));
 
     auto attr_ref = [](const Module &module, const AttributeNode &attr) {
         return CodeRef { &module, attr.attribute_id.make_slice() };
@@ -399,13 +402,13 @@ void AST::check_exports(
                 if (attr != nullptr && attr->attribute_id.value() == "export") {
                     collector.collect_issue<Issue::GenericError>(
                         attr_ref(module, *attr),
-                        k_export_on_function);
+                        export_without_declaration);
                 }
             }
         }
 
         for (TypeDeclNode *node : module.nodes.of_type<TypeDeclNode>()) {
-            if (node == nullptr || !type_exports_abi_table(*node) || !node->name_token.has_value()) {
+            if (node == nullptr || !type_exports_abi_table(*node, wasm) || !node->name_token.has_value()) {
                 continue;
             }
 

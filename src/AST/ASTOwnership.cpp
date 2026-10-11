@@ -12,6 +12,7 @@
 #include "AST/ASTCopy.h"
 #include "AST/ASTOps.h"
 #include "AST/ASTDestruction.h"
+#include "AST/ASTExternInterface.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTLastRead.h"
 #include "AST/ASTMemberLookup.h"
@@ -3072,7 +3073,13 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
     StaticInit built;
 
     // the initializer, if one was written. a static with none is simply zero - the global is
-    // zero-initialized, which is a defined value and the same one a fresh frame slot would hold
+    // zero-initialized, except a type with no zero value, refused here
+    if (node.decl->init_expr == nullptr) {
+        if (auto refusal = extern_interface_zero_refusal(node.result_type())) {
+            _collector.collect_issue<Issue::GenericError>(code_ref_for(site), *refusal);
+        }
+    }
+
     if (node.decl->init_expr != nullptr) {
         // **the index is part of the name**, or two statics on one type mangle to one symbol -
         // a member's mangled name is its owner, its name and its parameter types, and these take

@@ -1,5 +1,6 @@
 #include "Compiler/Lsp/LspSession.h"
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/SettledPath.h"
 
 #include <chrono>
@@ -175,13 +176,15 @@ void Compiler::Lsp::Session::resolve_project()
     _project_issues.clear();
 
     std::string error;
+    std::string arch;
 
-    if (!Compiler::TargetFacts::resolve(
-            _driver.target_os,
-            _driver.target_arch,
-            _driver.defines,
-            _facts,
-            error)) {
+    // the arch `build` would emit for
+    const bool resolved_facts =
+        Compiler::facts_architecture(
+            _driver.ios_device, _driver.target_arch, _driver.target_os, arch, error)
+        && Compiler::TargetFacts::resolve(_driver.target_os, arch, _driver.defines, _facts, error);
+
+    if (!resolved_facts) {
         _facts_ok = false;
         _manifests.clear();
         _roots.clear();

@@ -20,6 +20,10 @@ namespace
     constexpr const char *k_argc_symbol = "__eco_argc";
     constexpr const char *k_argv_symbol = "__eco_argv";
     constexpr const char *k_envp_symbol = "__eco_envp";
+
+    // `_IONBF` as each C runtime spells it. the two disagree
+    constexpr uint64_t k_ucrt_ionbf = 4;
+    constexpr uint64_t k_wasi_libc_ionbf = 2;
 };
 
 llvm::GlobalVariable *ProcessCodegen::get_or_create_argc()
@@ -39,8 +43,8 @@ llvm::GlobalVariable *ProcessCodegen::get_or_create_envp()
 
 void ProcessCodegen::gen_capture(llvm::Function *entry)
 {
-    assert((entry->arg_size() == 3 || entry->arg_size() == 2)
-        && "the entry point takes argc and argv, and envp on native");
+    assert(entry->arg_size() == _ctx.options.codegen.entry_arg_count()
+        && "the entry point was declared with the row's own argument count");
 
     llvm::Type *size_ty = _ctx.size_int_ty();
     llvm::Value *argc = entry->getArg(0);
@@ -53,7 +57,7 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
 
     _ctx.builder->CreateStore(entry->getArg(1), get_or_create_argv());
 
-    if (entry->arg_size() == 3) {
+    if (_ctx.options.codegen.entry_receives_envp()) {
         _ctx.builder->CreateStore(entry->getArg(2), get_or_create_envp());
     }
     else {
@@ -67,26 +71,32 @@ llvm::Value *ProcessCodegen::load_platform_envp()
 {
     llvm::Type *ptr = _ctx.opaque_ptr_type();
 
-    if (_ctx.targeting_wasm()) {
-        llvm::FunctionCallee get = _ctx.libc_callee(
-            Compiler::RuntimeSymbol::t_wasilibc_get_environ, ptr, {});
-        return _ctx.builder->CreateCall(get, {}, "environ");
+    switch (_ctx.options.codegen.environ_source()) {
+        case Compiler::EnvironSource::t_wasilibc_get_environ: {
+            llvm::FunctionCallee get = _ctx.libc_callee(
+                Compiler::RuntimeSymbol::t_wasilibc_get_environ, ptr, {});
+            return _ctx.builder->CreateCall(get, {}, "environ");
+        }
+
+        case Compiler::EnvironSource::t_ns_get_environ: {
+            llvm::FunctionCallee get = _ctx.libc_callee(
+                Compiler::RuntimeSymbol::t_ns_get_environ, ptr, {});
+            llvm::Value *slot = _ctx.builder->CreateCall(get, {}, "environ.slot");
+            return _ctx.builder->CreateLoad(ptr, slot, "environ");
+        }
+
+        case Compiler::EnvironSource::t_none:
+            return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
+
+        case Compiler::EnvironSource::t_libc_environ: {
+            llvm::GlobalVariable *environ_gv =
+                _ctx.libc_global(Compiler::RuntimeSymbol::t_environ, ptr);
+            return _ctx.builder->CreateLoad(ptr, environ_gv, "environ");
+        }
     }
 
-    if (_ctx.options.codegen.is_darwin()) {
-        llvm::FunctionCallee get = _ctx.libc_callee(
-            Compiler::RuntimeSymbol::t_ns_get_environ, ptr, {});
-        llvm::Value *slot = _ctx.builder->CreateCall(get, {}, "environ.slot");
-        return _ctx.builder->CreateLoad(ptr, slot, "environ");
-    }
-
-    if (_ctx.targeting_windows()) {
-        return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
-    }
-
-    // not `environ`: UCRT `#define`s that as `(*__p__environ())`
-    llvm::GlobalVariable *environ_gv = _ctx.libc_global(Compiler::RuntimeSymbol::t_environ, ptr);
-    return _ctx.builder->CreateLoad(ptr, environ_gv, "environ");
+    assert(false && "unhandled EnvironSource in load_platform_envp");
+    return llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr));
 }
 
 void ProcessCodegen::store_platform_envp()
@@ -99,35 +109,48 @@ void ProcessCodegen::unbuffer_stdio()
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
     llvm::Type *ptr = _ctx.opaque_ptr_type();
 
+    switch (_ctx.options.codegen.stdio_unbuffering()) {
+        case Compiler::StdioUnbuffering::t_none:
+            return;
+
+        case Compiler::StdioUnbuffering::t_ucrt_stdout_stderr:
+            unbuffer_ucrt(i32, ptr);
+            return;
+
+        case Compiler::StdioUnbuffering::t_wasi_libc_stdout:
+            unbuffer_wasi_libc(i32, ptr);
+            return;
+    }
+
+    assert(false && "unhandled StdioUnbuffering in unbuffer_stdio");
+}
+
+void ProcessCodegen::unbuffer_ucrt(llvm::Type *i32, llvm::Type *ptr)
+{
     // stdout is fully buffered when it is a pipe. `echo` of a string goes through
     // `_write` (unbuffered) after `fflush(NULL)`, and that fflush is a no-op from
     // JIT'd code on Windows: MCJIT resolves UCRT but `fflush(NULL)` does not drain
     // this process's FILE*. unbuffering stdout and stderr makes `printf` and
     // `_write` the same kind of write, so program order is what the goldens record
-    if (_ctx.targeting_windows()) {
-        llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-        llvm::FunctionCallee iob = _ctx.libc_callee(
-            Compiler::RuntimeSymbol::t_acrt_iob_func, ptr, { i32 });
-        llvm::FunctionCallee setvbuf_fn = _ctx.libc_callee(
-            Compiler::RuntimeSymbol::t_setvbuf, i32, { ptr, ptr, i32, i64 });
-        llvm::Value *null = llvm::ConstantPointerNull::get(
-            llvm::cast<llvm::PointerType>(ptr));
-        llvm::Value *ionbf = llvm::ConstantInt::get(i32, 4);
-        llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::FunctionCallee iob = _ctx.libc_callee(
+        Compiler::RuntimeSymbol::t_acrt_iob_func, ptr, { i32 });
+    llvm::FunctionCallee setvbuf_fn = _ctx.libc_callee(
+        Compiler::RuntimeSymbol::t_setvbuf, i32, { ptr, ptr, i32, i64 });
+    llvm::Value *null = llvm::ConstantPointerNull::get(
+        llvm::cast<llvm::PointerType>(ptr));
+    llvm::Value *ionbf = llvm::ConstantInt::get(i32, k_ucrt_ionbf);
+    llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
 
-        for (unsigned fd : { 1u, 2u }) {
-            llvm::Value *file = _ctx.builder->CreateCall(
-                iob, { llvm::ConstantInt::get(i32, fd) });
-            _ctx.builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
-        }
-
-        return;
+    for (unsigned fd : { 1u, 2u }) {
+        llvm::Value *file = _ctx.builder->CreateCall(
+            iob, { llvm::ConstantInt::get(i32, fd) });
+        _ctx.builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
     }
+}
 
-    if (!_ctx.targeting_wasm()) {
-        return;
-    }
-
+void ProcessCodegen::unbuffer_wasi_libc(llvm::Type *i32, llvm::Type *ptr)
+{
     llvm::GlobalVariable *stdout_gv = _ctx.libc_global(Compiler::RuntimeSymbol::t_stdout, ptr);
 
     llvm::FunctionCallee setvbuf_fn = _ctx.libc_callee(
@@ -138,16 +161,15 @@ void ProcessCodegen::unbuffer_stdio()
     llvm::Value *file = _ctx.builder->CreateLoad(ptr, stdout_gv, "stdout");
     llvm::Value *null = llvm::ConstantPointerNull::get(
         llvm::cast<llvm::PointerType>(ptr));
-    llvm::Value *ionbf = llvm::ConstantInt::get(i32, 2);
+    llvm::Value *ionbf = llvm::ConstantInt::get(i32, k_wasi_libc_ionbf);
     llvm::Value *zero = llvm::ConstantInt::get(_ctx.size_int_ty(), 0);
     _ctx.builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
 }
 
 void ProcessCodegen::gen_startup()
 {
-    // unbuffer_stdio is a no-op off Windows and wasm; an empty ctor on every
-    // POSIX lib is a global_ctors entry that does nothing
-    if (!_ctx.targeting_windows() && !_ctx.targeting_wasm()) {
+    // nothing to unbuffer
+    if (_ctx.options.codegen.stdio_unbuffering() == Compiler::StdioUnbuffering::t_none) {
         return;
     }
 
@@ -179,8 +201,8 @@ void ProcessCodegen::gen_library_lifecycle(llvm::Function *fini_walker)
 {
     gen_startup();
 
-    // a wasm reactor has no unload: the image lives with the page
-    if (fini_walker == nullptr || _ctx.targeting_wasm()) {
+    // null when nothing is owed a teardown
+    if (fini_walker == nullptr) {
         return;
     }
 

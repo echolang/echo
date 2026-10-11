@@ -156,8 +156,7 @@ void Parser::parse_testdecl(Parser::Payload &payload, bool symbol_only)
     // scope's stack is picked up by the next declaration this walk meets, which is the leak
     // Parser::drain_attributes' own call site in FuncDeclParser records
     if (symbol_only) {
-        AST::AttributeList discarded;
-        Parser::drain_attributes(payload, discarded);
+        Parser::discard_attributes(payload);
 
         Parser::parse_declaration_surface(payload, body_brace);
         return;
@@ -181,7 +180,7 @@ void Parser::parse_testdecl(Parser::Payload &payload, bool symbol_only)
     // rather than read
     decl.return_type = &payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_void());
 
-    Parser::drain_attributes(payload, decl.attributes);
+    Parser::drain_attributes(payload, decl.attributes, AST::AttributeSite::t_test);
 
     const std::string group = read_group(payload, decl);
     const bool expects_death = read_expects_death(payload, decl);

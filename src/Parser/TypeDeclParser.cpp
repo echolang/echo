@@ -467,9 +467,7 @@ static void leave_member_body(Parser::Payload &payload)
 //
 // both halves are the shared ones - Parser::drain_attributes and Parser::publish_declaration_markers,
 // the same two parse_funcdecl calls around its own registration - so no rule about an attribute is
-// spelled here. every attribute name is still accepted and ignored: there is no known-attribute set
-// in the compiler, and inventing one at this site would quietly close a machinery that today takes
-// any identifier
+// spelled here
 static void publish_member_attributes(
     Parser::Payload &payload,
     AST::FunctionDeclNode *decl,
@@ -477,7 +475,7 @@ static void publish_member_attributes(
     const TokenReference &nametoken
 )
 {
-    Parser::drain_attributes(payload, decl->attributes);
+    Parser::drain_attributes(payload, decl->attributes, AST::AttributeSite::t_function);
     Parser::publish_declaration_markers(payload, decl, struct_node, nametoken);
 }
 
@@ -1217,8 +1215,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     if (Parser::refuse_type_in_generic_body(payload, name_token)) {
         // the attributes staged ahead of this declaration are still owed a drain - an undrained one
         // attaches itself to whatever declaration comes next, which is the bug the drain below records
-        AST::AttributeList refused_attributes;
-        Parser::drain_attributes(payload, refused_attributes);
+        Parser::discard_attributes(payload);
 
         // the open brace is already consumed, and this is brace-depth aware and eats the closing one,
         // so the cursor lands exactly where the normal close-brace exit leaves it
@@ -1302,7 +1299,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // the attributes written ahead of the declaration, through the same drain a function uses - an
     // undrained attribute attaches itself to whatever declaration comes next, and this site is the
     // half of the bug that would pick up a method's `#[implicit]`
-    Parser::drain_attributes(payload, struct_node->attributes);
+    Parser::drain_attributes(payload, struct_node->attributes, AST::AttributeSite::t_type);
     struct_node->doc_comment = doc;
 
     Parser::bind_type_decl_attributes(payload, *struct_node);
@@ -1635,7 +1632,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             AST::FunctionDeclNode *member = parse_funcdecl(payload, func_kind, visibility);
 
             if (holds_any_requirements && member != nullptr && member->body != nullptr
-                && !member->is_implicitly_generated) {
+                && !member->has_synthesized_body()) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(member->declaration_site_token()),
                     fmt::format(
@@ -1705,12 +1702,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             if (var != nullptr) {
                 var->visibility = visibility.value;
-                Parser::drain_attributes(payload, var->attributes);
+                Parser::drain_attributes(payload, var->attributes, AST::AttributeSite::t_property);
                 var->doc_comment = std::move(property_doc);
             }
             else {
-                AST::AttributeList discarded;
-                Parser::drain_attributes(payload, discarded);
+                Parser::discard_attributes(payload);
             }
 
             // a requirement is behaviour, not storage. a required *property* would fix the layout of
@@ -1841,7 +1837,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     // declaration pass: the name has to be in the overload set before any other file's body is
     // parsed, because parse_funccall reports UnknownFunction while it is reading the call
-    if (collect_members && !holds_any_requirements && !is_enum_body) {
+    if (collect_members) {
         AST::ensure_synthesized_constructor(
             payload.context.module, *struct_node, payload.collector, self_value_type);
     }

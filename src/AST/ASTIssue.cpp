@@ -575,6 +575,7 @@ std::vector<AST::IssueNote> AST::Issue::UnknownAttribute::notes() const
 }
 
 ISSUE_MESSAGE_FNC(ManifestAttributeInSource) { return _message; }
+ISSUE_MESSAGE_FNC(MisplacedAttribute) { return _message; }
 
 ISSUE_MESSAGE_FNC(UnknownManifestAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(ReservedAttributeNamespace) { return _message; }

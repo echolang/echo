@@ -21,6 +21,17 @@
 namespace Compiler::LLVM
 {
 
+static bool host_bitcode_round_trip_works()
+{
+    // a Windows-hosted LLVM fails the same-process bitcode round-trip,
+    // whatever the row emits
+#if defined(_WIN32)
+    return false;
+#else
+    return true;
+#endif
+}
+
 static IsolatedEmitRequest make_isolated_request(
     std::string bitcode,
     std::filesystem::path object_path,
@@ -110,7 +121,7 @@ bool emit_unit_objects(
     env.no_optimize = ctx.options.no_optimize;
     env.targeting_windows = ctx.targeting_windows();
     env.cross = ctx.options.codegen.is_cross();
-    env.native_library = ctx.options.codegen.is_native_library();
+    env.exec_model = Compiler::exec_model_environment(ctx.options.codegen);
 
     struct Output
     {
@@ -182,13 +193,12 @@ bool emit_unit_objects(
 
     // a single live module, or `ECO_JOBS=1`, stays in this LLVMContext. the bitcode
     // round-trip is the cost; run_jobs would keep one item on this thread either way.
-    // wasm objects fail that round-trip (`Invalid record`) the way Windows does
-#if defined(_WIN32)
-    const bool in_memory = true;
-#else
+    // the row says whether the target snapshots; the host check is this process's LLVM
     const bool in_memory =
-        !ctx.options.codegen.snapshots_bitcode() || live.size() <= 1 || jobs <= 1;
-#endif
+        !host_bitcode_round_trip_works()
+        || !ctx.options.codegen.snapshots_bitcode()
+        || live.size() <= 1
+        || jobs <= 1;
 
     if (in_memory) {
         for (Output *output : live) {

@@ -152,14 +152,14 @@ bool Compiler::append_apple_target_args(
     append_darwin_sdk_args(argv);
     return true;
 #else
-    if (target.apple_sdk.empty()) {
+    if (target.apple_sdk().empty()) {
         append_darwin_sdk_args(argv);
         return true;
     }
 
-    const std::filesystem::path sdk = apple_sdk_root(target.apple_sdk);
+    const std::filesystem::path sdk = apple_sdk_root(target.apple_sdk());
     if (sdk.empty()) {
-        out_error = "the '" + target.apple_sdk + "' SDK was not found. install Xcode's iOS platform support";
+        out_error = "the '" + target.apple_sdk() + "' SDK was not found. install Xcode's iOS platform support";
         return false;
     }
 

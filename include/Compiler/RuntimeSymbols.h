@@ -40,15 +40,8 @@ namespace Compiler
         t_count
     };
 
-    // the C spelling libc_callee inserts. order matches the enumerators
     const char *runtime_symbol_name(RuntimeSymbol symbol);
-
-    // the table libc_callee walks. first `t_count` names of reserved_c_export_names
     std::span<const char *const> compiler_runtime_names();
-
-    // names `#[export]` may not claim: the runtime table, then memcpy/memset/memmove
-    // (libc, not a RuntimeSymbol, because echoc does not declare them). `main` is
-    // CodegenTarget::reserved_entry_names, even in a lib
     std::span<const char *const> reserved_c_export_names();
 
     inline constexpr std::string_view k_compiler_runtime_prefix = "__eco_";

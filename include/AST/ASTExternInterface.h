@@ -20,12 +20,13 @@ namespace AST
     // `$__image` - the erased library handle that keeps the image loaded
     inline constexpr const char *k_extern_image_property = "__image";
 
-    // the requirements an ABI table, fingerprint, and slot_symbol walk, in
-    // declaration order. nulls in methods() are skipped here, once
+    // requirements in declaration order. look a slot up by name, not layout index
     std::vector<FunctionDeclNode *> extern_interface_requirements(const ComplexType &ct);
 
-    // TypeChecker: an uninitialized non-nullable extern-interface local would
-    // jump through null slots. empty when the declaration is fine
+    // no zero value: a null slot jumps on the first call
+    std::optional<std::string> extern_interface_zero_refusal(const class ValueType &type);
+
+    // a local with no initializer and no unwrapped binding
     std::optional<std::string> extern_interface_uninitialized_refusal(const class VarDeclNode &decl);
 
     // the static on `conformer` that answers `requirement`, or a sentence.

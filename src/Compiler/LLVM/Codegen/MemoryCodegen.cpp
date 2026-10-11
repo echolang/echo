@@ -101,7 +101,7 @@ void MemoryCodegen::gen_counter_delta(int64_t delta)
             llvm::AtomicRMWInst::Add,
             counter,
             step,
-            llvm::Align(8),
+            _ctx.layout().getABITypeAlign(i64),
             llvm::AtomicOrdering::Monotonic)->setName("live");
         return;
     }

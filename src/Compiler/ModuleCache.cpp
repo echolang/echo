@@ -181,12 +181,7 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
 
-    // **and whether this program is a native library.** hidden-except-export changes
-    // every defined symbol of a native lib, so an exe and a lib of the same module
-    // cannot share an object. a wasm reactor's library objects alias a command's:
-    // entry lives in the uncached program unit and `--export-memory` is a link flag.
-    // C objects fold the same bit in c_spec_digest: `-fvisibility=hidden` on a
-    // native lib changes the object
+    // **and what kind of program this is.** no two kinds share an object
     environment = fnv1a64(
         std::string(Compiler::exec_model_environment(options)), environment);
 

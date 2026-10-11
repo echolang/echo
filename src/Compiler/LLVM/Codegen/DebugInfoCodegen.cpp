@@ -695,9 +695,13 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     // the three header words, marked artificial: they are the reference-counting machinery rather than
     // anything the author declared, so `frame variable` keeps them out of the way while `p` can still
     // reach them when a leak is what is being chased
+    //
+    // counts are i64 on every row, which is not `usize` on wasm32. read them off the box
+    const unsigned count_bits =
+        class_layout.box->getElementType(ClassBox::strong_index)->getIntegerBitWidth();
     llvm::DIType *counter = unit->builder->createBasicType(
-        "usize",
-        _ctx.size_int_ty()->getBitWidth(),
+        fmt::format("uint{}", count_bits),
+        count_bits,
         llvm::dwarf::DW_ATE_unsigned);
 
     const std::array<std::pair<const char *, llvm::DIType *>, 3> header = {{
@@ -709,7 +713,8 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     for (size_t i = 0; i < header.size(); i++) {
         elements.push_back(unit->builder->createMemberType(
             unit->cu, header[i].first, decl_file, decl_line,
-            header[i].second->getSizeInBits(), 64,
+            header[i].second->getSizeInBits(),
+            _ctx.layout().getABITypeAlign(class_layout.box->getElementType(i)).value() * 8,
             box_layout->getElementOffsetInBits(i),
             llvm::DINode::FlagArtificial, header[i].second));
     }

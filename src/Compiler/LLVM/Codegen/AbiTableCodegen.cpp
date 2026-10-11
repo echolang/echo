@@ -130,16 +130,17 @@ void AbiCodegen::emit_tables()
     }
 
     for (AST::TypeDeclNode *node : module->nodes.of_type<AST::TypeDeclNode>()) {
-        if (node == nullptr || !AST::type_exports_abi_table(*node)) {
+        if (node == nullptr || !AST::type_exports_abi_table(*node, _ctx.targeting_wasm())) {
             continue;
         }
 
         AST::ComplexType &conformer = node->complex_type();
 
+        // the parser admits only an extern interface to this list
         for (const AST::ValueType &iface_type : conformer.extern_conformances()) {
             AST::ComplexType *iface = iface_type.get_complex_type();
 
-            if (iface == nullptr || !iface->is_extern_interface_kind()) {
+            if (iface == nullptr) {
                 continue;
             }
 
@@ -203,31 +204,35 @@ void AbiCodegen::gen_slot_symbol(AST::FunctionCallExprNode &node)
 
     const auto requirements = AST::extern_interface_requirements(*ct);
     const AST::ValueType string_type = node.decl->get_return_type();
-    std::vector<llvm::Constant *> names;
-    names.reserve(requirements.size());
-
-    for (AST::FunctionDeclNode *requirement : requirements) {
-        const std::string link = requirement->abi_link_name.value_or(requirement->func_name());
-        names.push_back(_ctx.string_constant(link, string_type));
-    }
-
     llvm::Type *elem_ty = _ctx.types->get_llvm_type(string_type, *_ctx.current_cmp_unit);
-    llvm::ArrayType *arr_ty = llvm::ArrayType::get(elem_ty, names.size());
-    llvm::Constant *arr = llvm::ConstantArray::get(arr_ty, names);
+    llvm::ArrayType *arr_ty = llvm::ArrayType::get(elem_ty, requirements.size());
 
-    auto *gv = new llvm::GlobalVariable(
-        *_ctx.current_module(),
-        arr_ty,
-        true,
-        llvm::GlobalValue::PrivateLinkage,
-        arr,
-        "abi.slot_names");
+    // one table of names per interface per unit
+    const std::string table_name = "abi.slot_names." + ct->mangled_token();
+    llvm::GlobalVariable *gv = _ctx.current_module()->getNamedGlobal(table_name);
+
+    if (gv == nullptr) {
+        std::vector<llvm::Constant *> names;
+        names.reserve(requirements.size());
+
+        for (AST::FunctionDeclNode *requirement : requirements) {
+            names.push_back(_ctx.string_constant(requirement->requirement_link_name(), string_type));
+        }
+
+        gv = new llvm::GlobalVariable(
+            *_ctx.current_module(),
+            arr_ty,
+            true,
+            llvm::GlobalValue::PrivateLinkage,
+            llvm::ConstantArray::get(arr_ty, names),
+            table_name);
+    }
 
     node.arguments[0]->accept(*_ctx.visitor);
     llvm::Value *index = _ctx.pop_scalar();
 
     if (_ctx.options.assertions_enabled()) {
-        llvm::Value *n = llvm::ConstantInt::get(index->getType(), names.size());
+        llvm::Value *n = llvm::ConstantInt::get(index->getType(), requirements.size());
         llvm::Value *oob = _ctx.builder->CreateICmpUGE(index, n, "abi.slot.oob");
         _ctx.abort->gen_abort_if(
             oob, "fatal error", "abi::slot_symbol index is out of range",
@@ -260,25 +265,34 @@ void AbiCodegen::gen_bind_unchecked(AST::FunctionCallExprNode &node)
     llvm::Value *agg = llvm::UndefValue::get(agg_ty);
     llvm::Type *ptr_ty = llvm::PointerType::get(*_ctx.llvm_context, 0);
 
-    size_t slot_i = 0;
+    // each slot by name, never by layout index
+    const auto property_index = [&](const std::string &name) {
+        const AST::ComplexType::Property *prop = ct->find_property(name);
 
-    for (size_t i = 0; i < ct->property_count(); ++i) {
-        const AST::ComplexType::Property &prop = ct->get_property(i);
-        const unsigned idx = static_cast<unsigned>(prop.index);
-
-        if (prop.name == AST::k_extern_image_property) {
-            agg = _ctx.builder->CreateInsertValue(agg, image, { idx }, "abi.image");
-            continue;
+        if (prop == nullptr) {
+            throw _ctx.error(fmt::format(
+                "'{}' has no property '{}' to bind {}", ct->namespaced_name(), name, _ctx.function_context()));
         }
 
+        return static_cast<unsigned>(prop->index);
+    };
+
+    const std::vector<AST::FunctionDeclNode *> requirements = AST::extern_interface_requirements(*ct);
+
+    for (size_t ordinal = 0; ordinal < requirements.size(); ++ordinal) {
+        const unsigned idx = property_index(
+            AST::extern_slot_property_name(ordinal, requirements[ordinal]->func_name()));
+
         llvm::Value *off = llvm::ConstantInt::get(
-            llvm::Type::getInt64Ty(*_ctx.llvm_context), slot_i);
+            llvm::Type::getInt64Ty(*_ctx.llvm_context), ordinal);
         llvm::Value *addr = _ctx.builder->CreateInBoundsGEP(
             ptr_ty, slots, off, "abi.slot.addr");
         llvm::Value *fn = _ctx.builder->CreateLoad(ptr_ty, addr, "abi.slot");
         agg = _ctx.builder->CreateInsertValue(agg, fn, { idx }, "abi.slot");
-        ++slot_i;
     }
+
+    agg = _ctx.builder->CreateInsertValue(
+        agg, image, { property_index(AST::k_extern_image_property) }, "abi.image");
 
     _ctx.push_scalar(agg);
 }

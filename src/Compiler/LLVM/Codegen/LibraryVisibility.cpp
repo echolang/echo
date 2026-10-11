@@ -55,48 +55,50 @@ namespace
 
 void hide_non_exported_symbols(CodegenContext &ctx)
 {
+    // a unit merged into another under `--optimize whole` has given its module away
     for (auto &unit : ctx.cmp_units) {
-        if (!unit->llvm_module) {
+        if (unit->llvm_module) {
+            hide_non_exported_symbols(*unit->llvm_module);
+        }
+    }
+}
+
+void hide_non_exported_symbols(llvm::Module &module)
+{
+    const std::unordered_set<const llvm::Function *> lifecycle = lifecycle_functions(module);
+
+    for (llvm::Function &fn : module.functions()) {
+        // local symbols are already invisible. LLVM refuses any other visibility on them
+        if (fn.isDeclaration() || fn.hasLocalLinkage()) {
             continue;
         }
 
-        llvm::Module &module = *unit->llvm_module;
-        const std::unordered_set<const llvm::Function *> lifecycle = lifecycle_functions(module);
-
-        for (llvm::Function &fn : module.functions()) {
-            if (fn.isDeclaration()) {
-                continue;
-            }
-
-            // DLLExport is planted at lowering on every native-lib `#[export]`.
-            // the marker is the keep-visible rule, so a table global Phase 3
-            // plants with the same storage class is kept without a name set
-            if (fn.hasDLLExportStorageClass() || lifecycle.count(&fn) > 0) {
-                fn.setVisibility(llvm::GlobalValue::DefaultVisibility);
-                continue;
-            }
-
-            fn.setVisibility(llvm::GlobalValue::HiddenVisibility);
-            fn.setDSOLocal(true);
+        // DLLExport is the keep-visible marker, planted on every native-lib `#[export]`
+        if (fn.hasDLLExportStorageClass() || lifecycle.count(&fn) > 0) {
+            fn.setVisibility(llvm::GlobalValue::DefaultVisibility);
+            continue;
         }
 
-        for (llvm::GlobalVariable &gv : module.globals()) {
-            if (gv.isDeclaration()) {
-                continue;
-            }
+        fn.setVisibility(llvm::GlobalValue::HiddenVisibility);
+        fn.setDSOLocal(true);
+    }
 
-            if (gv.getName().starts_with("llvm.")) {
-                continue;
-            }
-
-            if (gv.hasDLLExportStorageClass()) {
-                gv.setVisibility(llvm::GlobalValue::DefaultVisibility);
-                continue;
-            }
-
-            gv.setVisibility(llvm::GlobalValue::HiddenVisibility);
-            gv.setDSOLocal(true);
+    for (llvm::GlobalVariable &gv : module.globals()) {
+        if (gv.isDeclaration() || gv.hasLocalLinkage()) {
+            continue;
         }
+
+        if (gv.getName().starts_with("llvm.")) {
+            continue;
+        }
+
+        if (gv.hasDLLExportStorageClass()) {
+            gv.setVisibility(llvm::GlobalValue::DefaultVisibility);
+            continue;
+        }
+
+        gv.setVisibility(llvm::GlobalValue::HiddenVisibility);
+        gv.setDSOLocal(true);
     }
 }
 

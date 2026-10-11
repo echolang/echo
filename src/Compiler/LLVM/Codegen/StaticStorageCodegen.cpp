@@ -114,7 +114,7 @@ namespace Compiler::LLVM
 
             _ctx.builder->SetInsertPoint(entry);
             llvm::LoadInst *seen = _ctx.builder->CreateLoad(i64, guard, "seen");
-            seen->setAlignment(llvm::Align(8));
+            seen->setAlignment(_ctx.layout().getABITypeAlign(i64));
             llvm::Value *is_done = _ctx.builder->CreateICmpEQ(seen, done_tok, "is.done");
             llvm::Value *in_flight = _ctx.builder->CreateICmpNE(
                 seen, llvm::ConstantInt::get(i64, 0), "in.flight");
@@ -123,10 +123,10 @@ namespace Compiler::LLVM
 
             _ctx.builder->SetInsertPoint(run);
             llvm::StoreInst *claim = _ctx.builder->CreateStore(one, guard);
-            claim->setAlignment(llvm::Align(8));
+            claim->setAlignment(_ctx.layout().getABITypeAlign(i64));
             _ctx.builder->CreateCall(body_ty, body);
             llvm::StoreInst *finish = _ctx.builder->CreateStore(done_tok, guard);
-            finish->setAlignment(llvm::Align(8));
+            finish->setAlignment(_ctx.layout().getABITypeAlign(i64));
             _ctx.builder->CreateBr(done);
 
             _ctx.builder->SetInsertPoint(done);
@@ -171,7 +171,7 @@ namespace Compiler::LLVM
         _ctx.builder->SetInsertPoint(loop);
         llvm::LoadInst *seen = _ctx.builder->CreateLoad(i64, guard, "seen");
         seen->setAtomic(llvm::AtomicOrdering::Acquire);
-        seen->setAlignment(llvm::Align(8));
+        seen->setAlignment(_ctx.layout().getABITypeAlign(i64));
         llvm::Value *is_done = _ctx.builder->CreateICmpEQ(seen, done_tok, "is.done");
         llvm::Value *is_self = _ctx.builder->CreateICmpEQ(seen, token, "is.self");
         llvm::Value *mine_or_done = _ctx.builder->CreateOr(is_done, is_self, "mine.or.done");
@@ -189,7 +189,7 @@ namespace Compiler::LLVM
             guard,
             llvm::ConstantInt::get(i64, 0),
             token,
-            llvm::Align(8),
+            _ctx.layout().getABITypeAlign(i64),
             llvm::AtomicOrdering::Acquire,
             llvm::AtomicOrdering::Monotonic);
         llvm::Value *ok = _ctx.builder->CreateExtractValue(cas, 1, "won");
@@ -200,7 +200,7 @@ namespace Compiler::LLVM
         _ctx.builder->CreateCall(body_ty, body);
         llvm::StoreInst *finish = _ctx.builder->CreateStore(done_tok, guard);
         finish->setAtomic(llvm::AtomicOrdering::Release);
-        finish->setAlignment(llvm::Align(8));
+        finish->setAlignment(_ctx.layout().getABITypeAlign(i64));
         _ctx.builder->CreateBr(done);
 
         _ctx.builder->SetInsertPoint(wait);
@@ -265,7 +265,7 @@ namespace Compiler::LLVM
         if (threaded) {
             seen->setAtomic(llvm::AtomicOrdering::Acquire);
         }
-        seen->setAlignment(llvm::Align(8));
+        seen->setAlignment(_ctx.layout().getABITypeAlign(i64));
         _ctx.builder->CreateCondBr(
             _ctx.builder->CreateICmpEQ(seen, done_tok, "initialized"),
             done,
@@ -302,7 +302,7 @@ namespace Compiler::LLVM
 
             if (!threaded) {
                 llvm::LoadInst *cur = _ctx.builder->CreateLoad(ptr, head, "chain");
-                cur->setAlignment(llvm::Align(8));
+                cur->setAlignment(_ctx.layout().getABITypeAlign(ptr));
                 _ctx.builder->CreateStore(cur, next_slot);
                 _ctx.builder->CreateStore(link, head);
             }
@@ -314,13 +314,13 @@ namespace Compiler::LLVM
                 _ctx.builder->SetInsertPoint(push);
                 llvm::LoadInst *cur = _ctx.builder->CreateLoad(ptr, head, "chain");
                 cur->setAtomic(llvm::AtomicOrdering::Monotonic);
-                cur->setAlignment(llvm::Align(8));
+                cur->setAlignment(_ctx.layout().getABITypeAlign(ptr));
                 _ctx.builder->CreateStore(cur, next_slot);
                 llvm::AtomicCmpXchgInst *cas = _ctx.builder->CreateAtomicCmpXchg(
                     head,
                     cur,
                     link,
-                    llvm::Align(8),
+                    _ctx.layout().getABITypeAlign(ptr),
                     llvm::AtomicOrdering::Release,
                     llvm::AtomicOrdering::Monotonic);
                 llvm::Value *ok = _ctx.builder->CreateExtractValue(cas, 1, "published");
@@ -392,7 +392,7 @@ namespace Compiler::LLVM
         if (_ctx.options.codegen.has_os_threads()) {
             first->setAtomic(llvm::AtomicOrdering::Acquire);
         }
-        first->setAlignment(llvm::Align(8));
+        first->setAlignment(_ctx.layout().getABITypeAlign(ptr));
         _ctx.builder->CreateBr(loop);
 
         _ctx.builder->SetInsertPoint(loop);

@@ -17,8 +17,7 @@ void drain_refused_attributes(Parser::Payload &payload)
         return;
     }
 
-    AST::AttributeList refused;
-    Parser::drain_attributes(payload, refused);
+    Parser::discard_attributes(payload);
 }
 }
 
@@ -144,7 +143,7 @@ AST::TypeDeclNode *Parser::parse_opaque_typedecl(Payload &payload, AST::Visibili
     // reason. attributes land in the two later passes, which is also when unique/atomic/core
     // can be refused at the declaration
     if (payload.pass != Pass::t_type_names) {
-        Parser::drain_attributes(payload, struct_node->attributes);
+        Parser::drain_attributes(payload, struct_node->attributes, AST::AttributeSite::t_type);
         struct_node->doc_comment = doc;
         Parser::bind_type_decl_attributes(payload, *struct_node);
     }

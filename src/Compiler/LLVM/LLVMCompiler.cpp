@@ -6,6 +6,7 @@
 #include "Compiler/TestRunner.h"
 
 #include "AST/ASTFunctionEmission.h"
+#include "AST/ASTValueType.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
@@ -354,6 +355,14 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // and a compile-time size_of<T>() reads it
     _backend.init_target();
 
+    // AST usize and DataLayout pointer width must agree
+    if (_ctx.layout().getPointerSize(0) != AST::target_pointer_size()) {
+        throw _ctx.error(fmt::format(
+            "the AST pointer width ({} bytes) is not the target's ({} bytes) - the front end did not "
+            "install the row's AST::PointerSizeScope",
+            AST::target_pointer_size(), _ctx.layout().getPointerSize(0)));
+    }
+
     {
         Compiler::ScopedPhase phase("declare");
 
@@ -428,8 +437,9 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     }
     else {
         _ctx.current_cmp_unit = main_cmp_unit;
+        // null walker: nothing to tear down
         llvm::Function *walker = nullptr;
-        if (_ctx.options.codegen.is_native_library()) {
+        if (_ctx.options.codegen.has_unload()) {
             walker = _statics.ensure_teardown_walker(true);
         }
         _process.gen_library_lifecycle(walker);

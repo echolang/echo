@@ -261,7 +261,7 @@ TEST_CASE("a native lib's C objects do not share an exe's", "[cbuild][cache]")
 
     Compiler::CompilerOptions exe;
     Compiler::CompilerOptions lib;
-    lib.codegen.exec_model = Compiler::ExecModel::t_library;
+    lib.codegen = lib.codegen.for_program(Compiler::ExecModel::t_library);
 
     std::vector<std::string> exe_explain;
     Compiler::CBuildResult exe_result;
@@ -406,9 +406,7 @@ TEST_CASE("apple target args with an empty codegen target are the Darwin SDK", "
 
 TEST_CASE("apple target args for an iOS codegen target name the SDK and triple", "[cbuild][host]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = "arm64-apple-ios15.0-simulator";
-    target.apple_sdk = "iphonesimulator";
+    const Compiler::CodegenTarget target = Compiler::CodegenTarget::ios_simulator("arm64");
 
     std::vector<std::string> argv = { "clang", "-c" };
     std::string error;
@@ -420,7 +418,7 @@ TEST_CASE("apple target args for an iOS codegen target name the SDK and triple",
         REQUIRE(error.find("iphonesimulator") != std::string::npos);
     } else {
         REQUIRE(Compiler::append_apple_target_args(argv, target, error));
-        REQUIRE(flag_values(argv, "-target") == std::vector<std::string>{ target.triple });
+        REQUIRE(flag_values(argv, "-target") == std::vector<std::string>{ target.triple() });
         REQUIRE(flag_values(argv, "-isysroot") == std::vector<std::string>{ sdk.string() });
     }
 #else
