@@ -22,12 +22,23 @@ function Invoke-Checked {
 # `$ErrorActionPreference = "Stop"` the first byte on stderr kills the step
 # and GHA logs only "Process completed with exit code 1". inherit the
 # streams, snapshot LASTEXITCODE before the next cmdlet runs
+function Format-ExitCode([int]$Code) {
+    if ($Code -ge 0) {
+        return "$Code"
+    }
+    $hex = "0x{0:X8}" -f [uint32]$Code
+    if ([uint32]$Code -eq 0xC0000409) {
+        return "$Code ($hex STATUS_STACK_BUFFER_OVERRUN / abort)"
+    }
+    return "$Code ($hex)"
+}
+
 function Invoke-Native {
     param([string]$What, [string]$File, [string[]]$Arguments = @())
     Write-Host $What
     & $File @Arguments
     $code = $LASTEXITCODE
-    Write-Host "${What}: exit $code"
+    Write-Host "${What}: exit $(Format-ExitCode $code)"
     if ($code -ne 0) {
         exit $code
     }
@@ -159,7 +170,9 @@ Invoke-WithCleanPath -BinDir $stageBin -Block {
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     Set-Location $scratch
     Set-Content -Path smoke.eco -Value "assert(1 == 1);`nvar `$xs = [1, 2, 3];`ndprint(`$xs[1]);`n" -NoNewline -Encoding ascii
-    Invoke-Native -What "echoc run" -File $echoc -Arguments @("run", "smoke.eco")
+    # Windows `echoc run` is compile+link of a scratch exe plus exec. a fast-fail
+    # from the child is an NTSTATUS with no compiler diagnostic, so this smoke
+    # names the two halves: bundled clang/link, then the produced image
     Invoke-Native -What "echoc build" -File $echoc -Arguments @("build", "smoke.eco", "-o", "smoke.exe")
     if (-not (Test-Path -LiteralPath "smoke.exe")) {
         Write-Error "echoc build did not write smoke.exe"
