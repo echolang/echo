@@ -25,6 +25,7 @@ namespace Compiler
         t_write,
         t_win_write,
         t_exit,
+        t_atexit,
         t_getenv,
         t_strcmp,
         t_pthread_self,

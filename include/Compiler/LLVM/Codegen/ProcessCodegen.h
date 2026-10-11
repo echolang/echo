@@ -40,8 +40,11 @@ namespace Compiler::LLVM
         void gen_startup();
 
         // replaces gen_startup on a program with no entry. a native lib also
-        // plants `__eco_lib_fini` in `llvm.global_dtors` to walk static teardown
-        // then dlclose's atexit. linkonce_odr so the entry-unit partition's
+        // plants `__eco_lib_fini` so a `dlclose` / `FreeLibrary` walks static
+        // teardown. ELF and Mach-O put it in `llvm.global_dtors`; COFF's
+        // `.CRT$XTX` is process-exit only, so Windows registers `atexit` from a
+        // ctor instead — the CRT's module-local onexit table, which DllMain
+        // walks on PROCESS_DETACH. linkonce_odr so the entry-unit partition's
         // GlobalDCE keeps it (internal would be skipped by keep_odr_from_dce).
         // a wasm reactor has no fini: the image lives with the page.
         // `fini_walker` is null when there is nothing to walk

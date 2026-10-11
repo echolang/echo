@@ -134,13 +134,15 @@ namespace Compiler
     // compile args plus the link-only half of the row. `-mexec-model=reactor` and
     // `-shared` are columns of `target`. `--export-memory` is the program fact
     // `CompilerOptions::export_memory`, not a row column, because CBuild reuses
-    // append_codegen_target_args for C compiles
+    // append_codegen_target_args for C compiles. `output_path` is the image
+    // being linked: Darwin/ELF take its filename for install_name/soname, and
+    // Windows a native lib writes `/IMPLIB:` next to it so a C host can link
     bool append_codegen_link_args(
         std::vector<std::string> &argv,
         const CodegenTarget &target,
         bool export_memory,
         std::string &out_error,
-        const std::string &output_basename = {}
+        const std::string &output_path = {}
     );
 
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt

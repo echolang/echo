@@ -16,7 +16,9 @@ namespace Compiler::LLVM
 namespace
 {
     // functions llvm.global_ctors / llvm.global_dtors will call. hiding one
-    // makes Mach-O drop the `__mod_term_func` entry, so a lib fini never runs
+    // makes Mach-O drop the `__mod_term_func` entry, so a lib fini never
+    // runs. Windows registers that fini with `atexit` from a ctor, so the
+    // ctor is in this set too
     std::unordered_set<const llvm::Function *> lifecycle_functions(llvm::Module &module)
     {
         std::unordered_set<const llvm::Function *> keep;

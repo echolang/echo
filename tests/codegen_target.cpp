@@ -315,7 +315,16 @@ TEST_CASE("native library link args pass -shared", "[target]")
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-install_name,@rpath/greeter.dylib")
             != argv.end());
     }
-    else if (!target.is_windows()) {
+    else if (target.is_windows()) {
+        REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,/IMPLIB:greeter.lib") != argv.end());
+
+        std::vector<std::string> with_dir = { "clang" };
+        REQUIRE(Compiler::append_codegen_link_args(
+            with_dir, target, false, error, "ecobuild/greeter.dll"));
+        REQUIRE(std::find(with_dir.begin(), with_dir.end(), "-Wl,/IMPLIB:ecobuild/greeter.lib")
+            != with_dir.end());
+    }
+    else {
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-soname,greeter.dylib") != argv.end());
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-z,defs") != argv.end());
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-Bsymbolic-functions") != argv.end());

@@ -17,6 +17,7 @@ namespace
         "write",
         "_write",
         "exit",
+        "atexit",
         "getenv",
         "strcmp",
         "pthread_self",

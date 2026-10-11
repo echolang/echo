@@ -520,7 +520,7 @@ bool Compiler::append_codegen_link_args(
     const CodegenTarget &target,
     bool export_memory,
     std::string &out_error,
-    const std::string &output_basename
+    const std::string &output_path
 )
 {
     if (!append_codegen_target_args(argv, target, out_error)) {
@@ -539,12 +539,21 @@ bool Compiler::append_codegen_link_args(
     if (target.is_native_library()) {
         argv.push_back("-shared");
 
-        if (!output_basename.empty()) {
+        if (!output_path.empty()) {
+            const std::string basename = std::filesystem::path(output_path).filename().string();
+
             if (target.is_darwin()) {
-                argv.push_back("-Wl,-install_name,@rpath/" + output_basename);
+                argv.push_back("-Wl,-install_name,@rpath/" + basename);
             }
-            else if (!target.is_windows()) {
-                argv.push_back("-Wl,-soname," + output_basename);
+            else if (target.is_windows()) {
+                // MSVC link refuses a .dll as input (LNK1107). the import
+                // library sits next to the image so a C host can name it
+                std::filesystem::path implib = output_path;
+                implib.replace_extension(".lib");
+                argv.push_back("-Wl,/IMPLIB:" + implib.string());
+            }
+            else {
+                argv.push_back("-Wl,-soname," + basename);
                 argv.push_back("-Wl,-z,defs");
                 // the lib's own calls to an export stay inside the image.
                 // without it, a plugin that exports `floor` binds to libm

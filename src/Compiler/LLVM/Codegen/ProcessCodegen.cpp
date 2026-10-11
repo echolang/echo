@@ -179,8 +179,7 @@ void ProcessCodegen::gen_library_lifecycle(llvm::Function *fini_walker)
 {
     gen_startup();
 
-    // a wasm reactor has no unload: the image lives with the page. a native
-    // lib tears statics down from global_dtors, which dlclose runs
+    // a wasm reactor has no unload: the image lives with the page
     if (fini_walker == nullptr || _ctx.targeting_wasm()) {
         return;
     }
@@ -206,7 +205,33 @@ void ProcessCodegen::gen_library_lifecycle(llvm::Function *fini_walker)
     _ctx.builder->CreateCall(fini_walker);
     _ctx.builder->CreateRetVoid();
 
-    llvm::appendToGlobalDtors(*module, fn, 65535);
+    if (_ctx.targeting_windows()) {
+        // COFF `.CRT$XTX` (llvm.global_dtors) runs at process exit, after the
+        // host has printed and often after stdout is gone. `atexit` in a DLL
+        // is the CRT's module-local onexit table; FreeLibrary walks it.
+        constexpr const char *k_reg = "__eco_lib_atexit";
+
+        if (module->getFunction(k_reg) == nullptr) {
+            llvm::Function *reg = llvm::Function::Create(
+                llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), false),
+                llvm::GlobalValue::InternalLinkage,
+                k_reg,
+                module);
+
+            llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+            llvm::FunctionCallee atexit = _ctx.libc_callee(
+                Compiler::RuntimeSymbol::t_atexit, i32, { _ctx.opaque_ptr_type() });
+
+            _ctx.builder->SetInsertPoint(
+                llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", reg));
+            _ctx.builder->CreateCall(atexit, { fn });
+            _ctx.builder->CreateRetVoid();
+            llvm::appendToGlobalCtors(*module, reg, 65535);
+        }
+    }
+    else {
+        llvm::appendToGlobalDtors(*module, fn, 65535);
+    }
 }
 
 llvm::Value *ProcessCodegen::gen_argc(const llvm::Twine &name)

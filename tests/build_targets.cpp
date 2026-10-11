@@ -675,9 +675,16 @@ TEST_CASE("a C program links a native lib and calls an export", "[targets]")
         "}\n");
 
     const fs::path host = project.root() / "host";
-    std::vector<std::string> link = {
-        clang, host_c.string(), "-o", host.string(), lib.string()
-    };
+    std::vector<std::string> link = { clang, host_c.string(), "-o", host.string() };
+#if defined(_WIN32)
+    // MSVC link reads an import library. passing the .dll is LNK1107
+    fs::path implib = lib;
+    implib.replace_extension(".lib");
+    REQUIRE(EchoTests::file_exists(implib));
+    link.push_back(implib.string());
+#else
+    link.push_back(lib.string());
+#endif
     Compiler::append_darwin_sdk_args(link);
 #if !defined(_WIN32)
     // the dylib's id is @rpath/<file>; without this the image loads and then cannot

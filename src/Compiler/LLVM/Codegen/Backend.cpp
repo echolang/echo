@@ -604,7 +604,7 @@ bool Backend::link_program(
             _ctx.options.codegen,
             _ctx.options.export_memory,
             target_error,
-            std::filesystem::path(executable_name).filename().string())) {
+            executable_name)) {
         llvm::errs() << target_error << '\n';
         return false;
     }
