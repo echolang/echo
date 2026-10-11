@@ -5,7 +5,7 @@
 // refused in AST::GuardLowering rather than at the synthesized `unwrap()` call, which would report
 // against a token the author never wrote - the same call AST::iteration_plan_for makes about a const
 // cursor. statement `guard` over a const subject is fine: it only asks `has_value()`. this is where
-// a future `#[core: const_unwrappable]` would attach
+// a future `#[echoc::core: const_unwrappable]` would attach
 
 struct Box : contract::unwrappable<int32>
 {

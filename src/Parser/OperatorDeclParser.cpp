@@ -411,6 +411,7 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
 AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
 
     // the declaration pass stops once the signature is registered; the body pass carries on into the
     // body. read off the payload for parse_funcdecl's reason - no caller in between has to know
@@ -458,6 +459,10 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     if (payload.context.self_struct_ptr != nullptr) {
         if (payload.context.self_struct_ptr->complex_type().is_interface_kind()) {
             interface_owner = payload.context.self_struct_ptr;
+        }
+        else if (payload.context.self_struct_ptr->complex_type().is_extern_interface_kind()) {
+            return refuse(operator_token,
+                "An extern interface cannot declare an operator - a slot is a C function, not a symbol.");
         }
         else {
             return refuse(operator_token,
@@ -608,6 +613,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // attribute could have something to say about, and leaving them staged lets the next `struct`
     // drain them
     Parser::drain_attributes(payload, funcdecl->attributes);
+    funcdecl->doc_comment = doc;
 
     // an operator is an expression, so a void one is a statement written as an operator. refused
     // rather than lowered, because `$a = $b avg $c` would then declare a void variable

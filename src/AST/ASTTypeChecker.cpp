@@ -6,7 +6,9 @@
 #include "AST/ASTConstruction.h"
 #include "AST/ASTEnumMap.h"
 #include "AST/ASTAtomics.h"
+#include "AST/ASTAbi.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTExternInterface.h"
 #include "AST/ASTWasm.h"
 #include "AST/ASTSimd.h"
 #include "AST/ASTCompleteness.h"
@@ -218,6 +220,12 @@ const ComplexType *TypeChecker::enclosing_type() const
 void TypeChecker::run()
 {
     AST::check_wasm_surface(_collector, _bundle, _options.codegen.is_wasm());
+
+    AST::check_extern_interface_declarations(_collector, _bundle);
+
+    AST::check_extern_conformances(_collector, _bundle);
+
+    AST::check_abi_exports(_collector, _bundle, _options.codegen.is_wasm());
 
     AST::check_exports(
         _collector,
@@ -687,8 +695,7 @@ void TypeChecker::check_has_implementation(FunctionDeclNode &node)
     _collector.collect_issue<Issue::BodylessFunction>(
         code_ref_for(node.declaration_site_token()),
         fmt::format("'{}' was declared but never given a body - write one, or say where its "
-                    "implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an "
-                    "'extern' block.",
+                    "implementation comes from with an 'extern' block.",
             node.signature_description()));
 }
 
@@ -848,7 +855,17 @@ void TypeChecker::visit_type_decl(TypeDeclNode &node)
         walk_type_decl_property_types(node);
         return;
     }
+
+    // slots and `$__image` are minted; check_extern_interface_declarations
+    // already asked c_function_signature_refusal of the requirements
+    if (node.complex_type().is_extern_interface_kind()) {
+        return;
+    }
+
+    const bool prev_props = _in_type_properties;
+    _in_type_properties = true;
     RecursiveVisitor::visit_type_decl(node);
+    _in_type_properties = prev_props;
 }
 
 void TypeChecker::visitType(TypeNode &node)
@@ -1327,21 +1344,69 @@ void TypeChecker::check_ref_count_argument(FunctionCallExprNode &node)
 // nothing else is refused. a still-generic T returns early exactly as its neighbour above does, because
 // the monomorphizer already reports an uninstantiated call and a second diagnostic on top of it is noise;
 // and every other type has a rendering, which is the whole point of the builtin
-void TypeChecker::check_assume_is_unsafe(FunctionCallExprNode &node)
+void TypeChecker::check_unsafe_builtin(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin() || _unsafe_depth > 0) {
+        return;
+    }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (kind == BuiltinKind::t_assume) {
+        _collector.collect_issue<Issue::AssumeRequiresUnsafe>(
+            code_ref_for(node.token_function_name),
+            "'assume' recovers a class handle from erasure, which is a promise the type system cannot "
+            "check");
+        return;
+    }
+
+    if (kind == BuiltinKind::t_abi_bind_unchecked) {
+        _collector.collect_issue<Issue::BindUncheckedRequiresUnsafe>(
+            code_ref_for(node.token_function_name),
+            "'bind_unchecked' seats function pointers from a library image, which is a promise the "
+            "type system cannot check");
+    }
+}
+
+void TypeChecker::check_abi_slot_symbol(FunctionCallExprNode &node)
 {
     if (!node.decl->is_builtin()
-        || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_assume) {
+        || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_abi_slot_symbol) {
         return;
     }
 
-    if (_unsafe_depth > 0) {
+    if (node.arguments.size() != 1 || node.arguments[0] == nullptr) {
         return;
     }
 
-    _collector.collect_issue<Issue::AssumeRequiresUnsafe>(
-        code_ref_for(node.token_function_name),
-        "'assume' recovers a class handle from erasure, which is a promise the type system cannot "
-        "check");
+    if (node.decl->instantiation_args.size() != 1) {
+        return;
+    }
+
+    const ComplexType *ct = node.decl->instantiation_args[0].get_complex_type();
+
+    if (ct == nullptr || !ct->is_extern_interface_kind()) {
+        return;
+    }
+
+    const ConstFoldResult index = const_fold(node.arguments[0]);
+
+    if (!index.is_folded()) {
+        return;
+    }
+
+    const uint64_t n = extern_interface_requirements(*ct).size();
+
+    if (index.bits >= n) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            fmt::format(
+                "'abi::slot_symbol' index {} is out of range for '{}' ({} slot{})",
+                index.bits,
+                ct->namespaced_name(),
+                n,
+                n == 1 ? "" : "s"));
+    }
 }
 
 ExprNode *TypeChecker::rewrite_value_edge(ExprNode *expr)
@@ -1773,7 +1838,8 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // instance. `dprint(nothing())` is not here — rewrite_value_edge walks every argument, including
     // the AddrOf dprint's T& plants as a place edge, and does not go through this decl-is-set gate
     if (node.decl != nullptr) {
-        check_assume_is_unsafe(node);
+        check_unsafe_builtin(node);
+        check_abi_slot_symbol(node);
 
         // outside the gate too, and for a plainer reason than its neighbour's: the question is whether
         // the *builtin* may be called at all, which does not depend on a single argument being resolved
@@ -2090,7 +2156,7 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
 // element, the implicit borrow a call argument gets, a receiver's auto-borrow, a `return &...`. All of
 // them arrive here as one of the two nodes below, which is why there are two call sites and not six.
 //
-// A `#[builtin:]` callee is exempt. `mem::init` and `mem::take` are the two seams that deliberately
+// A `#[echoc::builtin:]` callee is exempt. `mem::init` and `mem::take` are the two seams that deliberately
 // name storage the compiler is not accounting for, and requiring them to manufacture an ordinary
 // readable `T&` over uninitialized bytes would be asking for a promise that is *false* at the moment
 // it is made
@@ -2583,6 +2649,19 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
                 *node.init_expr,
                 node.token_varname
             );
+        }
+    }
+
+    // user locals only. `_in_parameter` and `_in_type_properties` skip those
+    // walks, and a synthesized body is skipped via `is_implicitly_generated`.
+    // file-scope statements become locals of `main` and `_current_function`
+    // is still null here
+    if (!_in_parameter
+        && !_in_type_properties
+        && (_current_function == nullptr || !_current_function->is_implicitly_generated)) {
+        if (auto refusal = extern_interface_uninitialized_refusal(node)) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_varname), *refusal);
         }
     }
 

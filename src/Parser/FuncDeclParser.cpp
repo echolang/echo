@@ -6,6 +6,7 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTAttributes.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
@@ -465,6 +466,27 @@ void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into
     }
 }
 
+void Parser::take_leading_doc(Parser::Payload &payload)
+{
+    if (!payload.pending_doc.empty() || payload.cursor.is_done()) {
+        return;
+    }
+
+    const DocComment *doc = payload.cursor.tokens.doc_comment_at(payload.cursor.snapshot().index);
+
+    if (doc != nullptr) {
+        payload.pending_doc = doc->text;
+    }
+}
+
+std::string Parser::take_pending_doc(Parser::Payload &payload)
+{
+    take_leading_doc(payload);
+    std::string text = std::move(payload.pending_doc);
+    payload.pending_doc.clear();
+    return text;
+}
+
 void Parser::publish_declaration_markers(
     Parser::Payload &payload,
     AST::FunctionDeclNode *funcdecl,
@@ -706,6 +728,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
 )
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
 
     // the declaration pass stops once the signature is registered; the body pass carries on into the
     // body. read off the payload rather than taken as an argument, so no caller in between has to
@@ -766,10 +789,16 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // resolved before the name token is captured below, because the Echo name is what the symbol
     // table, the namespace and every call site use - only extern_symbol reaches the linker
     std::optional<std::string> extern_symbol;
-    if (kind == FuncDeclKind::t_extern) {
-        extern_symbol = cursor.current().value();
-
+    std::optional<std::string> requirement_link;
+    if (kind == FuncDeclKind::t_extern || kind == FuncDeclKind::t_requirement) {
         if (cursor.peek_is_type(1, Token::Type::t_as)) {
+            if (kind == FuncDeclKind::t_extern) {
+                extern_symbol = cursor.current().value();
+            }
+            else {
+                requirement_link = cursor.current().value();
+            }
+
             cursor.skip(); // the C symbol
             cursor.skip(); // the `as` keyword
 
@@ -778,6 +807,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
                 Parser::skip_refused_function(payload);
                 return nullptr;
             }
+        }
+        else if (kind == FuncDeclKind::t_extern) {
+            extern_symbol = cursor.current().value();
         }
     }
 
@@ -977,6 +1009,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // along (TypeDeclParser's own collect_attributes), landing on a type declaration that never
     // asked for it
     Parser::drain_attributes(payload, funcdecl->attributes);
+    funcdecl->doc_comment = doc;
 
     // an `extern { }` may carry attributes for every function in it (`#[wasm: import "env"]
     // extern { ... }`). the block parser drained those before the `{` and hands a copy here;
@@ -1024,6 +1057,10 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // it. outside the branch above rather than in its method arm, because "only a method can declare
     // one" is a diagnostic this owes and a helper called only for methods could never report it
     publish_declaration_markers(payload, funcdecl, owner_struct, nametoken);
+
+    if (kind == FuncDeclKind::t_requirement) {
+        funcdecl->abi_link_name = requirement_link.value_or(nametoken.value());
+    }
 
     // an extern declaration ends here, in both parser passes, so this is the single place that
     // owns its tail. doing it before the symbol_only return below is deliberate: the symbol pass
@@ -1113,8 +1150,11 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         // an intrinsic is spelled as a **string** because an LLVM intrinsic name is free text with
         // dots in it; a builtin is spelled as a **name**, because the set is closed and a closed
         // vocabulary reads bare - the same rule `#[if: os == darwin]` has always followed
-        if (auto *intrinsic_attr = funcdecl->attributes.get_first("intrinsic")) {
-            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, "intrinsic",
+        const std::string intrinsic_name(AST::compiler_attribute::intrinsic);
+        const std::string builtin_name(AST::compiler_attribute::builtin);
+
+        if (auto *intrinsic_attr = funcdecl->attributes.get_first(intrinsic_name)) {
+            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, intrinsic_name,
                 [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
                     return reader.string(written);
                 });
@@ -1124,8 +1164,8 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
             }
         }
 
-        if (auto *builtin_attr = funcdecl->attributes.get_first("builtin")) {
-            funcdecl->builtin = read_attribute_value(payload, builtin_attr, "builtin",
+        if (auto *builtin_attr = funcdecl->attributes.get_first(builtin_name)) {
+            funcdecl->builtin = read_attribute_value(payload, builtin_attr, builtin_name,
                 [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
                     std::optional<std::string> value = reader.name(written);
 

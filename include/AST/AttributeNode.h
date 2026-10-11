@@ -8,6 +8,8 @@
 #include "Token.h"
 
 #include <optional>
+#include <unordered_map>
+#include <vector>
 
 namespace AST
 {
@@ -78,6 +80,7 @@ namespace AST
 
         void push_back(AttributeNode *attribute) {
             _attributes[attribute->attribute_id.value()].push_back(attribute);
+            _order.push_back(attribute);
         }
 
         // absent is not an error - asking whether a declaration carries an attribute is the
@@ -98,8 +101,14 @@ namespace AST
             return it->second.front();
         }
 
+        // written order, so a dump can emit every tool attribute without knowing the names
+        const std::vector<AttributeNode *> &all() const {
+            return _order;
+        }
+
     private:
         std::unordered_map<std::string, std::vector<AttributeNode *>> _attributes;
+        std::vector<AttributeNode *> _order;
 
     };
 };

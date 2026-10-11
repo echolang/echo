@@ -262,14 +262,43 @@ TEST_CASE("a native library takes the host shared-library suffix", "[target]")
 #if defined(__APPLE__)
     REQUIRE(std::string(target.output_extension()) == ".dylib");
     REQUIRE(target.output_path("greeter") == std::filesystem::path("greeter.dylib"));
+    REQUIRE(target.library_file_name("greeter") == "libgreeter.dylib");
 #elif defined(_WIN32)
     REQUIRE(std::string(target.output_extension()) == ".dll");
     REQUIRE(target.output_path("greeter") == std::filesystem::path("greeter.dll"));
+    REQUIRE(target.library_file_name("greeter") == "greeter.dll");
 #else
     REQUIRE(std::string(target.output_extension()) == ".so");
     REQUIRE(target.output_path("greeter") == std::filesystem::path("greeter.so"));
+    REQUIRE(target.library_file_name("greeter") == "libgreeter.so");
 #endif
     REQUIRE(target.output_path("greeter.dylib") == std::filesystem::path("greeter.dylib"));
+}
+
+TEST_CASE("library_file_name does not need exec_model set", "[target]")
+{
+    Compiler::CodegenTarget host;
+#if defined(__APPLE__)
+    REQUIRE(host.library_file_name("greeter") == "libgreeter.dylib");
+#elif defined(_WIN32)
+    REQUIRE(host.library_file_name("greeter") == "greeter.dll");
+#else
+    REQUIRE(host.library_file_name("greeter") == "libgreeter.so");
+#endif
+}
+
+TEST_CASE("an iOS row refuses a native library", "[target]")
+{
+    Compiler::CodegenTarget ios;
+    ios.ios = true;
+    REQUIRE(ios.library_refusal().has_value());
+
+    Compiler::CodegenTarget simulator;
+    simulator.apple_sdk = "iphonesimulator";
+    REQUIRE(simulator.library_refusal().has_value());
+
+    Compiler::CodegenTarget host;
+    REQUIRE_FALSE(host.library_refusal().has_value());
 }
 
 TEST_CASE("native library link args pass -shared", "[target]")
@@ -304,6 +333,7 @@ TEST_CASE("a wasm library keeps the .wasm suffix", "[target]")
     REQUIRE_FALSE(target.is_native_library());
     REQUIRE(std::string(target.output_extension()) == ".wasm");
     REQUIRE(target.output_path("plot") == std::filesystem::path("plot.wasm"));
+    REQUIRE(target.library_file_name("plot") == "plot.wasm");
 }
 
 TEST_CASE("wasi on build defaults facts arch to wasm32", "[target]")

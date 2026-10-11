@@ -155,7 +155,7 @@ bool c_spec_digest(
     // `-fvisibility=hidden` on a native lib changes every defined C global, so
     // an exe and a lib of the same module cannot share a C object
     digest = Compiler::fnv1a64(
-        options.codegen.is_native_library() ? std::string("lib") : std::string("cmd"), digest);
+        std::string(Compiler::exec_model_environment(options)), digest);
 
     out_digest = digest;
 
@@ -681,16 +681,16 @@ bool Compiler::build_c_shared_library(
         digest = fnv1a64(word, digest);
     }
 
-    // the host's, because this is a file this machine's dlopen has to open - see runtime_library_of
+    // the host row's suffix: this is a file this machine's dlopen has to open
     out_library = directory / fmt::format(
-        "lib{}.{}{}", spec.module_name, to_hex(digest), TargetFacts::host().shared_library_extension());
+        "lib{}.{}{}", spec.module_name, to_hex(digest), CodegenTarget{}.library_suffix());
 
     if (keeping && std::filesystem::is_regular_file(out_library, ec)) {
         return true;
     }
 
     // through the clang driver rather than the system linker: a shared library's platform flags are
-    // considerably fussier than an executable's, and this path is not the one Backend::link_executable's
+    // considerably fussier than an executable's, and this path is not the one Backend::link_program's
     // fast path exists to speed up - it runs once per module per change, not once per build
     std::vector<std::string> argv = { "clang", "-shared", "-o", out_library.string() };
     Compiler::append_windows_sysroot_link_args(argv);

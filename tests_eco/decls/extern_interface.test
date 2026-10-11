@@ -1,0 +1,100 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "extern interface",
+          "name": "greeter",
+          "qualified": "greeter",
+          "visibility": "public",
+          "file": "extern_interface.eco",
+          "line": 1,
+          "column": 25,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "requirements": [
+            {
+              "kind": "method",
+              "name": "add",
+              "qualified": "add",
+              "visibility": "public",
+              "file": "extern_interface.eco",
+              "line": 2,
+              "column": 14,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "a",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false
+                },
+                {
+                  "name": "b",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false
+                }
+              ],
+              "return": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "generics": [],
+              "link": "add"
+            },
+            {
+              "kind": "method",
+              "name": "open",
+              "qualified": "open",
+              "visibility": "public",
+              "file": "extern_interface.eco",
+              "line": 3,
+              "column": 30,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "path",
+                  "label": null,
+                  "type": {
+                    "kind": "ptr",
+                    "to": {
+                      "kind": "prim",
+                      "name": "uint8"
+                    },
+                    "borrow": false,
+                    "weak": false,
+                    "const": false,
+                    "nullable": true
+                  },
+                  "default": false
+                }
+              ],
+              "return": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "generics": [],
+              "link": "sqlite3_open"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

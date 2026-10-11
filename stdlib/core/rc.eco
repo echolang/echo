@@ -6,7 +6,7 @@
  * `erased::from` accept when the thing you have is not a class of its own.
  *
  * Not unique, and not `mem::`. The wrapped value is copied into the object at construction.
- * There is no `#[core:]` binding: the compiler never mints one, it only has to be a name you can
+ * There is no `#[echoc::core:]` binding: the compiler never mints one, it only has to be a name you can
  * write, the same way `result` is.
  *
  * ```echo

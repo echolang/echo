@@ -32,6 +32,14 @@ namespace Parser
     // something to be read against
     void drain_attributes(Payload &payload, AST::AttributeList &into);
 
+    // if a `/** ... */` sits immediately before the current token, copy its text onto
+    // `payload.pending_doc`. a second call while one is already pending is a no-op, which is
+    // what lets an attribute then a function share one block
+    void take_leading_doc(Payload &payload);
+
+    // take_leading_doc, then hand the pending text to the caller and clear it
+    std::string take_pending_doc(Payload &payload);
+
     // publishes every marker a member declaration's attributes state about it, or reports why the
     // declaration cannot carry one.
     //
@@ -71,6 +79,10 @@ namespace Parser
     {
         t_normal,
         t_extern,
+        // an extern-interface requirement: accepts `function <symbol> as <name>(...)`
+        // like t_extern, stores the C name on abi_link_name, and still takes a
+        // planted body later
+        t_requirement,
     };
 
     // whether the body is parsed or left for the body pass is read off `payload.pass`.

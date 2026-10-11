@@ -350,16 +350,24 @@ namespace Compiler::LLVM
         return storage;
     }
 
-    void StaticStorageCodegen::gen_teardown()
+    llvm::Function *StaticStorageCodegen::ensure_teardown_walker(bool create_head)
     {
         llvm::Type *ptr = _ctx.opaque_ptr_type();
 
-        // nothing pushed a node, so there is nothing to walk. asked of the *module* rather than of a
-        // count kept here, so a unit that references no static emits no walk at all
-        auto *head = _ctx.current_module()->getGlobalVariable(k_chain_head_symbol, true);
+        llvm::GlobalVariable *head = create_head
+            ? _ctx.get_or_create_odr_global(k_chain_head_symbol, ptr)
+            : _ctx.current_module()->getGlobalVariable(k_chain_head_symbol, true);
 
+        // nothing pushed a node, so there is nothing to walk. asked of the *module*
+        // rather than of a count kept here, so a unit that references no static
+        // emits no walk at all - unless a lib fini asked for the head, in which
+        // case a dependency's push still has somewhere to be found
         if (head == nullptr) {
-            return;
+            return nullptr;
+        }
+
+        if (llvm::Function *existing = _ctx.current_module()->getFunction(k_teardown_symbol)) {
+            return existing;
         }
 
         llvm::StructType *node_type = chain_node_type(_ctx);
@@ -370,51 +378,58 @@ namespace Compiler::LLVM
             k_teardown_symbol,
             _ctx.current_module());
 
-        // scoped, so the builder is back in the caller's block - `main`'s epilogue - before the call to
-        // this function is emitted below. the same restore init_for takes, and for the same reason
-        {
-            llvm::IRBuilderBase::InsertPointGuard restore_point(*_ctx.builder);
+        llvm::IRBuilderBase::InsertPointGuard restore_point(*_ctx.builder);
 
-            _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+        _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
 
-            auto *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn);
-            auto *loop = llvm::BasicBlock::Create(*_ctx.llvm_context, "loop", fn);
-            auto *body = llvm::BasicBlock::Create(*_ctx.llvm_context, "body", fn);
-            auto *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
+        auto *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn);
+        auto *loop = llvm::BasicBlock::Create(*_ctx.llvm_context, "loop", fn);
+        auto *body = llvm::BasicBlock::Create(*_ctx.llvm_context, "body", fn);
+        auto *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
 
-            _ctx.builder->SetInsertPoint(entry);
-            llvm::LoadInst *first = _ctx.builder->CreateLoad(ptr, head, "first");
-            if (_ctx.options.codegen.has_os_threads()) {
-                first->setAtomic(llvm::AtomicOrdering::Acquire);
-            }
-            first->setAlignment(llvm::Align(8));
-            _ctx.builder->CreateBr(loop);
+        _ctx.builder->SetInsertPoint(entry);
+        llvm::LoadInst *first = _ctx.builder->CreateLoad(ptr, head, "first");
+        if (_ctx.options.codegen.has_os_threads()) {
+            first->setAtomic(llvm::AtomicOrdering::Acquire);
+        }
+        first->setAlignment(llvm::Align(8));
+        _ctx.builder->CreateBr(loop);
 
-            _ctx.builder->SetInsertPoint(loop);
-            llvm::PHINode *current = _ctx.builder->CreatePHI(ptr, 2, "node");
-            current->addIncoming(first, entry);
-            _ctx.builder->CreateCondBr(
-                _ctx.builder->CreateICmpEQ(current, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), "at.end"),
-                done,
-                body);
+        _ctx.builder->SetInsertPoint(loop);
+        llvm::PHINode *current = _ctx.builder->CreatePHI(ptr, 2, "node");
+        current->addIncoming(first, entry);
+        _ctx.builder->CreateCondBr(
+            _ctx.builder->CreateICmpEQ(current, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), "at.end"),
+            done,
+            body);
 
-            _ctx.builder->SetInsertPoint(body);
-            llvm::Value *next = _ctx.builder->CreateLoad(
-                ptr, _ctx.builder->CreateStructGEP(node_type, current, 0, "next.slot"), "next");
-            llvm::Value *end = _ctx.builder->CreateLoad(
-                ptr, _ctx.builder->CreateStructGEP(node_type, current, 1, "fn.slot"), "fn");
+        _ctx.builder->SetInsertPoint(body);
+        llvm::Value *next = _ctx.builder->CreateLoad(
+            ptr, _ctx.builder->CreateStructGEP(node_type, current, 0, "next.slot"), "next");
+        llvm::Value *end = _ctx.builder->CreateLoad(
+            ptr, _ctx.builder->CreateStructGEP(node_type, current, 1, "fn.slot"), "fn");
 
-            _ctx.builder->CreateCall(
-                llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), false), end);
+        _ctx.builder->CreateCall(
+            llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), false), end);
 
-            _ctx.builder->CreateBr(loop);
-            current->addIncoming(next, body);
+        _ctx.builder->CreateBr(loop);
+        current->addIncoming(next, body);
 
-            _ctx.builder->SetInsertPoint(done);
-            _ctx.builder->CreateRetVoid();
+        _ctx.builder->SetInsertPoint(done);
+        _ctx.builder->CreateRetVoid();
+
+        return fn;
+    }
+
+    void StaticStorageCodegen::gen_teardown()
+    {
+        llvm::Function *fn = ensure_teardown_walker(false);
+
+        if (fn == nullptr) {
+            return;
         }
 
-        // and the call, in whichever block the caller left live - `main`'s epilogue
+        // the call, in whichever block the caller left live - `main`'s epilogue
         _ctx.builder->CreateCall(fn);
     }
 };

@@ -47,6 +47,9 @@ Parser::VisibilityPrefix Parser::parse_visibility_prefix(
         return prefix;
     }
 
+    // a `/** ... */` ahead of `public function f()` points at this token, not at `function`
+    Parser::take_leading_doc(payload);
+
     prefix.token.emplace(cursor.current());
     cursor.skip();
 

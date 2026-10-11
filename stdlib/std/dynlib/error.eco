@@ -1,21 +1,28 @@
 /**
- * Why a library could not be opened.
- *
- * A sentence from `dlerror` or a fallback, not an errno: the two platforms do
- * not share a code space and the host already has the path.
+ * Why a library could not be opened or bound.
  */
 
 namespace std::dynlib;
 
-public struct dynerror
+public enum dynerror
 {
-    string $text;
+    case not_found(string $path);
+    case load_failed(string $text);
+    case missing_interface(string $name);
+    case missing_symbol(string $name);
+    case abi_mismatch(abi::mismatch $why);
 
-    /**
-     * The sentence `open` failed with.
-     */
     const function message() : string
     {
-        return $this->text;
+        return match ($this) {
+            dynerror::not_found($path) =>
+                str::concat('library not found: ', $path),
+            dynerror::load_failed($text) => $text,
+            dynerror::missing_interface($name) =>
+                str::concat('library has no interface ', $name),
+            dynerror::missing_symbol($name) =>
+                str::concat('library has no symbol ', $name),
+            dynerror::abi_mismatch($why) => $why->message(),
+        };
     }
 }

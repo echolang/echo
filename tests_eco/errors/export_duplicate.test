@@ -4,7 +4,7 @@ expect: fail
 --- OUT --->
 [error] DuplicateExportName  export_duplicate.eco:8:10
 
-  'render' is already exported by another function - two exports cannot share a name, because the name is the symbol the host looks up
+  'render' is already exported - two exports cannot share a name, because the name is the symbol the host looks up
 
   7 | #[export: "render"]
   8 | function draw() : int32

@@ -1,0 +1,4 @@
+#[echoc::x: "no"]
+function f() : void
+{
+}

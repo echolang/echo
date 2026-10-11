@@ -460,7 +460,16 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
     }
 
     for (llvm::GlobalVariable &global : module.globals()) {
-        if (global.isDeclaration() || global.hasLocalLinkage() || is_llvm_global_name(global.getName())) {
+        if (global.isDeclaration() || global.hasLocalLinkage()) {
+            continue;
+        }
+
+        // llvm.global_ctors / dtors have to be a root of `__shared` or a
+        // lib's `__eco_lib_fini` is extracted into no partition and dlclose
+        // never runs it. other `llvm.*` metadata stays out
+        if (is_llvm_global_name(global.getName())
+            && global.getName() != "llvm.global_ctors"
+            && global.getName() != "llvm.global_dtors") {
             continue;
         }
 

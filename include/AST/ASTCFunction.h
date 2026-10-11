@@ -52,6 +52,12 @@ namespace AST
     // is_implicitly_convertible both ask
     bool c_function_signatures_match(const CallableSignature &a, const CallableSignature &b);
 
+    // Echo's `const` on a by-value parameter is a local write-protect, not C's.
+    // two signatures that differ only by that bit (or by nullability on an
+    // address) are one C type. the fingerprint and signatures_match both ask
+    // this so they cannot disagree
+    CallableSignature c_abi_erased(const CallableSignature &signature);
+
     // **why may this declaration's address not be taken?** nullopt when it may.
     //
     // reads implicit_arg_count(), is_generic() and function_emission_kind rather than
@@ -69,12 +75,16 @@ namespace AST
     // so an export is not diagnosed as an address-of. asked once by AST::check_exports
     std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
 
-    // leftover `#[export]` on a type or at file scope, `export_refusal` on every exported
-    // function, duplicate export names, an export named a reserved entry, and an
-    // export of a C symbol codegen itself declares. TypeChecker asks once, like
-    // check_wasm_surface, and passes the reserved names - this file does not include
-    // Compiler. `reserved_entry` is CodegenTarget::reserved_entry_names; `reserved_runtime`
-    // is reserved_c_export_names; `reserved_runtime_prefix` is `__eco_`;
+    // leftover `#[export]` at file scope (a type's `#[export]` is
+    // AST::check_abi_exports), `export_refusal` on every exported function,
+    // duplicate export names (function symbols and `__eco_abi_<mangled>`
+    // table symbols share the map; table names come from
+    // AST::type_exports_abi_table), an export named a reserved entry, and
+    // an export of a C symbol codegen itself declares.
+    // TypeChecker asks once, like check_wasm_surface, and passes the reserved
+    // names - this file does not include Compiler. `reserved_entry` is
+    // CodegenTarget::reserved_entry_names; `reserved_runtime` is
+    // reserved_c_export_names; `reserved_runtime_prefix` is `__eco_`;
     // `reserved_wasm_crt` is empty off a wasm row
     void check_exports(
         Collector &collector,

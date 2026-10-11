@@ -2,8 +2,10 @@
 #include "Parser/ConstDeclParser.h"
 #include "Parser/EnumDeclParser.h"
 #include "Parser/EnumMapParser.h"
+#include "Parser/ExternInterfaceParser.h"
 #include "Parser/OperatorDeclParser.h"
 
+#include "AST/ASTAttributes.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTConstructor.h"
@@ -111,7 +113,7 @@ bool Parser::publish_type_symbol(Parser::Payload &payload, AST::Namespace &ns, A
 static void parse_associated_type(
     Parser::Payload &payload,
     AST::TypeDeclNode &struct_node,
-    bool is_interface_body,
+    bool declares_associated_types,
     bool collect_members
 )
 {
@@ -148,7 +150,7 @@ static void parse_associated_type(
 
     // **only an interface declares one.** a struct *binds* an associated type its conformance declared;
     // it does not introduce one, and there would be nothing to constrain the binding against
-    if (!is_interface_body) {
+    if (!declares_associated_types) {
         refuse(keyword, fmt::format(
             "only an 'interface' declares an associated type, and '{}' is not one. an implementor "
             "binds one by declaring the member that answers the requirement mentioning it.",
@@ -271,13 +273,14 @@ static void parse_conformance_clause(
     // entry - tested per entry, `interface A : B, C` reported the same sentence twice, which is what
     // the "reported once, at the clause" this is written for means. nothing is published either way,
     // so there is no second entry worth reading
-    if (owner.is_interface_kind()) {
+    if (owner.is_interface_kind() || owner.is_extern_interface_kind()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(colon_token),
             fmt::format(
-                "'{}' is an interface, and an interface cannot conform to another one - "
+                "'{}' is an {}, and cannot conform to another one - "
                 "declare the requirements it needs directly.",
-                struct_node.type_name()));
+                struct_node.type_name(),
+                AST::type_kind_keyword(owner.kind)));
 
         cursor.restore(resume);
         return;
@@ -297,6 +300,44 @@ static void parse_conformance_clause(
         }
 
         const AST::ValueType conformance = entry->type;
+
+        if (conformance.has_complex_type()
+            && conformance.get_complex_type()->is_extern_interface_kind()) {
+            if (owner.kind != AST::ComplexTypeKind::t_struct) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(entry_token),
+                    fmt::format(
+                        "'{}' cannot conform to the extern interface '{}' - only a `struct` can.",
+                        struct_node.type_name(), conformance.get_type_desciption()));
+            }
+            else {
+                bool duplicate = false;
+                for (const AST::ValueType &existing : owner.extern_conformances()) {
+                    if (existing == conformance) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (duplicate) {
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(entry_token),
+                        fmt::format(
+                            "'{}' already answers '{}'.",
+                            struct_node.type_name(), conformance.get_type_desciption()));
+                }
+                else {
+                    owner.add_extern_conformance(conformance);
+                }
+            }
+
+            if (cursor.is_type(Token::Type::t_comma)) {
+                cursor.skip();
+                continue;
+            }
+
+            break;
+        }
 
         // **an enum reads its backing type out of this same clause**, rather than out of a grammar of
         // its own. the two are told apart by what the entry names - an interface is always a declared
@@ -532,6 +573,7 @@ static void parse_constructor(
 )
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
     auto name_token = struct_node->name_token.value();
 
     // this declaration's site: its own `constructor` keyword, not the struct's name token, which
@@ -567,6 +609,7 @@ static void parse_constructor(
     // once the node exists, so an attribute is read against the declaration it was written for -
     // member_kind above is the whole of what publish_implicit_conversion needs to refuse it
     publish_member_attributes(payload, ctor_decl, struct_node, ctor_token);
+    ctor_decl->doc_comment = doc;
 
     // the struct's own namespace: `Foo(...)` has to resolve wherever the type name does, which for a
     // block-local struct is that block and nowhere else
@@ -686,6 +729,7 @@ static void parse_destructor(
 )
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
 
     auto dtor_token = cursor.current();
 
@@ -707,6 +751,7 @@ static void parse_destructor(
     // the `destructor` keyword is both the declaration site and the name token, so it is what a
     // refused attribute locates against too
     publish_member_attributes(payload, dtor_decl, struct_node, dtor_token);
+    dtor_decl->doc_comment = doc;
 
     dtor_decl->ast_namespace = payload.context.current_namespace;
     dtor_decl->owner_type = &struct_node->complex_type();
@@ -823,6 +868,7 @@ static void parse_init(
 )
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
     const TokenReference init_token = cursor.current();
 
     cursor.skip(); // skip "init"
@@ -858,6 +904,7 @@ static void parse_init(
     }
 
     publish_member_attributes(payload, init_decl, struct_node, init_token);
+    init_decl->doc_comment = doc;
 
     init_decl->ast_namespace = payload.context.current_namespace;
     init_decl->owner_type = &struct_node->complex_type();
@@ -908,7 +955,7 @@ static void parse_init(
     payload.context.declaration_scope().add_funcdecl(*init_decl);
 }
 
-// `#[core: string]` - the stdlib telling the compiler which declared type this is. bound in both the
+// `#[echoc::core: string]` - the stdlib telling the compiler which declared type this is. bound in both the
 // declaration and the body pass; re-binding the same node is how the two reconcile, and a *different*
 // node is a second declaration of one core type, which is reported.
 //
@@ -917,14 +964,15 @@ static void parse_init(
 // are already shaped this way
 static void bind_core_type_attribute(Parser::Payload &payload, AST::TypeDeclNode *struct_node)
 {
-    auto *core_attr = struct_node->attributes.get_first("core");
+    const std::string core_name(AST::compiler_attribute::core);
+    auto *core_attr = struct_node->attributes.get_first(core_name);
     if (core_attr == nullptr) {
         return;
     }
 
     // a **name**, not a string: the set AST::core_type_kind_for accepts is closed, and a closed
     // vocabulary is spelled bare wherever it appears inside a `#[...]`
-    Parser::read_attribute_value(payload, core_attr, "core",
+    Parser::read_attribute_value(payload, core_attr, core_name,
         [&](AST::AttributeReader &reader, const AST::AttributeValue &written) {
             std::optional<std::string> value = reader.name(written);
 
@@ -986,7 +1034,16 @@ static void bind_unique_attribute(Parser::Payload &payload, AST::TypeDeclNode *s
         return;
     }
 
-    // an interface stores nothing and never has a layout, so it owns nothing to be unique about
+    // an Echo interface stores nothing; an extern interface is a bound table of
+    // C pointers, not storage one value can own exclusively
+    if (complex.is_extern_interface_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(unique_attr->attribute_tokens),
+            "'#[unique]' cannot be written on an extern interface. An extern interface is a bound "
+            "table of C function pointers, not storage one value can own exclusively.");
+        return;
+    }
+
     if (complex.is_interface_kind()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(unique_attr->attribute_tokens),
@@ -1018,6 +1075,14 @@ static void bind_atomic_attribute(Parser::Payload &payload, AST::TypeDeclNode *s
             payload.context.code_ref(atomic_attr->attribute_tokens),
             "'#[atomic]' cannot be written on an incomplete type. An incomplete type has no "
             "reference count.");
+        return;
+    }
+
+    if (complex.is_extern_interface_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(atomic_attr->attribute_tokens),
+            "'#[atomic]' cannot be written on an extern interface. An extern interface is a bound "
+            "table of C function pointers, so there is no reference count to make atomic.");
         return;
     }
 
@@ -1084,6 +1149,7 @@ void Parser::bind_type_decl_attributes(Payload &payload, AST::TypeDeclNode &node
 AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
     const bool declarations_only = payload.pass == Pass::t_declarations;
 
     if (!starts_typedecl(cursor)) {
@@ -1092,10 +1158,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         return nullptr;
     }
 
-    const AST::ComplexTypeKind kind = typedecl_kind(cursor);
-
-    // skip the struct or class keyword
-    cursor.skip();
+    const AST::ComplexTypeKind kind = consume_typedecl_keyword(cursor);
 
     if (!payload.expect_token(Token::Type::t_identifier)) {
         return nullptr;
@@ -1107,6 +1170,15 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     // optional generic type parameters: struct Foo<T, U> { ... }
     std::vector<ParsedTypeParam> parsed_type_params = parse_type_param_list(payload);
+
+    if (kind == AST::ComplexTypeKind::t_extern_interface && !parsed_type_params.empty()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            fmt::format(
+                "'{}' is an extern interface, so it cannot have type parameters.",
+                name_token.value()));
+        parsed_type_params.clear();
+    }
 
     // the conformance clause - `struct Point : Comparable<Point>, Hashable`. read here so the cursor is
     // right in every pass, and *resolved* only in the two later ones: an interface may be declared
@@ -1231,6 +1303,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // undrained attribute attaches itself to whatever declaration comes next, and this site is the
     // half of the bug that would pick up a method's `#[implicit]`
     Parser::drain_attributes(payload, struct_node->attributes);
+    struct_node->doc_comment = doc;
 
     Parser::bind_type_decl_attributes(payload, *struct_node);
 
@@ -1323,7 +1396,12 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // context to bind `$this`, prefix the owner's type parameters and register on the type. it opens
     // a null frame of its own around each body, so nothing nested inherits the receiver. both passes
     // reach a method, so both need it
-    AST::SelfScope self_scope(payload.context, struct_node, &self_type_node, &self_const_type_node);
+    // an extern interface's requirements are all const: the binding is a value
+    // the host holds, and a call through it never writes the table
+    AST::TypeNode *receiver_type = kind == AST::ComplexTypeKind::t_extern_interface
+        ? &self_const_type_node
+        : &self_type_node;
+    AST::SelfScope self_scope(payload.context, struct_node, receiver_type, &self_const_type_node);
 
     // add the struct to the current scope, which is the list --print-ast walks. the body pass only:
     // the declaration pass has no file root, and a name is already resolvable without this because
@@ -1336,12 +1414,14 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // create an empty base scope for the properties to sit in
     auto &structscope = payload.context.emplace_node<AST::ScopeNode>();
 
-    // an interface body admits exactly one thing: a bodyless `function` or `operator` requirement.
-    // everything else is refused *here*, at the member, because this walk is the only place that knows
-    // which member shape was written - and each refusal declines to publish rather than reporting on
-    // the way past, so an interface never carries a property, a constructor or a destructor that a
-    // later pass could find and believe in
-    const bool is_interface_body = struct_node->complex_type().is_interface_kind();
+    // two requirement bodies, two flags. an Echo interface admits a `function`
+    // or `operator` signature and has no layout. an extern interface admits a
+    // `function` signature only - its layout is compiler-owned slots. associated
+    // types are a regular interface's
+    const bool holds_echo_requirements = struct_node->complex_type().is_interface_kind();
+    const bool holds_extern_requirements = struct_node->complex_type().is_extern_interface_kind();
+    const bool holds_any_requirements = holds_echo_requirements || holds_extern_requirements;
+    const bool declares_associated_types = holds_echo_requirements;
 
     // **an enum body refuses the same shapes an interface does, minus one and for a different reason.**
     // an interface refuses a property because it has no layout; an enum refuses one because its layout
@@ -1353,7 +1433,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // the interface's associated types resolve throughout its body. opened for every body kind, with a
     // null owner outside an interface, so `find_type_param` has one rule rather than a conditional
     AST::AssociatedTypeScope associated_scope(
-        payload.context, is_interface_body ? &struct_node->complex_type() : nullptr);
+        payload.context, declares_associated_types ? &struct_node->complex_type() : nullptr);
 
     // reports a member shape this body cannot hold, and consumes it so the rest of the body is still
     // read. one lambda rather than the wording repeated at four arms, which is what keeps the four
@@ -1365,16 +1445,19 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // spell with "an" - a fifth that did not would want the article from AST::type_kind_keyword's owner
     // rather than from here
     auto refuse_member_shape = [&](const TokenReference &at, const std::string &shape) {
-        const char *holds = is_interface_body
+        const char *keyword = AST::type_kind_keyword(struct_node->complex_type().kind);
+        const std::string holds = holds_echo_requirements
             ? "An interface holds requirements only - a `function` or `operator` signature ending in ';'."
-            : "An enum holds `case` declarations, and the functions, operators and statics it answers with.";
+            : holds_extern_requirements
+                ? "An extern interface holds requirements only - a `function` signature ending in ';'."
+                : "An enum holds `case` declarations, and the functions, operators and statics it answers with.";
 
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(at),
             fmt::format(
                 "'{}' is an {}, so it cannot declare {}. {}",
                 struct_node->type_name(),
-                AST::type_kind_keyword(struct_node->complex_type().kind),
+                keyword,
                 shape,
                 holds));
     };
@@ -1415,7 +1498,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             // an attribute ahead of a member. it lands on `context.scope()` - the file root, since a
             // struct body pushes no scope of its own - and the member declaration below drains it from
-            // there, exactly as a top-level declaration does. `#[core: string_view]` on a nested
+            // there, exactly as a top-level declaration does. `#[echoc::core: string_view]` on a nested
             // `view` is the case that needs it
             parse_attribute(payload);
         }
@@ -1474,7 +1557,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // an enum is refused one for a reason of its own: a nested type is reached as `A::Inner`,
             // and an enum's `::` already means a case. one spelling denoting a type in one enum and a
             // value in the next is the ambiguity a pattern cannot afford
-            if (is_interface_body || is_enum_body) {
+            if (holds_any_requirements || is_enum_body) {
                 refuse_braced_member("a nested type");
                 continue;
             }
@@ -1510,7 +1593,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 "An associated type is part of what the interface requires, so it is reachable exactly "
                 "where the interface is.");
 
-            parse_associated_type(payload, *struct_node, is_interface_body, collect_members);
+            parse_associated_type(payload, *struct_node, declares_associated_types, collect_members);
         }
         // **ahead of starts_vardecl**, for the two arms above's reason and one sharper than theirs:
         // a method may be written `const function get()`, and starts_vardecl reads that leading
@@ -1533,25 +1616,34 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // an interface's method is a **requirement**: it is the surface every implementor answers, so
             // there is nothing for a modifier to hide it from. refused ahead of parse_funcdecl so the
             // declaration is not left carrying a visibility the language does not give it
-            if (is_interface_body) {
+            if (holds_any_requirements) {
+                const char *keyword = AST::type_kind_keyword(struct_node->complex_type().kind);
                 refuse_visibility_prefix(
                     payload,
                     visibility,
-                    "A method declared in an interface is a requirement, so it is reachable exactly where "
-                    "the interface is - it is what an implementor promises to answer.");
+                    fmt::format(
+                        "A method declared in an {} is a requirement, so it is reachable exactly where "
+                        "the {} is - it is what an implementor promises to answer.",
+                        keyword, keyword));
 
                 visibility.value = AST::Visibility::t_public;
             }
 
-            AST::FunctionDeclNode *member = parse_funcdecl(payload, FuncDeclKind::t_normal, visibility);
+            const FuncDeclKind func_kind = struct_node->complex_type().is_extern_interface_kind()
+                ? FuncDeclKind::t_requirement
+                : FuncDeclKind::t_normal;
+            AST::FunctionDeclNode *member = parse_funcdecl(payload, func_kind, visibility);
 
-            if (is_interface_body && member != nullptr && member->body != nullptr) {
+            if (holds_any_requirements && member != nullptr && member->body != nullptr
+                && !member->is_implicitly_generated) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(member->declaration_site_token()),
                     fmt::format(
-                        "'{}' is a requirement of the interface '{}', so it cannot have a body - end it "
+                        "'{}' is a requirement of the {} '{}', so it cannot have a body - end it "
                         "with ';' and let each implementor write one.",
-                        member->signature_description(), struct_node->type_name()));
+                        member->signature_description(),
+                        AST::type_kind_keyword(struct_node->complex_type().kind),
+                        struct_node->type_name()));
             }
         }
         // **also ahead of starts_vardecl**, and for the sharpest version of the arm above's reason: both
@@ -1566,7 +1658,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // cases would make one spelling mean a case in one enum and a folded literal in the next,
             // and a *pattern* has no way to say which it meant - so the ambiguity is refused at the
             // declaration rather than resolved by a precedence nobody could see
-            if (is_interface_body || is_enum_body) {
+            if (holds_any_requirements || is_enum_body) {
                 refuse_member_shape(at, "a constant");
                 cursor.try_skip_to_next_statement();
             }
@@ -1608,16 +1700,23 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             AST::DeclarationPublishScope nested_decls(
                 payload.context, payload.cursor.is_type(Token::Type::t_static));
 
+            std::string property_doc = Parser::take_pending_doc(payload);
             auto var = parse_varexpr(payload, &structscope);
 
             if (var != nullptr) {
                 var->visibility = visibility.value;
+                Parser::drain_attributes(payload, var->attributes);
+                var->doc_comment = std::move(property_doc);
+            }
+            else {
+                AST::AttributeList discarded;
+                Parser::drain_attributes(payload, discarded);
             }
 
             // a requirement is behaviour, not storage. a required *property* would fix the layout of
             // every implementor and mean nothing without a stored offset, so it is refused - which also
             // keeps ComplexType::has_property_layout() true of exactly the two kinds that have one
-            if (is_interface_body) {
+            if (holds_any_requirements) {
                 refuse_member_shape(
                     var != nullptr ? var->token_varname : cursor.current(), "a property");
             }
@@ -1670,7 +1769,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             //
             // an enum is refused one because it already has as many as it has cases: a value of one is
             // always some case, and a constructor beside them could build a value that is none of them
-            if (is_interface_body || is_enum_body) {
+            if (holds_any_requirements || is_enum_body) {
                 refuse_braced_member("a constructor");
                 continue;
             }
@@ -1682,7 +1781,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             && (cursor.peek_is_type(1, Token::Type::t_open_brace)
                 || cursor.peek_is_type(1, Token::Type::t_open_paren)
                 || cursor.peek_is_type(1, Token::Type::t_colon))) {
-            if (is_interface_body || is_enum_body) {
+            if (holds_any_requirements || is_enum_body) {
                 refuse_braced_member("an init");
                 continue;
             }
@@ -1701,7 +1800,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             //
             // an interface owns no storage of its own, and what a value of one holds is torn down by
             // the concrete class's own destructor, reached through the object's typeinfo
-            if (is_interface_body) {
+            if (holds_any_requirements) {
                 refuse_braced_member("a destructor");
                 continue;
             }
@@ -1742,7 +1841,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     // declaration pass: the name has to be in the overload set before any other file's body is
     // parsed, because parse_funccall reports UnknownFunction while it is reading the call
-    if (collect_members && !is_interface_body && !is_enum_body) {
+    if (collect_members && !holds_any_requirements && !is_enum_body) {
         AST::ensure_synthesized_constructor(
             payload.context.module, *struct_node, payload.collector, self_value_type);
     }
@@ -1751,6 +1850,10 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // from the case list this walk just collected
     if (collect_members && is_enum_body) {
         Parser::finalize_enum(payload, struct_node, self_value_type);
+    }
+
+    if (collect_members && struct_node->complex_type().is_extern_interface_kind()) {
+        Parser::finalize_extern_interface(payload, struct_node);
     }
 
     if (!declarations_only) {
@@ -1789,7 +1892,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         // that is in no scope is never reached by AST::PointerAdjuster. the accessor's `$__match = $this`
         // therefore kept the receiver's address instead of the value behind it, and the enum read its
         // discriminant out of a pointer - a wrong answer with nothing anywhere reporting it
-        if (is_enum_body) {
+        if (struct_node->complex_type().is_extern_interface_kind()) {
+            Parser::plant_extern_interface_bodies(payload, struct_node);
+        }
+
+        if (is_enum_body || struct_node->complex_type().is_extern_interface_kind()) {
             const auto publish_synthesized = [&](const std::vector<AST::FunctionDeclNode *> &members) {
                 for (AST::FunctionDeclNode *member : members) {
                     if (member == nullptr || !member->is_implicitly_generated || member->body == nullptr) {

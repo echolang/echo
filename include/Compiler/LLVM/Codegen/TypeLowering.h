@@ -108,6 +108,16 @@ namespace Compiler::LLVM
         // own LLVM Function uses this, so integer-ext cannot be decided a second time
         static FunctionCallingShape calling_shape_of(const AST::FunctionDeclNode &node);
 
+        // `&name` as an Echo callable or as a C function pointer, and an ABI
+        // table slot. one chassis: look up, mint, forward, return. t_echo is
+        // linkonce_odr and skips the environment; t_c is unit-local InternalLinkage
+        // with integer-ext and a tail call, so an `#[inline]` body defined in every
+        // unit stays ODR-identical
+        llvm::Function *ensure_function_adapt(
+            AST::FunctionDeclNode *decl,
+            FunctionCallingShape shape
+        );
+
         // **how *this declaration* hands its answer back**, which is the aggregate rule
         // Compiler::LLVM::return_abi_for owns plus the one thing it cannot see: whether the declaration
         // uses Echo's convention at all.

@@ -6,6 +6,7 @@
 #include "AST/ASTAccess.h"
 #include "AST/ASTNode.h"
 #include "AST/ASTValueType.h"
+#include "AST/AttributeNode.h"
 #include "Lexer.h"
 #include "AST/TypeNode.h"
 
@@ -107,6 +108,13 @@ namespace AST
         // a label is part of the callee's external shape - it participates in overload identity and
         // in the mangled name - where the `$name` does not, except as an optional named-arg filter
         std::optional<TokenReference> label_token;
+
+        // the attributes written ahead of this property. empty on a local: only a type body
+        // drains onto a VarDeclNode
+        AttributeList attributes;
+
+        // the `/** ... */` immediately preceding this declaration, original text, or empty
+        std::string doc_comment;
 
         bool has_label() const {
             return label_token.has_value();

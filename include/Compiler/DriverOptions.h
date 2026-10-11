@@ -117,6 +117,9 @@ namespace Compiler
         bool dry_run = false;
         bool with_stdlib = false;
 
+        // with --print decls: include dependency and stdlib declarations. refused without -p decls
+        bool decls_all = false;
+
         ColorChoice color = ColorChoice::t_auto;
         DiagnosticFormat format = DiagnosticFormat::t_auto;
 

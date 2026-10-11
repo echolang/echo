@@ -352,17 +352,4 @@ std::string TargetFacts::cache_signature() const
     return result;
 }
 
-std::string TargetFacts::shared_library_extension() const
-{
-    if (family() == "darwin") {
-        return ".dylib";
-    }
-
-    if (family() == "windows") {
-        return ".dll";
-    }
-
-    return ".so";
-}
-
 };

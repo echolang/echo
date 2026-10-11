@@ -7,6 +7,8 @@
 #include "AST/FunctionDeclNode.h"
 
 #include <fmt/core.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -109,7 +111,7 @@ namespace Compiler::LLVM
             type, core_types().string_view_type());
 
         if (to_view == nullptr) {
-            // a hand-declared `#[core: string]` with no conversion: the stored window is the truth
+            // a hand-declared `#[echoc::core: string]` with no conversion: the stored window is the truth
             const AST::CoreStringLayout &layout = core_string_layout();
 
             return builder->CreateExtractValue(
@@ -127,6 +129,52 @@ namespace Compiler::LLVM
         emit_call(fn, args, types->return_abi_of(to_view, *current_cmp_unit));
 
         return pop_scalar();
+    }
+
+    llvm::Constant *CodegenContext::string_constant(
+        const std::string &bytes,
+        const AST::ValueType &type
+    )
+    {
+        // the bytes themselves, always: a private NUL-terminated global. the NUL costs one byte and buys
+        // `->c_str()` for free on a literal, which is the whole C-interop story for one
+        llvm::Constant *byte_pointer = llvm::cast<llvm::Constant>(
+            builder->CreateGlobalStringPtr(bytes, "str"));
+
+        // no stdlib, no `string` type - the literal stays the bare address it has always been. this is the
+        // path that compiles `stdlib/core/string.eco` itself. asks for a *layout*, since what follows
+        // GEPs the window out of it
+        if (!type.has_property_layout()) {
+            return byte_pointer;
+        }
+
+        // resolved once by compile_bundle, which is also where a malformed stdlib string is reported
+        const AST::CoreStringLayout &layout = core_string_layout();
+
+        auto *string_struct = llvm::cast<llvm::StructType>(types->get_llvm_type(type, *current_cmp_unit));
+        auto *view_struct = llvm::cast<llvm::StructType>(string_struct->getElementType(layout.window_index));
+
+        // a literal is a *constant* of the string type, not a call to one of its constructors: the bytes
+        // are already in the binary, the size is known here, and the owner is null - so nothing is
+        // allocated and nothing is retained
+        std::vector<llvm::Constant *> view_fields(2);
+        view_fields[layout.bytes_index] = byte_pointer;
+        view_fields[layout.size_index] =
+            llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
+
+        const unsigned field_count = string_struct->getNumElements();
+        std::vector<llvm::Constant *> string_fields(field_count);
+
+        for (unsigned i = 0; i < field_count; i++) {
+            string_fields[i] = llvm::Constant::getNullValue(string_struct->getElementType(i));
+        }
+
+        string_fields[layout.window_index] = llvm::ConstantStruct::get(view_struct, view_fields);
+        string_fields[layout.owner_index] =
+            llvm::ConstantPointerNull::get(
+                llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));
+
+        return llvm::ConstantStruct::get(string_struct, string_fields);
     }
 
     CodegenContext::StringWindow CodegenContext::gen_string_window(

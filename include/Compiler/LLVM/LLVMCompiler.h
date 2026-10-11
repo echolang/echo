@@ -11,6 +11,7 @@
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/AbiTableCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
@@ -214,8 +215,8 @@ public:
         std::vector<std::filesystem::path> &out_objects);
 
     // links what emit_objects produced, plus anything a cache supplied
-    bool link_executable(
-        const std::string &executable_name,
+    bool link_program(
+        const std::string &program_name,
         const std::vector<std::filesystem::path> &objects,
         const std::vector<Compiler::LinkRequirement> &link
     );
@@ -230,6 +231,7 @@ private:
     Compiler::LLVM::TypeDeclCodegen _struct;
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
+    Compiler::LLVM::AbiCodegen _abi;
     Compiler::LLVM::AtomicCodegen _atomics;
     Compiler::LLVM::SimdCodegen _simd;
     Compiler::LLVM::MemoryCodegen _memory;

@@ -62,7 +62,7 @@ TEST_CASE("#[inline] does not invent a body for a declaration that has none", "[
     // have StmtCodegen try to emit one
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "#[inline]\n"
-        "#[intrinsic: \"llvm.sqrt\"]\n"
+        "#[echoc::intrinsic: \"llvm.sqrt\"]\n"
         "function rooted(float $x) : float;");
 
     AST::FunctionDeclNode *decl = only_decl(*bundle, "rooted");

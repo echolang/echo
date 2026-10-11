@@ -44,7 +44,7 @@ expect: fail
      :                        ^^^^^^^^^^^
   12 | 
 
-  35 | #[builtin: alloc_bytes]
+  35 | #[echoc::builtin: alloc_bytes]
   36 | private function alloc_bytes(usize $bytes) : ptr<uint8>;
      :                  ----------- declared here
   37 | 
@@ -58,7 +58,7 @@ expect: fail
      :                                    ^^^^^^^^
   18 | 
 
-  33 | #[builtin: process_argv]
+  33 | #[echoc::builtin: process_argv]
   34 | private function raw_argv() : ptr<ptr<uint8>>;
      :                  -------- declared here
   35 | 

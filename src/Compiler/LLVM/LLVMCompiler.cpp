@@ -33,7 +33,7 @@
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
-      _abort(_ctx), _atomics(_ctx), _simd(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx),
+      _abort(_ctx), _abi(_ctx), _atomics(_ctx), _simd(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx),
       _erasure(_ctx), _debug_info(_ctx), _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
@@ -53,6 +53,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.process = &_process;
     _ctx.debug_print = &_debug_print;
     _ctx.erasure = &_erasure;
+    _ctx.abi = &_abi;
     _ctx.debug_info = &_debug_info;
 }
 
@@ -345,7 +346,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         _ctx.crash_info_layout = AST::resolve_core_crash_info_layout(_ctx.core_types(), layout_error);
 
         if (!_ctx.crash_info_layout.has_value()) {
-            throw _ctx.error(fmt::format("the declared #[core: crash_info] is unusable: {}", layout_error));
+            throw _ctx.error(fmt::format("the declared #[echoc::core: crash_info] is unusable: {}", layout_error));
         }
     }
 
@@ -407,6 +408,8 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
                 func_decl.accept(*this);
             }
         }
+
+        _ctx.abi->emit_tables();
     }
     }
 
@@ -425,7 +428,11 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     }
     else {
         _ctx.current_cmp_unit = main_cmp_unit;
-        _process.gen_startup();
+        llvm::Function *walker = nullptr;
+        if (_ctx.options.codegen.is_native_library()) {
+            walker = _statics.ensure_teardown_walker(true);
+        }
+        _process.gen_library_lifecycle(walker);
     }
 
     {
@@ -779,14 +786,14 @@ bool LLVMCompiler::emit_objects(
     return Compiler::LLVM::emit_unit_objects(_ctx, _backend, object_for, out_objects);
 }
 
-bool LLVMCompiler::link_executable(
-    const std::string &executable_name,
+bool LLVMCompiler::link_program(
+    const std::string &program_name,
     const std::vector<std::filesystem::path> &objects,
     const std::vector<Compiler::LinkRequirement> &link
 )
 {
     Compiler::ScopedPhase phase("link");
-    return _backend.link_executable(executable_name, objects, link);
+    return _backend.link_program(program_name, objects, link);
 }
 
 void LLVMCompiler::optimize() { _backend.optimize(); }

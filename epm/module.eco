@@ -31,7 +31,6 @@
 #[if: static_curl]
 #[if: os == linux]
 #[link: lib "z"]
-#[link: lib "dl"]
 #[end]
 #[if: os == darwin]
 #[link: lib "z"]

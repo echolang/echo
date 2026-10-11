@@ -650,7 +650,7 @@ TEST_CASE("a generic call in a pending const if condition is instantiated", "[ge
     // a user function is not foldable - the folder is not an evaluator - so this is a builtin,
     // declared here because the bundle has no stdlib
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: needs_destruction]\n"
+        "#[echoc::builtin: needs_destruction]\n"
         "function nd<T>(): bool;\n"
         "function poison<T>(T $x): T { return $x; }\n"
         "const if (nd<int32>()) {\n"

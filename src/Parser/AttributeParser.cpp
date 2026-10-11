@@ -1,11 +1,13 @@
 #include "Parser/AttributeParser.h"
 
 #include "Parser/AttributeValueParser.h"
+#include "Parser/FuncDeclParser.h"
 
 #include "AST/ASTAttributes.h"
+#include "AST/ASTIssue.h"
 #include "AST/ASTWasm.h"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 void Parser::report_attribute_refusals(Parser::Payload &payload, const AST::AttributeReader &reader)
 {
@@ -42,6 +44,9 @@ AST::AttributeNode *Parser::parse_attribute(
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
+
+    // the `/** ... */` that precedes this `#[` points at this token
+    Parser::take_leading_doc(payload);
 
     payload.cursor.skip(); // skip the attribute keyword
 
@@ -106,13 +111,55 @@ AST::AttributeNode *Parser::parse_attribute(
     // reported and then *skipped past* rather than returned as null, so that the declaration after it still
     // parses: one misspelled attribute should cost one message, not the whole file.
     //
-    // a manifest leaves this to read_manifest_attributes, which knows the closed list *and* the
-    // tool-namespace escape - a source file has no such escape
-    if (!payload.is_manifest && !AST::is_known_attribute(name_token.value())) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(name_token),
-            "unknown attribute '" + name_token.value() + "', expected one of: "
-                + AST::known_attribute_list());
+    // a manifest leaves this to read_manifest_attributes, which asks the same owner with
+    // AttributeMedium::t_manifest. locate on `first_name`, the real token both passes share: a
+    // joined `ns::name` is a virtual token minted per pass, so using it would report the same
+    // reserved name twice
+    if (!payload.is_manifest) {
+        const std::string &written_name = name_token.value();
+        const AST::CodeRef at = payload.context.code_ref(first_name);
+
+        switch (AST::attribute_admission(
+            written_name,
+            AST::AttributeMedium::t_source,
+            payload.context.module.writes_compiler_attributes)) {
+        case AST::AttributeAdmission::t_language:
+        case AST::AttributeAdmission::t_compiler:
+        case AST::AttributeAdmission::t_tool:
+            break;
+
+        case AST::AttributeAdmission::t_reserved_namespace:
+            payload.collector.collect_issue<AST::Issue::ReservedAttributeNamespace>(
+                at,
+                "the 'echoc::' namespace is reserved for the compiler and its standard library.");
+            break;
+
+        case AST::AttributeAdmission::t_unknown_compiler:
+            payload.collector.collect_issue<AST::Issue::UnknownAttribute>(
+                at,
+                fmt::format(
+                    "unknown compiler attribute '{}', expected one of: {}",
+                    written_name, AST::compiler_attribute_list()),
+                written_name);
+            break;
+
+        case AST::AttributeAdmission::t_manifest_in_source:
+            payload.collector.collect_issue<AST::Issue::ManifestAttributeInSource>(
+                at,
+                fmt::format(
+                    "'{}' is a manifest attribute; it belongs in a module.eco.",
+                    written_name));
+            break;
+
+        case AST::AttributeAdmission::t_unknown:
+            payload.collector.collect_issue<AST::Issue::UnknownAttribute>(
+                at,
+                fmt::format(
+                    "unknown attribute '{}', expected one of: {}",
+                    written_name, AST::known_attribute_list()),
+                written_name);
+            break;
+        }
     }
 
     // a type body shares the file-root ScopeNode, so "child of file.root" is not "written at file

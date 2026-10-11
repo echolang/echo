@@ -392,7 +392,7 @@ AST::UnwrapLookup AST::unwrap_plan_for(
     if (unwrappable_tmpl == nullptr && checkable_tmpl == nullptr) {
         return refuse(fmt::format(
             "'{}' cannot be guarded: it is not nullable, and nothing in this program declares "
-            "'#[core: unwrappable]' or '#[core: checkable]' for it to conform to. those interfaces "
+            "'#[echoc::core: unwrappable]' or '#[echoc::core: checkable]' for it to conform to. those interfaces "
             "live in the standard library, which this compilation left out - a 'T?' still guards "
             "without them.",
             subject.get_type_desciption()));

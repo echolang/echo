@@ -127,9 +127,16 @@ function Invoke-WithCleanPath {
 $stageBin = Join-Path $stage "bin"
 Write-Host "smoke test echoc with a clean PATH (including echoc build)"
 Invoke-WithCleanPath -BinDir $stageBin -Block {
-    $reported = ((& (Join-Path $stageBin "echoc.exe") --version) | Out-String).Trim()
+    $echoc = Join-Path $stageBin "echoc.exe"
+    $reported = ((& $echoc --version) | Out-String).Trim()
+    Write-Host "echoc --version: '$reported' (exit $LASTEXITCODE)"
+    Write-Host "expected:        '$($env:VERSION)'"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "echoc --version failed with exit $LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
     if ($reported -ne $env:VERSION) {
-        Write-Error "The binary reports '$reported', expected '$env:VERSION'."
+        Write-Host "The binary reports '$reported', expected '$env:VERSION'."
         exit 1
     }
 
@@ -137,9 +144,9 @@ Invoke-WithCleanPath -BinDir $stageBin -Block {
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     Set-Location $scratch
     Set-Content -Path smoke.eco -Value "assert(1 == 1);`nvar `$xs = [1, 2, 3];`ndprint(`$xs[1]);`n" -NoNewline
-    & (Join-Path $stageBin "echoc.exe") run smoke.eco
+    & $echoc run smoke.eco 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & (Join-Path $stageBin "echoc.exe") build smoke.eco -o smoke.exe
+    & $echoc build smoke.eco -o smoke.exe 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if (-not (Test-Path -LiteralPath "smoke.exe")) {
         Write-Error "echoc build did not write smoke.exe"

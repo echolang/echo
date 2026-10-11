@@ -1,0 +1,24 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownAttribute  bare_compiler_attribute.eco:2:3
+
+  unknown attribute 'builtin', expected one of: inline, implicit, unique, atomic, group, tests, export, wasm
+
+  1 | // a bare compiler stem is unknown, not reserved. the note is what points at the real spelling
+  2 | #[builtin: size_of]
+    :   ^^^^^^^
+  3 | function byte_size<T>() : usize;
+
+  note: 'builtin' belongs to the standard library, spelled 'echoc::builtin'; a program cannot write it.
+
+[error] BodylessFunction  bare_compiler_attribute.eco:3:10
+
+  'byte_size<T>()' was declared but never given a body - write one, or say where its implementation comes from with an 'extern' block.
+
+  2 | #[builtin: size_of]
+  3 | function byte_size<T>() : usize;
+    :          ^^^^^^^^^
+  4 | 
+
+2 errors, nothing was compiled.

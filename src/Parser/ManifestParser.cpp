@@ -33,8 +33,8 @@
 namespace
 {
 
-// the attribute names a manifest may use are AST::is_known_manifest_attribute's, spelled there beside the
-// union the shared attribute parser answers with. Anything else is an error rather than an ignored line,
+// the attribute names a manifest may use are AST::attribute_admission's, asked with
+// AttributeMedium::t_manifest. Anything else is an error rather than an ignored line,
 // which is the one rule the whole format rests on: `#[sources: ...]` misspelled `#[source: ...]` would
 // otherwise produce a module with no files and no complaint
 
@@ -495,19 +495,26 @@ bool read_manifest_attributes(
         const std::string name = attribute->attribute_id.value();
         const uint32_t line = attribute->attribute_id.line();
 
-        if (!AST::is_known_manifest_attribute(name)) {
-            if (AST::is_reserved_manifest_namespace(name)) {
-                payload.collector.collect_issue<AST::Issue::ReservedManifestAttribute>(
-                    payload.context.code_ref(attribute->attribute_id),
-                    "the 'echoc::' namespace is reserved for the compiler.");
-            }
-            else {
-                payload.collector.collect_issue<AST::Issue::UnknownManifestAttribute>(
-                    payload.context.code_ref(attribute->attribute_id),
-                    fmt::format(
-                        "unknown manifest attribute '{}', expected one of: {}",
-                        name, AST::known_manifest_attribute_list()));
-            }
+        switch (AST::attribute_admission(name, AST::AttributeMedium::t_manifest, false)) {
+        case AST::AttributeAdmission::t_language:
+        case AST::AttributeAdmission::t_tool:
+            break;
+
+        case AST::AttributeAdmission::t_reserved_namespace:
+            payload.collector.collect_issue<AST::Issue::ReservedAttributeNamespace>(
+                payload.context.code_ref(attribute->attribute_id),
+                "the 'echoc::' namespace is reserved for the compiler and its standard library.");
+            return false;
+
+        case AST::AttributeAdmission::t_compiler:
+        case AST::AttributeAdmission::t_unknown_compiler:
+        case AST::AttributeAdmission::t_manifest_in_source:
+        case AST::AttributeAdmission::t_unknown:
+            payload.collector.collect_issue<AST::Issue::UnknownManifestAttribute>(
+                payload.context.code_ref(attribute->attribute_id),
+                fmt::format(
+                    "unknown manifest attribute '{}', expected one of: {}",
+                    name, AST::known_manifest_attribute_list()));
             return false;
         }
 
@@ -1090,8 +1097,7 @@ bool resolve_manifest_targets(
         // **a test target names no file**, so every path it does name is a *selection* - resolved against
         // the manifest like any other, and deliberately not checked against `sources`: a file: filter that
         // matches nothing is a refusal the runner makes, where it can say what there was to choose from
-        if (target.kind == Parser::TargetKind::t_test
-            || target.kind == Parser::TargetKind::t_library) {
+        if (!Parser::target_has_entry(target.kind)) {
             for (const std::string &file : target.files) {
                 settled.files.push_back(Compiler::settled_path(out.directory, file));
             }

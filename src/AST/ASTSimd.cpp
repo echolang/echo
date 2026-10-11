@@ -295,6 +295,12 @@ namespace AST
             case BuiltinKind::t_atomic_exchange:
             case BuiltinKind::t_atomic_compare_exchange:
             case BuiltinKind::t_atomic_fence:
+            case BuiltinKind::t_abi_version:
+            case BuiltinKind::t_abi_fingerprint:
+            case BuiltinKind::t_abi_slot_count:
+            case BuiltinKind::t_abi_symbol:
+            case BuiltinKind::t_abi_slot_symbol:
+            case BuiltinKind::t_abi_bind_unchecked:
                 return false;
         }
 

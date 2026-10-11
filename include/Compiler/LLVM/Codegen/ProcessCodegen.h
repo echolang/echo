@@ -39,6 +39,14 @@ namespace Compiler::LLVM
         // and wasm, where there is nothing to unbuffer
         void gen_startup();
 
+        // replaces gen_startup on a program with no entry. a native lib also
+        // plants `__eco_lib_fini` in `llvm.global_dtors` to walk static teardown
+        // then dlclose's atexit. linkonce_odr so the entry-unit partition's
+        // GlobalDCE keeps it (internal would be skipped by keep_odr_from_dce).
+        // a wasm reactor has no fini: the image lives with the page.
+        // `fini_walker` is null when there is nothing to walk
+        void gen_library_lifecycle(llvm::Function *fini_walker);
+
         // the three reads, as a usize count and two opaque pointers. what the `process_argc` /
         // `process_argv` / `process_envp` builtins lower to. argc/argv load the capture
         // globals. envp does too on a command; a lib reads the platform source live

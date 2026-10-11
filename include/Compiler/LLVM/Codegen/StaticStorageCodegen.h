@@ -66,6 +66,12 @@ namespace Compiler::LLVM
         // static, since nothing ever pushed a node onto the chain
         void gen_teardown();
 
+        // the `linkonce_odr` walker over the teardown chain. `create_head` is a
+        // native lib's fini: this unit may reference no static of its own, and
+        // still has to walk a chain a dependency pushed. an executable passes
+        // false so a program with no static still emits no walk
+        llvm::Function *ensure_teardown_walker(bool create_head);
+
     private:
         CodegenContext &_ctx;
 

@@ -175,6 +175,40 @@ void ProcessCodegen::gen_startup()
     llvm::appendToGlobalCtors(*module, fn, 65535);
 }
 
+void ProcessCodegen::gen_library_lifecycle(llvm::Function *fini_walker)
+{
+    gen_startup();
+
+    // a wasm reactor has no unload: the image lives with the page. a native
+    // lib tears statics down from global_dtors, which dlclose runs
+    if (fini_walker == nullptr || _ctx.targeting_wasm()) {
+        return;
+    }
+
+    llvm::Module *module = _ctx.current_module();
+    constexpr const char *k_name = "__eco_lib_fini";
+
+    if (module->getFunction(k_name) != nullptr) {
+        return;
+    }
+
+    llvm::Function *fn = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), false),
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        k_name,
+        module);
+
+    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    _ctx.builder->SetInsertPoint(
+        llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn));
+
+    _ctx.builder->CreateCall(fini_walker);
+    _ctx.builder->CreateRetVoid();
+
+    llvm::appendToGlobalDtors(*module, fn, 65535);
+}
+
 llvm::Value *ProcessCodegen::gen_argc(const llvm::Twine &name)
 {
     return _ctx.builder->CreateLoad(_ctx.size_int_ty(), get_or_create_argc(), name);

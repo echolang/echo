@@ -2,7 +2,7 @@
  * `result<T, E>` - a value, or the reason there is not one.
  *
  * `T?` is the cheap answer when absence is enough. This is the other one: a value of type `T`, or a
- * failure of type `E`. Nothing in the compiler knows what a result is. There is no `#[core:]` binding
+ * failure of type `E`. Nothing in the compiler knows what a result is. There is no `#[echoc::core:]` binding
  * and there is deliberately none. `guard` reaches it through the two interfaces below, and
  * `.ok(...)` / `.error(...)` are the ordinary static shorthand every enum's cases get.
  *

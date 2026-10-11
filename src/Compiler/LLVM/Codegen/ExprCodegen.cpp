@@ -24,6 +24,7 @@
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/AbiTableCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
@@ -47,6 +48,7 @@
 #include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -54,6 +56,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
 
@@ -155,52 +158,7 @@ void ExprCodegen::gen_literal_bool(AST::LiteralBoolExprNode &node)
 
 void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
 {
-    const std::string &bytes = node.get_string_value();
-
-    // the bytes themselves, always: a private NUL-terminated global. the NUL costs one byte and buys
-    // `->c_str()` for free on a literal, which is the whole C-interop story for one
-    llvm::Value *byte_pointer = _ctx.builder->CreateGlobalStringPtr(bytes, "str");
-
-    const AST::ValueType type = node.result_type();
-
-    // no stdlib, no `string` type - the literal stays the bare address it has always been. this is the
-    // path that compiles `stdlib/core/string.eco` itself. asks for a *layout*, since what follows
-    // GEPs the window out of it
-    if (!type.has_property_layout()) {
-        _ctx.push_scalar(byte_pointer);
-        return;
-    }
-
-    // resolved once by compile_bundle, which is also where a malformed stdlib string is reported
-    const AST::CoreStringLayout &layout = _ctx.core_string_layout();
-
-    auto *string_struct = llvm::cast<llvm::StructType>(_ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit));
-    auto *view_struct = llvm::cast<llvm::StructType>(string_struct->getElementType(layout.window_index));
-
-    // **the whole point of this function.** a literal is a *constant* of the string type, not a call to
-    // one of its constructors: the bytes are already in the binary, the size is known here, and the
-    // owner is null - so nothing is allocated and nothing is retained. a null owner is also what makes
-    // the retain and release the ownership pass wraps this value in no-ops, since both are null-guarded
-    std::vector<llvm::Constant *> view_fields(2);
-    view_fields[layout.bytes_index] = llvm::cast<llvm::Constant>(byte_pointer);
-    view_fields[layout.size_index] =
-        llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
-
-    // every field, then the two the layout names. SSO storage on `string` is extra
-    // properties the constant must still fill - getNullValue so a new one is
-    // zero rather than a missing operand LLVM rejects
-    const unsigned field_count = string_struct->getNumElements();
-    std::vector<llvm::Constant *> string_fields(field_count);
-
-    for (unsigned i = 0; i < field_count; i++) {
-        string_fields[i] = llvm::Constant::getNullValue(string_struct->getElementType(i));
-    }
-
-    string_fields[layout.window_index] = llvm::ConstantStruct::get(view_struct, view_fields);
-    string_fields[layout.owner_index] =
-        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));
-
-    _ctx.push_scalar(llvm::ConstantStruct::get(string_struct, string_fields));
+    _ctx.push_scalar(_ctx.string_constant(node.get_string_value(), node.result_type()));
 }
 
 void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
@@ -1137,6 +1095,15 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_simd_to_array:
             _ctx.simd->gen_simd_builtin(node, kind);
             return;
+
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
+            _ctx.abi->gen_builtin(node, kind);
+            return;
     }
 }
 
@@ -1381,6 +1348,12 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }
@@ -1602,12 +1575,12 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
     }
 
     if (!node.as_callable) {
-        _ctx.push_scalar(ensure_function_adapt(
+        _ctx.push_scalar(_ctx.types->ensure_function_adapt(
             node.decl, TypeLowering::FunctionCallingShape::t_c));
         return;
     }
 
-    llvm::Function *adapt = ensure_function_adapt(
+    llvm::Function *adapt = _ctx.types->ensure_function_adapt(
         node.decl, TypeLowering::FunctionCallingShape::t_echo);
     llvm::StructType *callable_type = _ctx.types->callable_llvm_type();
     llvm::Value *value = llvm::UndefValue::get(callable_type);
@@ -1618,83 +1591,6 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
         1,
         "ref.env");
     _ctx.push_scalar(value);
-}
-
-llvm::Function *ExprCodegen::ensure_function_adapt(
-    AST::FunctionDeclNode *decl,
-    TypeLowering::FunctionCallingShape shape
-)
-{
-    const bool c_abi = shape == TypeLowering::FunctionCallingShape::t_c;
-    const std::string name = std::string(c_abi ? "__eco_c_adapt." : "__eco_adapt.")
-        + AST::mangle_function_name(decl);
-
-    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
-        return existing;
-    }
-
-    llvm::Function *target = _ctx.llvm_function(decl);
-
-    if (target == nullptr) {
-        throw _ctx.error(fmt::format(
-            "function reference has no symbol to adapt {}",
-            _ctx.function_context()));
-    }
-
-    const AST::ValueType fn_type = c_abi
-        ? decl->c_function_type()
-        : decl->callable_type();
-    const AST::CallableSignature &signature = fn_type.signature();
-
-    llvm::FunctionType *adapt_ty = _ctx.types->get_llvm_function_type(
-        signature,
-        *_ctx.current_cmp_unit,
-        shape);
-
-    llvm::Function *adapt = llvm::Function::Create(
-        adapt_ty,
-        c_abi ? llvm::GlobalValue::InternalLinkage : llvm::GlobalValue::LinkOnceODRLinkage,
-        name,
-        _ctx.current_module());
-
-    _ctx.types->apply_c_integer_ext(*adapt, signature, shape);
-
-    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
-    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
-    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", adapt));
-
-    std::vector<llvm::Value *> forwarded;
-    unsigned i = 0;
-
-    if (!c_abi) {
-        const ReturnAbi abi = _ctx.types->return_abi_of(decl, *_ctx.current_cmp_unit);
-        if (abi.is_indirect()) {
-            forwarded.push_back(adapt->getArg(i++));
-        }
-
-        // skip the environment the indirect call always passes
-        if (i < adapt->arg_size()) {
-            i++;
-        }
-    }
-
-    for (; i < adapt->arg_size(); i++) {
-        forwarded.push_back(adapt->getArg(i));
-    }
-
-    llvm::CallInst *call = _ctx.builder->CreateCall(target, forwarded);
-    if (c_abi) {
-        call->setTailCall(true);
-    }
-
-    if (adapt->getReturnType()->isVoidTy()) {
-        _ctx.builder->CreateRetVoid();
-    }
-    else {
-        _ctx.builder->CreateRet(call);
-    }
-
-    return adapt;
 }
 
 void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)

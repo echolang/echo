@@ -150,7 +150,7 @@ TEST_CASE("the option table is indexed by its own ids", "[cli]")
 {
     const std::vector<CommandLineOption> &table = Compiler::command_line_options();
 
-    REQUIRE(table.size() == static_cast<size_t>(Opt::t_version) + 1);
+    REQUIRE(table.size() == static_cast<size_t>(Opt::t_decls_all) + 1);
 
     for (size_t i = 0; i < table.size(); i++) {
         REQUIRE(static_cast<size_t>(table[i].id) == i);
@@ -280,7 +280,7 @@ TEST_CASE("every row carries a short summary and a full description", "[cli]")
 TEST_CASE("a value's code is its enumerator", "[cli]")
 {
     const std::vector<Compiler::OptionValue> &prints = Compiler::option_for(Opt::t_print).values;
-    REQUIRE(prints.size() == 7);
+    REQUIRE(prints.size() == 8);
 
     REQUIRE(prints[0].code == static_cast<unsigned int>(PrintKind::t_ast));
     REQUIRE(prints[1].code == static_cast<unsigned int>(PrintKind::t_ast_resolved));
@@ -289,6 +289,7 @@ TEST_CASE("a value's code is its enumerator", "[cli]")
     REQUIRE(prints[4].code == static_cast<unsigned int>(PrintKind::t_symbols));
     REQUIRE(prints[5].code == static_cast<unsigned int>(PrintKind::t_instances));
     REQUIRE(prints[6].code == static_cast<unsigned int>(PrintKind::t_manifest));
+    REQUIRE(prints[7].code == static_cast<unsigned int>(PrintKind::t_decls));
 
     const std::vector<Compiler::OptionValue> &explains = Compiler::option_for(Opt::t_explain).values;
     REQUIRE(explains.size() == 4);
@@ -659,6 +660,21 @@ TEST_CASE("manifest is an answer and cannot be combined with another dump", "[cl
     REQUIRE(driver.prints(PrintKind::t_manifest));
 }
 
+TEST_CASE("decls-all needs print decls", "[cli]")
+{
+    CommandLine cli;
+    std::string error;
+    REQUIRE(parse({ "build", "--decls-all", "a.eco" }, cli, error));
+
+    DriverOptions refused;
+    REQUIRE_FALSE(Compiler::resolve_driver_options(cli, refused, error));
+    REQUIRE(error.find("--print decls") != std::string::npos);
+
+    const DriverOptions driver = resolved({ "build", "-p", "decls", "--decls-all", "a.eco" });
+    REQUIRE(driver.prints(PrintKind::t_decls));
+    REQUIRE(driver.decls_all);
+}
+
 // **structure rather than a golden, and deliberately.** A two-hundred-line string literal would make
 // every wording improvement a test edit, which trains people to regenerate rather than read - and the
 // descriptions being prose somebody improves is the whole point of moving them into the table
@@ -740,11 +756,13 @@ TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
 
     REQUIRE(contains(unicode, "\u251c\u2500 ast"));
     REQUIRE(contains(unicode, "\u251c\u2500 instances"));
-    REQUIRE(contains(unicode, "\u2514\u2500 manifest"));
+    REQUIRE(contains(unicode, "\u251c\u2500 manifest"));
+    REQUIRE(contains(unicode, "\u2514\u2500 decls"));
 
     REQUIRE(contains(ascii, "|- ast"));
     REQUIRE(contains(ascii, "|- instances"));
-    REQUIRE(contains(ascii, "`- manifest"));
+    REQUIRE(contains(ascii, "|- manifest"));
+    REQUIRE(contains(ascii, "`- decls"));
 
     // the plain page is ascii to the byte, so a golden or a CI log never carries a glyph
     for (const unsigned char byte : ascii) {

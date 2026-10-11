@@ -96,20 +96,6 @@ TEST_CASE("from_triple maps Android before Linux and iOS before Darwin", "[targe
     REQUIRE(wasi.architecture == "wasm32");
 }
 
-TEST_CASE("shared_library_extension follows family, not os", "[target]")
-{
-    Compiler::TargetFacts facts;
-
-    facts.operating_system = "ios";
-    REQUIRE(facts.shared_library_extension() == ".dylib");
-
-    facts.operating_system = "android";
-    REQUIRE(facts.shared_library_extension() == ".so");
-
-    facts.operating_system = "windows";
-    REQUIRE(facts.shared_library_extension() == ".dll");
-}
-
 TEST_CASE("resolve accepts ios and android as a target os", "[target]")
 {
     Compiler::TargetFacts facts;

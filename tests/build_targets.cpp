@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "Compiler/TargetFacts.h"
+#include "Compiler/CodegenTarget.h"
+#include "Compiler/HostTool.h"
 
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "subprocess.h"
 
@@ -32,6 +34,11 @@ public:
         EchoTests::ScopedProject("build_targets", name)
     {};
 };
+
+fs::path default_lib(const fs::path &dir, const std::string &stem = "greeter")
+{
+    return dir / Compiler::CodegenTarget{}.library_file_name(stem);
+}
 
 // PE export table vs ELF/Mach-O dynsym. llvm-nm --extern-only on a Windows .dll
 // with no COFF symbol table prints "no symbols" and exits 0
@@ -107,8 +114,7 @@ void require_lib_exports(const std::string &case_name, const std::string &echoc_
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
+    const fs::path lib = default_lib(project.root() / "ecobuild");
     REQUIRE(EchoTests::file_exists(lib));
 
     const ProcessResult nm = exported_symbols(lib);
@@ -395,8 +401,7 @@ TEST_CASE("a native lib target writes a shared library", "[targets]")
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
+    const fs::path lib = default_lib(project.root() / "ecobuild");
     REQUIRE(EchoTests::file_exists(lib));
 }
 
@@ -563,8 +568,7 @@ TEST_CASE("a dependency #[export] stays visible under --optimize whole", "[targe
         "#[export]\n"
         "public function add(int32 $a, int32 $b) : int32 { return helper() + $a + $b; }\n");
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "lib" / "ecobuild" / ("greeter" + ext);
+    const fs::path lib = default_lib(project.root() / "lib" / "ecobuild");
 
     for (const char *args : { "build", "build --optimize whole" }) {
         const ProcessResult built = project.echoc(args, project.root() / "lib");
@@ -600,8 +604,7 @@ TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib
     INFO(plug.output);
     REQUIRE(plug.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "plugin/ecobuild" / ("greeter" + ext);
+    const fs::path lib = default_lib(project.root() / "plugin/ecobuild");
     REQUIRE(EchoTests::file_exists(lib));
 
     write_file(project.root() / "host/module.eco",
@@ -617,7 +620,7 @@ TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib
         "};\n"
         "\n"
         "string $name = 'add';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else {\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else {\n"
         "    die('plugin has no add');\n"
         "};\n"
         "\n"
@@ -637,6 +640,66 @@ TEST_CASE("a host exe loads a native lib and calls an export", "[targets][dynlib
     REQUIRE(ran.output.find("5") != std::string::npos);
 }
 
+TEST_CASE("a C program links a native lib and calls an export", "[targets]")
+{
+    // the dynlib case above is Echo loading Echo. this is the other host: a C main
+    // against the C ABI name #[export] planted
+    ScopedProject project("c_calls_export");
+    write_lib_only(project,
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+
+    const ProcessResult built = project.echoc("build --no-stdlib");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const fs::path lib = default_lib(project.root() / "ecobuild");
+    REQUIRE(EchoTests::file_exists(lib));
+
+    const std::string clang = Compiler::host_clang();
+    if (clang.empty()) {
+        SKIP("no host clang");
+    }
+
+    const fs::path host_c = project.root() / "host.c";
+    write_file(host_c,
+        "#include <stdint.h>\n"
+        "#include <stdio.h>\n"
+        "\n"
+        "int32_t add(int32_t a, int32_t b);\n"
+        "\n"
+        "int main(void)\n"
+        "{\n"
+        "    printf(\"%d\\n\", add(2, 3));\n"
+        "    return 0;\n"
+        "}\n");
+
+    const fs::path host = project.root() / "host";
+    std::vector<std::string> link = {
+        clang, host_c.string(), "-o", host.string(), lib.string()
+    };
+    Compiler::append_darwin_sdk_args(link);
+#if !defined(_WIN32)
+    // the dylib's id is @rpath/<file>; without this the image loads and then cannot
+    // find itself
+    link.push_back("-Wl,-rpath," + lib.parent_path().string());
+#endif
+
+    const ProcessResult linked = EchoTests::run_process(link);
+    INFO(linked.output);
+    REQUIRE(linked.exit_code == 0);
+
+#if defined(_WIN32)
+    std::error_code ec;
+    fs::copy_file(lib, EchoTests::with_exe(host).parent_path() / lib.filename(), ec);
+#endif
+
+    const ProcessResult ran = EchoTests::run_binary(host);
+    INFO(ran.output);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("5") != std::string::npos);
+}
+
 TEST_CASE("a lib with no exports still writes the image", "[targets]")
 {
     ScopedProject project("lib_no_exports");
@@ -646,8 +709,7 @@ TEST_CASE("a lib with no exports still writes the image", "[targets]")
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    REQUIRE(EchoTests::file_exists(project.root() / "ecobuild" / ("greeter" + ext)));
+    REQUIRE(EchoTests::file_exists(default_lib(project.root() / "ecobuild")));
 }
 
 TEST_CASE("-o on a lib applies the shared-library suffix", "[targets]")
@@ -661,9 +723,9 @@ TEST_CASE("-o on a lib applies the shared-library suffix", "[targets]")
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
+    const std::string ext = Compiler::CodegenTarget{}.library_suffix();
     REQUIRE(EchoTests::file_exists(project.root() / ("elsewhere" + ext)));
-    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild" / ("greeter" + ext)));
+    REQUIRE_FALSE(EchoTests::file_exists(default_lib(project.root() / "ecobuild")));
 }
 
 TEST_CASE("a module with an exe and a lib builds both when no target is named", "[targets]")
@@ -675,9 +737,8 @@ TEST_CASE("a module with an exe and a lib builds both when no target is named", 
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
     REQUIRE(EchoTests::file_exists(project.root() / "ecobuild/app"));
-    REQUIRE(EchoTests::file_exists(project.root() / "ecobuild" / ("greeter" + ext)));
+    REQUIRE(EchoTests::file_exists(default_lib(project.root() / "ecobuild")));
 }
 
 TEST_CASE("building the lib of a mixed module leaves the exe unbuilt", "[targets]")
@@ -689,8 +750,7 @@ TEST_CASE("building the lib of a mixed module leaves the exe unbuilt", "[targets
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    REQUIRE(EchoTests::file_exists(project.root() / "ecobuild" / ("greeter" + ext)));
+    REQUIRE(EchoTests::file_exists(default_lib(project.root() / "ecobuild")));
     REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/app"));
 }
 
@@ -716,8 +776,7 @@ TEST_CASE("a custom export name is the symbol nm and dlsym see", "[targets]")
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
+    const fs::path lib = default_lib(project.root() / "ecobuild");
     REQUIRE(EchoTests::file_exists(lib));
 
     const ProcessResult nm = exported_symbols(lib);
@@ -743,8 +802,7 @@ TEST_CASE("an unexported helper is hidden from the dynamic symbol table", "[targ
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "ecobuild" / ("greeter" + ext);
+    const fs::path lib = default_lib(project.root() / "ecobuild");
 
     const ProcessResult nm = exported_symbols(lib);
     INFO(nm.output);
@@ -783,8 +841,7 @@ TEST_CASE("a native lib hides C globals from #[cc:]", "[targets][cbuild]")
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
-    const fs::path lib = project.root() / "ecobuild" / ("cclib" + ext);
+    const fs::path lib = default_lib(project.root() / "ecobuild", "cclib");
     REQUIRE(EchoTests::file_exists(lib));
 
     const ProcessResult nm = exported_symbols(lib);

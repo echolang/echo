@@ -26,7 +26,7 @@ namespace AST
     enum class FunctionEmission
     {
         // no symbol exists anywhere, so nothing may declare or define one - a `declare` nobody defines
-        // fails at link time rather than at the mistake. Three shapes reach this: a `#[builtin:]`, which
+        // fails at link time rather than at the mistake. Three shapes reach this: a `#[echoc::builtin:]`, which
         // is answered at each call site; an interface requirement, whose implementors hold the bodies
         // under their own symbols; and a generic template, which has no concrete signature to mangle.
         t_no_symbol,
@@ -35,7 +35,7 @@ namespace AST
         // name. Declared eagerly, defined never.
         t_extern_symbol,
 
-        // `#[intrinsic:]`: still a real llvm::Function, but LLVM supplies it. Declared lazily, on
+        // `#[echoc::intrinsic:]`: still a real llvm::Function, but LLVM supplies it. Declared lazily, on
         // reference only, for the cost reason above.
         t_intrinsic,
 
@@ -71,8 +71,8 @@ namespace AST
     bool emission_has_body(FunctionEmission kind);
 
     // did the *author* owe this declaration a body? four shapes get their implementation from
-    // somewhere else: an `extern { }` member, from another object file; an `#[intrinsic:]`, from
-    // LLVM; a `#[builtin:]`, folded at each call site; and an interface requirement, from every
+    // somewhere else: an `extern { }` member, from another object file; an `#[echoc::intrinsic:]`, from
+    // LLVM; a `#[echoc::builtin:]`, folded at each call site; and an interface requirement, from every
     // implementor. Anything else with no body is a source omission, which is what AST::TypeChecker
     // reports with it.
     //

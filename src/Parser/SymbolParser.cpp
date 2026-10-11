@@ -182,7 +182,8 @@ void Parser::parse_type_names(Parser::Payload &payload)
             continue;
         }
 
-        if (!starts_typedecl(cursor) || !cursor.peek_is_type(1, Token::Type::t_identifier)) {
+        if (!starts_typedecl(cursor)
+            || !cursor.peek_is_type(typedecl_name_offset(cursor), Token::Type::t_identifier)) {
             // token by token rather than skipping bodies whole, which is also how parse_symbols
             // walks - so a `struct` written inside a function body is reached by both
             if (cursor.is_type(Token::Type::t_open_brace)) {
@@ -212,7 +213,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // is here so a name written *out of order across files* resolves
         if (!open_regions.empty() && open_regions.back().type_body == nullptr) {
             pending = Pending {};
-            cursor.skip(); // the struct or class keyword, and the loop walks the rest of it
+            consume_typedecl_keyword(cursor);
             continue;
         }
 
@@ -226,9 +227,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         const std::optional<AST::Visibility> declared_visibility = pending.visibility;
         pending.visibility.reset();
 
-        const AST::ComplexTypeKind kind = typedecl_kind(cursor);
-
-        cursor.skip(); // the struct or class keyword
+        const AST::ComplexTypeKind kind = consume_typedecl_keyword(cursor);
 
         auto name_token = cursor.current();
         cursor.skip();
@@ -404,9 +403,9 @@ void Parser::parse_declaration_surface(
         else if (cursor.is_type(Token::Type::t_hash)) {
             // an attribute, walked in this pass too - the frames of this walk must mirror the body
             // pass's exactly, and until now this one skipped `#` as an unknown token. that made every
-            // attribute a *body-pass* fact, which is fine for `#[builtin: ...]` (read off the same
+            // attribute a *body-pass* fact, which is fine for `#[echoc::builtin: ...]` (read off the same
             // declaration node either pass reconciles on) but not for anything the next pass has to
-            // already know: `#[core: string]` binds the type a string literal is, and a literal is
+            // already know: `#[echoc::core: string]` binds the type a string literal is, and a literal is
             // parsed in the body pass. binding it here is what makes that independent of file order,
             // since this pass completes over *every* file before the next one starts
             AST::AttributeNode *attribute = parse_attribute(payload, scope_owner);

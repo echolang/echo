@@ -19,10 +19,7 @@
 namespace
 {
 
-// the basis is Compiler::k_fnv_offset_basis, in the header - the C object cache folds with it too
 using Compiler::k_fnv_offset_basis;
-
-constexpr uint64_t k_fnv_prime = 1099511628211ULL;
 
 };
 
@@ -113,24 +110,6 @@ bool Compiler::fold_target_environment(
     return true;
 }
 
-uint64_t Compiler::fnv1a64(const void *data, size_t length, uint64_t seed)
-{
-    const auto *bytes = static_cast<const unsigned char *>(data);
-    uint64_t hash = seed;
-
-    for (size_t i = 0; i < length; i++) {
-        hash ^= bytes[i];
-        hash *= k_fnv_prime;
-    }
-
-    return hash;
-}
-
-uint64_t Compiler::fnv1a64(const std::string &text, uint64_t seed)
-{
-    return fnv1a64(text.data(), text.size(), seed);
-}
-
 bool Compiler::compute_module_keys(
     const std::vector<const Parser::ModuleManifest *> &manifests,
     const CompilerOptions &options,
@@ -209,7 +188,7 @@ bool Compiler::compute_module_keys(
     // C objects fold the same bit in c_spec_digest: `-fvisibility=hidden` on a
     // native lib changes the object
     environment = fnv1a64(
-        options.codegen.is_native_library() ? std::string("lib") : std::string("cmd"), environment);
+        std::string(Compiler::exec_model_environment(options)), environment);
 
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;

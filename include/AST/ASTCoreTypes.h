@@ -13,7 +13,7 @@ namespace AST
 {
     class TypeDeclNode;
 
-    // the stdlib types the *compiler itself* has to be able to name, bound by `#[core: ...]` on the
+    // the stdlib types the *compiler itself* has to be able to name, bound by `#[echoc::core: ...]` on the
     // declaration.
     //
     // the compiler deliberately does not hardcode the name `string`, for the reason a builtin's surface
@@ -126,6 +126,10 @@ namespace AST
         // `struct erased` - owning erasure of a class handle. bound so from/assume/retain/release
         // find `$object` and `$release` by name
         t_erased,
+
+        // `struct abi::header` - version, slot_count, fingerprint. bound so the
+        // table producer and `abi::bind` share one layout, by property name
+        t_abi_header,
     };
 
     // resolves a core-type name to its kind, or nullopt when the name is not one. the single place that
@@ -138,7 +142,7 @@ namespace AST
     public:
         // binds a kind to the declaration that carried the attribute. the parse passes reach the same
         // declaration more than once, so re-binding the identical node is normal and silent; binding a
-        // *different* one is a second `#[core: string]` in the program, which the caller reports
+        // *different* one is a second `#[echoc::core: string]` in the program, which the caller reports
         void bind(CoreTypeKind kind, TypeDeclNode *decl);
 
         TypeDeclNode *declaration(CoreTypeKind kind) const;
@@ -164,7 +168,7 @@ namespace AST
         // stdlib declares it - the same reason resolve_core_string_layout goes by property name and
         // not by field order.
         //
-        // an unbound kind answers the `#[core:]` tag in angle brackets rather than an invented name.
+        // an unbound kind answers the `#[echoc::core:]` tag in angle brackets rather than an invented name.
         // a `--no-stdlib` program genuinely has no spelling to quote, and the tag is the only thing
         // true about it in that case
         std::string spelling(CoreTypeKind kind) const;

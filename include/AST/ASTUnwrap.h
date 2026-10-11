@@ -52,7 +52,7 @@ namespace AST
         //
         // this matters three ways, and only the first is tidiness. `stdlib/core/contract.eco` could
         // rename everything it declares and only Echo source would notice, which is precisely what
-        // `#[core:]` exists to give. `has_value()` is const and `unwrap()` is not, so the two already
+        // `#[echoc::core:]` exists to give. `has_value()` is const and `unwrap()` is not, so the two already
         // differ in the axis AST::argument_fit ranks on - a by-name lookup could land on a
         // differently-ranked overload than the one conformance checking accepted. and a user type
         // declaring `unwrappable<V>` beside its own unrelated `unwrap(...)` set was resolved by the
@@ -144,7 +144,7 @@ namespace AST
         const ValueType &subject
     );
 
-    // the unspellable `#[builtin: unwrap_abort]` a `guard` without `else` lowers to. one per
+    // the unspellable `#[echoc::builtin: unwrap_abort]` a `guard` without `else` lowers to. one per
     // module, created on first use. `--no-stdlib` gets the same decl: a `T?` without an arm
     // must still stop
     FunctionDeclNode &ensure_unwrap_abort(class Module &module, const TokenReference &at);

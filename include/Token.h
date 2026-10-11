@@ -177,11 +177,23 @@ bool token_is_reserved_word(const std::string &spelling);
 
 class TokenReference;
 struct TokenSlice;
+
+// a `/** ... */` the lexer recorded without emitting a token. `next_token_index` is the first
+// real token after the comment, so a declaration starting at that token can find its doc
+struct DocComment
+{
+    size_t next_token_index = 0;
+    std::string text;
+    uint32_t line = 0;
+    uint32_t column = 0;
+};
+
 struct TokenCollection
 {
 
     std::vector<Token> tokens;
     std::vector<std::string> token_values;
+    std::vector<DocComment> doc_comments;
 
     // stamped onto every `push` that is not minted. Module::tokenize sets this to the file it is
     // about to lex, then clears it; lexer tests leave it null
@@ -209,7 +221,21 @@ struct TokenCollection
     void clear() {
         tokens.clear();
         token_values.clear();
+        doc_comments.clear();
         appending_file = nullptr;
+    }
+
+    // the last `/** ... */` whose following token is `index`, or null
+    const DocComment *doc_comment_at(size_t index) const {
+        const DocComment *found = nullptr;
+
+        for (const DocComment &doc : doc_comments) {
+            if (doc.next_token_index == index) {
+                found = &doc;
+            }
+        }
+
+        return found;
     }
 
     inline size_t size() const {

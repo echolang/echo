@@ -20,7 +20,7 @@
  *
  * They sit in `contract` rather than at the root because they are not vocabulary you write every line -
  * you name one where you declare a conformance or constrain a type parameter, and `array`, `string` and
- * `die` are what you write the rest of the time. The compiler binds them with `#[core: ...]` and never by
+ * `die` are what you write the rest of the time. The compiler binds them with `#[echoc::core: ...]` and never by
  * their spelling, so the name, the namespace and the documentation all live here: this file could rename
  * every one of them and only Echo source would notice. A program compiled with `--no-stdlib` has none of
  * them, and `foreach` then says so in a located diagnostic rather than crashing.
@@ -43,7 +43,7 @@ namespace contract;
  * a `true`. That is the whole contract - and it is what lets `current()` skip a bounds check that
  * `advance()` already performed.
  */
-#[core: iterator]
+#[echoc::core: iterator]
 public interface iterator<V>
 {
     /**
@@ -63,7 +63,7 @@ public interface iterator<V>
  * `Iter` is an associated type: the implementor chooses it and this interface only constrains it. You
  * never write it - the compiler reads it off your `iterate()`.
  */
-#[core: iterable]
+#[echoc::core: iterable]
 public interface iterable<V>
 {
     type Iter : iterator<V>;
@@ -89,7 +89,7 @@ public interface iterable<V>
  * a cursor over storage it may not write, so a container's two `iterate()` overloads return two different
  * cursors, and `foreach` picks between them by whether the value it was given is const.
  */
-#[core: const_iterable]
+#[echoc::core: const_iterable]
 public interface const_iterable<V>
 {
     type Iter : iterator<V>;
@@ -107,7 +107,7 @@ public interface const_iterable<V>
  * `current`: that is what lets the capability set grow. A future `reversible` or `random_access<V>` is
  * another interface beside this one, and a cursor declares the ones it can honour.
  */
-#[core: keyed]
+#[echoc::core: keyed]
 public interface keyed<K>
 {
     /**
@@ -141,7 +141,7 @@ public interface keyed<K>
  * flag with no declaration anywhere, and the tagged spelling is a layout the compiler interns. The
  * compiler answers for it directly instead, ahead of this interface being consulted at all.
  */
-#[core: unwrappable]
+#[echoc::core: unwrappable]
 public interface unwrappable<V>
 {
     /**
@@ -165,7 +165,7 @@ public interface unwrappable<V>
  *
  *     guard $sound->start() else ($e) { die($e); }
  */
-#[core: checkable]
+#[echoc::core: checkable]
 public interface checkable
 {
     /**
@@ -184,7 +184,7 @@ public interface checkable
  *
  *     $r = guard request($url) else ($error) { return .error($error); }
  */
-#[core: failable]
+#[echoc::core: failable]
 public interface failable<E>
 {
     /**

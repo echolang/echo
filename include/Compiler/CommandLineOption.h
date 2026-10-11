@@ -82,7 +82,8 @@ namespace Compiler
         t_dry_run,
         t_stdio,
         t_help,
-        t_version
+        t_version,
+        t_decls_all
     };
 
     // what `-p, --print <what>` names. **the enumerator order is the table's row order**, and
@@ -95,7 +96,8 @@ namespace Compiler
         t_ir_units,
         t_symbols,
         t_instances,
-        t_manifest
+        t_manifest,
+        t_decls
     };
 
     // what `--explain <what>` names. **`t_prune` is legal on `run` alone**, because only the JIT prunes -

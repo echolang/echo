@@ -838,3 +838,47 @@ TEST_CASE("wasmtime runs a host import through --preload", "[target][wasi]")
     REQUIRE(ran.exit_code == 0);
     REQUIRE(EchoTests::output_has_line(ran.output, "7"));
 }
+
+TEST_CASE("a dependency #[export] appears in the wasm export section", "[target][wasi]")
+{
+    ScopedProject project("wasm_dep_export");
+    write_file(project.root() / "dep/module.eco",
+        "#[module: \"dep\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "dep/src/api.eco",
+        "#[export]\n"
+        "public function helper() : int32 { return 7; }\n");
+    write_file(project.root() / "lib/module.eco",
+        "#[module: \"onlylib\"]\n"
+        "#[depends: \"../dep\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: lib { name: \"greeter\" }]\n");
+    write_file(project.root() / "lib/src/lib.eco",
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return helper() + $a + $b; }\n");
+
+    const ProcessResult ir = project.echoc(
+        "build --no-stdlib --target-os wasi --target-arch wasm32 -p ir",
+        project.root() / "lib");
+    INFO(ir.output);
+    REQUIRE(ir.output.find("wasm-export-name") != std::string::npos);
+    REQUIRE(ir.output.find("\"helper\"") != std::string::npos);
+    REQUIRE(ir.output.find("\"add\"") != std::string::npos);
+
+    require_wasi_sdk();
+
+    REQUIRE(ir.exit_code == 0);
+
+    const ProcessResult built = project.echoc(
+        "build --no-stdlib --target-os wasi --target-arch wasm32",
+        project.root() / "lib");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const std::filesystem::path wasm = project.root() / "lib" / "ecobuild" / "greeter.wasm";
+    REQUIRE(std::filesystem::is_regular_file(wasm));
+
+    const WasmSurface surface = parse_wasm_surface(wasm);
+    REQUIRE(has_name(surface.exports, "helper"));
+    REQUIRE(has_name(surface.exports, "add"));
+}

@@ -171,7 +171,8 @@ namespace
         const Parser::ActiveTargets &active_targets,
         const Compiler::SourceOverride &overlay,
         AST::Bundle &bundle,
-        Parser::ModuleParser &parser
+        Parser::ModuleParser &parser,
+        bool with_stdlib
     )
     {
         for (const Parser::ModuleManifest *entry : manifests) {
@@ -182,6 +183,8 @@ namespace
 
             AST::module_handle_t handle = bundle.modules.add_module(manifest.name);
             auto &module = bundle.modules.get_module(handle);
+            module.writes_compiler_attributes =
+                Compiler::is_compiler_supplied_module(manifest) || !with_stdlib;
 
             auto input = Parser::ModuleParser::InputPayload {
                 .files = {},
@@ -351,15 +354,14 @@ std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
     Parser::ModuleParser &parser
 )
 {
-    (void)request.with_stdlib;
-
     if (auto failure = parse_manifest_modules(
             request.manifests,
             request.roots,
             request.active_targets,
             request.overlay,
             bundle,
-            parser)) {
+            parser,
+            request.with_stdlib)) {
         return failure;
     }
 
@@ -378,6 +380,7 @@ std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
 
     AST::module_handle_t module_handle = bundle.modules.add_module(ECO_MAIN_MODULE_NAME);
     auto &module = bundle.modules.get_module(module_handle);
+    module.writes_compiler_attributes = !request.with_stdlib;
 
     auto input = Parser::ModuleParser::InputPayload {
         .files = {},
@@ -411,8 +414,7 @@ bool Compiler::module_declares_a_program(const Parser::ModuleManifest &manifest)
     return std::any_of(
         manifest.targets.begin(), manifest.targets.end(),
         [](const Parser::ModuleTarget &target) {
-            return target.kind == Parser::TargetKind::t_executable
-                || target.kind == Parser::TargetKind::t_library;
+            return Parser::is_buildable_target(target.kind);
         });
 }
 

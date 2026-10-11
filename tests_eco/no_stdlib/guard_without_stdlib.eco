@@ -3,7 +3,7 @@
 // that AST::iteration_plan_for puts first.
 //
 // the two are the opposite way round on purpose. `foreach` has no meaning without the iteration
-// protocol, so a missing `#[core: iterator]` has to be a located refusal. `guard` had a meaning before
+// protocol, so a missing `#[echoc::core: iterator]` has to be a located refusal. `guard` had a meaning before
 // the unwrapping protocol existed and keeps it: a nullable's payload is a property of the type, needs
 // nobody's conformance, and is decided in the parser.
 //

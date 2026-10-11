@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] uninitialized.eco:5:9
+
+  an 'extern interface' value only comes from a binding; declare 'greeter?' or initialize it
+
+  4 | 
+  5 | greeter $x;
+    :         ^^
+  6 | echo 1;
+
+1 error, nothing was compiled.

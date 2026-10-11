@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] no_stdlib.eco:1:25
+
+  'extern interface greeter' needs the standard library - its layout holds 'erased', which is unbound without it.
+
+  1 | public extern interface greeter {
+    :                         ^^^^^^^
+  2 |     function add(int32 $a, int32 $b) : int32;
+
+1 error, nothing was compiled.

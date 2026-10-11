@@ -71,6 +71,23 @@ bool CodegenTarget::snapshots_bitcode() const
     return !is_wasm();
 }
 
+const char *CodegenTarget::library_suffix() const
+{
+    if (is_wasm()) {
+        return ".wasm";
+    }
+
+    if (is_darwin()) {
+        return ".dylib";
+    }
+
+    if (is_windows()) {
+        return ".dll";
+    }
+
+    return ".so";
+}
+
 const char *CodegenTarget::output_extension() const
 {
     if (is_wasm()) {
@@ -81,15 +98,33 @@ const char *CodegenTarget::output_extension() const
         return "";
     }
 
-    // native lib is never a real cross (iOS is refused, wasi is `.wasm` above), so
-    // the suffix is this host's, the same rule `output_path` uses for `.exe`
-#if defined(__APPLE__)
-    return ".dylib";
-#elif defined(_WIN32)
-    return ".dll";
-#else
-    return ".so";
-#endif
+    return library_suffix();
+}
+
+std::string CodegenTarget::library_file_name(const std::string &stem) const
+{
+    const char *ext = library_suffix();
+
+    // Windows and wasm have no `lib` prefix. Darwin and ELF do, so another
+    // module can `-l` the image by the stem the target named
+    if (is_wasm() || is_windows()) {
+        return stem + ext;
+    }
+
+    return std::string("lib") + stem + ext;
+}
+
+std::optional<const char *> CodegenTarget::library_refusal() const
+{
+    // a native lib is a loadable image and iOS does not load one from an app.
+    // `ios` covers the facts-only host row (`--target-os ios` off Darwin);
+    // apple_sdk covers the real Darwin cross
+    if (ios || !apple_sdk.empty()) {
+        return "a native 'lib' target is a loadable library, and iOS does not load "
+            "one from an app";
+    }
+
+    return std::nullopt;
 }
 
 std::filesystem::path CodegenTarget::output_path(std::filesystem::path path) const
@@ -140,6 +175,7 @@ bool resolve_codegen_target(
     std::string &out_error)
 {
     out_target = {};
+    out_target.ios = facts.operating_system == "ios";
 
     const bool host_is_darwin = TargetFacts::host().operating_system == "darwin";
 

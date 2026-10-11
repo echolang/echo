@@ -1,0 +1,351 @@
+flags: -p decls
+stdlib: off
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "struct",
+          "name": "Point",
+          "qualified": "Point",
+          "visibility": "public",
+          "file": "function_and_struct.eco",
+          "line": 10,
+          "column": 15,
+          "doc": "/** a point in the plane */",
+          "tools": [
+            {
+              "namespace": "web",
+              "name": "js_name",
+              "value": {
+                "kind": "string",
+                "text": "Point"
+              }
+            }
+          ],
+          "generics": [],
+          "fields": [
+            {
+              "name": "x",
+              "visibility": "public",
+              "static": false,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "doc": null,
+              "tools": [
+                {
+                  "namespace": "web",
+                  "name": "js_name",
+                  "value": {
+                    "kind": "string",
+                    "text": "x"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "y",
+              "visibility": "public",
+              "static": false,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "doc": null,
+              "tools": []
+            }
+          ],
+          "constructors": [
+            {
+              "kind": "constructor",
+              "name": "Point",
+              "qualified": "Point",
+              "visibility": "public",
+              "file": "function_and_struct.eco",
+              "line": 10,
+              "column": 15,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "x",
+                  "label": "x",
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false
+                },
+                {
+                  "name": "y",
+                  "label": "y",
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false
+                }
+              ],
+              "return": {
+                "kind": "named",
+                "name": "Point"
+              },
+              "generics": []
+            }
+          ],
+          "methods": [
+            {
+              "kind": "method",
+              "name": "sum",
+              "qualified": "sum",
+              "visibility": "public",
+              "file": "function_and_struct.eco",
+              "line": 23,
+              "column": 21,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "generics": []
+            }
+          ],
+          "destructor": true
+        },
+        {
+          "kind": "enum",
+          "name": "Color",
+          "qualified": "Color",
+          "visibility": "public",
+          "file": "function_and_struct.eco",
+          "line": 33,
+          "column": 13,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "backing": {
+            "kind": "prim",
+            "name": "int32"
+          },
+          "cases": [
+            {
+              "name": "red",
+              "discriminant": 1,
+              "payload": []
+            },
+            {
+              "name": "green",
+              "discriminant": 2,
+              "payload": []
+            }
+          ]
+        },
+        {
+          "kind": "interface",
+          "name": "Drawable",
+          "qualified": "Drawable",
+          "visibility": "public",
+          "file": "function_and_struct.eco",
+          "line": 39,
+          "column": 18,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "members": [
+            {
+              "kind": "method",
+              "name": "draw",
+              "qualified": "draw",
+              "visibility": "public",
+              "file": "function_and_struct.eco",
+              "line": 41,
+              "column": 14,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "prim",
+                "name": "void"
+              },
+              "generics": []
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "add",
+          "qualified": "add",
+          "visibility": "public",
+          "file": "function_and_struct.eco",
+          "line": 3,
+          "column": 17,
+          "doc": "/** adds two numbers */",
+          "tools": [
+            {
+              "namespace": "web",
+              "name": "js_name",
+              "value": {
+                "kind": "string",
+                "text": "add"
+              }
+            }
+          ],
+          "export": null,
+          "params": [
+            {
+              "name": "a",
+              "label": null,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "default": false
+            },
+            {
+              "name": "b",
+              "label": null,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "default": false
+            }
+          ],
+          "return": {
+            "kind": "prim",
+            "name": "int32"
+          },
+          "generics": []
+        },
+        {
+          "kind": "function",
+          "name": "id",
+          "qualified": "id",
+          "visibility": "public",
+          "file": "function_and_struct.eco",
+          "line": 44,
+          "column": 17,
+          "doc": null,
+          "tools": [],
+          "export": null,
+          "params": [
+            {
+              "name": "v",
+              "label": null,
+              "type": {
+                "kind": "named",
+                "name": "T"
+              },
+              "default": false
+            }
+          ],
+          "return": {
+            "kind": "named",
+            "name": "T"
+          },
+          "generics": [
+            {
+              "name": "T",
+              "constraint": null
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "takes_ptr",
+          "qualified": "takes_ptr",
+          "visibility": "internal",
+          "file": "function_and_struct.eco",
+          "line": 49,
+          "column": 10,
+          "doc": null,
+          "tools": [],
+          "export": null,
+          "params": [
+            {
+              "name": "p",
+              "label": null,
+              "type": {
+                "kind": "ptr",
+                "to": {
+                  "kind": "prim",
+                  "name": "int32"
+                },
+                "borrow": false,
+                "weak": false,
+                "const": false,
+                "nullable": true
+              },
+              "default": false
+            },
+            {
+              "name": "n",
+              "label": null,
+              "type": {
+                "kind": "ptr",
+                "to": {
+                  "kind": "prim",
+                  "name": "int32"
+                },
+                "borrow": true,
+                "weak": false,
+                "const": false,
+                "nullable": false
+              },
+              "default": false
+            }
+          ],
+          "return": {
+            "kind": "prim",
+            "name": "void"
+          },
+          "generics": []
+        },
+        {
+          "kind": "function",
+          "name": "maybe",
+          "qualified": "maybe",
+          "visibility": "internal",
+          "file": "function_and_struct.eco",
+          "line": 53,
+          "column": 10,
+          "doc": null,
+          "tools": [],
+          "export": null,
+          "params": [
+            {
+              "name": "n",
+              "label": null,
+              "type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "prim",
+                  "name": "int32"
+                }
+              },
+              "default": false
+            }
+          ],
+          "return": {
+            "kind": "optional",
+            "of": {
+              "kind": "prim",
+              "name": "int32"
+            }
+          },
+          "generics": []
+        }
+      ]
+    }
+  ]
+}

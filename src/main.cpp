@@ -19,6 +19,7 @@
 #include "Compiler/CommandLine.h"
 #include "Compiler/CommandLineHelp.h"
 #include "Compiler/CommandLineOption.h"
+#include "Compiler/DeclsJson.h"
 #include "Compiler/DriverOptions.h"
 #include "Compiler/ParsePipeline.h"
 #include "Compiler/Lsp/LspServer.h"
@@ -56,6 +57,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_set>
 
 // the files an argument names, expanding wildcards. `missing` counts the paths that were named
 // literally and are not there - a caller has to refuse those rather than compile what is left, since
@@ -190,9 +192,10 @@ struct Program
     // read only through Parser::module_contribution_for, which is the one owner of what a module compiles
     Parser::ActiveTargets active_targets;
 
-    // settled here with the Program, a column of the row the linker reads. a lib has
-    // no entry; everything else is a command
-    Compiler::ExecModel exec_model = Compiler::ExecModel::t_command;
+    // settled here with the Program. a lib has no entry and a different
+    // suffix; everything else is a command. the whole row, so run_front_end
+    // copies it once rather than overwriting exec_model on the invocation's
+    Compiler::CodegenTarget codegen;
 };
 
 // what an invocation settles once, before any program is compiled.
@@ -333,6 +336,37 @@ static void print_resolved_ast(const Compiler::DriverOptions &driver, AST::Bundl
     }
 }
 
+static std::unordered_set<std::string> decls_user_modules(const Invocation &invocation)
+{
+    std::unordered_set<std::string> names;
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        if (Compiler::manifest_is_a_root(manifest, invocation.roots)
+            && !Compiler::is_compiler_supplied_module(manifest)) {
+            names.insert(manifest.name);
+        }
+    }
+
+    if (!invocation.sources.empty()) {
+        names.insert(ECO_MAIN_MODULE_NAME);
+    }
+
+    return names;
+}
+
+static void print_decls(
+    const Compiler::DriverOptions &driver,
+    const Invocation &invocation,
+    AST::Bundle &bundle
+)
+{
+    if (!driver.prints(Compiler::PrintKind::t_decls)) {
+        return;
+    }
+
+    std::cout << Compiler::decls_as_json(bundle, decls_user_modules(invocation), driver.decls_all);
+}
+
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
 // a pass added to one entry point and forgotten in the other is a silent behaviour difference.
 // Compiler::run_semantic_pipeline is the sequence; this is the driver's ProgressStep, dump, flush
@@ -341,7 +375,8 @@ static int run_semantic_passes(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
-    const Compiler::CompilerOptions &options
+    const Compiler::CompilerOptions &options,
+    const Invocation &invocation
 )
 {
     Compiler::ProgressStep step(
@@ -364,6 +399,7 @@ static int run_semantic_passes(
     step.finish(compiled);
 
     print_resolved_ast(driver, bundle);
+    print_decls(driver, invocation, bundle);
 
     // **stdout is flushed first, always.** Diagnostics go to stderr and a JIT'd program's output goes to
     // stdout; the two are unbuffered and buffered respectively, so a reader that merged them would see
@@ -596,7 +632,7 @@ static bool emit_and_link_modules(
         return false;
     }
 
-    return compiler.link_executable(output, objects, link);
+    return compiler.link_program(output, objects, link);
 }
 
 // the inputs each freshly emitted module was built from, so the next miss can name what changed.
@@ -861,8 +897,7 @@ static bool select_targets(
             return kind == Parser::TargetKind::t_executable;
         }
 
-        return kind == Parser::TargetKind::t_executable
-            || kind == Parser::TargetKind::t_library;
+        return Parser::is_buildable_target(kind);
     };
 
     std::vector<Parser::ModuleTarget> candidates;
@@ -1122,7 +1157,8 @@ static bool resolve_programs(
             entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
             /*entry_file=*/{},
             out.codegen.output_path(driver.output),
-            /*active_targets=*/{}
+            /*active_targets=*/{},
+            out.codegen
         });
 
         return true;
@@ -1156,25 +1192,28 @@ static bool resolve_programs(
         Compiler::CodegenTarget row = out.codegen;
 
         if (target.kind == Parser::TargetKind::t_library) {
-            if (out.target_facts.operating_system == "ios") {
-                diagnostics.render_untyped("Lib Needs Host",
-                    "a native 'lib' target is a loadable library, and iOS does not load "
-                    "one from an app");
+            row.exec_model = Compiler::ExecModel::t_library;
+
+            if (auto refusal = row.library_refusal()) {
+                diagnostics.render_untyped("Lib Needs Host", *refusal);
                 return false;
             }
-
-            row.exec_model = Compiler::ExecModel::t_library;
         }
+
+        const std::filesystem::path named = driver.output.empty()
+            ? out.layout.target_binary(
+                *entry,
+                row.is_library() ? row.library_file_name(target.name) : target.name)
+            : driver.output;
 
         Program program {
             target.name,
             entry->name,
             target.entry,
-            row.output_path(
-                driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output),
-            /*active_targets=*/{}
+            row.output_path(named),
+            /*active_targets=*/{},
+            row
         };
-        program.exec_model = row.exec_model;
 
         // **only the target being built, and only in the module that declared it.** Two targets of one
         // module are two programs here, so each opens its own scope and neither sees the other's - which
@@ -1269,7 +1308,7 @@ static bool resolve_invocation(
 
     if (driver.options.track_allocations || driver.options.report_allocations) {
         for (const Program &program : out.programs) {
-            if (program.exec_model == Compiler::ExecModel::t_library) {
+            if (program.codegen.is_library()) {
                 diagnostics.render_untyped(
                     "Nothing To Track",
                     "'--track-allocations' reports from main's epilogue, and a lib has none");
@@ -1303,11 +1342,9 @@ static bool run_front_end(
 
     // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
     // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
-    // passes. exec_model is a column of this row, copied from the Program resolve_programs
-    // already settled
+    // passes. the row is the Program's: resolve_programs already set exec_model on it
     out.options = driver.options;
-    out.options.codegen = invocation.codegen;
-    out.options.codegen.exec_model = program.exec_model;
+    out.options.codegen = program.codegen;
 
     out.pointer_size.emplace(out.options.codegen.pointer_size());
 
@@ -1325,7 +1362,7 @@ static bool run_front_end(
 
     {
         Compiler::ScopedPhase phase("semantic passes");
-        if (run_semantic_passes(driver, diagnostics, bundle, out.options) != 0) {
+        if (run_semantic_passes(driver, diagnostics, bundle, out.options, invocation) != 0) {
             return false;
         }
     }
@@ -1712,7 +1749,7 @@ static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompile
 // `run`, and a linked test runner cannot drift on `--print ir` or `-O`.
 //
 // nullopt is success; anything else is the exit status the subcommand owes its caller
-static std::optional<int> compile_and_link_executable(
+static std::optional<int> compile_and_link_program(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     FrontEnd &front,
@@ -1940,7 +1977,7 @@ int main_run(
         const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run";
 #endif
 
-        if (const std::optional<int> failed = compile_and_link_executable(
+        if (const std::optional<int> failed = compile_and_link_program(
                 driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program)) {
             return failed.value();
         }
@@ -2072,7 +2109,7 @@ static bool resolve_test_selection(
 // **compiles the module and runs its tests, each in a process of its own.**
 //
 // Unix shares prepare_jit with `run` so the two cannot drift. Windows (no fork into a JIT) compiles
-// a linked runner through compile_and_link_executable - the same function `build` uses - and spawns
+// a linked runner through compile_and_link_program - the same function `build` uses - and spawns
 // it once per test. Isolation is "one process per test"; fork vs. spawn is TestRunner's question.
 int main_test(
     const Compiler::DriverOptions &driver,
@@ -2154,7 +2191,7 @@ int main_test(
 
     runner = front.layout().scratch_dir() / "eco_tests.exe";
 
-    if (const std::optional<int> failed = compile_and_link_executable(
+    if (const std::optional<int> failed = compile_and_link_program(
             driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
             driver.whole_program)) {
         return failed.value();
@@ -2286,7 +2323,7 @@ static int build_one_program(
     LLVMCompiler compiler(options);
     compiler.set_entry(entry_module, front.entry_file());
 
-    if (const std::optional<int> failed = compile_and_link_executable(
+    if (const std::optional<int> failed = compile_and_link_program(
             driver, diagnostics, front, bundle, compiler, output, plan, whole_program)) {
         return failed.value();
     }

@@ -5,6 +5,7 @@
 
 #include "Compiler/BuildLayout.h"
 #include "Compiler/CompilerOptions.h"
+#include "Compiler/Fnv.h"
 #include "Compiler/TargetFacts.h"
 #include "Parser/ManifestParser.h"
 
@@ -19,16 +20,6 @@
 
 namespace Compiler
 {
-    // FNV-1a, 64 bit. Not cryptographic and does not need to be: this answers "are these the same inputs as
-    // last time", where the adversary is an edited source file rather than a person
-    uint64_t fnv1a64(const void *data, size_t length, uint64_t seed);
-    uint64_t fnv1a64(const std::string &text, uint64_t seed);
-
-    // what a fold starts from. Here rather than private to this file because the C object cache folds its
-    // own inputs with the same function, and a second store starting from a hand-copied magic number is a
-    // second place for the algorithm to be subtly not the same one
-    constexpr uint64_t k_fnv_offset_basis = 1469598103934665603ULL;
-
     // a digest as it is written into a filename or a sidecar. One spelling, because a key compared against
     // one formatted a hair differently is a permanent miss that looks exactly like a working cache
     std::string to_hex(uint64_t value);

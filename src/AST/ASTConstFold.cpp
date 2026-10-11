@@ -1,7 +1,9 @@
 #include "AST/ASTConstFold.h"
 
+#include "AST/ASTAbi.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTCopy.h"
+#include "AST/ASTExternInterface.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ConstExprNode.h"
@@ -405,6 +407,12 @@ namespace
                     call.decl->builtin.value()));
         }
 
+        if (kind == AST::BuiltinKind::t_abi_version) {
+            return ConstFoldResult::folded(
+                AST::ValueType(AST::ValueTypePrimitive::t_uint32),
+                AST::k_abi_version);
+        }
+
         // **the subject is the type the query is about.** an instantiated decl carries it on
         // instantiation_args. a still-generic builtin - `needs_destruction<T>()` inside a template,
         // or `needs_destruction<int32>()` before the monomorphizer rewires the call - carries it on
@@ -448,6 +456,25 @@ namespace
                         kind == AST::BuiltinKind::t_integer_max
                     )
                 );
+
+            case AST::BuiltinKind::t_abi_fingerprint:
+            case AST::BuiltinKind::t_abi_slot_count: {
+                const AST::ComplexType *ct = subject.get_complex_type();
+
+                if (ct == nullptr || !ct->is_extern_interface_kind()) {
+                    return ConstFoldResult::pending();
+                }
+
+                if (kind == AST::BuiltinKind::t_abi_fingerprint) {
+                    return ConstFoldResult::folded(
+                        AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+                        AST::abi_fingerprint(*ct));
+                }
+
+                return ConstFoldResult::folded(
+                    AST::ValueType(AST::ValueTypePrimitive::t_uint32),
+                    static_cast<uint64_t>(extern_interface_requirements(*ct).size()));
+            }
 
             default:
                 // unreachable: builtin_foldability answered t_ast_fact

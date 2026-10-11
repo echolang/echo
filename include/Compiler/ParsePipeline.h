@@ -101,8 +101,8 @@ namespace Compiler
         const std::vector<std::filesystem::path> &roots
     );
 
-    // does this manifest name a file of its own as a program? the *executable* targets,
-    // not every target: a `#[target: test]` produces no artifact. two readers -
+    // does this manifest name a program of its own? Parser::is_buildable_target:
+    // an exe or a lib. a `#[target: test]` produces no artifact. two readers -
     // resolve_programs and collect_shared_top_level_code
     bool module_declares_a_program(const Parser::ModuleManifest &manifest);
 

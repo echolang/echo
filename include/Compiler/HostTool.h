@@ -123,7 +123,7 @@ namespace Compiler
 
     // `-target` / `--sysroot` / `-isysroot` for this row. the dispatcher: WASI
     // is append_wasi_target_args, everything else is append_apple_target_args.
-    // CBuild and link_executable both call this so they cannot disagree about
+    // CBuild and link_program both call this so they cannot disagree about
     // the triple. false with a sentence when a WASI sysroot is not on this machine
     bool append_codegen_target_args(
         std::vector<std::string> &argv,

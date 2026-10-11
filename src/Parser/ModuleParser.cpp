@@ -47,7 +47,9 @@ Parser::Payload Parser::ModuleParser::make_parser_payload(
         cursor,
         context,
         collector,
-        pass
+        pass,
+        false,
+        {}
     };
 }
 

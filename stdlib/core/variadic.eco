@@ -35,7 +35,7 @@
  * compile error naming the position.
  */
 
-#[core: variadic_args]
+#[echoc::core: variadic_args]
 public struct variadic_args
 {
 }

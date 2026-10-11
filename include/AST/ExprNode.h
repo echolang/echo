@@ -793,7 +793,7 @@ namespace AST
     // strong count, so it must be visible at the site that pays for it, and **it can fail** - the object
     // may already be gone - so its result is a `T?` the program has to acknowledge before using
     //
-    // a keyword form rather than a `#[builtin:]` in stdlib/core/mem.eco, unlike `ref_count` beside it,
+    // a keyword form rather than a `#[echoc::builtin:]` in stdlib/core/mem.eco, unlike `ref_count` beside it,
     // because `weak` has to be a keyword anyway to be a type constructor, and a language whose two halves
     // of one idea live in different places - one in the grammar, one in a library that `--no-stdlib`
     // removes - would be answering "where is weak from" twice
@@ -1242,7 +1242,7 @@ namespace AST
         bool expansion_decided = false;
 
         // **is this list a C variadic tail rather than a collection?** set by AST::bind_array_literal_to
-        // when the parameter it arrived at is `#[core: variadic_args]`, and by nothing else - so it is
+        // when the parameter it arrived at is `#[echoc::core: variadic_args]`, and by nothing else - so it is
         // a property of the *position*, exactly as `bound_type` is.
         //
         // it changes three answers and no others: the elements keep their own types instead of being

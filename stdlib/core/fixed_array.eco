@@ -6,13 +6,13 @@
  * the elements; destroying one destroys them. Both fall out of `T[N]`'s place in the copy
  * and destruction taxonomy, so this file declares neither a destructor nor a copy constructor.
  *
- * `#[core: fixed_array]` lets the compiler recognise a destination for an array literal, so
+ * `#[echoc::core: fixed_array]` lets the compiler recognise a destination for an array literal, so
  * `fixed_array<int32, 4> $q = [1, 2, 3, 4];` expands to four indexed writes rather than
  * appends. It knows no method and no shape of this type.
  *
  * Counts and indices are `usize` throughout, matching `array<T>` and `slice<T>`.
  */
-#[core: fixed_array]
+#[echoc::core: fixed_array]
 public struct fixed_array<T, const usize N> : contract::iterable<T>, contract::const_iterable<const T>
 {
     // **not private**, and the element operators are why: an operator is a free declaration,

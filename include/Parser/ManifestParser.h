@@ -64,6 +64,19 @@ namespace Parser
         t_library
     };
 
+    // `echoc build` produces an artifact for these. a test target produces none
+    inline bool is_buildable_target(TargetKind kind)
+    {
+        return kind == TargetKind::t_executable || kind == TargetKind::t_library;
+    }
+
+    // an exe names a file whose root becomes `main`. a lib and a test do not:
+    // the lib is every file, the test is a selection
+    inline bool target_has_entry(TargetKind kind)
+    {
+        return kind == TargetKind::t_executable;
+    }
+
     // one `#[requires: "name" { version:, source: git "...", rev: }]`. the compiler reads
     // the name and resolves it against the package directory; version / source / rev are
     // recorded only. the source *kind* is a closed tag so a later host is another tag

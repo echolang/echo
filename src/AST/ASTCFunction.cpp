@@ -1,5 +1,6 @@
 #include "AST/ASTCFunction.h"
 
+#include "AST/ASTAbi.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
@@ -162,24 +163,6 @@ namespace
             type.get_type_desciption());
     }
 
-    // const on a by-value parameter is Echo's local write-protect, not C's. two signatures that
-    // differ only by that bit are one C type, so bind_function_ref_to compares the erased form
-    AST::CallableSignature abi_erased(const AST::CallableSignature &signature)
-    {
-        AST::CallableSignature erased;
-        erased.return_type = AST::ValueType::make_mutable(
-            AST::ValueType::make_non_nullable(signature.return_type));
-
-        erased.parameter_types.reserve(signature.parameter_types.size());
-
-        for (const auto &parameter : signature.parameter_types) {
-            erased.parameter_types.push_back(
-                AST::ValueType::make_mutable(AST::ValueType::make_non_nullable(parameter)));
-        }
-
-        return erased;
-    }
-
     std::optional<std::string> type_refusal_walk(
         const AST::ValueType &type,
         const AST::CoreTypes &core,
@@ -262,12 +245,28 @@ std::optional<std::string> AST::c_function_type_refusal(
     return type_refusal_walk(type, core, seen);
 }
 
+AST::CallableSignature AST::c_abi_erased(const AST::CallableSignature &signature)
+{
+    AST::CallableSignature erased;
+    erased.return_type = AST::ValueType::make_mutable(
+        AST::ValueType::make_non_nullable(signature.return_type));
+
+    erased.parameter_types.reserve(signature.parameter_types.size());
+
+    for (const auto &parameter : signature.parameter_types) {
+        erased.parameter_types.push_back(
+            AST::ValueType::make_mutable(AST::ValueType::make_non_nullable(parameter)));
+    }
+
+    return erased;
+}
+
 bool AST::c_function_signatures_match(
     const AST::CallableSignature &a,
     const AST::CallableSignature &b
 )
 {
-    return abi_erased(a) == abi_erased(b);
+    return c_abi_erased(a) == c_abi_erased(b);
 }
 
 std::optional<std::string> AST::c_function_signature_refusal(
@@ -376,7 +375,7 @@ void AST::check_exports(
         return CodeRef { &module, node.name_token.value().make_slice() };
     };
 
-    std::unordered_map<std::string, const FunctionDeclNode *> exported_names;
+    std::unordered_map<std::string, TokenReference> exported_names;
     std::unordered_set<std::string> extern_symbols;
 
     for (auto &module_ptr : bundle.modules) {
@@ -406,14 +405,26 @@ void AST::check_exports(
         }
 
         for (TypeDeclNode *node : module.nodes.of_type<TypeDeclNode>()) {
-            if (node == nullptr) {
+            if (node == nullptr || !type_exports_abi_table(*node) || !node->name_token.has_value()) {
                 continue;
             }
 
-            if (auto *export_attr = node->attributes.get_first("export")) {
-                collector.collect_issue<Issue::GenericError>(
-                    attr_ref(module, *export_attr),
-                    k_export_on_function);
+            for (const ValueType &iface_type : node->complex_type().extern_conformances()) {
+                const ComplexType *iface = iface_type.get_complex_type();
+
+                if (iface == nullptr) {
+                    continue;
+                }
+
+                const std::string symbol = abi_table_symbol(*iface);
+                auto [it, inserted] = exported_names.emplace(symbol, node->name_token.value());
+
+                if (!inserted) {
+                    collector.collect_issue<Issue::DuplicateExportName>(
+                        CodeRef { &module, node->name_token.value().make_slice() },
+                        symbol,
+                        it->second);
+                }
             }
         }
 
@@ -463,13 +474,14 @@ void AST::check_exports(
                 continue;
             }
 
-            auto [it, inserted] = exported_names.emplace(*node->export_name, node);
+            auto [it, inserted] = exported_names.emplace(
+                *node->export_name, node->name_token.value());
 
-            if (!inserted && it->second != node && it->second->name_token.has_value()) {
+            if (!inserted) {
                 collector.collect_issue<Issue::DuplicateExportName>(
                     name_ref(module, *node),
                     *node->export_name,
-                    it->second->name_token.value());
+                    it->second);
             }
         }
     }

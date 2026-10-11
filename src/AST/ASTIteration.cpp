@@ -54,7 +54,7 @@ AST::IterationLookup AST::iteration_plan_for(
     if (iterator_tmpl == nullptr || iterable_tmpl == nullptr) {
         return refuse(
             "'foreach' needs the iteration protocol, and nothing in this program declares "
-            "'#[core: iterator]'. it lives in the standard library, which this compilation left out.");
+            "'#[echoc::core: iterator]'. it lives in the standard library, which this compilation left out.");
     }
 
     // not settled yet - a type parameter awaiting substitution, or a call that has not resolved. asking

@@ -25,6 +25,7 @@ void drain_refused_attributes(Parser::Payload &payload)
 AST::TypeDeclNode *Parser::parse_opaque_typedecl(Payload &payload, AST::Visibility visibility)
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
 
     // standalone `extern struct Name;` skips the prefix; `struct Name;` inside `extern { }` is
     // already on the type keyword. one function either way
@@ -144,6 +145,7 @@ AST::TypeDeclNode *Parser::parse_opaque_typedecl(Payload &payload, AST::Visibili
     // can be refused at the declaration
     if (payload.pass != Pass::t_type_names) {
         Parser::drain_attributes(payload, struct_node->attributes);
+        struct_node->doc_comment = doc;
         Parser::bind_type_decl_attributes(payload, *struct_node);
     }
 

@@ -25,6 +25,9 @@ namespace AST
         // the only one read today
         AttributeList attributes;
 
+        // the `/** ... */` immediately preceding this declaration, original text, or empty
+        std::string doc_comment;
+
         // who may name this type lives on the **layout**, not here - see ComplexType::visibility. an
         // instantiation has a layout and no declaration node, and a constructor call names a type without
         // spelling it in type position, so both of those questions have to be answerable without this node

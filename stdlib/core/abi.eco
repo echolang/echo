@@ -1,0 +1,97 @@
+/**
+ * The plugin ABI table. A host binds one; a library exports one.
+ *
+ * `header` is the prefix of `__eco_abi_<mangled>`. `bind` reads it and refuses a
+ * mismatch. `bind_unchecked` is the seat both modes share.
+ */
+
+namespace abi;
+
+#[echoc::core: abi_header]
+public struct header
+{
+    uint32 $version;
+    uint32 $slot_count;
+    uint64 $fingerprint;
+}
+
+public enum mismatch
+{
+    case version(uint32 $here, uint32 $there);
+    case fingerprint(uint64 $here, uint64 $there);
+    case slot_count(uint32 $here, uint32 $there);
+
+    const function message() : string
+    {
+        return match ($this) {
+            mismatch::version($here, $there) =>
+                str::concat(
+                    str::concat('ABI version ', str::from($here)),
+                    str::concat(' vs ', str::from($there))),
+            mismatch::fingerprint($here, $there) =>
+                str::concat(
+                    str::concat('ABI fingerprint ', str::from($here)),
+                    str::concat(' vs ', str::from($there))),
+            mismatch::slot_count($here, $there) =>
+                str::concat(
+                    str::concat('ABI slot count ', str::from($here)),
+                    str::concat(' vs ', str::from($there))),
+        };
+    }
+}
+
+#[echoc::builtin: abi_version]
+public function version() : uint32;
+
+#[echoc::builtin: abi_fingerprint]
+public function fingerprint<T : extern interface>() : uint64;
+
+#[echoc::builtin: abi_slot_count]
+public function slot_count<T : extern interface>() : uint32;
+
+#[echoc::builtin: abi_symbol]
+public function symbol<T : extern interface>() : string;
+
+#[echoc::builtin: abi_slot_symbol]
+public function slot_symbol<T : extern interface>(usize $i) : string;
+
+#[echoc::builtin: abi_bind_unchecked]
+public function bind_unchecked<T : extern interface>(
+    ptr<const ptr<uint8>> $slots,
+    erased $image
+) : T;
+
+public function bind<T : extern interface>(
+    ptr<const uint8> $table,
+    erased $image
+) : result<T, mismatch>
+{
+    uint32 $here_version = version();
+    uint32 $here_slots = slot_count<T>();
+    uint64 $here_fp = fingerprint<T>();
+
+    header $h = header(0, 0, 0);
+
+    unsafe {
+        ptr<const header> $hp = $table:$ as ptr<const header>;
+        $h = $hp:$[0];
+    }
+
+    if ($h->version != $here_version) {
+        return .error(.version($here_version, $h->version));
+    }
+
+    if ($h->slot_count != $here_slots) {
+        return .error(.slot_count($here_slots, $h->slot_count));
+    }
+
+    if ($h->fingerprint != $here_fp) {
+        return .error(.fingerprint($here_fp, $h->fingerprint));
+    }
+
+    unsafe {
+        ptr<const ptr<uint8>> $slots =
+            ($table:$ + mem::size<header>()) as ptr<const ptr<uint8>>;
+        return .ok(bind_unchecked<T>($slots, $image));
+    }
+}

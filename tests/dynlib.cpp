@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "Compiler/TargetFacts.h"
+#include "Compiler/CodegenTarget.h"
 
 #include <filesystem>
 #include <string>
@@ -29,13 +29,18 @@ public:
 
 const std::string &lib_ext()
 {
-    static const std::string ext = Compiler::TargetFacts::host().shared_library_extension();
+    static const std::string ext = Compiler::CodegenTarget{}.library_suffix();
     return ext;
+}
+
+fs::path lib_image(const fs::path &dir, const std::string &stem)
+{
+    return dir / Compiler::CodegenTarget{}.library_file_name(stem);
 }
 
 fs::path plugin_image(const ScopedProject &project)
 {
-    return project.root() / "plugin" / "ecobuild" / ("greeter" + lib_ext());
+    return lib_image(project.root() / "plugin" / "ecobuild", "greeter");
 }
 
 void write_plugin(const ScopedProject &project, const std::string &source)
@@ -84,7 +89,7 @@ ProcessResult build_and_run_host(const ScopedProject &project, const std::string
     return EchoTests::run_binary(project.root() / "host/ecobuild/host");
 }
 
-// look up `lib_var->symbol(name)`, bind it as `extern function<sig> fn_var`,
+// look up `lib_var->address(name)`, bind it as `extern function<sig> fn_var`,
 // run `body` inside that `unsafe`. temps are keyed on `fn_var` so two lookups
 // in one host cannot shadow — Echo refuses a second `guard` of the same name
 std::string with_export(
@@ -101,7 +106,7 @@ std::string with_export(
         "{\n"
         "    string $__name_" + tag + " = '" + export_name + "';\n"
         "    ptr<uint8> $__raw_" + tag + " = guard " + lib_var
-            + "->symbol($__name_" + tag + ") else {\n"
+            + "->address($__name_" + tag + ") else {\n"
         "        die('no " + export_name + "');\n"
         "    };\n"
         "    unsafe {\n"
@@ -119,12 +124,12 @@ std::string call_i32(const std::string &export_name)
 
 };
 
-TEST_CASE("dynlib::extension matches the host suffix", "[dynlib]")
+TEST_CASE("dynlib::file_name matches CodegenTarget::library_file_name", "[dynlib]")
 {
-    ScopedProject project("extension");
+    ScopedProject project("file_name");
     write_host(project,
         "use std::dynlib;\n"
-        "echo dynlib::extension();\n");
+        "echo dynlib::file_name('greeter');\n");
 
     const ProcessResult built = project.echoc("build", project.root() / "host");
     INFO(built.output);
@@ -133,7 +138,8 @@ TEST_CASE("dynlib::extension matches the host suffix", "[dynlib]")
     const ProcessResult ran = EchoTests::run_binary(project.root() / "host/ecobuild/host");
     INFO(ran.output);
     REQUIRE(ran.exit_code == 0);
-    REQUIRE(ran.output.find(lib_ext()) != std::string::npos);
+    REQUIRE(ran.output.find(Compiler::CodegenTarget{}.library_file_name("greeter"))
+        != std::string::npos);
 }
 
 TEST_CASE("open of a missing path is a dynerror", "[dynlib]")
@@ -167,7 +173,7 @@ TEST_CASE("a missing export name is null", "[dynlib]")
     const ProcessResult ran = build_and_run_host(project,
         open_plugin(plugin_image(project)) +
         "string $name = 'nope';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else {\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else {\n"
         "    echo 'missing';\n"
         "    return 0;\n"
         "};\n"
@@ -190,7 +196,7 @@ TEST_CASE("#[export: \"name\"] is the symbol dynlib looks up", "[dynlib]")
     const ProcessResult by_alias = build_and_run_host(project,
         open_plugin(plugin_image(project)) +
         "string $name = 'sum';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else {\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else {\n"
         "    die('plugin has no sum');\n"
         "};\n"
         "unsafe {\n"
@@ -215,7 +221,7 @@ TEST_CASE("the Echo name is not exported when #[export] renamed it", "[dynlib]")
     const ProcessResult by_echo_name = build_and_run_host(project,
         open_plugin(plugin_image(project)) +
         "string $name = 'add';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else {\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else {\n"
         "    echo 'hidden';\n"
         "    return 0;\n"
         "};\n"
@@ -242,8 +248,8 @@ TEST_CASE("two exports of one lib are independently callable", "[dynlib]")
         open_plugin(plugin_image(project)) +
         "string $add_name = 'add';\n"
         "string $mul_name = 'mul';\n"
-        "ptr<uint8> $add_raw = guard $plug->symbol($add_name) else { die('no add'); };\n"
-        "ptr<uint8> $mul_raw = guard $plug->symbol($mul_name) else { die('no mul'); };\n"
+        "ptr<uint8> $add_raw = guard $plug->address($add_name) else { die('no add'); };\n"
+        "ptr<uint8> $mul_raw = guard $plug->address($mul_name) else { die('no mul'); };\n"
         "unsafe {\n"
         "    extern function<int32(int32, int32)> $add =\n"
         "        $add_raw:$ as extern function<int32(int32, int32)>;\n"
@@ -272,7 +278,7 @@ TEST_CASE("an unexported helper is reachable through an export, not through dlsy
     const ProcessResult via_export = build_and_run_host(project,
         open_plugin(plugin_image(project)) +
         "string $name = 'bump';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else { die('no bump'); };\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else { die('no bump'); };\n"
         "unsafe {\n"
         "    extern function<int32(int32)> $bump =\n"
         "        $raw:$ as extern function<int32(int32)>;\n"
@@ -285,7 +291,7 @@ TEST_CASE("an unexported helper is reachable through an export, not through dlsy
     const ProcessResult via_dlsym = build_and_run_host(project,
         open_plugin(plugin_image(project)) +
         "string $name = 'helper';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else {\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else {\n"
         "    echo 'hidden';\n"
         "    return 0;\n"
         "};\n"
@@ -296,47 +302,46 @@ TEST_CASE("an unexported helper is reachable through an export, not through dlsy
     REQUIRE(via_dlsym.output.find("leaked") == std::string::npos);
 }
 
-TEST_CASE("symbol after close is null", "[dynlib]")
+TEST_CASE("dropping the last library handle unloads the image", "[dynlib]")
 {
-    ScopedProject project("close_then_symbol");
+    ScopedProject project("drop_unloads");
     const ProcessResult plug = build_plugin(project,
+        "class Marker\n"
+        "{\n"
+        "    destructor()\n"
+        "    {\n"
+        "        echo 'fini';\n"
+        "    }\n"
+        "}\n"
+        "\n"
+        "struct Hold\n"
+        "{\n"
+        "    static Marker $m = Marker();\n"
+        "}\n"
+        "\n"
         "#[export]\n"
-        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+        "public function touch() : int32\n"
+        "{\n"
+        "    Marker $keep = Hold::$m;\n"
+        "    return 1;\n"
+        "}\n");
     INFO(plug.output);
     REQUIRE(plug.exit_code == 0);
 
     const ProcessResult ran = build_and_run_host(project,
-        open_plugin(plugin_image(project)) +
-        "string $name = 'add';\n"
-        "$plug->close();\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else {\n"
-        "    echo 'closed';\n"
-        "    return 0;\n"
-        "};\n"
-        "echo 'still';\n");
+        "use std::dynlib;\n"
+        "string $path = '" + EchoTests::echo_string_path(plugin_image(project)) + "';\n"
+        "{\n"
+        "    dynlib::library $plug = guard dynlib::library::open($path) else ($e) {\n"
+        "        die($e->message());\n"
+        "    };\n" +
+        with_export("$plug", "touch", "int32()", "$fn", "        echo $fn();\n") +
+        "    echo 'before';\n"
+        "}\n"
+        "echo 'after';\n");
     INFO(ran.output);
     REQUIRE(ran.exit_code == 0);
-    REQUIRE(ran.output.find("closed") != std::string::npos);
-    REQUIRE(ran.output.find("still") == std::string::npos);
-}
-
-TEST_CASE("close twice is safe", "[dynlib]")
-{
-    ScopedProject project("close_twice");
-    const ProcessResult plug = build_plugin(project,
-        "#[export]\n"
-        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
-    INFO(plug.output);
-    REQUIRE(plug.exit_code == 0);
-
-    const ProcessResult ran = build_and_run_host(project,
-        open_plugin(plugin_image(project)) +
-        "$plug->close();\n"
-        "$plug->close();\n"
-        "echo 'ok';\n");
-    INFO(ran.output);
-    REQUIRE(ran.exit_code == 0);
-    REQUIRE(ran.output.find("ok") != std::string::npos);
+    REQUIRE(EchoTests::output_equals_lines(ran.output, { "1", "before", "fini", "after" }));
 }
 
 TEST_CASE("a plugin export can write through a pointer the host allocated", "[dynlib]")
@@ -351,7 +356,7 @@ TEST_CASE("a plugin export can write through a pointer the host allocated", "[dy
     const ProcessResult ran = build_and_run_host(project,
         open_plugin(plugin_image(project)) +
         "string $name = 'store';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else { die('no store'); };\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else { die('no store'); };\n"
         "int32 $n = 0;\n"
         "unsafe {\n"
         "    extern function<void(ptr<int32>, int32)> $store =\n"
@@ -381,7 +386,7 @@ TEST_CASE("a host function pointer can be passed into a plugin export", "[dynlib
         "function twice(int32 $n) : int32 { return $n * 2; }\n"
         "\n"
         "string $name = 'apply';\n"
-        "ptr<uint8> $raw = guard $plug->symbol($name) else { die('no apply'); };\n"
+        "ptr<uint8> $raw = guard $plug->address($name) else { die('no apply'); };\n"
         "unsafe {\n"
         "    extern function<int32(extern function<int32(int32)>, int32)> $apply =\n"
         "        $raw:$ as extern function<int32(extern function<int32(int32)>, int32)>;\n"
@@ -462,9 +467,14 @@ TEST_CASE("a plugin static is live across calls and resets on reopen", "[dynlib]
     REQUIRE(EchoTests::output_equals_lines(first.output, { "1", "2" }));
 
     const ProcessResult reopened = build_and_run_host(project,
-        open_plugin(plugin_image(project)) +
+        "use std::dynlib;\n"
+        "string $path = '" + EchoTests::echo_string_path(plugin_image(project)) + "';\n"
+        "{\n"
+        "    dynlib::library $plug = guard dynlib::library::open($path) else ($e) {\n"
+        "        die($e->message());\n"
+        "    };\n" +
         with_export("$plug", "bump", "int32()", "$fn", "        echo $fn();\n") +
-        "$plug->close();\n"
+        "}\n"
         "dynlib::library $again = guard dynlib::library::open($path) else ($e) {\n"
         "    die($e->message());\n"
         "};\n" +
@@ -516,8 +526,8 @@ TEST_CASE("two Echo libs can be loaded in one process", "[dynlib]")
     INFO(mul.output);
     REQUIRE(mul.exit_code == 0);
 
-    const fs::path add_lib = project.root() / "adder" / "ecobuild" / ("adder" + lib_ext());
-    const fs::path mul_lib = project.root() / "mul" / "ecobuild" / ("mul" + lib_ext());
+    const fs::path add_lib = lib_image(project.root() / "adder" / "ecobuild", "adder");
+    const fs::path mul_lib = lib_image(project.root() / "mul" / "ecobuild", "mul");
 
     const ProcessResult ran = build_and_run_host(project,
         "use std::dynlib;\n"
@@ -579,4 +589,103 @@ TEST_CASE("a lib sees setenv after dlopen", "[dynlib]")
     REQUIRE(EchoTests::output_equals_lines(ran.output, { "0", "1" }));
 }
 #endif
+
+const char *k_greeter_iface =
+    "public extern interface greeter {\n"
+    "    function add(int32 $a, int32 $b) : int32;\n"
+    "    function answer() : int32;\n"
+    "}\n";
+
+TEST_CASE("dynlib::load binds an exported conformer", "[dynlib][extern_interface]")
+{
+    ScopedProject project("typed_load");
+    const ProcessResult plug = build_plugin(project,
+        std::string(k_greeter_iface) +
+        "\n"
+        "#[export]\n"
+        "public struct English : greeter {\n"
+        "    static function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n"
+        "    static function answer() : int32 { return 42; }\n"
+        "}\n");
+    INFO(plug.output);
+    REQUIRE(plug.exit_code == 0);
+
+    const fs::path dir = project.root() / "plugin" / "ecobuild";
+    const ProcessResult ran = build_and_run_host(project,
+        std::string(k_greeter_iface) +
+        "use std::dynlib;\n"
+        "\n"
+        "string $dir = '" + EchoTests::echo_string_path(dir) + "';\n"
+        "greeter $g = guard dynlib::load<greeter>($dir, 'greeter') else ($e) {\n"
+        "    die($e->message());\n"
+        "};\n"
+        "echo $g->add(2, 3);\n"
+        "echo $g->answer();\n");
+    INFO(ran.output);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(EchoTests::output_equals_lines(ran.output, { "5", "42" }));
+}
+
+TEST_CASE("load of a lib with no table is missing_interface", "[dynlib][extern_interface]")
+{
+    ScopedProject project("missing_table");
+    const ProcessResult plug = build_plugin(project,
+        "#[export]\n"
+        "public function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n");
+    INFO(plug.output);
+    REQUIRE(plug.exit_code == 0);
+
+    const fs::path dir = project.root() / "plugin" / "ecobuild";
+    const ProcessResult ran = build_and_run_host(project,
+        std::string(k_greeter_iface) +
+        "use std::dynlib;\n"
+        "\n"
+        "string $dir = '" + EchoTests::echo_string_path(dir) + "';\n"
+        "guard dynlib::load<greeter>($dir, 'greeter') else ($e) {\n"
+        "    echo $e->message();\n"
+        "    return 0;\n"
+        "};\n"
+        "echo 'bound';\n");
+    INFO(ran.output);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("no interface") != std::string::npos);
+    REQUIRE(ran.output.find("bound") == std::string::npos);
+}
+
+TEST_CASE("a binding keeps the image loaded after the library local is gone", "[dynlib][extern_interface]")
+{
+    ScopedProject project("binding_outlives");
+    const ProcessResult plug = build_plugin(project,
+        std::string(k_greeter_iface) +
+        "\n"
+        "#[export]\n"
+        "public struct English : greeter {\n"
+        "    static function add(int32 $a, int32 $b) : int32 { return $a + $b; }\n"
+        "    static function answer() : int32 { return 42; }\n"
+        "}\n");
+    INFO(plug.output);
+    REQUIRE(plug.exit_code == 0);
+
+    const fs::path dir = project.root() / "plugin" / "ecobuild";
+    const ProcessResult ran = build_and_run_host(project,
+        std::string(k_greeter_iface) +
+        "use std::dynlib;\n"
+        "\n"
+        "string $dir = '" + EchoTests::echo_string_path(dir) + "';\n"
+        "greeter? $held = null;\n"
+        "{\n"
+        "    dynlib::library $lib = guard dynlib::library::open(dynlib::path_of($dir, 'greeter')) else ($e) {\n"
+        "        die($e->message());\n"
+        "    };\n"
+        "    greeter $bound = guard $lib->bind<greeter>() else ($e) {\n"
+        "        die($e->message());\n"
+        "    };\n"
+        "    $held = $bound;\n"
+        "}\n"
+        "greeter $g = guard $held else { die('binding was dropped'); };\n"
+        "echo $g->add(2, 3);\n");
+    INFO(ran.output);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("5") != std::string::npos);
+}
 

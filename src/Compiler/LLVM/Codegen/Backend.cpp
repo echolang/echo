@@ -557,7 +557,7 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
     return true;
 }
 
-bool Backend::link_executable(
+bool Backend::link_program(
     const std::string &executable_name,
     const std::vector<std::filesystem::path> &objects,
     const std::vector<Compiler::LinkRequirement> &link

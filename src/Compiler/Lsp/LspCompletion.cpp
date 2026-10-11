@@ -109,6 +109,8 @@ namespace
         case AST::ComplexTypeKind::t_struct:
         case AST::ComplexTypeKind::t_opaque:
             return CompletionItemKind::t_struct;
+        case AST::ComplexTypeKind::t_extern_interface:
+            return CompletionItemKind::t_interface;
         }
 
         return CompletionItemKind::t_struct;

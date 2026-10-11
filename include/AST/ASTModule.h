@@ -49,6 +49,12 @@ namespace AST
         // still shrink (`init` derives fields), so CallResolver leaves those calls pending
         bool construction_finalized = false;
 
+        // may this module write `#[echoc::core:]` / `#[echoc::builtin:]` / `#[echoc::intrinsic:]`.
+        // **defaults to false**, so a construction site that forgets it fails closed: it refuses
+        // loudly rather than admitting silently. set true for a compiler-supplied module, or for
+        // any module of a `--no-stdlib` build
+        bool writes_compiler_attributes = false;
+
         Module(const std::string &name, module_handle_t handle) :
             name(name), handle(handle)
         {}

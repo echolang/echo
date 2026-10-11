@@ -1,0 +1,6 @@
+// a compiler attribute is reserved for the standard library. with the stdlib loaded, a program
+// cannot write one even spelled correctly
+#[echoc::builtin: size_of]
+function byte_size<T>() : usize;
+
+echo 1;

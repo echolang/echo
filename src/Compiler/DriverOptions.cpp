@@ -139,5 +139,12 @@ bool Compiler::resolve_driver_options(
         }
     }
 
+    out.decls_all = cli.flag(Opt::t_decls_all);
+
+    if (out.decls_all && !out.prints(PrintKind::t_decls)) {
+        out_error = "'--decls-all' needs '--print decls'.";
+        return false;
+    }
+
     return true;
 }

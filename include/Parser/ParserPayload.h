@@ -58,6 +58,11 @@ namespace Parser
         // something here is another
         bool is_manifest = false;
 
+        // the `/** ... */` waiting for the declaration this walk is about to mint. captured when
+        // an attribute or a visibility modifier is the first token of the group, then taken when
+        // the declaration node is in hand
+        std::string pending_doc;
+
         // reports the token the cursor is sitting on as unexpected where `expected` was wanted
         // every parser needs this and all three of the pieces it takes - the cursor for the token,
         // the context to locate it, the collector to record it - already live here

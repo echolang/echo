@@ -19,7 +19,7 @@ public function pid() : int32
  * A command invoked with no extra arguments answers 1, the way C's `argc` does.
  * A lib or a wasm reactor answers 0: there is no `main` to capture argv.
  */
-#[builtin: process_argc]
+#[echoc::builtin: process_argc]
 public function argc() : usize;
 
 /**
@@ -30,7 +30,7 @@ public function argc() : usize;
  * pointer with a count kept somewhere else, which is not a thing to hand anybody. It was `public` only
  * for as long as there were no visibility modifiers to say otherwise.
  */
-#[builtin: process_argv]
+#[echoc::builtin: process_argv]
 private function raw_argv() : ptr<ptr<uint8>>;
 
 /**
@@ -44,7 +44,7 @@ private function raw_argv() : ptr<ptr<uint8>>;
  * **`internal` and not `private`**, which is the whole difference between this and `raw_argv` above:
  * `var_iterator` walks it, and that lives in vars.eco.
  */
-#[builtin: process_envp]
+#[echoc::builtin: process_envp]
 internal function raw_envp() : ptr<ptr<uint8>>;
 
 /**
@@ -288,5 +288,5 @@ public function exe() : string
  *
  * The exit code is what the shell sees. `0` means success by convention.
  */
-#[builtin: exit]
+#[echoc::builtin: exit]
 public function exit(int32 $code) : void;

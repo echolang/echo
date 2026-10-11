@@ -138,6 +138,7 @@ namespace AST
         // argument expression, ranked by argument_fit; visitVarDecl's declaration destination
         // does not admit borrow-of-temporary
         bool _in_parameter = false;
+        bool _in_type_properties = false;
 
         // how many `unsafe { }` blocks enclose the statement being checked. a *depth* and not a flag,
         // because blocks nest and an inner ordinary block inside an unsafe one is still unsafe -
@@ -205,7 +206,7 @@ namespace AST
         // visitVarDecl skips the declaration-destination check while `_in_parameter`
         void check_parameter_defaults(FunctionDeclNode &node);
 
-        // where a `#[core: variadic_args]` may be written, asked of the declaration as a whole -
+        // where a `#[echoc::core: variadic_args]` may be written, asked of the declaration as a whole -
         // see AST::variadic_args_refusal for why it is one question rather than four
         void check_variadic_args_position(FunctionDeclNode &node);
 
@@ -305,7 +306,8 @@ namespace AST
         // every other call
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
-        void check_assume_is_unsafe(FunctionCallExprNode &node);
+        void check_unsafe_builtin(FunctionCallExprNode &node);
+        void check_abi_slot_symbol(FunctionCallExprNode &node);
 
         // echo, or a settled `: void` call, where a value is consumed. asked from rewrite_value_edge,
         // so every value and place edge is covered and a TemporaryBind around a void method is not a

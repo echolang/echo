@@ -169,6 +169,11 @@ AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std
     case ComplexTypeKind::t_opaque:
         value_kind = ValueTypeKind::t_opaque;
         break;
+    case ComplexTypeKind::t_extern_interface:
+        // values are structs: layout, copy, teardown, TBAA, DWARF, `T?`
+        // keep their struct arms. the kind is how a declaration is told apart
+        value_kind = ValueTypeKind::t_struct;
+        break;
     }
 
     return ValueType(value_kind, complex_type);
@@ -440,6 +445,11 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += "UA";
         break;
 
+    case ValueTypeKind::t_kind_extern_interface:
+        assert(false && "an extern-interface constraint is not a type that mangles");
+        mangled_name += "UA";
+        break;
+
     case ValueTypeKind::t_pointer:
     case ValueTypeKind::t_weak:
         assert(false && "pointer and weak mangle in the prefix, before L");
@@ -530,6 +540,9 @@ std::string AST::ValueType::get_type_desciption() const
 
     case ValueTypeKind::t_kind_class:
         return prefix + "class" + suffix;
+
+    case ValueTypeKind::t_kind_extern_interface:
+        return prefix + "extern interface" + suffix;
 
     case ValueTypeKind::t_const_value:
         return prefix + std::to_string(_const_bits) + suffix;
@@ -767,6 +780,11 @@ void AST::TypeRegistry::derive_instantiation(
         inst->_conformances.push_back(substitute_type(conformance, subst, *this));
     }
 
+    inst->_extern_conformances.clear();
+    for (const auto &conformance : tmpl->_extern_conformances) {
+        inst->_extern_conformances.push_back(substitute_type(conformance, subst, *this));
+    }
+
     _deriving.erase(inst);
 }
 
@@ -831,6 +849,7 @@ const char *AST::type_kind_keyword(AST::ComplexTypeKind kind)
         // the keyword the author wrote. diagnostics that need to distinguish say "incomplete type"
         // from is_opaque(), not from a second keyword
         case ComplexTypeKind::t_opaque: return "struct";
+        case ComplexTypeKind::t_extern_interface: return "extern interface";
     }
 
     // no tail: every kind is above, and the switch is what makes a fifth one a compile error here

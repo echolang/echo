@@ -65,13 +65,16 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
 {
     auto bundle = std::make_unique<AST::Bundle>();
     auto module_handle = bundle->modules.add_module("test");
+    auto &module = bundle->modules.get_module(module_handle);
+    // Catch2 bundles never have a stdlib, so compiler attributes are admitted
+    module.writes_compiler_attributes = true;
 
     // buiild the input payload
     auto input = Parser::ModuleParser::InputPayload {
         .files = {
             Parser::ModuleParser::InputFile("/tmp/testfile.eco", content)
         },
-        .module = bundle->modules.get_module(module_handle),
+        .module = module,
         .collector = bundle->collector
     };
 
@@ -96,6 +99,8 @@ namespace
     {
         auto bundle = std::make_unique<AST::Bundle>();
         auto module_handle = bundle->modules.add_module("test");
+        auto &module = bundle->modules.get_module(module_handle);
+        module.writes_compiler_attributes = true;
 
         std::vector<Parser::ModuleParser::InputFile> files;
         for (size_t i = 0; i < file_contents.size(); i++) {
@@ -105,7 +110,7 @@ namespace
 
         auto input = Parser::ModuleParser::InputPayload {
             .files = files,
-            .module = bundle->modules.get_module(module_handle),
+            .module = module,
             .collector = bundle->collector
         };
 

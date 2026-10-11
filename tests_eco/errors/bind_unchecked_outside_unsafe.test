@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] BindUncheckedRequiresUnsafe  bind_unchecked_outside_unsafe.eco:13:19
+
+  'bind_unchecked' seats function pointers from a library image, which is a promise the type system cannot check
+
+  12 | ptr<const ptr<uint8>> $slots = null;
+  13 | greeter $g = abi::bind_unchecked<greeter>($slots, $image);
+     :                   ^^^^^^^^^^^^^^
+  14 | echo 1;
+
+  help: write it inside an 'unsafe' block
+
+1 error, nothing was compiled.

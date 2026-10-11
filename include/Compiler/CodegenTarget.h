@@ -59,6 +59,10 @@ namespace Compiler
         bool wasm = false;
         unsigned pointer_bytes = 8;
 
+        // facts asked for ios, even when the emit triple is still the host
+        // (`--target-os ios` off Darwin). a native lib is refused either way
+        bool ios = false;
+
         bool is_cross() const {
             return !triple.empty();
         }
@@ -122,9 +126,25 @@ namespace Compiler
         // record`) the way Windows does, so they stay in-memory
         bool snapshots_bitcode() const;
 
-        // appended when `-o` has no extension. empty on native (Windows `.exe`
-        // is the host fallback in output_path, not a row fact)
+        // appended when `-o` has no extension. empty on a native command
+        // (Windows `.exe` is the host fallback in output_path, not a row fact).
+        // a library uses library_suffix()
         const char *output_extension() const;
+
+        // `.dylib` / `.so` / `.dll` / `.wasm` - the suffix a loadable image
+        // takes on this row, independent of exec_model. library_file_name
+        // appends it; CBuild and LinkRequirement ask it of `CodegenTarget{}`
+        // for a file this machine's dlopen will open
+        const char *library_suffix() const;
+
+        // the file a `#[target: lib { name: }]` writes: `libgreeter.dylib` /
+        // `libgreeter.so` / `greeter.dll` / `greeter.wasm`. `-o` does not go
+        // through this; it stays the path the user wrote
+        std::string library_file_name(const std::string &stem) const;
+
+        // why this row cannot produce a loadable library. iOS: apple_sdk is
+        // set, and a phone does not dlopen an app-side dylib. empty when it can
+        std::optional<const char *> library_refusal() const;
 
         // the path a suffix-less `-o` or target name becomes. the row's
         // output_extension is the only suffix; Windows `.exe` applies only
@@ -135,6 +155,14 @@ namespace Compiler
         // teardown chain are then ordinary loads and stores
         bool has_os_threads() const;
     };
+
+    // the one bit compute_module_keys, c_spec_digest and PartitionHash fold for
+    // "is this a native library". hidden-except-export changes every defined
+    // symbol, so an exe and a lib of the same module cannot share an object
+    inline const char *exec_model_environment(bool native_library)
+    {
+        return native_library ? "lib" : "cmd";
+    }
 
     // `--target-arch` as TargetFacts::resolve should see it. `--ios-device` with
     // no arch override is arm64, so a condition cannot still see the Intel host

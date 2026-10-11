@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] operator_in_extern_interface.eco:2:5
+
+  An extern interface cannot declare an operator - a slot is a C function, not a symbol.
+
+  1 | public extern interface greeter {
+  2 |     operator (int32 $a) + (int32 $b): int32;
+    :     ^^^^^^^^
+  3 | }
+
+1 error, nothing was compiled.

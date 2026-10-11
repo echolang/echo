@@ -66,6 +66,8 @@ namespace
         case AST::ComplexTypeKind::t_struct:
         case AST::ComplexTypeKind::t_opaque:
             return Compiler::Lsp::OutlineKind::t_struct;
+        case AST::ComplexTypeKind::t_extern_interface:
+            return Compiler::Lsp::OutlineKind::t_interface;
         }
 
         return Compiler::Lsp::OutlineKind::t_struct;

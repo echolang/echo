@@ -14,7 +14,7 @@
  * a retain of `str::buf`. The same refusal covers a class handle, a float, an enum and
  * anything wider than a word.
  *
- * Nothing in the compiler knows what an `atomic` is. There is no `#[core:]` binding and
+ * Nothing in the compiler knows what an `atomic` is. There is no `#[echoc::core:]` binding and
  * there is deliberately none. The compiler supplies the verbs; this file supplies the type.
  */
 #[unique]

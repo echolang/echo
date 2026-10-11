@@ -57,6 +57,12 @@ namespace AST
             case BuiltinKind::t_simd_bitmask:
             case BuiltinKind::t_simd_from_array:
             case BuiltinKind::t_simd_to_array:
+            case BuiltinKind::t_abi_version:
+            case BuiltinKind::t_abi_fingerprint:
+            case BuiltinKind::t_abi_slot_count:
+            case BuiltinKind::t_abi_symbol:
+            case BuiltinKind::t_abi_slot_symbol:
+            case BuiltinKind::t_abi_bind_unchecked:
                 return false;
         }
 

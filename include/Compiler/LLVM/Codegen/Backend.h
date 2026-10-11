@@ -134,7 +134,7 @@ namespace Compiler::LLVM
         // *not* reference one has no business shipping it
         bool emit_object(CmpUnit &cmp_unit, const std::filesystem::path &object_path);
 
-        // links objects into an executable. Prefers the system linker and falls back to the `clang`
+        // links objects into a program (command or library). Prefers the system linker and falls back to the `clang`
         // driver, which is a ~33ms difference on every build: almost all of `clang -o exe exe.o` is
         // driver startup, and this stage is otherwise a constant floor no amount of caching removes.
         // The fallback is what keeps a platform whose flags we cannot spell buildable rather than broken
@@ -143,8 +143,8 @@ namespace Compiler::LLVM
         // the driver. **Both spellings render it through Compiler::partition_link_requirements** - the
         // fallback is the path exercised least, so a second hand-written rendering there is one that
         // drifts without anybody noticing until a platform needs it
-        bool link_executable(
-            const std::string &executable_name,
+        bool link_program(
+            const std::string &program_name,
             const std::vector<std::filesystem::path> &objects,
             const std::vector<Compiler::LinkRequirement> &link
         );

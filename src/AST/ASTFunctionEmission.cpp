@@ -2,7 +2,7 @@
 #include "AST/FunctionDeclNode.h"
 
 // the order of the arms is the whole content of this function, because the properties overlap: a
-// `#[builtin:]` and a `#[intrinsic:]` may both be generic, and the monomorphizer instantiates them like
+// `#[echoc::builtin:]` and a `#[echoc::intrinsic:]` may both be generic, and the monomorphizer instantiates them like
 // anything else, so an instance carries `is_instantiated()` *and* whichever attribute its template had.
 // Asking "was this generated?" first would answer t_odr_shared for `size_of<int32>` and emit a body for
 // a function that has no symbol at all.

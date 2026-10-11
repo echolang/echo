@@ -82,7 +82,7 @@ namespace Compiler::LLVM
         // prepended, which is why every callable target takes the environment as parameter 0
         void gen_indirect_call(AST::IndirectCallExprNode &node);
 
-        // answers a `#[builtin: ...]` call in the compiler instead of emitting a call - a builtin
+        // answers a `#[echoc::builtin: ...]` call in the compiler instead of emitting a call - a builtin
         // has no symbol at all. dispatches on AST::BuiltinKind to one of the three below
         void gen_builtin_call(AST::FunctionCallExprNode &node);
         void gen_addr_of(AST::AddrOfExprNode &node);
@@ -131,14 +131,6 @@ namespace Compiler::LLVM
 
     private:
         CodegenContext &_ctx;
-
-        // `&name` as an Echo callable or as a C function pointer. one chassis: look
-        // up, mint, forward, return. t_echo is linkonce_odr and skips the
-        // environment; t_c is unit-local InternalLinkage with integer-ext and a
-        // tail call, so an `#[inline]` body defined in every unit stays ODR-identical
-        llvm::Function *ensure_function_adapt(
-            AST::FunctionDeclNode *decl,
-            TypeLowering::FunctionCallingShape shape);
 
         // a call whose declaration is an interface **requirement**: the callee is loaded out of the
         // receiver's own vtable rather than looked up in the function table, because a requirement has no

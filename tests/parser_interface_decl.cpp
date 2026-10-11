@@ -236,7 +236,7 @@ TEST_CASE("what a conformance clause cannot name", "[interface]")
         auto bundle = EchoTests::tests_make_parsed_bundle(
             "interface I { function f() : void; }\n"
             "interface J : I { function g() : void; }\n");
-        REQUIRE(has_issue_containing(*bundle, "an interface cannot conform to another one"));
+        REQUIRE(has_issue_containing(*bundle, "is an interface, and cannot conform to another one"));
     }
 }
 

@@ -10,7 +10,7 @@
  * does not name constructors, fields or modules.
  */
 
-#[core: type_id]
+#[echoc::core: type_id]
 public struct type_id
 {
     private ptr<uint8> $desc;
@@ -42,7 +42,7 @@ public struct type_id
 /**
  * The identity of `T`. Generic, no value arguments: the type is the whole of the question.
  */
-#[builtin: type_id]
+#[echoc::builtin: type_id]
 public function type_id<T>() : type_id;
 
 operator (const type_id& $a) == (const type_id& $b) : bool

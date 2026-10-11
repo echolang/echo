@@ -297,6 +297,41 @@ TEST_CASE("Multi Line Comments", "[lexer]") {
     REQUIRE( tokens.token_values[1] == "ronon" );
 }
 
+TEST_CASE("Doc comments are recorded without becoming tokens", "[lexer]") {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "/** adds two numbers */\nfunction add");
+
+    REQUIRE(tokens.tokens.size() == 2);
+    REQUIRE(tokens.tokens[0].type == Token::Type::t_function);
+    REQUIRE(tokens.tokens[1].type == Token::Type::t_identifier);
+    REQUIRE(tokens.doc_comments.size() == 1);
+    REQUIRE(tokens.doc_comments[0].next_token_index == 0);
+    REQUIRE(tokens.doc_comments[0].text == "/** adds two numbers */");
+}
+
+TEST_CASE("ordinary block comments are not doc comments", "[lexer]") {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "/* not a doc */ function add");
+
+    REQUIRE(tokens.tokens.size() == 2);
+    REQUIRE(tokens.doc_comments.empty());
+}
+
+TEST_CASE("the last of two adjacent doc comments wins", "[lexer]") {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "/** first */\n/** second */\nfunction add");
+
+    REQUIRE(tokens.doc_comments.size() == 1);
+    REQUIRE(tokens.doc_comments[0].text == "/** second */");
+    REQUIRE(tokens.doc_comments[0].next_token_index == 0);
+}
+
 TEST_CASE("Multi Line Comments Unterminated", "[lexer]") {
     Lexer lexer;
     TokenCollection tokens;

@@ -28,7 +28,7 @@ namespace Parser
     // does a value start at `offset` tokens from the cursor?
     //
     // **the one token of lookahead that separates `name` from `name atom`**, and therefore the one
-    // owner of where a tag ends: after `#[core: array]` the next token is `]`, which starts nothing, so
+    // owner of where a tag ends: after `#[echoc::core: array]` the next token is `]`, which starts nothing, so
     // `array` is a name rather than a tag with no payload
     bool starts_attribute_value(const Parser::Cursor &cursor, size_t offset = 0);
 

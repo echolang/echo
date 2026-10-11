@@ -33,6 +33,7 @@
 
 namespace llvm
 {
+    class Constant;
     class Function;
 };
 
@@ -58,6 +59,7 @@ namespace Compiler::LLVM
     class ProcessCodegen;
     class DebugPrintCodegen;
     class ErasureCodegen;
+    class AbiCodegen;
     class DebugInfoCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
@@ -74,7 +76,7 @@ namespace Compiler::LLVM
         // every check the compiler can skip skips together
         CompilerOptions options;
 
-        // the stdlib types the compiler names, bound by `#[core: ...]` during parsing. published here
+        // the stdlib types the compiler names, bound by `#[echoc::core: ...]` during parsing. published here
         // by compile_bundle rather than reached for, so codegen never holds the whole collector - the
         // only thing it needs from it is which declared type is `string`
         const AST::CoreTypes *core_types_ptr = nullptr;
@@ -97,7 +99,7 @@ namespace Compiler::LLVM
 
         // the same fact for `crash::info`: resolved once beside the binding, not per abort.
         // nullopt when nothing declared one - `--no-stdlib`, and a program that never bound
-        // `#[core: crash_info]`. the abort thunk is still piece-wise then; only hook *dispatch*
+        // `#[echoc::core: crash_info]`. the abort thunk is still piece-wise then; only hook *dispatch*
         // needs this
         std::optional<AST::CoreCrashInfoLayout> crash_info_layout;
 
@@ -124,13 +126,17 @@ namespace Compiler::LLVM
         StringWindow gen_string_window(llvm::Value *view, const char *prefix);
 
         // a `string` becomes a `view` through the conversion the type already
-        // declared. a view is handed back as-is. a hand-declared `#[core: string]`
+        // declared. a view is handed back as-is. a hand-declared `#[echoc::core: string]`
         // with no conversion still has a live window, and that is the fallback
         llvm::Value *string_as_view(
             llvm::Value *value,
             const AST::ValueType &type,
             const char *prefix
         );
+
+        // a `string` constant of these bytes, the same lowering a literal uses.
+        // abi::symbol / slot_symbol share it so a table name is one spelling
+        llvm::Constant *string_constant(const std::string &bytes, const AST::ValueType &type);
 
         // **the caller's half of the return ABI, and the only place a call to an Echo function is
         // emitted.** echo, die and dprint convert a `string` through this, and every ordinary
@@ -331,6 +337,10 @@ namespace Compiler::LLVM
         // owning class-handle erasure: `erased::from`, retain/release, and `assume`. reachable from
         // the expression subsystem, which is where those builtins are called
         ErasureCodegen *erasure = nullptr;
+
+        // ABI tables and the `abi::` builtins. reachable from the expression
+        // subsystem, which is where those builtins are called
+        AbiCodegen *abi = nullptr;
 
         // the debug-info subsystem: the whole of what a debugger is told. every entry point on it is a
         // no-op with `-g` off, which is what keeps the call sites free of a flag check - and it is its

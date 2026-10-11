@@ -225,7 +225,7 @@ namespace
         return std::to_string(exit_code);
     }
 
-    // `clang` is what Backend::link_executable falls back to. a FAIL rather than a skip: a suite
+    // `clang` is what Backend::link_program falls back to. a FAIL rather than a skip: a suite
     // that quietly stops testing native builds is exactly the silent no-op this corpus refuses
     void require_clang()
     {

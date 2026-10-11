@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ReservedAttributeNamespace  compiler_attribute_outside_stdlib.eco:3:3
+
+  the 'echoc::' namespace is reserved for the compiler and its standard library.
+
+  2 | // cannot write one even spelled correctly
+  3 | #[echoc::builtin: size_of]
+    :   ^^^^^
+  4 | function byte_size<T>() : usize;
+
+1 error, nothing was compiled.

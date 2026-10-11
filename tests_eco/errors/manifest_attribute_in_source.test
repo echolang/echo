@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ManifestAttributeInSource  manifest_attribute_in_source.eco:2:3
+
+  'depends' is a manifest attribute; it belongs in a module.eco.
+
+  1 | // a manifest name in a source file used to compile and do nothing
+  2 | #[depends: "../x"]
+    :   ^^^^^^^
+  3 | function f() : void
+
+1 error, nothing was compiled.

@@ -135,6 +135,11 @@ namespace Compiler
             return debug_info;
         }
     };
+
+    inline const char *exec_model_environment(const CompilerOptions &options)
+    {
+        return exec_model_environment(options.codegen.is_native_library());
+    }
 };
 
 #endif

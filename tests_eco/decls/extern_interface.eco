@@ -1,0 +1,4 @@
+public extern interface greeter {
+    function add(int32 $a, int32 $b) : int32;
+    function sqlite3_open as open(ptr<uint8> $path) : int32;
+}

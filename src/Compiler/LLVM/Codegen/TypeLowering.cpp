@@ -26,9 +26,11 @@
 #include "AST/TypeDeclNode.h"
 
 #include <llvm/Config/llvm-config.h>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
@@ -334,7 +336,7 @@ void TypeLowering::apply_function_attributes(
 
     // wasm-ld exports a function that carries this attribute *and* roots it against gc, so
     // no `--export` flags. a native library still plants DLLExport for the Windows .dll
-    // export table; hide_non_exported_symbols keys keep-visible on export_name
+    // export table; hide_non_exported_symbols keeps anything that carries that marker
     if (node->export_name) {
         if (_ctx.targeting_wasm()) {
             func->addFnAttr("wasm-export-name", *node->export_name);
@@ -461,6 +463,83 @@ TypeLowering::FunctionCallingShape TypeLowering::calling_shape_of(const AST::Fun
     return FunctionCallingShape::t_echo;
 }
 
+llvm::Function *TypeLowering::ensure_function_adapt(
+    AST::FunctionDeclNode *decl,
+    FunctionCallingShape shape
+)
+{
+    const bool c_abi = shape == FunctionCallingShape::t_c;
+    const std::string name = std::string(c_abi ? "__eco_c_adapt." : "__eco_adapt.")
+        + AST::mangle_function_name(decl);
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    llvm::Function *target = _ctx.llvm_function(decl);
+
+    if (target == nullptr) {
+        throw _ctx.error(fmt::format(
+            "function reference has no symbol to adapt {}",
+            _ctx.function_context()));
+    }
+
+    const AST::ValueType fn_type = c_abi
+        ? decl->c_function_type()
+        : decl->callable_type();
+    const AST::CallableSignature &signature = fn_type.signature();
+
+    llvm::FunctionType *adapt_ty = get_llvm_function_type(
+        signature,
+        *_ctx.current_cmp_unit,
+        shape);
+
+    llvm::Function *adapt = llvm::Function::Create(
+        adapt_ty,
+        c_abi ? llvm::GlobalValue::InternalLinkage : llvm::GlobalValue::LinkOnceODRLinkage,
+        name,
+        _ctx.current_module());
+
+    apply_c_integer_ext(*adapt, signature, shape);
+
+    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", adapt));
+
+    std::vector<llvm::Value *> forwarded;
+    unsigned i = 0;
+
+    if (!c_abi) {
+        const ReturnAbi abi = return_abi_of(decl, *_ctx.current_cmp_unit);
+        if (abi.is_indirect()) {
+            forwarded.push_back(adapt->getArg(i++));
+        }
+
+        // skip the environment the indirect call always passes
+        if (i < adapt->arg_size()) {
+            i++;
+        }
+    }
+
+    for (; i < adapt->arg_size(); i++) {
+        forwarded.push_back(adapt->getArg(i));
+    }
+
+    llvm::CallInst *call = _ctx.builder->CreateCall(target, forwarded);
+    if (c_abi) {
+        call->setTailCall(true);
+    }
+
+    if (adapt->getReturnType()->isVoidTy()) {
+        _ctx.builder->CreateRetVoid();
+    }
+    else {
+        _ctx.builder->CreateRet(call);
+    }
+
+    return adapt;
+}
+
 void TypeLowering::apply_c_integer_ext(
     llvm::Function &func,
     const AST::CallableSignature &signature,
@@ -517,7 +596,7 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     auto func_type = node->get_return_type();
 
     // **the C variadic tail is a parameter here and no parameter at all in LLVM.** a declaration
-    // ending in `#[core: variadic_args]` lowers to a function type over the parameters *before* it,
+    // ending in `#[echoc::core: variadic_args]` lowers to a function type over the parameters *before* it,
     // marked variadic - which is what makes the call ABI-correct: a variadic parameter is passed by a
     // different convention from a named one on several targets, and `isVarArg` is how the backend is
     // told which arguments are which
@@ -564,7 +643,7 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
             // func_name is the mangled symbol, which is not what a user wrote - say the declared
             // name instead
             throw _ctx.error(fmt::format(
-                "Function '{}' declares #[intrinsic: \"{}\"], but {}",
+                "Function '{}' declares #[echoc::intrinsic: \"{}\"], but {}",
                 node->func_name(), node->intrinsic.value(), failure
             ));
         }

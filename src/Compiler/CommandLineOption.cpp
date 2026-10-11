@@ -677,6 +677,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
                     "epm is why. It must not re-implement the attribute grammar, and it reads a manifest "
                     "*before* it has fetched anything. Combine this with another --print value and it is "
                     "refused: those other values need a compile."
+                },
+                {
+                    "decls", accepts::compiling, code_of(PrintKind::t_decls),
+                    "declarations as JSON",
+                    "Dump the resolved declarations as JSON after the semantic passes. User modules only, "
+                    "unless --decls-all is also given. Types are structured trees (prim, string, array, "
+                    "map, optional, named, ptr, function). Tool attributes and "
+                    "declaration docblocks are included."
                 }
             },
             nullptr
@@ -875,12 +883,23 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "Print the version this echoc was built as, and exit:\n"
             "  echoc --version",
             {}, nullptr
+        },
+        {
+            Opt::t_decls_all, "decls-all", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_report,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "include dependency declarations in --print decls",
+            "With --print decls, include declarations from every module in the bundle, including "
+            "dependencies and the standard library. Without --print decls it is refused:\n"
+            "  echoc build -p decls --decls-all -o app main.eco",
+            {}, nullptr
         }
     };
 
     // the identity option_for relies on, asserted where the table is built rather than trusted at every
     // lookup. tests/command_line.cpp pins it too, for a release build where this does not run
-    assert(table.size() == static_cast<size_t>(Opt::t_version) + 1 && "an Opt has no row in the table");
+    assert(table.size() == static_cast<size_t>(Opt::t_decls_all) + 1 && "an Opt has no row in the table");
 
     return table;
 }

@@ -1,0 +1,56 @@
+/** adds two numbers */
+#[web::js_name: "add"]
+public function add(int32 $a, int32 $b) : int32
+{
+    return $a + $b;
+}
+
+/** a point in the plane */
+#[web::js_name: "Point"]
+public struct Point
+{
+    #[web::js_name: "x"]
+    public int32 $x;
+
+    public int32 $y;
+
+    constructor(x: int32 $x, y: int32 $y)
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+
+    public function sum() : int32
+    {
+        return $this->x + $this->y;
+    }
+
+    destructor()
+    {
+    }
+}
+
+public enum Color : int32
+{
+    case red = 1;
+    case green = 2;
+}
+
+public interface Drawable
+{
+    function draw() : void;
+}
+
+public function id<T>(T $v) : T
+{
+    return $v;
+}
+
+function takes_ptr(ptr<int32> $p, int32& $n) : void
+{
+}
+
+function maybe(int32? $n) : int32?
+{
+    return $n;
+}

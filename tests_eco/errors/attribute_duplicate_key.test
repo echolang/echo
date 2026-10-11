@@ -1,6 +1,15 @@
 expect: fail
 
 --- OUT --->
+[error] ManifestAttributeInSource  attribute_duplicate_key.eco:3:3
+
+  'cc' is a manifest attribute; it belongs in a module.eco.
+
+  2 | // one that says which of the two can be deleted
+  3 | #[cc: define { WIDTH: 1, WIDTH: 2 }]
+    :   ^^
+  4 | echo 1;
+
 [error] attribute_duplicate_key.eco:3:26
 
   'WIDTH' is written twice in this record.
@@ -10,4 +19,4 @@ expect: fail
     :                          ^^^^^
   4 | echo 1;
 
-1 error, nothing was compiled.
+2 errors, nothing was compiled.

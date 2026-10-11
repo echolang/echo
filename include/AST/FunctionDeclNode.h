@@ -387,6 +387,9 @@ namespace AST
         // the list of attributes that are attached to this function
         AttributeList attributes;
 
+        // the `/** ... */` immediately preceding this declaration, original text, or empty
+        std::string doc_comment;
+
         // A function can be marked as intrinsic, meaning it is implemented in the compiler
         // the string represents the name of the intrinsic function to be called
         // those function must be mapped by the compiler, unknown intrinsic functions will
@@ -403,6 +406,12 @@ namespace AST
             return extern_symbol.has_value();
         }
 
+        // dlsym name of an extern-interface requirement. default is the Echo
+        // name; `function sqlite3_open as open(...)` stores the C symbol here.
+        // not `extern_symbol`: that field makes function_emission_kind
+        // t_extern_symbol and drops the forwarder body
+        std::optional<std::string> abi_link_name;
+
         // `#[export]` / `#[export: "name"]`: this function's symbol is the raw unmangled name
         // (default: its own unqualified name), C ABI. on a wasm row it is also in the module's
         // export section
@@ -412,7 +421,7 @@ namespace AST
         // import *name* is extern_symbol
         std::optional<std::string> import_module;
 
-        // marked `#[builtin: size_of]`: the compiler answers a call to this function directly
+        // marked `#[echoc::builtin: size_of]`: the compiler answers a call to this function directly
         // instead of emitting one. distinct from `intrinsic`, which names an *LLVM* intrinsic and
         // therefore still produces an llvm::Function - a builtin has no symbol at all, and its
         // call sites fold to a constant. the type it is asking about arrives in instantiation_args

@@ -535,7 +535,7 @@ bool Compiler::append_codegen_link_args(
 
     // native library: clang -shared, the same driver CBuild trusts for a loadable
     // object. wasm stays the reactor flag above; the Darwin ld / lld-link fast
-    // path is skipped in Backend::link_executable for this kind
+    // path is skipped in Backend::link_program for this kind
     if (target.is_native_library()) {
         argv.push_back("-shared");
 
