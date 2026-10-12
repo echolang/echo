@@ -87,10 +87,12 @@ namespace Compiler
         std::string &out_error
     );
 
-    // one WASI SDK lookup. WASI_SDK_PATH is a unit; discovery takes the
-    // first complete SDK prefix. Homebrew wasi-libc / wasi-runtimes fill a
-    // leftover sysroot or resource dir. wasm-ld sits next to clang, or on
-    // PATH only when no clang was chosen
+    // one WASI SDK lookup. WASI_SDK_PATH is a closed prefix: no Homebrew fill,
+    // no PATH clang mixed with that sysroot. otherwise discovery takes the first
+    // complete SDK (Unix /opt and Homebrew, Windows next to echoc). Homebrew
+    // wasi-libc / wasi-runtimes fill a leftover sysroot or resource dir only
+    // when WASI_SDK_PATH was not set. wasm-ld sits next to clang, or on PATH
+    // only when no clang was chosen and the prefix was not closed
     struct WasiSdk
     {
         std::filesystem::path sysroot;
@@ -121,8 +123,8 @@ namespace Compiler
         std::string &out_error
     );
 
-    // `-target` / `--sysroot` / `-isysroot` for this row. the dispatcher: WASI
-    // is append_wasi_target_args, everything else is append_apple_target_args.
+    // `-target` / `--sysroot` / `-isysroot` / Windows CRT includes for this row.
+    // the dispatcher is the row's OS: WASI, Darwin/iOS, Windows, else nothing.
     // CBuild and link_program both call this so they cannot disagree about
     // the triple. false with a sentence when a WASI sysroot is not on this machine
     bool append_codegen_target_args(

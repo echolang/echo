@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+
 #include <AST/ASTBundle.h>
 #include <AST/ASTExternInterface.h>
+#include <AST/ASTWasm.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
+#include <Compiler/CodegenTarget.h>
+#include <Compiler/TargetFacts.h>
 
 #include "helpers.h"
 
@@ -70,6 +75,43 @@ TEST_CASE("a user property named like an extern slot is still typechecked", "[ex
         "    Handle $__state;\n"
         "}\n");
     REQUIRE(has_issue_containing(*bundle, "incomplete type"));
+}
+
+TEST_CASE("#[wasm: import] is accepted when facts admit the wasm surface", "[wasm][sema]")
+{
+    Compiler::CompilerOptions options = EchoTests::tests_compiler_options();
+    std::string error;
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "", {}, options.facts, error));
+    REQUIRE(Compiler::resolve_codegen_target(options.facts, false, options.codegen, error));
+
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[wasm: import \"env\"]\n"
+        "extern function host_write(int32 $fd) : void;\n",
+        options);
+    REQUIRE_FALSE(has_issue_containing(*bundle, "#[wasm:]"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "--target-os wasi"));
+}
+
+TEST_CASE("#[wasm: export] stays at file scope when a function follows", "[wasm][attributes]")
+{
+    Compiler::CompilerOptions options = EchoTests::tests_compiler_options();
+    std::string error;
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "", {}, options.facts, error));
+    REQUIRE(Compiler::resolve_codegen_target(options.facts, false, options.codegen, error));
+
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[wasm: export \"memory\"]\n"
+        "#[export]\n"
+        "function f() : void {}\n",
+        options);
+
+    REQUIRE(AST::wasm_exports_memory(*bundle));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "object export is not a function export"));
+
+    auto decls = EchoTests::decls_named(**bundle->modules.begin(), "f");
+    REQUIRE(decls.size() == 1);
+    REQUIRE(decls[0]->attributes.get_first("wasm") == nullptr);
+    REQUIRE(decls[0]->attributes.get_first("export") != nullptr);
 }
 
 TEST_CASE("an exported conformer is refused on a wasm row", "[extern_interface][export]")

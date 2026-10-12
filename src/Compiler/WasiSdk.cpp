@@ -88,13 +88,18 @@ namespace
             return {};
         }
 
+        std::filesystem::path best;
         for (const auto &entry : std::filesystem::directory_iterator(lib_clang, ec)) {
-            if (entry.is_directory(ec) && looks_like_wasi_resource_dir(entry.path())) {
-                return entry.path();
+            if (!entry.is_directory(ec) || !looks_like_wasi_resource_dir(entry.path())) {
+                continue;
+            }
+
+            if (best.empty() || entry.path().filename() > best.filename()) {
+                best = entry.path();
             }
         }
 
-        return {};
+        return best;
     }
 
     const std::filesystem::path k_sdk_prefixes[] = {
@@ -148,10 +153,14 @@ namespace
         }
     }
 
-    void seat_wasm_ld(Compiler::WasiSdk &out)
+    void seat_wasm_ld(Compiler::WasiSdk &out, bool closed)
     {
         if (!out.clang.empty()) {
             out.wasm_ld = tool_in_sdk(out.clang.parent_path().parent_path(), "wasm-ld");
+            return;
+        }
+
+        if (closed) {
             return;
         }
 
@@ -164,14 +173,23 @@ namespace
     Compiler::WasiSdk resolve_wasi_sdk()
     {
         Compiler::WasiSdk out;
+        bool closed = false;
 
-        // WASI_SDK_PATH is a unit: take that prefix and do not scavenge
-        // another full SDK for the columns it left empty
         if (const char *asked = std::getenv("WASI_SDK_PATH"); asked && *asked) {
             out = sdk_from_prefix(asked);
+            closed = true;
         }
         else {
-            for (const std::filesystem::path &prefix : k_sdk_prefixes) {
+            std::vector<std::filesystem::path> prefixes(
+                std::begin(k_sdk_prefixes), std::end(k_sdk_prefixes));
+
+#if defined(_WIN32)
+            const std::filesystem::path dir = Compiler::process_directory();
+            prefixes.insert(prefixes.begin(), dir.parent_path() / "wasi-sdk");
+            prefixes.insert(prefixes.begin(), dir / "wasi-sdk");
+#endif
+
+            for (const std::filesystem::path &prefix : prefixes) {
                 Compiler::WasiSdk candidate = sdk_from_prefix(prefix);
                 if (is_complete_sdk(candidate)) {
                     out = candidate;
@@ -180,8 +198,11 @@ namespace
             }
         }
 
-        fill_split_install(out);
-        seat_wasm_ld(out);
+        if (!closed) {
+            fill_split_install(out);
+        }
+
+        seat_wasm_ld(out, closed);
         return out;
     }
 };
@@ -220,8 +241,14 @@ bool Compiler::append_wasi_target_args(
 {
     const WasiSdk &sdk = wasi_sdk();
     if (sdk.sysroot.empty()) {
-        out_error = "WASI SDK not found. Set WASI_SDK_PATH, or install a WASI SDK "
-            "(/opt/wasi-sdk) or Homebrew wasi-libc";
+        out_error = "WASI SDK not found. Set WASI_SDK_PATH to a complete SDK prefix "
+            "(clang and sysroot together)"
+#if defined(_WIN32)
+            ", or place a wasi-sdk next to echoc"
+#else
+            ", or install /opt/wasi-sdk or Homebrew wasi-sdk"
+#endif
+            ;
         return false;
     }
 

@@ -65,12 +65,17 @@ namespace Compiler
         // false with a sentence in `out_error` when an override names something outside the vocabulary -
         // reported here rather than at the condition, because the mistake is on the command line and a
         // diagnostic pointing at a source file would be blaming the wrong text
+        //
+        // **also the owner of arch implications**: wasi is wasm32, wasm32 requires wasi,
+        // `--ios-device` with no `--target-arch` is arm64. CodegenTarget::resolve_codegen_target
+        // is a pure function of already-settled facts plus `--ios-device`
         static bool resolve(
             const std::string &os_override,
             const std::string &arch_override,
             const std::vector<std::string> &defines,
             TargetFacts &out_facts,
-            std::string &out_error
+            std::string &out_error,
+            bool ios_device = false
         );
 
         // LLVM's triple mapped onto these vocabularies. **the named mapping**, so a test can hand it
@@ -129,10 +134,29 @@ namespace Compiler
         // `echoc test`
         bool tests = false;
 
+        // does this platform have OS threads / loadable libraries? **flags, like tests**, so
+        // `#[if: threads]` / `#[if: dynlib]` are the whole of what a program needs to say.
+        // derived from operating_system at resolve/from_triple: wasi is false for both.
+        // `--define threads` / `--define dynlib` are refused so the compiler is the only writer.
+        // CodegenTarget::has_os_threads / has_unload are the emit-row columns of the same facts
+        bool threads = true;
+        bool dynlib = true;
+
         // is `name` a flag this invocation declared? **false rather than an error when it is not** - a
         // condition has to be able to ask about a flag nobody set, or `#[if: TRACE]` could only ever be
         // written by someone who had already passed `--define TRACE`
         bool has_define(const std::string &name) const;
+
+        // `#[wasm:]` is a wasi-os surface, not an ISA fact. TypeChecker asks this rather than
+        // the emit row, so `echoc lsp --target-os wasi` and `echoc build --target-os wasi` agree
+        bool admits_wasm_surface() const {
+            return operating_system == "wasi";
+        }
+
+        // pointer width a condition-time `usize` should have. wasm32 is 4; everything
+        // else this compiler names is 8. CodegenTarget::pointer_size() is the emit-row
+        // reading of the same question, off the LLVM triple
+        unsigned pointer_size() const;
 
         // `os=darwin;arch=arm64;family=darwin;define=A;define=B;` - everything a condition can see, in
         // one string, for the module cache to fold. family is determined by os and is still here:

@@ -130,7 +130,7 @@ void AbiCodegen::emit_tables()
     }
 
     for (AST::TypeDeclNode *node : module->nodes.of_type<AST::TypeDeclNode>()) {
-        if (node == nullptr || !AST::type_exports_abi_table(*node, _ctx.targeting_wasm())) {
+        if (node == nullptr || !AST::type_exports_abi_table(*node, _ctx.options.codegen.exports_abi_tables())) {
             continue;
         }
 

@@ -44,9 +44,22 @@ namespace
     constexpr const char *k_axis_arch = "arch";
     constexpr const char *k_axis_family = "family";
 
-    // the one flag the compiler sets itself. it reads like any other flag to a condition, and is reserved
+    constexpr const char *k_wasi_os = "wasi";
+    constexpr const char *k_wasi_arch = "wasm32";
+    constexpr const char *k_ios_device_arch = "arm64";
+
+    // flags the compiler sets itself. they read like any other flag to a condition, and are reserved
     // against `--define` for the reason an axis is: writing it would be believing something false
     constexpr const char *k_flag_tests = "tests";
+    constexpr const char *k_flag_threads = "threads";
+    constexpr const char *k_flag_dynlib = "dynlib";
+
+    void apply_capabilities(TargetFacts &facts)
+    {
+        const bool wasi = facts.operating_system == k_wasi_os;
+        facts.threads = !wasi;
+        facts.dynlib = !wasi;
+    }
 
     struct Axis
     {
@@ -237,6 +250,7 @@ TargetFacts TargetFacts::from_triple(const std::string &spelled)
     TargetFacts facts;
     facts.operating_system = operating_system_of(triple);
     facts.architecture = architecture_of(triple);
+    apply_capabilities(facts);
 
     return facts;
 }
@@ -246,7 +260,8 @@ bool TargetFacts::resolve(
     const std::string &arch_override,
     const std::vector<std::string> &defines,
     TargetFacts &out_facts,
-    std::string &out_error
+    std::string &out_error,
+    bool ios_device
 )
 {
     out_facts = from_triple(llvm::sys::getDefaultTargetTriple());
@@ -276,6 +291,25 @@ bool TargetFacts::resolve(
 
         out_facts.architecture = arch_override;
     }
+
+    if (out_facts.operating_system == k_wasi_os) {
+        if (!arch_override.empty() && arch_override != k_wasi_arch) {
+            out_error = fmt::format("wasi is wasm32; --target-arch '{}' is not", arch_override);
+            return false;
+        }
+
+        out_facts.architecture = k_wasi_arch;
+    }
+    else if (out_facts.architecture == k_wasi_arch) {
+        out_error = "wasm32 is only emitted for wasi - pass '--target-os wasi' as well";
+        return false;
+    }
+
+    if (ios_device && arch_override.empty()) {
+        out_facts.architecture = k_ios_device_arch;
+    }
+
+    apply_capabilities(out_facts);
 
     for (const std::string &define : defines) {
         // a define carrying a value would be a substitution, and this compiler has `const` declarations
@@ -312,6 +346,13 @@ bool TargetFacts::resolve(
             return false;
         }
 
+        if (define == k_flag_threads || define == k_flag_dynlib) {
+            out_error = fmt::format(
+                "'{}' is a platform capability, not a flag - write `#[if: {}]` rather than defining it",
+                define, define);
+            return false;
+        }
+
         out_facts.defines.insert(define);
     }
 
@@ -331,7 +372,20 @@ bool TargetFacts::has_define(const std::string &name) const
         return tests;
     }
 
+    if (name == k_flag_threads) {
+        return threads;
+    }
+
+    if (name == k_flag_dynlib) {
+        return dynlib;
+    }
+
     return defines.find(name) != defines.end();
+}
+
+unsigned TargetFacts::pointer_size() const
+{
+    return architecture == k_wasi_arch ? 4u : 8u;
 }
 
 std::string TargetFacts::cache_signature() const
@@ -343,6 +397,8 @@ std::string TargetFacts::cache_signature() const
     // stated either way rather than only when set: a module compiled with its tests holds function bodies a
     // module compiled without them does not, so the two cannot be allowed to share an object
     result += std::string("tests=") + (tests ? "1" : "0") + ";";
+    result += std::string("threads=") + (threads ? "1" : "0") + ";";
+    result += std::string("dynlib=") + (dynlib ? "1" : "0") + ";";
 
     // the set is ordered, so this is stable across two invocations that typed the flags differently
     for (const std::string &define : defines) {

@@ -76,7 +76,7 @@ namespace AST
     std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
 
     // leftover `#[export]`, duplicate names, reserved C names. TypeChecker asks once.
-    // `wasm` is the row types emit a table for
+    // `exports_abi_tables` is CodegenTarget::exports_abi_tables()
     void check_exports(
         Collector &collector,
         Bundle &bundle,
@@ -84,7 +84,7 @@ namespace AST
         std::span<const char *const> reserved_runtime,
         std::string_view reserved_runtime_prefix,
         std::span<const char *const> reserved_wasm_crt,
-        bool wasm
+        bool exports_abi_tables
     );
 
     // the overload set `&name` denotes, re-derived from the node rather than stored - a stored

@@ -43,8 +43,13 @@ namespace AST
     // a file root writes `#[wasm: export "memory"]`
     bool wasm_exports_memory(Bundle &bundle);
 
-    // leftover or misplaced `#[wasm:]`. reports, writes nothing
-    void check_wasm_surface(Collector &collector, Bundle &bundle, bool targeting_wasm);
+    // leftover or misplaced `#[wasm:]`. reports, writes nothing.
+    // `admits_wasm_surface` is TargetFacts::admits_wasm_surface()
+    void check_wasm_surface(Collector &collector, Bundle &bundle, bool admits_wasm_surface);
+
+    // a `#[wasm: export ...]` object export stays at file root rather than
+    // draining onto the next declaration. Parser::drain_attributes asks this
+    bool wasm_export_stays_at_file_scope(const AttributeNode &attribute);
 };
 
 #endif

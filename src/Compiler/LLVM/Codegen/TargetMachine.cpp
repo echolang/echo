@@ -30,14 +30,18 @@ std::unique_ptr<llvm::TargetMachine> Compiler::LLVM::make_target_machine(
     const llvm::CodeGenOptLevel opt_level =
         no_optimize ? llvm::CodeGenOptLevel::None : llvm::CodeGenOptLevel::Default;
 
+    // Echo's floor is `generic`; x86 MC has no such processor. llvm_cpu_name is
+    // the spelling createTargetMachine will not fprintf-and-ignore
+    const std::string mc_cpu = Compiler::llvm_cpu_name(triple, cpu);
+
     llvm::TargetOptions opt;
     const llvm::Reloc::Model reloc = pic ? llvm::Reloc::PIC_ : llvm::Reloc::Static;
 #if LLVM_VERSION_MAJOR >= 21
     std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
-        llvm::Triple(triple), cpu, features, opt, reloc, std::nullopt, opt_level));
+        llvm::Triple(triple), mc_cpu, features, opt, reloc, std::nullopt, opt_level));
 #else
     std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
-        triple, cpu, features, opt, reloc, std::nullopt, opt_level));
+        triple, mc_cpu, features, opt, reloc, std::nullopt, opt_level));
 #endif
 
     if (!machine) {

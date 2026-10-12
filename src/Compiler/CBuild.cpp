@@ -135,7 +135,7 @@ bool c_spec_digest(
     digest = Compiler::fnv1a64(
         Compiler::apple_sdk_root(options.codegen.apple_sdk()).string(), digest);
 
-    if (options.codegen.is_wasm()) {
+    if (options.codegen.is_wasi()) {
         digest = Compiler::fnv1a64(Compiler::wasi_sysroot().string(), digest);
         digest = Compiler::fnv1a64(Compiler::wasi_resource_dir().string(), digest);
     }
@@ -566,9 +566,6 @@ bool Compiler::build_c_sources(
             job.argv.push_back("-fvisibility=hidden");
         }
 
-        if (!options.codegen.is_cross()) {
-            Compiler::append_windows_sysroot_cc_args(job.argv);
-        }
         if (!Compiler::append_codegen_target_args(job.argv, options.codegen, out_error)) {
             return false;
         }
@@ -694,8 +691,9 @@ bool Compiler::build_c_shared_library(
     // fast path exists to speed up - it runs once per module per change, not once per build
     std::vector<std::string> argv = {
         Compiler::cc_driver(CodegenTarget{}), "-shared", "-o", out_library.string() };
-    Compiler::append_windows_sysroot_link_args(argv);
-    Compiler::append_darwin_sdk_args(argv);
+    if (!Compiler::append_codegen_link_args(argv, CodegenTarget{}, false, out_error)) {
+        return false;
+    }
 
     for (const std::filesystem::path &object : objects) {
         argv.push_back(object.string());

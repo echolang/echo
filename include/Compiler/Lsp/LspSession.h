@@ -6,6 +6,7 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTDiagnostic.h"
 #include "AST/ASTFile.h"
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/DriverOptions.h"
 #include "Compiler/Lsp/LspSnapshot.h"
@@ -180,6 +181,7 @@ namespace Compiler
             std::map<std::filesystem::path, Document> _overlay;
 
             Compiler::TargetFacts _facts;
+            Compiler::CodegenTarget _codegen;
             bool _facts_ok = false;
 
             std::vector<Parser::ModuleManifest> _manifests;

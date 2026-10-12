@@ -217,13 +217,13 @@ const ComplexType *TypeChecker::enclosing_type() const
 
 void TypeChecker::run()
 {
-    AST::check_wasm_surface(_collector, _bundle, _options.codegen.is_wasm());
+    AST::check_wasm_surface(_collector, _bundle, _options.facts.admits_wasm_surface());
 
     AST::check_extern_interface_declarations(_collector, _bundle);
 
     AST::check_extern_conformances(_collector, _bundle);
 
-    AST::check_abi_exports(_collector, _bundle, _options.codegen.is_wasm());
+    AST::check_abi_exports(_collector, _bundle, _options.codegen.exports_abi_tables());
 
     const Compiler::ReservedExportNames reserved = _options.codegen.reserved_export_names();
 
@@ -234,7 +234,7 @@ void TypeChecker::run()
         reserved.runtime,
         reserved.runtime_prefix,
         reserved.wasm_crt,
-        _options.codegen.is_wasm());
+        _options.codegen.exports_abi_tables());
 
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();

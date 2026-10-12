@@ -156,6 +156,23 @@ Subtarget baseline_subtarget_for(const std::string &triple)
     return subtarget;
 }
 
+std::string llvm_cpu_name(const std::string &triple, const std::string &cpu)
+{
+    if (cpu != k_generic_cpu) {
+        return cpu;
+    }
+
+    const llvm::Triple parsed(triple);
+    if (parsed.getArch() == llvm::Triple::x86_64) {
+        return "x86-64";
+    }
+    if (parsed.getArch() == llvm::Triple::x86) {
+        return "i686";
+    }
+
+    return cpu;
+}
+
 bool resolve_subtarget(
     const std::string &triple,
     const std::string &cpu_request,
@@ -192,6 +209,17 @@ bool resolve_subtarget(
         out_subtarget.features = features_request;
     }
 
+    // generic is this compiler's floor, not an LLVM CPU name. x86's MC layer
+    // prints "'generic' is not a recognized processor" and continues; clang
+    // wants `x86-64` for the same floor (append_codegen_cc_cpu_args omits the
+    // flag). on a Windows /MT echoc linked against /MD LLVM that fprintf is
+    // STATUS_STACK_BUFFER_OVERRUN (0xC0000409) and GHA logs only exit 1.
+    // an empty CPU string is worse: LLVM reads it as the host CPU.
+    // Backend/TargetMachine still call ensure_targets_for_triple
+    if (out_subtarget.cpu == k_generic_cpu) {
+        return true;
+    }
+
     // **checked against the real target, because LLVM does not refuse.** `createTargetMachine` with a
     // CPU it does not know prints "'x' is not a recognized processor for this target (ignoring
     // processor)" to stderr and builds the object for something else - a warning in a stream nobody
@@ -205,10 +233,6 @@ bool resolve_subtarget(
         return false;
     }
 
-    // the CPU this function already resolved. an empty string is "the host" to
-    // LLVM's MC layer (Subtarget::cpu's own comment): a GHA runner's
-    // getHostCPUName() is not a name we asked for, and on a Windows /MT
-    // release that abort()s as STATUS_STACK_BUFFER_OVERRUN with no diagnostic
     const std::unique_ptr<llvm::MCSubtargetInfo> info(
         target->createMCSubtargetInfo(triple, out_subtarget.cpu, "")
     );

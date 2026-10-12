@@ -70,13 +70,13 @@ TEST_CASE("type_exports_abi_table is export plus an extern conformance", "[exter
     REQUIRE(english != nullptr);
     REQUIRE(plain != nullptr);
     REQUIRE(orphan != nullptr);
-    REQUIRE(AST::type_exports_abi_table(*english, false));
-    REQUIRE_FALSE(AST::type_exports_abi_table(*english, true));
-    REQUIRE_FALSE(AST::type_exports_abi_table(*plain, false));
-    REQUIRE_FALSE(AST::type_exports_abi_table(*orphan, false));
-    REQUIRE(AST::abi_table_export_refusal(*orphan, false).has_value());
-    REQUIRE_FALSE(AST::abi_table_export_refusal(*english, false).has_value());
-    REQUIRE(AST::abi_table_export_refusal(*english, true).has_value());
+    REQUIRE(AST::type_exports_abi_table(*english, true));
+    REQUIRE_FALSE(AST::type_exports_abi_table(*english, false));
+    REQUIRE_FALSE(AST::type_exports_abi_table(*plain, true));
+    REQUIRE_FALSE(AST::type_exports_abi_table(*orphan, true));
+    REQUIRE(AST::abi_table_export_refusal(*orphan, true).has_value());
+    REQUIRE_FALSE(AST::abi_table_export_refusal(*english, true).has_value());
+    REQUIRE(AST::abi_table_export_refusal(*english, false).has_value());
 }
 
 TEST_CASE("abi fingerprint moves when a requirement name changes", "[extern_interface][abi]")

@@ -107,13 +107,14 @@ uint64_t AST::abi_fingerprint(const ComplexType &ct)
     return hash;
 }
 
-bool AST::type_exports_abi_table(const TypeDeclNode &node, bool wasm)
+bool AST::type_exports_abi_table(const TypeDeclNode &node, bool exports_abi_tables)
 {
     return node.attributes.get_first("export") != nullptr
-        && !abi_table_export_refusal(node, wasm).has_value();
+        && !abi_table_export_refusal(node, exports_abi_tables).has_value();
 }
 
-std::optional<std::string> AST::abi_table_export_refusal(const TypeDeclNode &node, bool wasm)
+std::optional<std::string> AST::abi_table_export_refusal(
+    const TypeDeclNode &node, bool exports_abi_tables)
 {
     const AttributeNode *export_attr = node.attributes.get_first("export");
 
@@ -132,14 +133,14 @@ std::optional<std::string> AST::abi_table_export_refusal(const TypeDeclNode &nod
             "an 'export' on a type cannot take a name - the table is named from the interface");
     }
 
-    if (wasm) {
+    if (!exports_abi_tables) {
         return std::string("cannot export an extern-interface table from a wasm module");
     }
 
     return std::nullopt;
 }
 
-void AST::check_abi_exports(Collector &collector, Bundle &bundle, bool wasm)
+void AST::check_abi_exports(Collector &collector, Bundle &bundle, bool exports_abi_tables)
 {
     for (auto &module_ptr : bundle.modules) {
         Module &module = *module_ptr;
@@ -155,7 +156,7 @@ void AST::check_abi_exports(Collector &collector, Bundle &bundle, bool wasm)
                 continue;
             }
 
-            if (auto refusal = abi_table_export_refusal(*node, wasm)) {
+            if (auto refusal = abi_table_export_refusal(*node, exports_abi_tables)) {
                 collector.collect_issue<Issue::GenericError>(
                     CodeRef { &module, export_attr->attribute_id.make_slice() },
                     *refusal);

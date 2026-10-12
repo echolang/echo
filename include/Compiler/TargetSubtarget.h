@@ -24,9 +24,10 @@ namespace Compiler
     // branch does - start choosing instruction sets.
     struct Subtarget
     {
-        // never empty: the resolver's floor is "generic", which is what LLVM itself means by "the
-        // baseline this triple guarantees". an empty string is a *different* thing to LLVM's JIT than
-        // to its TargetMachine, and one of them auto-detects the host
+        // never empty: the resolver's floor is "generic", Echo's name for the baseline this
+        // triple guarantees. an empty string is a *different* thing to LLVM's JIT than to its
+        // TargetMachine, and one of them auto-detects the host. `generic` is this compiler's
+        // floor, not every LLVM table's CPU name - llvm_cpu_name is the spelling those APIs take
         std::string cpu;
 
         // `+feature,-feature,...`. empty except wasm32, which carries `+simd128` so a
@@ -43,6 +44,13 @@ namespace Compiler
     // which is long before the backend exists. One owner, so the two cannot register different sets
     void ensure_native_target_registered();
     void ensure_targets_for_triple(const std::string &triple);
+
+    // **the CPU string LLVM's TargetMachine / MC / EngineBuilder accept.** Echo's floor is
+    // `generic`; x86's table has no such processor (`x86-64` / `i686` are clang's spellings).
+    // passing `generic` into createMCSubtargetInfo is the fprintf that becomes
+    // STATUS_STACK_BUFFER_OVERRUN on a Windows /MT echoc linked against /MD LLVM. Subtarget.cpu
+    // stays `generic` so the cache key does not grow an LLVM dialect
+    std::string llvm_cpu_name(const std::string &triple, const std::string &cpu);
 
     // **the platform baseline for a triple** - the default, and neither `generic` nor the host.
     //

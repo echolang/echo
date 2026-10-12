@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Compiler/CodegenTarget.h"
+#include "Compiler/TargetFacts.h"
 
 #include <string>
 
@@ -97,6 +98,11 @@ namespace Compiler
         // the triple or the SDK. the CPU *inside* the triple stays a request above,
         // resolved twice
         CodegenTarget codegen;
+
+        // **what a condition and TypeChecker see**, settled by TargetFacts::resolve.
+        // TypeChecker asks facts.admits_wasm_surface() for `#[wasm:]` rather than the
+        // emit row, so lsp and build agree when `--target-os wasi` is set
+        TargetFacts facts;
 
         // file-root `#[wasm: export "memory"]`, copied from the bundle after typecheck.
         // a program fact, not a column of the emit row: the triple does not change, and

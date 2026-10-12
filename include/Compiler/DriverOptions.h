@@ -80,7 +80,8 @@ namespace Compiler
         unsigned timeout_ms = 0;
 
         // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what
-        // they mean for `#[if:]`. Compiler::resolve_codegen_target is the owner of what they emit
+        // they mean for `#[if:]` (including wasi→wasm32 and `--ios-device`→arm64).
+        // Compiler::resolve_codegen_target is the owner of what they emit
         std::string target_os;
         std::string target_arch;
 
@@ -88,7 +89,7 @@ namespace Compiler
         // not the simulator. false is the default and the simulator. not a fact a
         // condition can see - Compiler::CodegenTarget is the emission half. it does
         // imply arm64 for facts when `--target-arch` was not stated, via
-        // Compiler::facts_architecture, so a condition cannot still see the host arch.
+        // TargetFacts::resolve, so a condition cannot still see the host arch.
         // wasi is the same door: facts are wasm32 on every subcommand
         bool ios_device = false;
 

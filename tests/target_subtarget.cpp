@@ -43,6 +43,26 @@ TEST_CASE("wasm32-unknown-wasip1 resolves as generic", "[target]")
     REQUIRE(error.empty());
 }
 
+TEST_CASE("the x86_64 Windows host row resolves as generic without asking LLVM MC", "[target]")
+{
+    Compiler::Subtarget subtarget;
+    std::string error;
+
+    REQUIRE(Compiler::resolve_subtarget("x86_64-pc-windows-msvc", "", "", subtarget, error));
+    REQUIRE(subtarget.cpu == "generic");
+    REQUIRE(error.empty());
+}
+
+TEST_CASE("generic is spelled x86-64 for LLVM's x86_64 MC layer", "[target]")
+{
+    REQUIRE(Compiler::llvm_cpu_name("x86_64-pc-windows-msvc", "generic") == "x86-64");
+    REQUIRE(Compiler::llvm_cpu_name("x86_64-unknown-linux-gnu", "generic") == "x86-64");
+    REQUIRE(Compiler::llvm_cpu_name("i686-pc-windows-msvc", "generic") == "i686");
+    REQUIRE(Compiler::llvm_cpu_name("wasm32-unknown-wasip1", "generic") == "generic");
+    REQUIRE(Compiler::llvm_cpu_name("arm64-apple-macosx", "generic") == "generic");
+    REQUIRE(Compiler::llvm_cpu_name("x86_64-pc-windows-msvc", "haswell") == "haswell");
+}
+
 TEST_CASE("C compile cpu flags come from append_codegen_cc_cpu_args", "[target]")
 {
     const Compiler::CodegenTarget target = Compiler::CodegenTarget::wasi();

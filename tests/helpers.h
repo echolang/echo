@@ -8,6 +8,7 @@
 #include <AST/ASTBundle.h>
 #include <AST/ExprNode.h>
 #include <Compiler/CompilerOptions.h>
+#include <Compiler/TargetFacts.h>
 
 #include <memory>
 #include <string>
@@ -41,6 +42,7 @@ namespace EchoTests
     inline Compiler::CompilerOptions tests_compiler_options() {
         Compiler::CompilerOptions options;
         options.track_allocations = true;
+        options.facts = Compiler::TargetFacts::host();
         return options;
     }
 

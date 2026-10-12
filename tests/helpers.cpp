@@ -2,6 +2,7 @@
 
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
+#include <AST/ASTValueType.h>
 #include <Compiler/ParsePipeline.h>
 
 #include "helpers.h"
@@ -78,7 +79,10 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
         .collector = bundle->collector
     };
 
-    auto module_parser = Parser::ModuleParser(Compiler::TargetFacts::host());
+    const Compiler::TargetFacts &facts = options.facts.operating_system.empty()
+        ? Compiler::TargetFacts::host() : options.facts;
+    AST::PointerSizeScope pointer_size(options.codegen.pointer_size());
+    auto module_parser = Parser::ModuleParser(facts);
     module_parser.parse_input(input);
 
     run_test_semantic_passes(*bundle, options);

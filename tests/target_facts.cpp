@@ -177,3 +177,69 @@ TEST_CASE("axis_equals matches family independently of the specific os", "[targe
     REQUIRE(facts.axis_equals("os", "darwin", matched, error));
     REQUIRE_FALSE(matched);
 }
+
+TEST_CASE("wasi implies wasm32 and wasm32 requires wasi", "[target]")
+{
+    Compiler::TargetFacts facts;
+    std::string error;
+
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "", {}, facts, error));
+    REQUIRE(facts.operating_system == "wasi");
+    REQUIRE(facts.architecture == "wasm32");
+    REQUIRE(facts.pointer_size() == 4);
+    REQUIRE(facts.admits_wasm_surface());
+    REQUIRE_FALSE(facts.threads);
+    REQUIRE_FALSE(facts.dynlib);
+    REQUIRE(facts.has_define("threads") == false);
+    REQUIRE(facts.has_define("dynlib") == false);
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("linux", "wasm32", {}, facts, error));
+    REQUIRE(error.find("wasm32 is only emitted for wasi") != std::string::npos);
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("wasi", "arm64", {}, facts, error));
+    REQUIRE(error.find("wasi is wasm32") != std::string::npos);
+}
+
+TEST_CASE("host facts have threads and dynlib", "[target]")
+{
+    const Compiler::TargetFacts host = Compiler::TargetFacts::host();
+    if (host.operating_system != "wasi") {
+        REQUIRE(host.threads);
+        REQUIRE(host.dynlib);
+        REQUIRE(host.has_define("threads"));
+        REQUIRE(host.has_define("dynlib"));
+        REQUIRE_FALSE(host.admits_wasm_surface());
+        REQUIRE(host.pointer_size() == 8);
+    }
+}
+
+TEST_CASE("resolve refuses --define threads because threads is a capability", "[target]")
+{
+    Compiler::TargetFacts facts;
+    std::string error;
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("", "", { "threads" }, facts, error));
+    REQUIRE(error.find("platform capability") != std::string::npos);
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("", "", { "dynlib" }, facts, error));
+    REQUIRE(error.find("platform capability") != std::string::npos);
+}
+
+TEST_CASE("cache_signature folds threads and dynlib", "[target]")
+{
+    Compiler::TargetFacts facts;
+    facts.operating_system = "linux";
+    facts.architecture = "arm64";
+    facts.threads = true;
+    facts.dynlib = true;
+
+    const std::string with = facts.cache_signature();
+    REQUIRE(with.find("threads=1;") != std::string::npos);
+    REQUIRE(with.find("dynlib=1;") != std::string::npos);
+
+    facts.threads = false;
+    facts.dynlib = false;
+    const std::string without = facts.cache_signature();
+    REQUIRE(without.find("threads=0;") != std::string::npos);
+    REQUIRE(without != with);
+}

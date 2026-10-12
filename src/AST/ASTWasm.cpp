@@ -29,10 +29,10 @@ void report_wasm_clause(
     const AST::Module &module,
     const AST::AttributeNode &attr,
     const AST::WasmClause &clause,
-    bool targeting_wasm
+    bool admits_wasm_surface
 )
 {
-    if (!targeting_wasm) {
+    if (!admits_wasm_surface) {
         collector.collect_issue<AST::Issue::GenericError>(
             attr_ref(module, attr),
             "a '#[wasm:]' attribute is for '--target-os wasi'");
@@ -55,12 +55,12 @@ void report_leftover_import(
     const AST::Module &module,
     const AST::AttributeNode &attr,
     const AST::WasmClause &clause,
-    bool targeting_wasm
+    bool admits_wasm_surface
 )
 {
-    report_wasm_clause(collector, module, attr, clause, targeting_wasm);
+    report_wasm_clause(collector, module, attr, clause, admits_wasm_surface);
 
-    if (targeting_wasm && !clause.refusal.has_value()
+    if (admits_wasm_surface && !clause.refusal.has_value()
         && clause.kind == AST::WasmClauseKind::t_import) {
         collector.collect_issue<AST::Issue::GenericError>(
             attr_ref(module, attr),
@@ -117,6 +117,12 @@ std::optional<AST::WasmClause> AST::wasm_clause_of(const AttributeNode &attribut
     return out;
 }
 
+bool AST::wasm_export_stays_at_file_scope(const AttributeNode &attribute)
+{
+    const std::optional<WasmClause> clause = wasm_clause_of(attribute);
+    return clause.has_value() && clause->kind == WasmClauseKind::t_export;
+}
+
 std::optional<std::string> AST::wasm_import_module_of(const FunctionDeclNode &decl)
 {
     if (!decl.is_extern()) {
@@ -156,7 +162,7 @@ bool AST::wasm_exports_memory(Bundle &bundle)
     return false;
 }
 
-void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targeting_wasm)
+void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool admits_wasm_surface)
 {
     for (auto &module_ptr : bundle.modules) {
         Module &module = *module_ptr;
@@ -176,7 +182,7 @@ void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targetin
                     continue;
                 }
 
-                report_leftover_import(collector, module, *attr, *clause, targeting_wasm);
+                report_leftover_import(collector, module, *attr, *clause, admits_wasm_surface);
             }
         }
 
@@ -193,9 +199,9 @@ void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targetin
                 continue;
             }
 
-            report_wasm_clause(collector, module, *attr, *clause, targeting_wasm);
+            report_wasm_clause(collector, module, *attr, *clause, admits_wasm_surface);
 
-            if (!targeting_wasm || clause->refusal.has_value()) {
+            if (!admits_wasm_surface || clause->refusal.has_value()) {
                 continue;
             }
 
@@ -223,7 +229,7 @@ void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targetin
                 continue;
             }
 
-            report_wasm_clause(collector, module, *wasm_attr, *clause, targeting_wasm);
+            report_wasm_clause(collector, module, *wasm_attr, *clause, admits_wasm_surface);
 
             if (clause->refusal.has_value()) {
                 continue;
@@ -233,7 +239,7 @@ void AST::check_wasm_surface(Collector &collector, Bundle &bundle, bool targetin
                 continue;
             }
 
-            if (!targeting_wasm) {
+            if (!admits_wasm_surface) {
                 continue;
             }
 

@@ -101,7 +101,14 @@ namespace Compiler
             return _pointer_bytes;
         }
 
+        // wasm ISA (wasm32 / wasm64), read off the triple. PIC, bitcode snapshots,
+        // `.wasm` suffix, and LLVM `wasm-export-name` follow this. WASI ABI facts
+        // go through `is_wasi()` / `os()`
         bool is_wasm() const {
+            return _wasm_arch;
+        }
+
+        bool is_wasi() const {
             return _os == TargetOs::t_wasi;
         }
 
@@ -123,7 +130,13 @@ namespace Compiler
         }
 
         bool is_native_library() const {
-            return is_library() && !is_wasm();
+            return is_library() && has_unload();
+        }
+
+        // native extern-interface tables. wasm has none; TypeChecker asks this
+        // rather than a `bool wasm` threaded through AST
+        bool exports_abi_tables() const {
+            return !is_wasm();
         }
 
         // 3 on native (argc, argv, envp), 2 on wasi (argc, argv)
@@ -136,10 +149,7 @@ namespace Compiler
         EnvironSource environ_source() const;
         StdioUnbuffering stdio_unbuffering() const;
 
-        bool has_unload() const {
-            return !is_wasm();
-        }
-
+        bool has_unload() const;
         bool uses_pic() const;
 
         bool c_objects_use_fpic() const {
@@ -153,9 +163,7 @@ namespace Compiler
         std::string library_file_name(const std::string &stem) const;
         std::filesystem::path output_path(std::filesystem::path path) const;
 
-        bool has_os_threads() const {
-            return !is_wasm();
-        }
+        bool has_os_threads() const;
 
     private:
         CodegenTarget(std::string triple, std::string apple_sdk);
@@ -164,6 +172,7 @@ namespace Compiler
         std::string _apple_sdk;
         ExecModel _exec_model = ExecModel::t_command;
         TargetOs _os = TargetOs::t_other;
+        bool _wasm_arch = false;
         unsigned _pointer_bytes = 8;
     };
 
@@ -175,27 +184,20 @@ namespace Compiler
     {
         switch (row.exec_model()) {
             case ExecModel::t_command: return "cmd";
-            case ExecModel::t_library: return row.is_wasm() ? "reactor" : "lib";
+            case ExecModel::t_library: return row.is_wasi() ? "reactor" : "lib";
         }
 
         assert(false && "unhandled ExecModel in exec_model_environment");
         return "cmd";
     }
 
-    // `--target-arch` as TargetFacts::resolve should see it. wasi is wasm32 on every subcommand
-    bool facts_architecture(
-        bool ios_device,
-        const std::string &arch_override,
-        const std::string &target_os,
-        std::string &out_arch,
-        std::string &out_error
-    );
-
-    // what `build` emits. `run` / `test` / `clean` / `lsp` keep the host row
+    // what this invocation emits, from already-settled facts plus `--ios-device`.
+    // arch implications (wasi is wasm32, ios-device is arm64) live on TargetFacts::resolve.
+    // `build` and analysis paths (lsp, emit-only OS) fill a row; `run` / `test` keep the
+    // host row so `--target-os ios` stays a facts-only look at another platform's branch
     bool resolve_codegen_target(
         const TargetFacts &facts,
         bool ios_device,
-        const std::string &arch_override,
         CodegenTarget &out_target,
         std::string &out_error);
 };

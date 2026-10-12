@@ -311,10 +311,16 @@ std::string Compiler::host_clang()
 
 std::string Compiler::cc_driver(const CodegenTarget &target)
 {
-    if (target.is_wasm()) {
+    if (target.is_wasi()) {
         const std::filesystem::path clang = wasi_sdk().clang;
         if (!clang.empty()) {
             return clang.string();
+        }
+
+        // sysroot without a clang in the same prefix: do not mix PATH clang
+        // with a scavenged wasi-libc
+        if (!wasi_sdk().sysroot.empty()) {
+            return {};
         }
     }
 
@@ -508,11 +514,20 @@ bool Compiler::append_codegen_target_args(
     std::string &out_error
 )
 {
-    if (target.is_wasm()) {
+    if (target.is_wasi()) {
         return append_wasi_target_args(argv, target, out_error);
     }
 
-    return append_apple_target_args(argv, target, out_error);
+    if (target.is_darwin()) {
+        return append_apple_target_args(argv, target, out_error);
+    }
+
+    if (target.is_windows()) {
+        append_windows_sysroot_cc_args(argv);
+        return true;
+    }
+
+    return true;
 }
 
 bool Compiler::append_codegen_link_args(
@@ -529,7 +544,7 @@ bool Compiler::append_codegen_link_args(
 
     // clang turns this into `wasm-ld ... crt1-reactor.o --entry _initialize`. a C
     // compile must not see it: CBuild reuses append_codegen_target_args
-    if (target.is_wasm() && target.is_library()) {
+    if (target.is_wasi() && target.is_library()) {
         argv.push_back("-mexec-model=reactor");
     }
 
@@ -560,6 +575,10 @@ bool Compiler::append_codegen_link_args(
                 argv.push_back("-Wl,-Bsymbolic-functions");
             }
         }
+    }
+
+    if (target.is_windows()) {
+        append_windows_sysroot_link_args(argv);
     }
 
     if (target.is_wasm() && export_memory) {

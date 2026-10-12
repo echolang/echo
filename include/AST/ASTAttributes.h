@@ -74,13 +74,16 @@ namespace AST
         bool compiler_attributes_allowed
     );
 
-    // which declaration an attribute landed on. asked at the drain
+    // which declaration an attribute landed on. asked at the drain.
+    // t_file is the file root: a `#[wasm: export "memory"]` object export stays
+    // there rather than draining onto the next function
     enum class AttributeSite
     {
         t_function,
         t_type,
         t_property,
-        t_test
+        t_test,
+        t_file
     };
 
     // empty when this name may sit here, otherwise the sentence

@@ -252,7 +252,7 @@ bool Backend::prepare_execution()
             .setErrorStr(&errorStr)
             .setEngineKind(llvm::EngineKind::JIT)
             .setTargetOptions(opts)
-            .setMCPU(sub.cpu)
+            .setMCPU(Compiler::llvm_cpu_name(_ctx.target_triple, sub.cpu))
             .setMAttrs(attributes)
             .create();
 
@@ -606,11 +606,6 @@ bool Backend::link_program(
 
     std::vector<std::string> fallback = {
         Compiler::cc_driver(_ctx.options.codegen), "-o", executable_name };
-    // Windows CRT/sysroot flags are a host fact. a wasm clang line already
-    // carries `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` from the row
-    if (!_ctx.options.codegen.is_cross()) {
-        Compiler::append_windows_sysroot_link_args(fallback);
-    }
     std::string target_error;
     if (!Compiler::append_codegen_link_args(
             fallback,
@@ -625,14 +620,11 @@ bool Backend::link_program(
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     for (const std::string &word : link_words) {
-#if defined(_WIN32)
-        // same skip host_linker_command makes: UCRT already has libm, and
-        // clang turning `-lm` into m.lib is a missing-library error. a cross
-        // still wants `-lm` (wasi-libc has it)
-        if (!_ctx.options.codegen.is_cross() && word == "-lm") {
+        // UCRT already has libm; clang turning `-lm` into m.lib is a
+        // missing-library error. a wasi row still wants `-lm` (wasi-libc)
+        if (_ctx.options.codegen.is_windows() && word == "-lm") {
             continue;
         }
-#endif
         fallback.push_back(word);
     }
 

@@ -23,7 +23,7 @@ TEST_CASE("ios-device without --target-os ios is refused", "[target]")
     std::string error;
 
     REQUIRE(Compiler::TargetFacts::resolve("", "", {}, facts, error));
-    REQUIRE_FALSE(Compiler::resolve_codegen_target(facts, true, "", target, error));
+    REQUIRE_FALSE(Compiler::resolve_codegen_target(facts, true, target, error));
     REQUIRE(error.find("--target-os ios") != std::string::npos);
     REQUIRE_FALSE(target.is_cross());
 }
@@ -35,7 +35,7 @@ TEST_CASE("linux target-os stays the host triple even on build", "[target]")
     std::string error;
 
     REQUIRE(Compiler::TargetFacts::resolve("linux", "", {}, facts, error));
-    REQUIRE(Compiler::resolve_codegen_target(facts, false, "", target, error));
+    REQUIRE(Compiler::resolve_codegen_target(facts, false, target, error));
     REQUIRE_FALSE(target.is_cross());
     REQUIRE(target.triple().empty());
     REQUIRE(target.apple_sdk().empty());
@@ -48,7 +48,7 @@ TEST_CASE("ios build on Darwin is the simulator on this arch", "[target]")
     std::string error;
 
     REQUIRE(Compiler::TargetFacts::resolve("ios", "", {}, facts, error));
-    REQUIRE(Compiler::resolve_codegen_target(facts, false, "", target, error));
+    REQUIRE(Compiler::resolve_codegen_target(facts, false, target, error));
 
 #if defined(__APPLE__)
     REQUIRE(target.is_cross());
@@ -67,7 +67,7 @@ TEST_CASE("ios-device on Darwin is iphoneos arm64", "[target]")
     std::string error;
 
     REQUIRE(Compiler::TargetFacts::resolve("ios", "", {}, facts, error));
-    const bool resolved = Compiler::resolve_codegen_target(facts, true, "", target, error);
+    const bool resolved = Compiler::resolve_codegen_target(facts, true, target, error);
 
 #if defined(__APPLE__)
     REQUIRE(resolved);
@@ -87,7 +87,7 @@ TEST_CASE("ios-device with a non-arm64 arch override is refused", "[target]")
     std::string error;
 
     REQUIRE(Compiler::TargetFacts::resolve("ios", "x86_64", {}, facts, error));
-    const bool resolved = Compiler::resolve_codegen_target(facts, true, "x86_64", target, error);
+    const bool resolved = Compiler::resolve_codegen_target(facts, true, target, error);
 
 #if defined(__APPLE__)
     REQUIRE_FALSE(resolved);
@@ -100,15 +100,15 @@ TEST_CASE("ios-device with a non-arm64 arch override is refused", "[target]")
 
 namespace
 {
-    // the arch facts_architecture settles, or "refused: <sentence>"
+    // the arch TargetFacts::resolve settles, or "refused: <sentence>"
     std::string facts_arch(bool ios_device, const std::string &arch, const std::string &os = {})
     {
-        std::string out;
+        Compiler::TargetFacts facts;
         std::string error;
-        if (!Compiler::facts_architecture(ios_device, arch, os, out, error)) {
+        if (!Compiler::TargetFacts::resolve(os, arch, {}, facts, error, ios_device)) {
             return "refused: " + error;
         }
-        return out;
+        return facts.architecture;
     }
 }
 
@@ -117,7 +117,7 @@ TEST_CASE("ios-device with no arch override is arm64 for facts too", "[target]")
     REQUIRE(facts_arch(true, "") == "arm64");
     REQUIRE(facts_arch(true, "arm64") == "arm64");
     REQUIRE(facts_arch(true, "x86_64") == "x86_64");
-    REQUIRE(facts_arch(false, "").empty());
+    REQUIRE(facts_arch(false, "") == Compiler::TargetFacts::host().architecture);
     REQUIRE(facts_arch(false, "x86_64") == "x86_64");
 
     Compiler::TargetFacts facts;
@@ -128,7 +128,7 @@ TEST_CASE("ios-device with no arch override is arm64 for facts too", "[target]")
     REQUIRE(facts.architecture == "arm64");
 
     Compiler::CodegenTarget target;
-    const bool resolved = Compiler::resolve_codegen_target(facts, true, "", target, error);
+    const bool resolved = Compiler::resolve_codegen_target(facts, true, target, error);
 
 #if defined(__APPLE__)
     REQUIRE(resolved);
@@ -155,9 +155,10 @@ TEST_CASE("wasi build is a real cross to wasm32-wasip1", "[target]")
     REQUIRE(facts.operating_system == "wasi");
     REQUIRE(facts.family() == "wasi");
     REQUIRE(facts.architecture == "wasm32");
-    REQUIRE(Compiler::resolve_codegen_target(facts, false, "wasm32", target, error));
+    REQUIRE(Compiler::resolve_codegen_target(facts, false, target, error));
     REQUIRE(target.is_cross());
     REQUIRE(target.is_wasm());
+    REQUIRE(target.is_wasi());
     REQUIRE(target.triple() == "wasm32-unknown-wasip1");
     REQUIRE(target.apple_sdk().empty());
     REQUIRE(target.pointer_size() == 4);
@@ -180,15 +181,43 @@ TEST_CASE("output_path appends the row suffix to a suffix-less name", "[target]"
     REQUIRE(target.output_path("hello.exe") == std::filesystem::path("hello.exe"));
 }
 
-TEST_CASE("host output_path is suffix-less except Windows .exe", "[target]")
+TEST_CASE("append_codegen_target_args dispatches on the row OS", "[target]")
 {
-    Compiler::CodegenTarget target;
+    std::string error;
+
+    std::vector<std::string> windows_argv;
+    const Compiler::CodegenTarget windows =
+        Compiler::CodegenTarget::for_triple("x86_64-pc-windows-msvc");
+    REQUIRE(Compiler::append_codegen_target_args(windows_argv, windows, error));
 #if defined(_WIN32)
-    REQUIRE(target.output_path("hello") == std::filesystem::path("hello.exe"));
-    REQUIRE(target.output_path("hello.exe") == std::filesystem::path("hello.exe"));
+    REQUIRE(std::find(windows_argv.begin(), windows_argv.end(), "-fms-runtime-lib=static")
+        != windows_argv.end());
 #else
-    REQUIRE(target.output_path("hello") == std::filesystem::path("hello"));
+    REQUIRE(std::find(windows_argv.begin(), windows_argv.end(), "-fms-runtime-lib=static")
+        == windows_argv.end());
 #endif
+
+    std::vector<std::string> linux_argv;
+    const Compiler::CodegenTarget linux =
+        Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
+    REQUIRE(Compiler::append_codegen_target_args(linux_argv, linux, error));
+    REQUIRE(std::find(linux_argv.begin(), linux_argv.end(), "-fms-runtime-lib=static")
+        == linux_argv.end());
+    REQUIRE(std::find(linux_argv.begin(), linux_argv.end(), "-isysroot") == linux_argv.end());
+}
+
+TEST_CASE("a command's suffix is the row's OS, not this process", "[target]")
+{
+    const Compiler::CodegenTarget windows =
+        Compiler::CodegenTarget::for_triple("x86_64-pc-windows-msvc");
+    REQUIRE(std::string(windows.output_extension()) == ".exe");
+    REQUIRE(windows.output_path("hello") == std::filesystem::path("hello.exe"));
+    REQUIRE(windows.output_path("hello.exe") == std::filesystem::path("hello.exe"));
+
+    const Compiler::CodegenTarget linux =
+        Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
+    REQUIRE(linux.output_extension()[0] == '\0');
+    REQUIRE(linux.output_path("hello") == std::filesystem::path("hello"));
 }
 
 // a row's columns are read off its triple when it is built
@@ -197,7 +226,15 @@ TEST_CASE("a row reads its os and pointer width off its triple", "[target]")
     const Compiler::CodegenTarget wasi = Compiler::CodegenTarget::wasi();
     REQUIRE(wasi.os() == Compiler::TargetOs::t_wasi);
     REQUIRE(wasi.is_wasm());
+    REQUIRE(wasi.is_wasi());
     REQUIRE(wasi.pointer_size() == 4);
+
+    const Compiler::CodegenTarget unknown_wasm =
+        Compiler::CodegenTarget::for_triple("wasm32-unknown-unknown");
+    REQUIRE(unknown_wasm.is_wasm());
+    REQUIRE_FALSE(unknown_wasm.is_wasi());
+    REQUIRE_FALSE(unknown_wasm.has_os_threads());
+    REQUIRE_FALSE(unknown_wasm.has_unload());
 
     const Compiler::CodegenTarget device = Compiler::CodegenTarget::ios_device();
     REQUIRE(device.os() == Compiler::TargetOs::t_ios);
@@ -207,6 +244,7 @@ TEST_CASE("a row reads its os and pointer width off its triple", "[target]")
 
     const Compiler::CodegenTarget host;
     REQUIRE_FALSE(host.is_wasm());
+    REQUIRE_FALSE(host.is_wasi());
     REQUIRE(host.pointer_size() == ECO_TARGET_POINTER_SIZE);
 }
 
@@ -243,7 +281,11 @@ TEST_CASE("host row keeps main and pic", "[target]")
     REQUIRE(target.entry_arg_count() == 3);
     REQUIRE(target.uses_pic());
     REQUIRE(target.snapshots_bitcode());
+#if defined(_WIN32)
+    REQUIRE(std::string(target.output_extension()) == ".exe");
+#else
     REQUIRE(target.output_extension()[0] == '\0');
+#endif
     REQUIRE(target.has_os_threads());
 }
 

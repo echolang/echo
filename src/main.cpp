@@ -115,20 +115,14 @@ static bool resolve_target_facts(
 )
 {
     std::string error;
-    std::string arch;
-
-    if (!Compiler::facts_architecture(
-            driver.ios_device, driver.target_arch, driver.target_os, arch, error)) {
-        diagnostics.render_untyped("Invalid Target", error);
-        return false;
-    }
 
     if (!Compiler::TargetFacts::resolve(
             driver.target_os,
-            arch,
+            driver.target_arch,
             driver.defines,
             out,
-            error)) {
+            error,
+            driver.ios_device)) {
         diagnostics.render_untyped("Invalid Target", error);
         return false;
     }
@@ -1246,16 +1240,16 @@ static bool resolve_invocation(
         return false;
     }
 
-    // `build` is the only subcommand that emits objects, so it is the only one that fills a row.
-    // `run` / `test` keep the default-empty CodegenTarget (the host), which is what keeps
-    // `--target-os ios` a facts-only look at another platform's branch
-    if (driver.subcommand == Compiler::Subcommand::t_build) {
+    // `build` emits objects, so it always fills a row. emit-only OSes (wasi) fill a row
+    // on every analysis path so `usize` and `#[wasm:]` match `build`. `run` / `test`
+    // keep the host row, which is what keeps `--target-os ios` a facts-only look
+    if (driver.subcommand == Compiler::Subcommand::t_build
+        || Compiler::TargetFacts::is_emit_only_operating_system(out.target_facts.operating_system)) {
         std::string error;
 
         if (!Compiler::resolve_codegen_target(
                 out.target_facts,
                 driver.ios_device,
-                driver.target_arch,
                 out.codegen,
                 error)) {
             diagnostics.render_untyped("Invalid Target", error);
@@ -1353,6 +1347,7 @@ static bool run_front_end(
     // passes. the row is the Program's: resolve_programs already set exec_model on it
     out.options = driver.options;
     out.options.codegen = program.codegen;
+    out.options.facts = invocation.target_facts;
 
     out.pointer_size.emplace(out.options.codegen.pointer_size());
 
@@ -1980,11 +1975,8 @@ int main_run(
         report_cache_plan(
             driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
 
-#if defined(_WIN32)
-        const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run.exe";
-#else
-        const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run";
-#endif
+        const std::filesystem::path runner = Compiler::CodegenTarget{}.output_path(
+            front.layout().scratch_dir() / "eco_run");
 
         if (const std::optional<int> failed = compile_and_link_program(
                 driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program)) {
@@ -2198,7 +2190,7 @@ int main_test(
         driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
         /*bypassed=*/true);
 
-    runner = front.layout().scratch_dir() / "eco_tests.exe";
+    runner = Compiler::CodegenTarget{}.output_path(front.layout().scratch_dir() / "eco_tests");
 
     if (const std::optional<int> failed = compile_and_link_program(
             driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},

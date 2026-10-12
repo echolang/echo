@@ -364,7 +364,7 @@ void AST::check_exports(
     std::span<const char *const> reserved_runtime,
     std::string_view reserved_runtime_prefix,
     std::span<const char *const> reserved_wasm_crt,
-    bool wasm
+    bool exports_abi_tables
 )
 {
     const std::string export_without_declaration = fmt::format(
@@ -408,7 +408,8 @@ void AST::check_exports(
         }
 
         for (TypeDeclNode *node : module.nodes.of_type<TypeDeclNode>()) {
-            if (node == nullptr || !type_exports_abi_table(*node, wasm) || !node->name_token.has_value()) {
+            if (node == nullptr || !type_exports_abi_table(*node, exports_abi_tables)
+                || !node->name_token.has_value()) {
                 continue;
             }
 

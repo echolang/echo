@@ -25,10 +25,12 @@ static constexpr const char *k_wasi_os = "wasi";
 
 namespace
 {
-    // the os column, from a triple. asked when a row is built
+    // the os column, from a triple. asked when a row is built.
+    // WASI uses isOSWASI, the same predicate TargetFacts::operating_system_of uses;
+    // wasm ISA is a separate column (_wasm_arch)
     TargetOs os_of(const llvm::Triple &triple)
     {
-        if (triple.isWasm()) {
+        if (triple.isOSWASI()) {
             return TargetOs::t_wasi;
         }
 
@@ -66,6 +68,7 @@ CodegenTarget::CodegenTarget(std::string triple, std::string apple_sdk)
 {
     const llvm::Triple parsed(effective_triple());
     _os = os_of(parsed);
+    _wasm_arch = parsed.isWasm();
     _pointer_bytes = parsed.isArch32Bit() ? 4 : 8;
 }
 
@@ -107,22 +110,22 @@ std::optional<const char *> CodegenTarget::entry_symbol() const
         return std::nullopt;
     }
 
-    return is_wasm() ? k_entry_wasi[1] : ECO_ENTRY_SYMBOL_NAME;
+    return is_wasi() ? k_entry_wasi[1] : ECO_ENTRY_SYMBOL_NAME;
 }
 
 ReservedExportNames CodegenTarget::reserved_export_names() const
 {
     ReservedExportNames out;
 
-    // wasm command: `__main_argc_argv`. everything else: `main`
-    out.entry = is_wasm() && !is_library()
+    // wasi command: `__main_argc_argv`. everything else: `main`
+    out.entry = is_wasi() && !is_library()
         ? std::span<const char *const>(k_entry_wasi)
         : std::span<const char *const>(k_entry_main);
 
     out.runtime = reserved_c_export_names();
     out.runtime_prefix = k_compiler_runtime_prefix;
 
-    if (is_wasm()) {
+    if (is_wasi()) {
         out.wasm_crt = wasm_crt_names();
     }
 
@@ -131,7 +134,7 @@ ReservedExportNames CodegenTarget::reserved_export_names() const
 
 unsigned CodegenTarget::entry_arg_count() const
 {
-    return is_wasm() ? 2u : 3u;
+    return is_wasi() ? 2u : 3u;
 }
 
 EnvironSource CodegenTarget::environ_source() const
@@ -164,6 +167,36 @@ StdioUnbuffering CodegenTarget::stdio_unbuffering() const
     return StdioUnbuffering::t_none;
 }
 
+bool CodegenTarget::has_unload() const
+{
+    switch (_os) {
+        case TargetOs::t_wasi: return false;
+        case TargetOs::t_darwin:
+        case TargetOs::t_ios:
+        case TargetOs::t_linux:
+        case TargetOs::t_windows: return true;
+        case TargetOs::t_other: return !is_wasm();
+    }
+
+    assert(false && "unhandled TargetOs in has_unload");
+    return !is_wasm();
+}
+
+bool CodegenTarget::has_os_threads() const
+{
+    switch (_os) {
+        case TargetOs::t_wasi: return false;
+        case TargetOs::t_darwin:
+        case TargetOs::t_ios:
+        case TargetOs::t_linux:
+        case TargetOs::t_windows: return true;
+        case TargetOs::t_other: return !is_wasm();
+    }
+
+    assert(false && "unhandled TargetOs in has_os_threads");
+    return !is_wasm();
+}
+
 bool CodegenTarget::uses_pic() const
 {
     return !is_wasm();
@@ -171,7 +204,7 @@ bool CodegenTarget::uses_pic() const
 
 bool CodegenTarget::snapshots_bitcode() const
 {
-    // wasm stays in this LLVMContext. a Windows-hosted round-trip failure is
+    // wasm ISA stays in this LLVMContext. a Windows-hosted round-trip failure is
     // Emit.cpp's: a fact about this process, not this row
     return !is_wasm();
 }
@@ -197,11 +230,18 @@ const char *CodegenTarget::output_extension() const
         return ".wasm";
     }
 
-    if (!is_library()) {
-        return "";
+    if (is_library()) {
+        return library_suffix();
     }
 
-    return library_suffix();
+    // a Windows *command*, not "this process is Windows". a Linux-hosted
+    // `for_triple("x86_64-pc-windows-msvc")` still names an .exe, and a
+    // Windows-hosted Linux row does not
+    if (is_windows()) {
+        return ".exe";
+    }
+
+    return "";
 }
 
 std::string CodegenTarget::library_file_name(const std::string &stem) const
@@ -237,51 +277,14 @@ std::filesystem::path CodegenTarget::output_path(std::filesystem::path path) con
     const char *ext = output_extension();
     if (ext[0] != '\0') {
         path += ext;
-        return path;
     }
 
-#if defined(_WIN32)
-    path += ".exe";
-#endif
     return path;
-}
-
-bool facts_architecture(
-    bool ios_device,
-    const std::string &arch_override,
-    const std::string &target_os,
-    std::string &out_arch,
-    std::string &out_error)
-{
-    out_arch = arch_override;
-
-    if (target_os == k_wasi_os) {
-        // an explicit `--target-arch arm64` would emit a module that is not wasm
-        if (!arch_override.empty() && arch_override != k_wasi_arch) {
-            out_error = fmt::format("wasi is wasm32; --target-arch '{}' is not", arch_override);
-            return false;
-        }
-
-        out_arch = k_wasi_arch;
-        return true;
-    }
-
-    if (arch_override == k_wasi_arch) {
-        out_error = "wasm32 is only emitted for wasi - pass '--target-os wasi' as well";
-        return false;
-    }
-
-    if (ios_device && arch_override.empty()) {
-        out_arch = k_ios_device_arch;
-    }
-
-    return true;
 }
 
 bool resolve_codegen_target(
     const TargetFacts &facts,
     bool ios_device,
-    const std::string &arch_override,
     CodegenTarget &out_target,
     std::string &out_error)
 {
@@ -301,17 +304,15 @@ bool resolve_codegen_target(
         }
 
         // device is arm64; an explicit `--target-arch x86_64` would emit a phone
-        // that does not exist. host x86_64 without the flag still becomes arm64
-        // below - the phone's arch, not this machine's. facts_architecture is
-        // the matching half, so a condition sees arm64 too
-        if (!arch_override.empty() && arch_override != k_ios_device_arch) {
+        // that does not exist. TargetFacts::resolve already filled arm64 when
+        // the flag was omitted, so a condition sees the phone's arch too
+        if (!facts.architecture.empty() && facts.architecture != k_ios_device_arch) {
             out_error = fmt::format(
-                "--ios-device is arm64; --target-arch '{}' is not a phone", arch_override);
+                "--ios-device is arm64; --target-arch '{}' is not a phone", facts.architecture);
             return false;
         }
     }
 
-    // facts_architecture already refused any arch but wasm32 beside wasi
     if (facts.operating_system == k_wasi_os) {
         out_target = CodegenTarget::wasi();
         return true;
