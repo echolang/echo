@@ -117,12 +117,6 @@ std::optional<AST::WasmClause> AST::wasm_clause_of(const AttributeNode &attribut
     return out;
 }
 
-bool AST::wasm_export_stays_at_file_scope(const AttributeNode &attribute)
-{
-    const std::optional<WasmClause> clause = wasm_clause_of(attribute);
-    return clause.has_value() && clause->kind == WasmClauseKind::t_export;
-}
-
 std::optional<std::string> AST::wasm_import_module_of(const FunctionDeclNode &decl)
 {
     if (!decl.is_extern()) {

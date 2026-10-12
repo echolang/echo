@@ -27,9 +27,9 @@ namespace
     //   export      FuncDeclParser  -> FunctionDeclNode::export_name, AST::check_exports.
     //               on a type that answers an extern interface: AST::type_exports_abi_table,
     //               AST::check_abi_exports, AbiCodegen::emit_tables
-    //   wasm        FuncDeclParser drains `#[wasm: import]` onto an extern function;
-    //               a `#[wasm: export]` object export stays at file root (t_file) via
-    //               AST::wasm_export_stays_at_file_scope. AST::check_wasm_surface reports.
+    //   wasm        FuncDeclParser drains `#[wasm: import]` onto an extern function.
+    //               a `#[wasm: export]` object export is planted off the drain stack
+    //               by AttributeParser. AST::check_wasm_surface reports.
     constexpr unsigned site_bit(AST::AttributeSite site)
     {
         return 1u << static_cast<unsigned>(site);
@@ -38,7 +38,6 @@ namespace
     constexpr unsigned k_on_function = site_bit(AST::AttributeSite::t_function);
     constexpr unsigned k_on_type = site_bit(AST::AttributeSite::t_type);
     constexpr unsigned k_on_test = site_bit(AST::AttributeSite::t_test);
-    constexpr unsigned k_on_file = site_bit(AST::AttributeSite::t_file);
 
     struct DeclarationAttribute
     {
@@ -54,7 +53,7 @@ namespace
         { "group",    k_on_test },
         { "tests",    k_on_test },
         { "export",   k_on_function | k_on_type },
-        { "wasm",     k_on_function | k_on_file },
+        { "wasm",     k_on_function },
     };
 
     // the compiler's private contract with its stdlib. one spelling, used by every lookup and
@@ -128,7 +127,6 @@ namespace
             case AST::AttributeSite::t_type: return "a type";
             case AST::AttributeSite::t_property: return "a property";
             case AST::AttributeSite::t_test: return "a test";
-            case AST::AttributeSite::t_file: return "file scope";
         }
 
         assert(false && "unhandled AttributeSite in site_noun");
@@ -139,9 +137,8 @@ namespace
     std::string site_list(unsigned sites)
     {
         std::vector<std::string_view> nouns;
-        for (AST::AttributeSite site : { AST::AttributeSite::t_function, AST::AttributeSite::t_file,
-                                         AST::AttributeSite::t_type, AST::AttributeSite::t_property,
-                                         AST::AttributeSite::t_test }) {
+        for (AST::AttributeSite site : { AST::AttributeSite::t_function, AST::AttributeSite::t_type,
+                                         AST::AttributeSite::t_property, AST::AttributeSite::t_test }) {
             if ((sites & site_bit(site)) != 0) {
                 nouns.push_back(site_noun(site));
             }

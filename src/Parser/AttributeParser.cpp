@@ -5,6 +5,7 @@
 
 #include "AST/ASTAttributes.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTWasm.h"
 
 #include <fmt/format.h>
 
@@ -162,13 +163,19 @@ AST::AttributeNode *Parser::parse_attribute(
     }
 
     // a type body shares the file-root ScopeNode, so "child of file.root" is not "written at file
-    // scope". AST::check_wasm_surface and wasm_exports_memory read this. a wasm object export
-    // still goes on the drain stack; drain_attributes leaves it pending via
-    // AST::wasm_export_stays_at_file_scope so `#[export] function f()` cannot take it
+    // scope". AST::check_wasm_surface and wasm_exports_memory read `written_at_file_scope`.
+    // a wasm object export is planted off the drain stack: every later drain would otherwise
+    // have to notice it and put it back, and `discard_attributes` would drop it
     const auto seat_attribute = [&](AST::AttributeNode &node) {
         node.written_at_file_scope = payload.context.self_struct_ptr == nullptr
             && payload.context.current_function_ptr == nullptr
             && payload.context.scope().is_root();
+
+        if (const std::optional<AST::WasmClause> clause = AST::wasm_clause_of(node);
+            clause.has_value() && clause->kind == AST::WasmClauseKind::t_export) {
+            payload.context.scope().plant_attribute(node);
+            return;
+        }
 
         payload.context.scope().add_attribute(node);
     };

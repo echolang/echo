@@ -112,7 +112,9 @@ namespace Compiler
     std::filesystem::path wasi_wasm_ld();
 
     // the clang that compiles C objects and drives the link for this row.
-    // a WASI SDK's clang when the row is wasm and one is installed, else PATH
+    // a WASI row uses the SDK clang. empty when that row has a sysroot and no
+    // clang beside it: PATH clang must not be mixed with a scavenged wasi-libc.
+    // append_wasi_target_args is the sentence for that case
     std::string cc_driver(const CodegenTarget &target);
 
     // `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` for a WASI row. false with a

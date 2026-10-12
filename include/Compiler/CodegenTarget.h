@@ -129,6 +129,7 @@ namespace Compiler
             return _exec_model == ExecModel::t_library;
         }
 
+        // a loadable native image. wasm has no dlclose, so a wasm library is not one
         bool is_native_library() const {
             return is_library() && has_unload();
         }
@@ -149,7 +150,12 @@ namespace Compiler
         EnvironSource environ_source() const;
         StdioUnbuffering stdio_unbuffering() const;
 
-        bool has_unload() const;
+        // false for every wasm ISA, not only wasi. a switch on OS would say yes for a
+        // wasm triple LLVM still classifies as linux
+        bool has_unload() const {
+            return !is_wasm();
+        }
+
         bool uses_pic() const;
 
         bool c_objects_use_fpic() const {
@@ -163,7 +169,9 @@ namespace Compiler
         std::string library_file_name(const std::string &stem) const;
         std::filesystem::path output_path(std::filesystem::path path) const;
 
-        bool has_os_threads() const;
+        bool has_os_threads() const {
+            return !is_wasm();
+        }
 
     private:
         CodegenTarget(std::string triple, std::string apple_sdk);

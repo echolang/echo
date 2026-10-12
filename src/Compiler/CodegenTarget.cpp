@@ -167,36 +167,6 @@ StdioUnbuffering CodegenTarget::stdio_unbuffering() const
     return StdioUnbuffering::t_none;
 }
 
-bool CodegenTarget::has_unload() const
-{
-    switch (_os) {
-        case TargetOs::t_wasi: return false;
-        case TargetOs::t_darwin:
-        case TargetOs::t_ios:
-        case TargetOs::t_linux:
-        case TargetOs::t_windows: return true;
-        case TargetOs::t_other: return !is_wasm();
-    }
-
-    assert(false && "unhandled TargetOs in has_unload");
-    return !is_wasm();
-}
-
-bool CodegenTarget::has_os_threads() const
-{
-    switch (_os) {
-        case TargetOs::t_wasi: return false;
-        case TargetOs::t_darwin:
-        case TargetOs::t_ios:
-        case TargetOs::t_linux:
-        case TargetOs::t_windows: return true;
-        case TargetOs::t_other: return !is_wasm();
-    }
-
-    assert(false && "unhandled TargetOs in has_os_threads");
-    return !is_wasm();
-}
-
 bool CodegenTarget::uses_pic() const
 {
     return !is_wasm();
@@ -211,6 +181,12 @@ bool CodegenTarget::snapshots_bitcode() const
 
 const char *CodegenTarget::library_suffix() const
 {
+    // the ISA, not the OS column. wasm32-unknown-unknown is t_other and would
+    // otherwise be named like an ELF shared object
+    if (is_wasm()) {
+        return ".wasm";
+    }
+
     switch (_os) {
         case TargetOs::t_wasi: return ".wasm";
         case TargetOs::t_darwin: return ".dylib";

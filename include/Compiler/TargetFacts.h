@@ -134,13 +134,15 @@ namespace Compiler
         // `echoc test`
         bool tests = false;
 
-        // does this platform have OS threads / loadable libraries? **flags, like tests**, so
-        // `#[if: threads]` / `#[if: dynlib]` are the whole of what a program needs to say.
-        // derived from operating_system at resolve/from_triple: wasi is false for both.
+        // does this platform have OS threads / loadable libraries? **derived from
+        // operating_system, like family()**, so assigning `operating_system = "wasi"`
+        // cannot leave a stale true. wasi is false for both. `#[if: threads]` /
+        // `#[if: dynlib]` are the whole of what a program needs to say.
         // `--define threads` / `--define dynlib` are refused so the compiler is the only writer.
-        // CodegenTarget::has_os_threads / has_unload are the emit-row columns of the same facts
-        bool threads = true;
-        bool dynlib = true;
+        // CodegenTarget::has_os_threads / has_unload answer the same question off the emit row,
+        // and they are false for every wasm ISA
+        bool threads() const;
+        bool dynlib() const;
 
         // is `name` a flag this invocation declared? **false rather than an error when it is not** - a
         // condition has to be able to ask about a flag nobody set, or `#[if: TRACE]` could only ever be

@@ -79,10 +79,15 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
         .collector = bundle->collector
     };
 
-    const Compiler::TargetFacts &facts = options.facts.operating_system.empty()
-        ? Compiler::TargetFacts::host() : options.facts;
+    // an options object that never settled facts still parses against the host.
+    // written back onto `options` so the parser and the type checker see one row:
+    // the fallback used to apply only to the parser
+    if (options.facts.operating_system.empty()) {
+        options.facts = Compiler::TargetFacts::host();
+    }
+
     AST::PointerSizeScope pointer_size(options.codegen.pointer_size());
-    auto module_parser = Parser::ModuleParser(facts);
+    auto module_parser = Parser::ModuleParser(options.facts);
     module_parser.parse_input(input);
 
     run_test_semantic_passes(*bundle, options);

@@ -188,8 +188,8 @@ TEST_CASE("wasi implies wasm32 and wasm32 requires wasi", "[target]")
     REQUIRE(facts.architecture == "wasm32");
     REQUIRE(facts.pointer_size() == 4);
     REQUIRE(facts.admits_wasm_surface());
-    REQUIRE_FALSE(facts.threads);
-    REQUIRE_FALSE(facts.dynlib);
+    REQUIRE_FALSE(facts.threads());
+    REQUIRE_FALSE(facts.dynlib());
     REQUIRE(facts.has_define("threads") == false);
     REQUIRE(facts.has_define("dynlib") == false);
 
@@ -204,8 +204,8 @@ TEST_CASE("host facts have threads and dynlib", "[target]")
 {
     const Compiler::TargetFacts host = Compiler::TargetFacts::host();
     if (host.operating_system != "wasi") {
-        REQUIRE(host.threads);
-        REQUIRE(host.dynlib);
+        REQUIRE(host.threads());
+        REQUIRE(host.dynlib());
         REQUIRE(host.has_define("threads"));
         REQUIRE(host.has_define("dynlib"));
         REQUIRE_FALSE(host.admits_wasm_surface());
@@ -230,16 +230,15 @@ TEST_CASE("cache_signature folds threads and dynlib", "[target]")
     Compiler::TargetFacts facts;
     facts.operating_system = "linux";
     facts.architecture = "arm64";
-    facts.threads = true;
-    facts.dynlib = true;
 
     const std::string with = facts.cache_signature();
     REQUIRE(with.find("threads=1;") != std::string::npos);
     REQUIRE(with.find("dynlib=1;") != std::string::npos);
 
-    facts.threads = false;
-    facts.dynlib = false;
+    // capabilities follow the os. assigning the field is the whole of the change
+    facts.operating_system = "wasi";
     const std::string without = facts.cache_signature();
     REQUIRE(without.find("threads=0;") != std::string::npos);
+    REQUIRE(without.find("dynlib=0;") != std::string::npos);
     REQUIRE(without != with);
 }

@@ -538,7 +538,14 @@ bool Compiler::append_codegen_link_args(
     const std::string &output_path
 )
 {
-    if (!append_codegen_target_args(argv, target, out_error)) {
+    // compile -isystem directories do not belong on a link line, and the Windows
+    // link helper already carries the CRT flag those compile args also set.
+    // calling both doubled -fms-runtime-lib=static and pasted the include set
+    // onto the link
+    if (target.is_windows()) {
+        append_windows_sysroot_link_args(argv);
+    }
+    else if (!append_codegen_target_args(argv, target, out_error)) {
         return false;
     }
 
@@ -575,10 +582,6 @@ bool Compiler::append_codegen_link_args(
                 argv.push_back("-Wl,-Bsymbolic-functions");
             }
         }
-    }
-
-    if (target.is_windows()) {
-        append_windows_sysroot_link_args(argv);
     }
 
     if (target.is_wasm() && export_memory) {

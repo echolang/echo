@@ -8,7 +8,6 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTAttributes.h"
 #include "AST/ASTBuiltin.h"
-#include "AST/ASTWasm.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTOperatorSemantics.h"
@@ -461,11 +460,6 @@ void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into
 {
     // each pass emplaces its own AttributeNode. AttributeList::get_first and collector dedup cover it
     for (auto &attr : payload.context.scope().collect_attributes()) {
-        if (attr != nullptr && AST::wasm_export_stays_at_file_scope(*attr)) {
-            payload.context.scope().restore_pending_attribute(*attr);
-            continue;
-        }
-
         if (attr != nullptr) {
             Parser::check_attribute_site(payload, *attr, site);
         }

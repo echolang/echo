@@ -252,6 +252,15 @@ bool Compiler::append_wasi_target_args(
         return false;
     }
 
+    // a scavenged wasi-libc sysroot plus PATH clang is how a host libc object
+    // used to be linked into a wasm module. cc_driver refuses that mix by
+    // returning no program; this is the sentence, before anything is spawned
+    if (sdk.clang.empty()) {
+        out_error = "WASI sysroot has no clang in the same prefix. Set WASI_SDK_PATH "
+            "to a complete SDK (clang and sysroot together), not a wasi-libc checkout";
+        return false;
+    }
+
     if (sdk.wasm_ld.empty()) {
         out_error = "no wasm-ld next to the clang driving this WASI build. "
             "Install a WASI SDK and set WASI_SDK_PATH so clang and wasm-ld sit in the same bin/";

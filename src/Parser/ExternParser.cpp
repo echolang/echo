@@ -1,7 +1,5 @@
 #include "Parser/ExternParser.h"
 
-#include "AST/ASTWasm.h"
-
 #include "Parser/AttributeParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/OpaqueDeclParser.h"
@@ -28,15 +26,8 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
     // attributes written ahead of the block belong to every function in it. drain them here,
     // before the `{`, so the first function cannot silently take them all: `#[wasm: import "env"]
     // extern { a; b; }` used to attach to `a` only because that function drained the stack
-    std::vector<AST::AttributeNode *> block_attributes;
-    for (AST::AttributeNode *attr : payload.context.scope().collect_attributes()) {
-        if (attr != nullptr && AST::wasm_export_stays_at_file_scope(*attr)) {
-            payload.context.scope().restore_pending_attribute(*attr);
-            continue;
-        }
-
-        block_attributes.push_back(attr);
-    }
+    std::vector<AST::AttributeNode *> block_attributes =
+        payload.context.scope().collect_attributes();
 
     // ask once here, not once per function that receives a copy
     for (AST::AttributeNode *attr : block_attributes) {

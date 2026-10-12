@@ -206,6 +206,25 @@ TEST_CASE("append_codegen_target_args dispatches on the row OS", "[target]")
     REQUIRE(std::find(linux_argv.begin(), linux_argv.end(), "-isysroot") == linux_argv.end());
 }
 
+TEST_CASE("a windows link line carries the CRT flag once", "[target]")
+{
+    std::string error;
+    std::vector<std::string> argv;
+    const Compiler::CodegenTarget windows =
+        Compiler::CodegenTarget::for_triple("x86_64-pc-windows-msvc");
+    REQUIRE(Compiler::append_codegen_link_args(argv, windows, false, error));
+
+    const auto crt_flags = std::count(
+        argv.begin(), argv.end(), std::string("-fms-runtime-lib=static"));
+#if defined(_WIN32)
+    REQUIRE(crt_flags == 1);
+    REQUIRE(std::find(argv.begin(), argv.end(), "-fuse-ld=lld") != argv.end());
+    REQUIRE(std::find(argv.begin(), argv.end(), "-isystem") == argv.end());
+#else
+    REQUIRE(crt_flags == 0);
+#endif
+}
+
 TEST_CASE("a command's suffix is the row's OS, not this process", "[target]")
 {
     const Compiler::CodegenTarget windows =
@@ -235,6 +254,8 @@ TEST_CASE("a row reads its os and pointer width off its triple", "[target]")
     REQUIRE_FALSE(unknown_wasm.is_wasi());
     REQUIRE_FALSE(unknown_wasm.has_os_threads());
     REQUIRE_FALSE(unknown_wasm.has_unload());
+    REQUIRE(std::string(unknown_wasm.library_suffix()) == ".wasm");
+    REQUIRE(unknown_wasm.library_file_name("greeter") == "greeter.wasm");
 
     const Compiler::CodegenTarget device = Compiler::CodegenTarget::ios_device();
     REQUIRE(device.os() == Compiler::TargetOs::t_ios);

@@ -54,13 +54,6 @@ namespace
     constexpr const char *k_flag_threads = "threads";
     constexpr const char *k_flag_dynlib = "dynlib";
 
-    void apply_capabilities(TargetFacts &facts)
-    {
-        const bool wasi = facts.operating_system == k_wasi_os;
-        facts.threads = !wasi;
-        facts.dynlib = !wasi;
-    }
-
     struct Axis
     {
         const char *name;
@@ -250,7 +243,6 @@ TargetFacts TargetFacts::from_triple(const std::string &spelled)
     TargetFacts facts;
     facts.operating_system = operating_system_of(triple);
     facts.architecture = architecture_of(triple);
-    apply_capabilities(facts);
 
     return facts;
 }
@@ -308,8 +300,6 @@ bool TargetFacts::resolve(
     if (ios_device && arch_override.empty()) {
         out_facts.architecture = k_ios_device_arch;
     }
-
-    apply_capabilities(out_facts);
 
     for (const std::string &define : defines) {
         // a define carrying a value would be a substitution, and this compiler has `const` declarations
@@ -373,14 +363,24 @@ bool TargetFacts::has_define(const std::string &name) const
     }
 
     if (name == k_flag_threads) {
-        return threads;
+        return threads();
     }
 
     if (name == k_flag_dynlib) {
-        return dynlib;
+        return dynlib();
     }
 
     return defines.find(name) != defines.end();
+}
+
+bool TargetFacts::threads() const
+{
+    return operating_system != k_wasi_os;
+}
+
+bool TargetFacts::dynlib() const
+{
+    return operating_system != k_wasi_os;
 }
 
 unsigned TargetFacts::pointer_size() const
@@ -397,8 +397,10 @@ std::string TargetFacts::cache_signature() const
     // stated either way rather than only when set: a module compiled with its tests holds function bodies a
     // module compiled without them does not, so the two cannot be allowed to share an object
     result += std::string("tests=") + (tests ? "1" : "0") + ";";
-    result += std::string("threads=") + (threads ? "1" : "0") + ";";
-    result += std::string("dynlib=") + (dynlib ? "1" : "0") + ";";
+    // derived from os, and still spelled out: changing which os has threads must miss
+    // the old object without a manual cache version bump, the same reason family is here
+    result += std::string("threads=") + (threads() ? "1" : "0") + ";";
+    result += std::string("dynlib=") + (dynlib() ? "1" : "0") + ";";
 
     // the set is ordered, so this is stable across two invocations that typed the flags differently
     for (const std::string &define : defines) {

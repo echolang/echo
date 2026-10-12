@@ -81,11 +81,6 @@ void AST::ScopeNode::plant_attribute(AST::AttributeNode &attribute)
 void AST::ScopeNode::add_attribute(AST::AttributeNode &attribute)
 {
     plant_attribute(attribute);
-    restore_pending_attribute(attribute);
-}
-
-void AST::ScopeNode::restore_pending_attribute(AST::AttributeNode &attribute)
-{
     _attribute_stack.push_back(&attribute);
 }
 
