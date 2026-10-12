@@ -413,7 +413,7 @@ namespace
     {
         static const std::filesystem::path dir = [] {
             const Compiler::CapturedProcess printed =
-                Compiler::run_captured({ Compiler::cc_driver(Compiler::CodegenTarget{}), "-print-resource-dir" });
+                Compiler::run_captured({ Compiler::host_clang(), "-print-resource-dir" });
 
             if (printed.exit_code == 0) {
                 const std::string root = trim_right(printed.output);

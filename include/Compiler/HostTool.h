@@ -10,7 +10,7 @@
 
 namespace Compiler
 {
-    struct CodegenTarget;
+    class CodegenTarget;
 
     // **the sole way echoc runs another program**, and the whole of what one costs a caller.
     //

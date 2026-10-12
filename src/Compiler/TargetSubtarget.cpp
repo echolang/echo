@@ -4,6 +4,8 @@
 #include <llvm/ADT/StringMap.h>
 #include <llvm/MC/MCSubtargetInfo.h>
 #include <llvm/MC/TargetRegistry.h>
+#include <llvm/Support/ErrorHandling.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
@@ -11,6 +13,7 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -79,6 +82,17 @@ void ensure_native_target_registered()
     // a function-local static rather than the raw calls: llvm's own registration is idempotent, but
     // "has this happened yet" is a question two callers would otherwise each answer their own way
     static const bool registered = [] {
+        // LLVM's default handler fprintf()s and abort()s. on a Windows /MT
+        // echoc linked against /MD LLVM that mix is STATUS_STACK_BUFFER_OVERRUN
+        // (0xC0000409) and GHA logs only "Process completed with exit code 1".
+        // here, not main: --version must not touch LLVM, and this is the first
+        // call every compile makes. _Exit so abort() cannot swallow the sentence
+        llvm::install_fatal_error_handler([](void *, const char *reason, bool) {
+            llvm::errs() << "LLVM fatal error: " << (reason != nullptr ? reason : "") << "\n";
+            llvm::errs().flush();
+            std::_Exit(1);
+        });
+
         llvm::InitializeNativeTarget();
         llvm::InitializeNativeTargetAsmPrinter();
         llvm::InitializeNativeTargetAsmParser();
@@ -191,11 +205,12 @@ bool resolve_subtarget(
         return false;
     }
 
-    // built with **no** CPU and asked about ours afterwards. Handing it the name is how you get LLVM's
-    // own answer, which is the warning this exists to replace - printed to stderr underneath whatever
-    // else is on it, and followed by an object built for something the person did not ask for
+    // the CPU this function already resolved. an empty string is "the host" to
+    // LLVM's MC layer (Subtarget::cpu's own comment): a GHA runner's
+    // getHostCPUName() is not a name we asked for, and on a Windows /MT
+    // release that abort()s as STATUS_STACK_BUFFER_OVERRUN with no diagnostic
     const std::unique_ptr<llvm::MCSubtargetInfo> info(
-        target->createMCSubtargetInfo(triple, "", "")
+        target->createMCSubtargetInfo(triple, out_subtarget.cpu, "")
     );
 
     if (!info || !info->isCPUStringValid(out_subtarget.cpu)) {

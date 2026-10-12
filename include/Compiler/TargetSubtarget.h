@@ -8,7 +8,7 @@
 
 namespace Compiler
 {
-    struct CodegenTarget;
+    class CodegenTarget;
 
     // **the sole answer to "which CPU is the backend compiling for".**
     //
