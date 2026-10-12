@@ -127,7 +127,7 @@ bool Backend::prepare_execution()
         return true;
     }
 
-    Compiler::ensure_native_target_registered();
+    Compiler::ensure_targets_for_triple(_ctx.target_triple);
 
     auto main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {

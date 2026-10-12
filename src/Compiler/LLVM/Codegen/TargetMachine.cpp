@@ -19,7 +19,7 @@ std::unique_ptr<llvm::TargetMachine> Compiler::LLVM::make_target_machine(
     std::string &error
 )
 {
-    Compiler::ensure_native_target_registered();
+    Compiler::ensure_targets_for_triple(triple);
 
     auto *target = llvm::TargetRegistry::lookupTarget(triple, error);
 

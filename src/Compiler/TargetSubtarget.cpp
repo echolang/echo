@@ -97,8 +97,25 @@ void ensure_native_target_registered()
         LLVMInitializeX86AsmPrinter();
         LLVMInitializeX86AsmParser();
 #endif
-        // wasi is a real cross on every host. CodegenTarget names
-        // `wasm32-unknown-wasip1`; without these, lookupTarget refuses it
+        return true;
+    }();
+
+    (void)registered;
+}
+
+void ensure_targets_for_triple(const std::string &triple)
+{
+    ensure_native_target_registered();
+
+    // wasi is a real cross on every host. CodegenTarget names
+    // `wasm32-unknown-wasip1`; without these, lookupTarget refuses it.
+    // a host compile does not need them, and initializing them in a
+    // Windows /MT release binary is the first extra LLVM work `build` did
+    if (!llvm::Triple(triple).isWasm()) {
+        return;
+    }
+
+    static const bool wasm_registered = [] {
         LLVMInitializeWebAssemblyTargetInfo();
         LLVMInitializeWebAssemblyTarget();
         LLVMInitializeWebAssemblyTargetMC();
@@ -107,7 +124,7 @@ void ensure_native_target_registered()
         return true;
     }();
 
-    (void)registered;
+    (void)wasm_registered;
 }
 
 Subtarget baseline_subtarget_for(const std::string &triple)
@@ -165,7 +182,7 @@ bool resolve_subtarget(
     // CPU it does not know prints "'x' is not a recognized processor for this target (ignoring
     // processor)" to stderr and builds the object for something else - a warning in a stream nobody
     // reads and a silently different binary
-    ensure_native_target_registered();
+    ensure_targets_for_triple(triple);
 
     std::string lookup_error;
     const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, lookup_error);

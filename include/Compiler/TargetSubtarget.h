@@ -35,13 +35,14 @@ namespace Compiler
         std::string features;
     };
 
-    // **LLVM targets this compile may name, registered.** Native always; WebAssembly always, because
-    // CodegenTarget can name `wasm32-unknown-wasip1` on every host; on Darwin also AArch64 and
-    // X86, because CodegenTarget can name `arm64-apple-ios15.0` on an Intel Mac and
+    // **LLVM targets this compile may name, registered.** Native always; WebAssembly only when
+    // the triple is wasm, so a host compile does not register a target it will not emit; on Darwin
+    // also AArch64 and X86, because CodegenTarget can name `arm64-apple-ios15.0` on an Intel Mac and
     // `x86_64-apple-ios15.0-simulator` on Apple Silicon. Idempotent, and here rather than left implicit
     // in Backend::init_target because the CPU a person wrote has to be checked at the command line,
     // which is long before the backend exists. One owner, so the two cannot register different sets
     void ensure_native_target_registered();
+    void ensure_targets_for_triple(const std::string &triple);
 
     // **the platform baseline for a triple** - the default, and neither `generic` nor the host.
     //

@@ -26,8 +26,10 @@ function Format-ExitCode([int]$Code) {
     if ($Code -ge 0) {
         return "$Code"
     }
-    $hex = "0x{0:X8}" -f [uint32]$Code
-    if ([uint32]$Code -eq 0xC0000409) {
+    # pwsh refuses `[uint32]$negative` (checked conversion). the bits are an NTSTATUS
+    $u = [BitConverter]::ToUInt32([BitConverter]::GetBytes($Code), 0)
+    $hex = "0x{0:X8}" -f $u
+    if ($u -eq 0xC0000409) {
         return "$Code ($hex STATUS_STACK_BUFFER_OVERRUN / abort)"
     }
     return "$Code ($hex)"
