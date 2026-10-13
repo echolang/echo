@@ -449,6 +449,9 @@ namespace AST
         MAKE_ISSUE_DEF1(NoSuchManifest, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnusableTargetName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(TargetEntryNotASource, IssueSeverity::Error, const std::string, _message);
+        // TokenException from a module.eco. a source file's twin is FrontEndFailure; a manifest reports
+        // through the collector
+        MAKE_ISSUE_DEF1(UntokenizableManifest, IssueSeverity::Error, const std::string, _message);
 
     };
 };

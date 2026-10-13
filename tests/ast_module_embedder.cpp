@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "helpers.h"
 #include "subprocess.h"
 #include "test_lane.h"
 
@@ -158,6 +159,52 @@ TEST_CASE("stdlib module.eco drops thread and dynlib on wasi", "[embedder][wasi]
         REQUIRE(req.value != "pthread");
         REQUIRE(req.value != "dl");
     }
+}
+
+// a Windows checkout is CRLF. File must drop CR so an embedded stdlib still lexes. written as bytes so
+// every host sees the same case
+TEST_CASE("a CRLF source reads as LF, and a lone CR is kept", "[embedder]")
+{
+    EchoTests::ScopedProject project("embedder", "crlf_source");
+    const fs::path path = project.root() / "crlf.eco";
+    EchoTests::write_file(path, "echo 1;\r\necho 2;\r\n$a = '\r';\n");
+
+    AST::File file(path);
+    std::string error;
+    REQUIRE(file.read_from_disk(error));
+    REQUIRE(file.content.value_or("") == "echo 1;\necho 2;\n$a = '\r';\n");
+}
+
+TEST_CASE("collect_stdlib_files embeds a CRLF checkout as LF", "[embedder]")
+{
+    EchoTests::ScopedProject project("embedder", "crlf_stdlib");
+    EchoTests::write_file(project.root() / "module.eco", "/**\r\n * a\r\n */\r\n#[module: \"stdlib\"]\r\n");
+    EchoTests::write_file(project.root() / "core" / "a.eco", "echo 1;\r\n");
+
+    const auto files = AST::collect_stdlib_files(project.root());
+    REQUIRE(files.size() == 2);
+
+    for (const auto &[path, content] : files) {
+        INFO(path);
+        REQUIRE(content.find('\r') == std::string::npos);
+    }
+}
+
+TEST_CASE("a manifest the lexer cannot read is a diagnostic, not a crash", "[embedder]")
+{
+    Parser::ManifestScratch scratch(Compiler::TargetFacts{});
+    Parser::ModuleManifest manifest;
+
+    // text, like the embedded stdlib's manifest - it never goes through File, so '\r' reaches the lexer
+    const bool read = Parser::read_module_manifest(
+        "stdlib:/module.eco",
+        scratch,
+        manifest,
+        Parser::ManifestRead::t_full,
+        std::string("/**\n */\r\n#[module: \"stdlib\"]\n"));
+
+    REQUIRE_FALSE(read);
+    REQUIRE(EchoTests::has_issue_containing(scratch.bundle, "at line 2"));
 }
 
 TEST_CASE("write_embedded_stdlib emits a file table and module.eco", "[embedder]")

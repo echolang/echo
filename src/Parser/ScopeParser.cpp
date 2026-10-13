@@ -312,6 +312,10 @@ AST::ScopeNode & Parser::parse_scope(
         // diagnostic about one, including the refusal of a constant written inside a body, which this arm is
         // also reached for. asked ahead of starts_vardecl, which answers yes to a leading `const` outright
         else if (starts_constdecl(payload)) {
+            // declaration pass already took this constant's docblock. drain the pending one or the next
+            // declaration steals it
+            Parser::take_pending_doc(payload);
+
             // the whole statement, not "on to the next terminator": the declaration pass read this one
             // in full, so its shape is known-good, and a value containing a braced group - a closure
             // literal, which that pass refuses but only *after* reading it - has a `;` inside it that

@@ -605,3 +605,4 @@ ISSUE_MESSAGE_FNC(ModuleDependencyCycle) { return _message; }
 ISSUE_MESSAGE_FNC(NoSuchManifest) { return _message; }
 ISSUE_MESSAGE_FNC(UnusableTargetName) { return _message; }
 ISSUE_MESSAGE_FNC(TargetEntryNotASource) { return _message; }
+ISSUE_MESSAGE_FNC(UntokenizableManifest) { return _message; }

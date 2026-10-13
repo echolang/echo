@@ -27,6 +27,7 @@ stdlib: off
             }
           ],
           "generics": [],
+          "conforms": [],
           "fields": [
             {
               "name": "x",
@@ -36,6 +37,9 @@ stdlib: off
                 "kind": "prim",
                 "name": "int32"
               },
+              "line": 13,
+              "default": false,
+              "default_value": null,
               "doc": null,
               "tools": [
                 {
@@ -56,6 +60,9 @@ stdlib: off
                 "kind": "prim",
                 "name": "int32"
               },
+              "line": 15,
+              "default": false,
+              "default_value": null,
               "doc": null,
               "tools": []
             }
@@ -65,6 +72,8 @@ stdlib: off
               "kind": "constructor",
               "name": "Point",
               "qualified": "Point",
+              "owner": null,
+              "const": false,
               "visibility": "public",
               "file": "function_and_struct.eco",
               "line": 10,
@@ -80,7 +89,10 @@ stdlib: off
                     "kind": "prim",
                     "name": "int32"
                   },
-                  "default": false
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
                 },
                 {
                   "name": "y",
@@ -89,7 +101,10 @@ stdlib: off
                     "kind": "prim",
                     "name": "int32"
                   },
-                  "default": false
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
                 }
               ],
               "return": {
@@ -103,7 +118,9 @@ stdlib: off
             {
               "kind": "method",
               "name": "sum",
-              "qualified": "sum",
+              "qualified": "Point::sum",
+              "owner": "Point",
+              "const": false,
               "visibility": "public",
               "file": "function_and_struct.eco",
               "line": 23,
@@ -132,6 +149,7 @@ stdlib: off
           "doc": null,
           "tools": [],
           "generics": [],
+          "conforms": [],
           "backing": {
             "kind": "prim",
             "name": "int32"
@@ -140,14 +158,20 @@ stdlib: off
             {
               "name": "red",
               "discriminant": 1,
-              "payload": []
+              "payload": [],
+              "line": 35,
+              "doc": null
             },
             {
               "name": "green",
               "discriminant": 2,
-              "payload": []
+              "payload": [],
+              "line": 36,
+              "doc": null
             }
-          ]
+          ],
+          "fields": [],
+          "methods": []
         },
         {
           "kind": "interface",
@@ -160,11 +184,14 @@ stdlib: off
           "doc": null,
           "tools": [],
           "generics": [],
+          "conforms": [],
           "members": [
             {
               "kind": "method",
               "name": "draw",
-              "qualified": "draw",
+              "qualified": "Drawable::draw",
+              "owner": "Drawable",
+              "const": false,
               "visibility": "public",
               "file": "function_and_struct.eco",
               "line": 41,
@@ -185,6 +212,8 @@ stdlib: off
           "kind": "function",
           "name": "add",
           "qualified": "add",
+          "owner": null,
+          "const": false,
           "visibility": "public",
           "file": "function_and_struct.eco",
           "line": 3,
@@ -209,7 +238,10 @@ stdlib: off
                 "kind": "prim",
                 "name": "int32"
               },
-              "default": false
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": false
             },
             {
               "name": "b",
@@ -218,7 +250,10 @@ stdlib: off
                 "kind": "prim",
                 "name": "int32"
               },
-              "default": false
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": false
             }
           ],
           "return": {
@@ -231,6 +266,8 @@ stdlib: off
           "kind": "function",
           "name": "id",
           "qualified": "id",
+          "owner": null,
+          "const": false,
           "visibility": "public",
           "file": "function_and_struct.eco",
           "line": 44,
@@ -246,7 +283,10 @@ stdlib: off
                 "kind": "named",
                 "name": "T"
               },
-              "default": false
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": false
             }
           ],
           "return": {
@@ -264,6 +304,8 @@ stdlib: off
           "kind": "function",
           "name": "takes_ptr",
           "qualified": "takes_ptr",
+          "owner": null,
+          "const": false,
           "visibility": "internal",
           "file": "function_and_struct.eco",
           "line": 49,
@@ -286,7 +328,10 @@ stdlib: off
                 "const": false,
                 "nullable": true
               },
-              "default": false
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": false
             },
             {
               "name": "n",
@@ -302,7 +347,10 @@ stdlib: off
                 "const": false,
                 "nullable": false
               },
-              "default": false
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": false
             }
           ],
           "return": {
@@ -315,6 +363,8 @@ stdlib: off
           "kind": "function",
           "name": "maybe",
           "qualified": "maybe",
+          "owner": null,
+          "const": false,
           "visibility": "internal",
           "file": "function_and_struct.eco",
           "line": 53,
@@ -333,7 +383,10 @@ stdlib: off
                   "name": "int32"
                 }
               },
-              "default": false
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": false
             }
           ],
           "return": {

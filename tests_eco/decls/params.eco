@@ -1,0 +1,39 @@
+// parameters say how they are passed: a const borrow, a written effect, a move. defaults come back as
+// written, and a member is qualified through its type
+
+public struct Pair
+{
+    public int32 $a = 1;
+    public int32 $b;
+
+    constructor(int32 $a, int32 $b)
+    {
+        $this->a = $a;
+        $this->b = $b;
+    }
+
+    public const function sum(int32 $scale = 2) : int32
+    {
+        return ($this->a + $this->b) * $scale;
+    }
+
+    public function label(const string& $prefix, array<int32> $xs = [1, 2], string $suffix = '!', int32 $n = -1) : string
+    {
+        return $prefix;
+    }
+
+    public static function zero() : Pair
+    {
+        return Pair(0, 0);
+    }
+}
+
+public function swap(inout int32& $x, out int32& $y) : void
+{
+    $y = $x;
+}
+
+public function keep(mv string $s) : string
+{
+    return $s;
+}

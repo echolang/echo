@@ -7,6 +7,27 @@
 #include <fstream>
 #include <sstream>
 
+namespace
+{
+    // drop CR from CRLF. a text-mode read does this only on Windows, and the lexer has no rule for '\r'.
+    // a lone CR is kept
+    std::string without_crlf(const std::string &bytes)
+    {
+        std::string text;
+        text.reserve(bytes.size());
+
+        for (size_t i = 0; i < bytes.size(); i++) {
+            if (bytes[i] == '\r' && i + 1 < bytes.size() && bytes[i + 1] == '\n') {
+                continue;
+            }
+
+            text.push_back(bytes[i]);
+        }
+
+        return text;
+    }
+};
+
 AST::File::File(const std::filesystem::path &path) :
     _path(path)
 {}
@@ -45,7 +66,7 @@ bool AST::File::read_from_disk(std::string &out_error)
 {
     // load the file into a string
     // we probably should use a stream in the future
-    auto istrm = std::ifstream(_path);
+    auto istrm = std::ifstream(_path, std::ios::binary);
 
     // **an unreadable file must not parse as an empty one, silently.** without the check, a
     // path that is not there - or is there and cannot be opened - produces a file with no declarations,
@@ -67,7 +88,8 @@ bool AST::File::read_from_disk(std::string &out_error)
     // this is a TEMPORARY hack so my dump text editor will do syntax highlighting
     // without having to create a syntax highlighting extension..
     stream << istrm.rdbuf();
-    auto str = stream.str();
+    auto str = without_crlf(stream.str());
+    stream.str(str);
     if (str.substr(0, 5) == "<?php" || str.substr(0, 5) == "<?eco") {
         stream.str(str.substr(5));
     }

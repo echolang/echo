@@ -6,7 +6,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -119,18 +118,17 @@ std::vector<std::pair<std::string, std::string>> AST::collect_stdlib_files(const
     std::vector<std::pair<std::string, std::string>> files;
     std::error_code ec;
 
+    // **through AST::File, never a reader of its own.** File drops CRLF; a binary read here embedded '\r'
+    // and a Windows release could not lex its own stdlib
     const auto add_file = [&files, &stdlib_root](const std::filesystem::path &path) {
-        std::ifstream in(path, std::ios::binary);
-        if (!in) {
-            throw std::runtime_error(fmt::format("cannot read stdlib file '{}'", path.string()));
+        AST::File file(path);
+        std::string error;
+        if (!file.read_from_disk(error)) {
+            throw std::runtime_error(fmt::format("cannot read stdlib file: {}", error));
         }
-        const std::string content(
-            (std::istreambuf_iterator<char>(in)),
-            std::istreambuf_iterator<char>()
-        );
         std::string rel = with_forward_slashes(
             std::filesystem::relative(path, stdlib_root).generic_string());
-        files.emplace_back(std::move(rel), content);
+        files.emplace_back(std::move(rel), file.content.value_or(""));
     };
 
     const std::filesystem::path manifest = stdlib_root / "module.eco";

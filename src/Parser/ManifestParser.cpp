@@ -1213,7 +1213,18 @@ bool read_manifest_with(
 
     Parser::ModuleParser &parser = scratch.parser;
 
-    AST::TokenizedFile tokenized = parser.make_tokenized_file(module, file);
+    // **a mistake in the manifest, not a compiler bug.** TokenException becomes a diagnostic; on Windows
+    // an uncaught one is an abort with no message
+    std::optional<AST::TokenizedFile> lexed;
+    try {
+        lexed.emplace(parser.make_tokenized_file(module, file));
+    }
+    catch (const Lexer::TokenException &e) {
+        report_at<AST::Issue::UntokenizableManifest>(into, static_cast<uint32_t>(e.get_line()), e.what());
+        return false;
+    }
+
+    AST::TokenizedFile &tokenized = *lexed;
 
     // passes 1 and 2 only. A file-scope attribute is collected by the declaration pass, so the body pass
     // would add nothing but a second copy of every attribute node
