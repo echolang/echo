@@ -197,10 +197,12 @@ TEST_CASE("append_codegen_target_args dispatches on the row OS", "[target]")
         == windows_argv.end());
 #endif
 
+    // `linux` is a GNU predefined macro (the integer 1). target_facts.cpp spells
+    // the same avoidance
     std::vector<std::string> linux_argv;
-    const Compiler::CodegenTarget linux =
+    const Compiler::CodegenTarget gnu =
         Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
-    REQUIRE(Compiler::append_codegen_target_args(linux_argv, linux, error));
+    REQUIRE(Compiler::append_codegen_target_args(linux_argv, gnu, error));
     REQUIRE(std::find(linux_argv.begin(), linux_argv.end(), "-fms-runtime-lib=static")
         == linux_argv.end());
     REQUIRE(std::find(linux_argv.begin(), linux_argv.end(), "-isysroot") == linux_argv.end());
@@ -233,10 +235,10 @@ TEST_CASE("a command's suffix is the row's OS, not this process", "[target]")
     REQUIRE(windows.output_path("hello") == std::filesystem::path("hello.exe"));
     REQUIRE(windows.output_path("hello.exe") == std::filesystem::path("hello.exe"));
 
-    const Compiler::CodegenTarget linux =
+    const Compiler::CodegenTarget gnu =
         Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
-    REQUIRE(linux.output_extension()[0] == '\0');
-    REQUIRE(linux.output_path("hello") == std::filesystem::path("hello"));
+    REQUIRE(gnu.output_extension()[0] == '\0');
+    REQUIRE(gnu.output_path("hello") == std::filesystem::path("hello"));
 }
 
 // a row's columns are read off its triple when it is built
