@@ -73,6 +73,16 @@ std::optional<int64_t> AST::AttributeReader::integer(const AST::AttributeValue &
     return value.integer;
 }
 
+std::optional<bool> AST::AttributeReader::boolean(const AST::AttributeValue &value)
+{
+    if (!value.is(AST::AttributeValueKind::t_bool)) {
+        wrong_shape(value, AST::AttributeValueKind::t_bool);
+        return std::nullopt;
+    }
+
+    return value.boolean;
+}
+
 std::optional<std::string> AST::AttributeReader::word(const AST::AttributeValue &value)
 {
     switch (value.kind) {

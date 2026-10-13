@@ -150,7 +150,7 @@ TEST_CASE("the option table is indexed by its own ids", "[cli]")
 {
     const std::vector<CommandLineOption> &table = Compiler::command_line_options();
 
-    REQUIRE(table.size() == static_cast<size_t>(Opt::t_decls_all) + 1);
+    REQUIRE(table.size() == static_cast<size_t>(Opt::t_dir) + 1);
 
     for (size_t i = 0; i < table.size(); i++) {
         REQUIRE(static_cast<size_t>(table[i].id) == i);
@@ -198,7 +198,7 @@ TEST_CASE("a flag carries no value machinery and a valued one carries exactly on
     // valued option with no acceptance rule fails here rather than accepting anything forever
     const std::set<Opt> free_text = {
         Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_package_dir, Opt::t_link, Opt::t_define,
-        Opt::t_target_cpu, Opt::t_target_features
+        Opt::t_target_cpu, Opt::t_target_features, Opt::t_dir
     };
 
     for (const CommandLineOption &option : Compiler::command_line_options()) {
@@ -459,7 +459,7 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({}) == "No command given.");
 
     REQUIRE(refusal({ "compile", "a.eco" })
-        == "'compile' is not an echoc command. Write 'run', 'build', 'test', 'clean' or 'lsp'.");
+        == "'compile' is not an echoc command. Write 'run', 'build', 'install', 'test', 'clean' or 'lsp'.");
 
     REQUIRE(refusal({ "run", "--nonsense", "a.eco" }) == "Unknown option '--nonsense'.");
 
@@ -486,6 +486,15 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
 
     REQUIRE(refusal({ "clean", "app.eco" })
         == "'clean' takes no source files. It parses none and runs no pass.");
+
+    // install is for this machine and names its own binaries
+    // the flags that would say otherwise are refused at the word rather than read and ignored
+    REQUIRE(refusal({ "install" }) == "<accepted>");
+    REQUIRE(refusal({ "install", "--target", "clock", "--dir", "/tmp/bin" }) == "<accepted>");
+    REQUIRE(refusal({ "install", "-o", "out" }) == "'install' does not take '-o, --output'.");
+    REQUIRE(refusal({ "install", "--target-os", "wasi" }) == "'install' does not take '--target-os'.");
+    REQUIRE(refusal({ "build", "--dir", "/tmp/bin" }) == "'build' does not take '--dir'.");
+    REQUIRE(contains(refusal({ "install", "app.eco" }), "'install' takes no source files. It installs"));
 
     REQUIRE(refusal({ "lsp" }) == "<accepted>");
     REQUIRE(refusal({ "lsp", "app.eco" })
@@ -555,6 +564,8 @@ TEST_CASE("the subcommand decides the build mode, and a flag overrides it", "[cl
 {
     REQUIRE(resolved({ "run", "a.eco" }).options.mode == Compiler::BuildMode::t_debug);
     REQUIRE(resolved({ "build", "-o", "x", "a.eco" }).options.mode == Compiler::BuildMode::t_release);
+    REQUIRE(resolved({ "install" }).options.mode == Compiler::BuildMode::t_release);
+    REQUIRE(resolved({ "install", "--debug" }).options.mode == Compiler::BuildMode::t_debug);
     REQUIRE(resolved({ "run", "--release", "a.eco" }).options.mode == Compiler::BuildMode::t_release);
     REQUIRE(resolved({ "build", "-o", "x", "--debug", "a.eco" }).options.mode
         == Compiler::BuildMode::t_debug);
@@ -716,6 +727,11 @@ TEST_CASE("a category with nothing in it is absent from the page", "[cli]")
     // clean compiles nothing, so it answers no question about how
     REQUIRE_FALSE(contains(clean, Compiler::category_heading(OptionCategory::t_build)));
     REQUIRE(contains(build, Compiler::category_heading(OptionCategory::t_build)));
+
+    const std::string install = page(Subcommand::t_install, TerminalCapabilities::plain());
+
+    REQUIRE_FALSE(contains(build, Compiler::category_heading(OptionCategory::t_installation)));
+    REQUIRE(contains(install, Compiler::category_heading(OptionCategory::t_installation)));
 }
 
 // **a value a subcommand cannot write is shown and marked, never hidden.** A reader who cannot see
@@ -898,6 +914,7 @@ TEST_CASE("the usage line is built from the table", "[cli]")
         "\n"
         "  echoc run [options] <sources...> [-- <program arguments>]\n"
         "  echoc build [options] <sources...>\n"
+        "  echoc install [options]\n"
         "  echoc test [options] <sources...>\n"
         "  echoc clean [options]\n"
         "  echoc lsp [options]\n");
@@ -971,7 +988,7 @@ TEST_CASE("one option's page is that option and nothing else", "[cli]")
     }
 
     // the facts the prose must not have to repeat, because they are on the row and would go stale
-    REQUIRE(contains(text, "Accepted by: run, build, test."));
+    REQUIRE(contains(text, "Accepted by: run, build, install, test."));
     REQUIRE(contains(text, "Defaults to 'module'."));
 
     // and no other option leaks onto it

@@ -18,7 +18,8 @@ namespace Compiler
         t_build,
         t_test,
         t_clean,
-        t_lsp
+        t_lsp,
+        t_install
     };
 
     // the bits an option's `subcommands` mask carries. a mask rather than a vector because the only
@@ -30,16 +31,19 @@ namespace Compiler
         constexpr unsigned int test = 1u << 2;
         constexpr unsigned int clean = 1u << 3;
         constexpr unsigned int lsp = 1u << 4;
+        constexpr unsigned int install = 1u << 5;
 
-        // the shapes that recur. `compiling` is the set that turns source into code, and is what replaced
-        // the second `for (auto &command : {...})` registration loop this table exists to delete.
+        // the shapes that recur
+        // `compiling` is the set that turns source into code, and is what replaced the second
+        // `for (auto &command : {...})` registration loop this table exists to delete
         //
-        // `test` is one of them and that is the whole of why the row it added is small: every flag about
-        // *how* a program is compiled means the same thing for a test run. `jitting` is the narrower pair
-        // that runs what it compiled in this process, which is what `--explain prune` is about
-        constexpr unsigned int compiling = run | build | test;
+        // `test` and `install` are both compiling: every flag about *how* a program is compiled
+        // means the same thing there
+        // `jitting` is the narrower pair that runs what it compiled in this process, which is
+        // what `--explain prune` is about
+        constexpr unsigned int compiling = run | build | test | install;
         constexpr unsigned int jitting = run | test;
-        constexpr unsigned int all = run | build | test | clean | lsp;
+        constexpr unsigned int all = run | build | test | clean | lsp | install;
     };
 
     unsigned int bit_of(Subcommand id);
@@ -83,7 +87,8 @@ namespace Compiler
         t_stdio,
         t_help,
         t_version,
-        t_decls_all
+        t_decls_all,
+        t_dir
     };
 
     // what `-p, --print <what>` names. **the enumerator order is the table's row order**, and
@@ -142,6 +147,7 @@ namespace Compiler
         t_target,
         t_report,
         t_removal,
+        t_installation,
         t_general
     };
 
@@ -303,6 +309,10 @@ namespace Compiler
         // does it take `.eco` positionals at all. `clean` parses no source and runs no pass, so a filename
         // on its command line is a mistake and is refused rather than ignored
         bool takes_sources;
+
+        // extra sentence on the "takes no source files" refusal, nullptr where there is none
+        // per row, because why a filename is a mistake is the command's own answer
+        const char *sources_refusal;
 
         // the positional as a usage line spells it, or nullptr
         const char *positional;

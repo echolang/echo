@@ -447,8 +447,11 @@ bool Compiler::parse_command_line(
     const unsigned int bit = bit_of(out.subcommand);
 
     if (!info.takes_sources && !out.sources.empty()) {
-        out_error = fmt::format(
-            "'{}' takes no source files. It parses none and runs no pass.", info.name);
+        out_error = fmt::format("'{}' takes no source files.", info.name);
+
+        if (info.sources_refusal != nullptr) {
+            out_error += std::string(" ") + info.sources_refusal;
+        }
 
         return false;
     }

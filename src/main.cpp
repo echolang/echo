@@ -27,6 +27,7 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/CrashReport.h"
 #include "Compiler/HostTool.h"
+#include "Compiler/Install.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
@@ -908,7 +909,9 @@ static bool select_targets(
             return kind == Parser::TargetKind::t_test;
         }
 
-        if (driver.subcommand == Compiler::Subcommand::t_run) {
+        // `install` for `run`'s reason, plus one more: a lib has no entry and nothing to put on a PATH
+        if (driver.subcommand == Compiler::Subcommand::t_run
+            || driver.subcommand == Compiler::Subcommand::t_install) {
             return kind == Parser::TargetKind::t_executable;
         }
 
@@ -923,17 +926,44 @@ static bool select_targets(
         }
     }
 
-    const auto refuse_lib_run = [&](const Parser::ModuleTarget &target) {
+    const auto refuse_lib = [&](const Parser::ModuleTarget &target) {
+        if (driver.subcommand == Compiler::Subcommand::t_install) {
+            diagnostics.render_untyped("Nothing To Install", fmt::format(
+                "'{}' is a lib target, and 'install' installs programs. Build it with "
+                "'echoc build --target {}'.",
+                target.name, target.name));
+            return;
+        }
+
         diagnostics.render_untyped("No Entry To Run", fmt::format(
             "'{}' is a lib target and has no entry to run. Build it with 'echoc build --target {}'.",
             target.name, target.name));
     };
 
+    // `install: true` is a default, nothing more
+    // unnamed, the marked exes are what `install` takes, or every exe when none is marked
+    // named, `--target` wins whatever the marks say
+    if (driver.targets.empty() && driver.subcommand == Compiler::Subcommand::t_install) {
+        std::vector<Parser::ModuleTarget> marked;
+
+        std::copy_if(candidates.begin(), candidates.end(), std::back_inserter(marked),
+            [](const Parser::ModuleTarget &target) { return target.install; });
+
+        if (!marked.empty()) {
+            candidates = std::move(marked);
+        }
+    }
+
     if (driver.targets.empty()) {
-        if (driver.subcommand == Compiler::Subcommand::t_run && candidates.empty()) {
+        // run and install both skip libs
+        // the empty-candidate loop is the one place that still sees the original list, so the
+        // two refusals cannot drift
+        if (candidates.empty()
+            && (driver.subcommand == Compiler::Subcommand::t_run
+                || driver.subcommand == Compiler::Subcommand::t_install)) {
             for (const Parser::ModuleTarget &target : entry.targets) {
                 if (target.kind == Parser::TargetKind::t_library) {
-                    refuse_lib_run(target);
+                    refuse_lib(target);
                     return false;
                 }
             }
@@ -955,9 +985,10 @@ static bool select_targets(
         }
 
         if (!accepts(declared->kind)) {
-            if (driver.subcommand == Compiler::Subcommand::t_run
+            if ((driver.subcommand == Compiler::Subcommand::t_run
+                    || driver.subcommand == Compiler::Subcommand::t_install)
                 && declared->kind == Parser::TargetKind::t_library) {
-                refuse_lib_run(*declared);
+                refuse_lib(*declared);
                 return false;
             }
 
@@ -1131,6 +1162,21 @@ static bool resolve_programs(
     // **the *executable* targets and not every target**, or a manifest declaring only `#[target: test]`
     // would fall through to the loop below and build no program at all, silently
     if (entry == nullptr || !Compiler::module_declares_a_program(*entry)) {
+        // an installed program is found by its name, and nothing here has one
+        // dropping a binary called `main` onto somebody's PATH is worse than a refusal
+        // so this is one before `--target` is even looked at
+        if (driver.subcommand == Compiler::Subcommand::t_install) {
+            diagnostics.render_untyped("Nothing To Install", entry == nullptr
+                ? "'install' installs a program a manifest names, and this one is the source files on the "
+                  "command line. Give the project a 'module.eco' with "
+                  "'#[target: exe { name: ..., entry: ... }]'."
+                : fmt::format(
+                    "'{}' declares no programs, so there is no name to install one under. Add "
+                    "'#[target: exe {{ name: ..., entry: ... }}]' to its manifest.",
+                    entry->name));
+            return false;
+        }
+
         if (!driver.targets.empty()) {
             diagnostics.render_untyped("No Such Target", entry == nullptr
                 ? "'--target' names a program a manifest declares, and this build's program is the source "
@@ -1244,7 +1290,9 @@ static bool resolve_invocation(
     // `build` emits objects, so it always fills a row. emit-only OSes (wasi) fill a row
     // on every analysis path so `usize` and `#[wasm:]` match `build`. `run` / `test`
     // keep the host row, which is what keeps `--target-os ios` a facts-only look
+    // `install` is a `build`, and the same row is what lets it reuse that build's objects
     if (driver.subcommand == Compiler::Subcommand::t_build
+        || driver.subcommand == Compiler::Subcommand::t_install
         || Compiler::TargetFacts::is_emit_only_operating_system(out.target_facts.operating_system)) {
         std::string error;
 
@@ -2343,16 +2391,16 @@ static int build_one_program(
     return 0;
 }
 
-int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+// every program the invocation resolved, built in order, false on the first that fails
+//
+// what `build` is, and the first half of what `install` is
+// one loop, so the second cannot grow a different idea of what building several targets means
+static bool build_programs(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation
+)
 {
-    // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
-    const auto started = std::chrono::steady_clock::now();
-
-    Invocation invocation;
-    if (!resolve_invocation(driver, diagnostics, invocation)) {
-        return 1;
-    }
-
     const bool several = invocation.programs.size() > 1;
 
     for (const Program &program : invocation.programs) {
@@ -2370,9 +2418,28 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
             // and `--diagnostics json` promises diagnostics then *one* of them - and an error in code the
             // targets share would otherwise be reported once per target, which is the same mistake said
             // several times rather than more help
-            return 1;
+            return false;
         }
     }
+
+    return true;
+}
+
+int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+{
+    // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
+    const auto started = std::chrono::steady_clock::now();
+
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    if (!build_programs(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    const bool several = invocation.programs.size() > 1;
 
     Compiler::ProgressReporter::instance().close(
         several
@@ -2383,6 +2450,88 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
 
     // once for the invocation rather than once per program: the tree is cumulative, so what it reports is
     // where the whole compile went - which is the question somebody timing a multi-target build has
+    std::cout << Compiler::PhaseTimings::instance().report();
+
+    return 0;
+}
+
+// `build`, then a copy of each binary into the install directory
+//
+// built where `build` would have put it, then copied
+// the module cache and the build directory stay exactly what an `echoc build` leaves
+// a link that fails halfway never touches the copy somebody is already running
+int main_install(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+{
+    const auto started = std::chrono::steady_clock::now();
+
+    // where, before what: a directory that cannot be named is a refusal worth having
+    // before the compile rather than after it
+    std::filesystem::path directory;
+    std::string reason;
+
+    if (!Compiler::resolve_install_dir(driver.install_dir, directory, reason)) {
+        diagnostics.render_untyped("No Install Directory", reason);
+        return 1;
+    }
+
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    if (const std::string refusal = Compiler::install_dir_refusal(
+            directory, invocation.layout, invocation.manifests);
+        !refusal.empty()) {
+        diagnostics.render_untyped("Cannot Install Here", refusal);
+        return 1;
+    }
+
+    if (!build_programs(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    std::vector<std::filesystem::path> installed;
+
+    for (const Program &program : invocation.programs) {
+        const std::filesystem::path file_name = program.output.filename();
+
+        if (!Compiler::install_binary(program.output, directory, file_name, reason)) {
+            Compiler::ProgressReporter::instance().suspend();
+            diagnostics.render_untyped("Install Failed", reason);
+            return 1;
+        }
+
+        installed.push_back(directory / file_name);
+    }
+
+    Compiler::ProgressReporter::instance().close(
+        installed.size() > 1
+            ? fmt::format("installed {} programs", installed.size())
+            : fmt::format("installed '{}'", installed.front().filename().string()),
+        Compiler::progress_elapsed_ms(started));
+
+    // always, and on stdout
+    // the checklist is a terminal's, and somebody who just changed what a name on their PATH
+    // runs is owed the path it now runs, whether they are looking at a terminal or not
+    for (size_t i = 0; i < installed.size(); i++) {
+        std::cout << "installed " << invocation.programs[i].name << " -> " << installed[i].string()
+                  << std::endl;
+    }
+
+    if (!Compiler::directory_is_on_path(directory)) {
+        const char *these = installed.size() > 1 ? "these" : "this";
+#if defined(_WIN32)
+        const std::string hint = fmt::format(
+            "'{}' is not on your PATH. Add it to run {} by name.",
+            directory.string(), these);
+#else
+        const std::string hint = fmt::format(
+            "'{}' is not on your PATH. Add it to run {} by name:\n  export PATH=\"{}:$PATH\"",
+            directory.string(), these, directory.string());
+#endif
+        diagnostics.render_untyped("Not On PATH", hint, AST::IssueSeverity::Warning);
+    }
+
     std::cout << Compiler::PhaseTimings::instance().report();
 
     return 0;
@@ -2717,6 +2866,9 @@ int main(int argc, char *argv[], char *envp[])
 
     case Compiler::Subcommand::t_build:
         return main_build(driver, diagnostics);
+
+    case Compiler::Subcommand::t_install:
+        return main_install(driver, diagnostics);
 
     case Compiler::Subcommand::t_test:
         return main_test(driver, diagnostics, capabilities, envp);

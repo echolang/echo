@@ -282,7 +282,7 @@ const std::vector<std::pair<std::string, Parser::TargetKind>> &target_kind_table
 const TargetKindShape &target_kind_shape(Parser::TargetKind kind)
 {
     static const TargetKindShape executable = {
-        { "name", "entry" },
+        { "name", "entry", "install" },
         { "name", "entry" },
         std::nullopt
     };
@@ -320,6 +320,7 @@ struct WrittenTarget
     std::string name;
     std::string entry;
     Parser::TargetKind kind = Parser::TargetKind::t_executable;
+    bool install = false;
     std::vector<std::string> groups;
     std::vector<std::string> files;
     uint32_t line = 0;
@@ -445,6 +446,16 @@ void read_manifest_targets(
                 }
 
                 target.entry = spelled.value();
+            }
+
+            if (const AST::AttributeValue *install = reader.field(*record, "install")) {
+                std::optional<bool> spelled = reader.boolean(*install);
+
+                if (!spelled.has_value()) {
+                    continue;
+                }
+
+                target.install = spelled.value();
             }
 
             // both selections read through AttributeReader::each, so one value and a list of them are the
@@ -1084,6 +1095,7 @@ bool resolve_manifest_targets(
         Parser::ModuleTarget settled;
         settled.name = target.name;
         settled.kind = target.kind;
+        settled.install = target.install;
         settled.groups = target.groups;
         settled.has_scope = target.has_scope;
         settled.sources_as_written = target.scoped_sources;
@@ -1158,6 +1170,7 @@ void record_written_targets(
         Parser::ModuleTarget settled;
         settled.name = target.name;
         settled.kind = target.kind;
+        settled.install = target.install;
         settled.groups = target.groups;
         settled.has_scope = target.has_scope;
         settled.sources_as_written = target.scoped_sources;

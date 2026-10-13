@@ -114,6 +114,11 @@ namespace Compiler
         // vocabulary, settled at the one call site that builds a reporter
         bool verbose = false;
 
+        // `install` only, and stated only: empty means no `--dir`
+        // Compiler::resolve_install_dir is the arm order
+        // not on `options`, because where a binary is copied changes no emitted byte
+        std::filesystem::path install_dir;
+
         // `clean` only
         bool dry_run = false;
         bool with_stdlib = false;

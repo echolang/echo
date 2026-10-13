@@ -129,6 +129,11 @@ namespace Parser
 
         TargetKind kind = TargetKind::t_executable;
 
+        // `install: true` on an exe: what `echoc install` takes when `--target` is not given
+        // a default, nothing more: `--target` still installs an unmarked exe, and a module
+        // that marks none of them installs all of them
+        bool install = false;
+
         // a `test` target's selection: the groups and the files whose tests it runs, empty meaning all of
         // them. Read by Compiler::select_tests, which is the same function `--filter` goes through - a
         // declared target is a saved filter and deliberately not a second selection engine

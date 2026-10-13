@@ -1,0 +1,4 @@
+// only an exe can be installed: a lib has nothing to put on a PATH
+#[module: "libinstall"]
+#[sources: "src/*.eco"]
+#[target: lib { name: "greeter", install: true }]

@@ -61,6 +61,7 @@ namespace AST
         std::optional<std::string> string(const AttributeValue &value);
         std::optional<std::string> name(const AttributeValue &value);
         std::optional<int64_t> integer(const AttributeValue &value);
+        std::optional<bool> boolean(const AttributeValue &value);
 
         // free text, however it was spelled - a string, a bare name, or a number. what `define`'s
         // record values go through, where `{ WIDTH: 40 }`, `{ WIDTH: "40" }` and `{ WIDTH: OTHER }`

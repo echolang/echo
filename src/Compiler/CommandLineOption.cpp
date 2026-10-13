@@ -43,7 +43,9 @@ namespace
     {
         std::vector<Compiler::OptionValue> out;
         for (const std::string &name : Compiler::TargetFacts::known_operating_systems()) {
-            unsigned int mask = Compiler::accepts::all;
+            // never install: the option itself refuses it
+            // a value reaches no further than its option
+            unsigned int mask = Compiler::accepts::all & ~Compiler::accepts::install;
             const char *summary = "evaluate conditions as this OS";
             const char *description =
                 "Picks the '#[if: os == ...]' arms. 'build' of ios or wasi is a real cross.";
@@ -160,6 +162,8 @@ unsigned int Compiler::bit_of(Subcommand id)
         return accepts::clean;
     case Subcommand::t_lsp:
         return accepts::lsp;
+    case Subcommand::t_install:
+        return accepts::install;
     case Subcommand::t_none:
         return 0;
     }
@@ -180,6 +184,8 @@ const char *Compiler::category_heading(OptionCategory category)
         return "What echoc tells you";
     case OptionCategory::t_removal:
         return "What clean removes";
+    case OptionCategory::t_installation:
+        return "Where install puts it";
     case OptionCategory::t_general:
         return "General";
     }
@@ -517,7 +523,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_target_os, "target-os", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // not install: what it installs runs on this machine, so another OS's binary has nowhere to go
+            accepts::all & ~accepts::install, 0, ExclusionGroup::t_none,
             "<name>", "",
             "evaluate '#[if:]' as if targeting this OS",
             "Look at the code the way another platform sees it. Every '#[if: os == ...]' condition is "
@@ -543,7 +550,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_target_arch, "target-arch", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // not install, for --target-os's reason
+            accepts::all & ~accepts::install, 0, ExclusionGroup::t_none,
             "<name>", "",
             "the same for the architecture",
             "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
@@ -894,12 +902,25 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "dependencies and the standard library. Without --print decls it is refused:\n"
             "  echoc build -p decls --decls-all -o app main.eco",
             {}, nullptr
+        },
+        {
+            Opt::t_dir, "dir", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_installation,
+            accepts::install, 0, ExclusionGroup::t_none,
+            "<dir>", "",
+            "the directory programs are installed into",
+            "Install somewhere other than your own bin directory:\n"
+            "  echoc install --dir /usr/local/bin\n"
+            "Without it the directory is $ECHO_BIN_DIR when that is set, and '~/.echo/bin' when it is not "
+            "('%LOCALAPPDATA%\\echo\\bin' on Windows, which is where the echoc installer already put "
+            "echoc). The directory is created if it does not exist.",
+            {}, nullptr
         }
     };
 
     // the identity option_for relies on, asserted where the table is built rather than trusted at every
     // lookup. tests/command_line.cpp pins it too, for a release build where this does not run
-    assert(table.size() == static_cast<size_t>(Opt::t_decls_all) + 1 && "an Opt has no row in the table");
+    assert(table.size() == static_cast<size_t>(Opt::t_dir) + 1 && "an Opt has no row in the table");
 
     return table;
 }
@@ -1030,6 +1051,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "Assertions and the compiler's runtime checks are on unless you say --release, which is the "
             "opposite of what 'build' does.",
             true,
+            nullptr,
             "<sources...>",
             "the .eco files to compile and run",
             "The .eco files to compile and run. Loose files like these become the 'main' module.\n"
@@ -1051,6 +1073,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "nothing it depends on has changed, so a second build usually only recompiles the program "
             "itself. That part is never cached, because its unit is where the C 'main' is created.",
             true,
+            nullptr,
             "<sources...>",
             "the .eco files to compile",
             "The .eco files to compile. Loose files like these become the 'main' module.\n"
@@ -1059,6 +1082,27 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "cannot find fails the build rather than being quietly left out.\n"
             "Name none at all and your program is whatever manifest this invocation points at: the one "
             "--module names, or the 'module.eco' in your working directory.",
+            false
+        },
+        {
+            Subcommand::t_install, "install", accepts::install,
+            "build the declared programs onto your PATH",
+            "Build this project's programs in release and copy them onto your PATH:\n"
+            "  echoc install\n"
+            "  echoc install --target clock\n"
+            "With no '--target', it takes the exe targets marked 'install: true', or every exe when "
+            "the manifest marks none. A lib or a test is never installed.\n"
+            "They land in '~/.echo/bin' ('%LOCALAPPDATA%\\echo\\bin' on Windows), in $ECHO_BIN_DIR "
+            "when that is set, or in '--dir'. Installing twice replaces what was there. The build "
+            "itself still sits in the module's build directory, like any 'echoc build'.\n"
+            "This is not 'epm install'. That one fetches dependencies into 'vendor/'. This one "
+            "installs the project itself.",
+            false,
+            "It installs the programs a manifest declares: run it beside the 'module.eco', or "
+            "point at one with '-m'.",
+            nullptr,
+            nullptr,
+            nullptr,
             false
         },
         {
@@ -1077,6 +1121,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "Only the modules you pointed at are searched. A library you depend on keeps its own tests, "
             "and running them is a matter of pointing at it instead.",
             true,
+            nullptr,
             "<sources...>",
             "the .eco files whose tests to run",
             "The .eco files to compile and take the tests of. Loose files like these become the 'main' "
@@ -1102,6 +1147,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "refuses every flag that describes one. A flag a command accepts and silently ignores is "
             "worse than one it rejects.",
             false,
+            "It parses none and runs no pass.",
             nullptr,
             nullptr,
             nullptr,
@@ -1123,6 +1169,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "v1 answers diagnostics, hover, go-to-definition and document symbols. Completion is not "
             "in this yet.",
             false,
+            "It parses none and runs no pass.",
             nullptr,
             nullptr,
             nullptr,
