@@ -282,10 +282,9 @@ bool Compiler::directory_is_on_path(const std::filesystem::path &directory)
         }
 
         const std::string entry = entries.substr(start, end - start);
-        std::error_code ec;
 
-        // equivalent() rather than a string compare, so a trailing slash or a symlink still counts
-        if (!entry.empty() && std::filesystem::equivalent(entry, directory, ec) && !ec) {
+        // same_directory, so a trailing slash, mixed separators, or a symlink still counts
+        if (!entry.empty() && same_directory(entry, directory)) {
             return true;
         }
 

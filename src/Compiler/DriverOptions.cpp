@@ -79,7 +79,7 @@ bool Compiler::resolve_driver_options(
     // one rule, because the subcommands disagree about nothing else: `run` and `test` keep
     // the checks (`assert` is how a test says it failed), `build` and `install` drop them
     // `install` is the strongest case for the release binary: that one lands on somebody's PATH
-    out.options.mode = out.subcommand == Subcommand::t_build || out.subcommand == Subcommand::t_install
+    out.options.mode = (out.subcommand == Subcommand::t_build || out.subcommand == Subcommand::t_install)
         ? BuildMode::t_release
         : BuildMode::t_debug;
 

@@ -8,6 +8,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -189,6 +190,22 @@ namespace
         return line;
     }
 
+    bool env_names_match(const std::string &left, const std::string &right)
+    {
+        if (left.size() != right.size()) {
+            return false;
+        }
+
+        for (size_t i = 0; i < left.size(); i++) {
+            if (std::tolower(static_cast<unsigned char>(left[i]))
+                != std::tolower(static_cast<unsigned char>(right[i]))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     std::wstring windows_environment(const std::vector<std::pair<std::string, std::string>> &extra_env)
     {
         if (extra_env.empty()) {
@@ -217,8 +234,10 @@ namespace
             bool replaced = false;
             const std::string key = narrow(entry.c_str(), eq);
 
+            // Windows names are case-insensitive: `PATH` has to replace `Path`
+            // a second copy in the block is ignored, and the child would keep the parent's
             for (const auto &pair : extra_env) {
-                if (pair.first == key) {
+                if (env_names_match(pair.first, key)) {
                     replaced = true;
                     break;
                 }

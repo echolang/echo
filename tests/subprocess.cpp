@@ -99,6 +99,18 @@ TEST_CASE("quote_windows_arg follows CommandLineToArgvW", "[subprocess]")
     REQUIRE(Compiler::quote_windows_arg("C:\\foo bar\\") == "\"C:\\foo bar\\\\\"");
     REQUIRE(Compiler::quote_windows_arg("say \"hi\"") == "\"say \\\"hi\\\"\"");
 }
+
+TEST_CASE("extra_env PATH replaces the parent's Path", "[subprocess]")
+{
+    const EchoTests::ProcessResult result = EchoTests::run_process(
+        { "cmd.exe", "/c", "echo %PATH%" },
+        EchoTests::k_default_timeout_ms,
+        {},
+        { { "PATH", "C:\\echo-install-sentinel" } });
+
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.output.find("echo-install-sentinel") != std::string::npos);
+}
 #endif
 
 TEST_CASE("process_directory is the running executable's folder", "[subprocess]")

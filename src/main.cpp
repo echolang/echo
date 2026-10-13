@@ -946,7 +946,10 @@ static bool select_targets(
     if (driver.targets.empty() && driver.subcommand == Compiler::Subcommand::t_install) {
         std::vector<Parser::ModuleTarget> marked;
 
-        std::copy_if(candidates.begin(), candidates.end(), std::back_inserter(marked),
+        std::copy_if(
+            candidates.begin(),
+            candidates.end(),
+            std::back_inserter(marked),
             [](const Parser::ModuleTarget &target) { return target.install; });
 
         if (!marked.empty()) {
@@ -974,7 +977,9 @@ static bool select_targets(
     }
 
     for (const std::string &named : driver.targets) {
-        auto declared = std::find_if(entry.targets.begin(), entry.targets.end(),
+        auto declared = std::find_if(
+            entry.targets.begin(),
+            entry.targets.end(),
             [&named](const Parser::ModuleTarget &target) { return target.name == named; });
 
         if (declared == entry.targets.end()) {
@@ -2479,9 +2484,9 @@ int main_install(const Compiler::DriverOptions &driver, const AST::DiagnosticRen
         return 1;
     }
 
-    if (const std::string refusal = Compiler::install_dir_refusal(
-            directory, invocation.layout, invocation.manifests);
-        !refusal.empty()) {
+    const std::string refusal = Compiler::install_dir_refusal(directory, invocation.layout, invocation.manifests);
+
+    if (!refusal.empty()) {
         diagnostics.render_untyped("Cannot Install Here", refusal);
         return 1;
     }

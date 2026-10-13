@@ -4,7 +4,6 @@
 
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -56,13 +55,11 @@ public:
         };
     }
 
-    ProcessResult install(const std::string &args, const Environment &env) const
-    {
+    ProcessResult install(const std::string &args, const Environment &env) const {
         return echoc(args, root(), env);
     }
 
-    ProcessResult install(const std::string &args = "install") const
-    {
+    ProcessResult install(const std::string &args = "install") const {
         return install(args, environment());
     }
 };
@@ -73,7 +70,7 @@ void write_two_target_project(const ScopedProject &project, const std::string &m
 {
     const auto target = [&marked](const std::string &name) {
         return "#[target: exe { name: \"" + name + "\", entry: \"src/" + name + "_main.eco\""
-            + (name == marked ? ", install: true" : "") + " }]\n";
+               + (name == marked ? ", install: true" : "") + " }]\n";
     };
 
     write_file(project.root() / "module.eco",
@@ -229,7 +226,8 @@ TEST_CASE("--dir beats ECHO_BIN_DIR, which beats the home directory", "[install]
     REQUIRE_FALSE(fs::exists(project.default_bin()));
 
     const ProcessResult by_flag = project.install(
-        "install --dir " + from_flag.string(), project.environment(from_env.string()));
+        "install --dir " + from_flag.string(),
+        project.environment(from_env.string()));
     INFO(by_flag.output);
     REQUIRE(by_flag.exit_code == 0);
     REQUIRE(EchoTests::file_exists(from_flag / "clock"));
