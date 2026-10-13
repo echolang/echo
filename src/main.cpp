@@ -25,6 +25,7 @@
 #include "Compiler/ParsePipeline.h"
 #include "Compiler/Lsp/LspServer.h"
 #include "Compiler/CompilerException.h"
+#include "Compiler/CrashReport.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
@@ -2605,6 +2606,9 @@ static int main_lsp(const Compiler::DriverOptions &driver)
 
 int main(int argc, char *argv[], char *envp[])
 {
+    // ahead of everything, so an exception escaping anything below says what it was
+    Compiler::install_crash_reporting();
+
     // before any write: on Windows this sets the console to UTF-8 and turns on virtual-terminal
     // processing. A pipe is left alone; see Compiler::prepare_terminal
     Compiler::prepare_terminal();
