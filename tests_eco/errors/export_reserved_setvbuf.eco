@@ -1,0 +1,6 @@
+#[export]
+function setvbuf() : void
+{
+}
+
+echo 1;

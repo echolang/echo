@@ -1,0 +1,5 @@
+public extern interface greeter {
+    function greet(string $name) : int32;
+}
+
+echo 1;

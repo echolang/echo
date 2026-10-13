@@ -1,0 +1,11 @@
+// `#[export]` on a property is refused. a tool attribute stays legal
+struct Point
+{
+    #[export]
+    public int32 $x;
+
+    #[web::js_name: "y"]
+    public int32 $y;
+}
+
+echo 1;

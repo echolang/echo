@@ -103,6 +103,8 @@ namespace AST
         // with every other atom and `constraint_admits` stays the one owner of "is this argument
         // allowed". `is_class()` is false: that question is "is this a class", and this atom is not
         t_kind_class,
+        // `T : extern interface` - the open kind predicate for plugin contracts
+        t_kind_extern_interface,
         // **a compile-time integer used as a generic argument**, the bound `10` in
         // `fixed_array<int32, 10>`. not a type a program holds: it sits in `instantiation_args`
         // so the intern cache, TypeSubstitution and the mangler keep talking in ValueType. the
@@ -192,6 +194,7 @@ namespace AST
         t_interface,
         t_enum,
         t_opaque,
+        t_extern_interface,
     };
 
     // **the keyword this kind was declared with** - "struct", "class", "interface", "enum".
@@ -222,10 +225,12 @@ namespace AST
         t_uint16,
         t_uint32,
         t_uint64,
-        // pointer-width integers, the width coming from ECO_TARGET_POINTER_SIZE. deliberately
-        // their own primitives rather than aliases of t_uint64/t_int64: every count, length and
-        // capacity in the stdlib is spelled with these, and a distinct type identity is what
-        // keeps those signatures stable when the width changes
+        // pointer-width integers, the width coming from AST::target_pointer_size() during
+        // parse/typecheck (installed from CodegenTarget via PointerSizeScope). codegen
+        // usize is size_int_ty(). deliberately their own primitives rather than aliases
+        // of t_uint64/t_int64: every count, length and capacity in the stdlib is spelled
+        // with these, and a distinct type identity is what keeps those signatures stable
+        // when the width changes
         t_usize,
         t_isize,
         t_float32,
@@ -292,6 +297,24 @@ namespace AST
     char get_primitive_id_char(ValueTypePrimitive primitive);
     IntegerSize get_integer_size(ValueTypePrimitive primitive);
 
+    // pointer width this compile type-checks, in bytes. default ECO_TARGET_POINTER_SIZE
+    unsigned target_pointer_size();
+
+    // installs `bytes` as target_pointer_size() until destroyed
+    class PointerSizeScope
+    {
+    public:
+        explicit PointerSizeScope(unsigned bytes);
+        ~PointerSizeScope();
+        PointerSizeScope(const PointerSizeScope &) = delete;
+        PointerSizeScope &operator=(const PointerSizeScope &) = delete;
+        PointerSizeScope(PointerSizeScope &&) = delete;
+        PointerSizeScope &operator=(PointerSizeScope &&) = delete;
+
+    private:
+        unsigned _previous;
+    };
+
     // what a `function<R(P...)>` is: a return type and a parameter list, and nothing else. defined
     // below ValueType, which it is made of; only the handle appears inside the class
     struct CallableSignature;
@@ -313,6 +336,10 @@ namespace AST
         // the `class` atom of `T : class`. only legal in a constraint list
         static ValueType make_class_kind_constraint() {
             return ValueType(ValueTypeKind::t_kind_class, ValueTypePrimitive::t_void);
+        }
+
+        static ValueType make_extern_interface_kind_constraint() {
+            return ValueType(ValueTypeKind::t_kind_extern_interface, ValueTypePrimitive::t_void);
         }
 
         static ValueType void_type() {
@@ -667,6 +694,10 @@ namespace AST
             return kind == ValueTypeKind::t_kind_class;
         }
 
+        bool is_extern_interface_kind_constraint() const {
+            return kind == ValueTypeKind::t_kind_extern_interface;
+        }
+
         bool is_interface() const {
             return kind == ValueTypeKind::t_interface;
         }
@@ -864,6 +895,7 @@ namespace AST
 
                 // no extra state: every `class` atom is the same predicate
                 case ValueTypeKind::t_kind_class:
+                case ValueTypeKind::t_kind_extern_interface:
                     return true;
 
                 // identity is the value: same primitive (what N was declared as) and the same
@@ -1088,6 +1120,17 @@ namespace AST
             return kind == ComplexTypeKind::t_opaque;
         }
 
+        bool is_extern_interface_kind() const {
+            return kind == ComplexTypeKind::t_extern_interface;
+        }
+
+        // a field-wise constructor: struct and class. an extern interface's
+        // slots are filled by a binding, never by `Greeter(...)`
+        bool has_memberwise_construction() const {
+            return kind == ComplexTypeKind::t_struct
+                || kind == ComplexTypeKind::t_class;
+        }
+
         // has properties, and so a layout codegen can lower. **an allow-list**, the mirror of
         // ValueType::has_property_layout(): a kind added without an arm here is incomplete until
         // someone opts it in. a deny-list (`!= t_interface`) would have claimed a layout for
@@ -1095,7 +1138,8 @@ namespace AST
         bool has_property_layout() const {
             return kind == ComplexTypeKind::t_struct
                 || kind == ComplexTypeKind::t_class
-                || kind == ComplexTypeKind::t_enum;
+                || kind == ComplexTypeKind::t_enum
+                || kind == ComplexTypeKind::t_extern_interface;
         }
 
         // the namespace the type was declared in, null when unknown or root. instantiations
@@ -1554,6 +1598,16 @@ namespace AST
             return _conformances;
         }
 
+        // plugin contracts. a separate list from conformances() because that one is
+        // erasability: TypeLowering asserts every entry is a real interface
+        void add_extern_conformance(ValueType iface) {
+            _extern_conformances.push_back(std::move(iface));
+        }
+
+        const std::vector<ValueType> &extern_conformances() const {
+            return _extern_conformances;
+        }
+
         // the associated types this *interface* declares - the `type Iter : contract::iterator<V>` in an
         // interface body. a type the implementor chooses and the interface only constrains.
         //
@@ -1598,6 +1652,7 @@ namespace AST
         FunctionDeclNode *_deinit = nullptr;
         std::vector<FunctionDeclNode *> _implicit_conversions;
         std::vector<ValueType> _conformances;
+        std::vector<ValueType> _extern_conformances;
         std::vector<TypeParamDecl *> _associated_types;
         std::vector<EnumCase> _enum_cases;
         std::vector<EnumMap *> _enum_maps;
@@ -1692,6 +1747,7 @@ namespace std
 
             case AST::ValueTypeKind::t_unknown:
             case AST::ValueTypeKind::t_kind_class:
+            case AST::ValueTypeKind::t_kind_extern_interface:
                 break;
             }
 

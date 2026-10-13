@@ -92,7 +92,7 @@ internal struct keyed<T, K>
     }
 }
 
-#[intrinsic: "llvm.vector.reverse"]
+#[echoc::intrinsic: "llvm.vector.reverse"]
 private function reverse_lanes(simd<int32, 4> $v) : simd<int32, 4>;
 
 /**

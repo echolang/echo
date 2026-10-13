@@ -1,5 +1,6 @@
 #include "Compiler/Lsp/LspUri.h"
 
+#include "Compiler/BuildLayout.h"
 #include "Compiler/SettledPath.h"
 
 #include <cctype>
@@ -114,9 +115,4 @@ std::string Compiler::Lsp::uri_from_path(const std::filesystem::path &path)
 #endif
 
     return "file://" + percent_encode_path(generic);
-}
-
-bool Compiler::Lsp::is_embedded_stdlib_path(const std::filesystem::path &path)
-{
-    return path.generic_string().rfind("stdlib:", 0) == 0;
 }

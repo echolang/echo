@@ -47,6 +47,7 @@ bool Compiler::resolve_driver_options(
     out.build_dir = cli.value(Opt::t_build_dir);
     out.package_dir = cli.value(Opt::t_package_dir);
     out.output = cli.value(Opt::t_output);
+    out.install_dir = cli.value(Opt::t_dir);
 
     out.no_stdlib = cli.flag(Opt::t_no_stdlib);
     out.emit_stdlib_header = cli.flag(Opt::t_emit_stdlib_header);
@@ -74,11 +75,11 @@ bool Compiler::resolve_driver_options(
         }
     }
 
-    // **the subcommand's default, then what was written over it.** One rule and not several, because the
-    // subcommands disagree about nothing else: `build` hands somebody a binary and so drops the checks,
-    // `run` is somebody trying something and so keeps them - and `test` keeps them for a stronger reason
-    // than either, `assert` being the whole of how a test says it failed
-    out.options.mode = out.subcommand == Subcommand::t_build
+    // the subcommand's default, then what was written over it
+    // one rule, because the subcommands disagree about nothing else: `run` and `test` keep
+    // the checks (`assert` is how a test says it failed), `build` and `install` drop them
+    // `install` is the strongest case for the release binary: that one lands on somebody's PATH
+    out.options.mode = (out.subcommand == Subcommand::t_build || out.subcommand == Subcommand::t_install)
         ? BuildMode::t_release
         : BuildMode::t_debug;
 
@@ -137,6 +138,13 @@ bool Compiler::resolve_driver_options(
                 "with other --print values.";
             return false;
         }
+    }
+
+    out.decls_all = cli.flag(Opt::t_decls_all);
+
+    if (out.decls_all && !out.prints(PrintKind::t_decls)) {
+        out_error = "'--decls-all' needs '--print decls'.";
+        return false;
     }
 
     return true;

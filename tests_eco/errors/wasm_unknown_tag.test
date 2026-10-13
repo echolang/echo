@@ -1,0 +1,15 @@
+stdlib: off
+expect: fail
+mode: build
+flags: --target-os wasi
+
+--- OUT --->
+[error] wasm_unknown_tag.eco:1:3
+
+  'module' is not a wasm clause, expected one of: import, export.
+
+  1 | #[wasm: module "env"]
+    :   ^^^^
+  2 | extern {
+
+1 error, nothing was compiled.

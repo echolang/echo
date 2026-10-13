@@ -1,5 +1,7 @@
 #include "Compiler/Lsp/LspSession.h"
 
+#include "AST/ASTValueType.h"
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/SettledPath.h"
 
 #include <chrono>
@@ -176,13 +178,24 @@ void Compiler::Lsp::Session::resolve_project()
 
     std::string error;
 
-    if (!Compiler::TargetFacts::resolve(
-            _driver.target_os,
-            _driver.target_arch,
-            _driver.defines,
-            _facts,
-            error)) {
+    const bool resolved_facts = Compiler::TargetFacts::resolve(
+        _driver.target_os, _driver.target_arch, _driver.defines, _facts, error, _driver.ios_device);
+
+    if (!resolved_facts) {
         _facts_ok = false;
+        _codegen = Compiler::CodegenTarget();
+        _manifests.clear();
+        _roots.clear();
+        _loose_mode = true;
+        _project_issues.push_back(ProjectIssue{
+            std::nullopt, 0, AST::IssueSeverity::Error, "Invalid Target: " + error });
+        return;
+    }
+
+    // analysis fills the emit row so `#[wasm:]` and `usize` match `build --target-os wasi`
+    if (!Compiler::resolve_codegen_target(_facts, _driver.ios_device, _codegen, error)) {
+        _facts_ok = false;
+        _codegen = Compiler::CodegenTarget();
         _manifests.clear();
         _roots.clear();
         _loose_mode = true;
@@ -311,6 +324,8 @@ Compiler::Lsp::Session::CompileInputs Compiler::Lsp::Session::capture_inputs(
     inputs.active_targets = workspace_targets();
     inputs.with_stdlib = !_driver.no_stdlib;
     inputs.options = _driver.options;
+    inputs.options.facts = _facts;
+    inputs.options.codegen = _codegen;
     return inputs;
 }
 
@@ -325,6 +340,7 @@ Compiler::Lsp::Session::RebuildProduct Compiler::Lsp::Session::produce_snapshot(
     const auto started = std::chrono::steady_clock::now();
     auto next = std::make_unique<Snapshot>();
     next->bundle = std::make_unique<AST::Bundle>();
+    AST::PointerSizeScope pointer_size(inputs.options.codegen.pointer_size());
     Parser::ModuleParser parser(inputs.facts, {});
 
     const std::vector<const Parser::ModuleManifest *> compiled = compiled_manifests(inputs.manifests);

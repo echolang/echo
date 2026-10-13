@@ -1,0 +1,7 @@
+mode: build
+target: wasi
+
+--- OUT --->
+1
+1
+1

@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_static_method.eco:4:21
+
+  cannot be exported because a static method belongs to a type C has no receiver for.
+
+  3 |     #[export]
+  4 |     static function make() : int32
+    :                     ^^^^
+  5 |     {
+
+1 error, nothing was compiled.

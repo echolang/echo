@@ -39,6 +39,10 @@ namespace Compiler
         static bool is_known_architecture(const std::string &name);
         static bool is_known_family(const std::string &name);
 
+        // wasi is a real cross: `run` / `test` would pick its constants and
+        // execute them on the host. the `--target-os` value mask reads this
+        static bool is_emit_only_operating_system(const std::string &name);
+
         // **the axes a condition may name**, and the whole of what routing on one costs a caller. closed,
         // so `#[if: cpu == arm64]` is caught rather than read as a flag called `cpu` that nobody defined -
         // which would be false, and silently so. one table in the .cpp: a fourth axis is a row, not a
@@ -61,12 +65,17 @@ namespace Compiler
         // false with a sentence in `out_error` when an override names something outside the vocabulary -
         // reported here rather than at the condition, because the mistake is on the command line and a
         // diagnostic pointing at a source file would be blaming the wrong text
+        //
+        // **also the owner of arch implications**: wasi is wasm32, wasm32 requires wasi,
+        // `--ios-device` with no `--target-arch` is arm64. CodegenTarget::resolve_codegen_target
+        // is a pure function of already-settled facts plus `--ios-device`
         static bool resolve(
             const std::string &os_override,
             const std::string &arch_override,
             const std::vector<std::string> &defines,
             TargetFacts &out_facts,
-            std::string &out_error
+            std::string &out_error,
+            bool ios_device = false
         );
 
         // LLVM's triple mapped onto these vocabularies. **the named mapping**, so a test can hand it
@@ -125,10 +134,31 @@ namespace Compiler
         // `echoc test`
         bool tests = false;
 
+        // does this platform have OS threads / loadable libraries? **derived from
+        // operating_system, like family()**, so assigning `operating_system = "wasi"`
+        // cannot leave a stale true. wasi is false for both. `#[if: threads]` /
+        // `#[if: dynlib]` are the whole of what a program needs to say.
+        // `--define threads` / `--define dynlib` are refused so the compiler is the only writer.
+        // CodegenTarget::has_os_threads / has_unload answer the same question off the emit row,
+        // and they are false for every wasm ISA
+        bool threads() const;
+        bool dynlib() const;
+
         // is `name` a flag this invocation declared? **false rather than an error when it is not** - a
         // condition has to be able to ask about a flag nobody set, or `#[if: TRACE]` could only ever be
         // written by someone who had already passed `--define TRACE`
         bool has_define(const std::string &name) const;
+
+        // `#[wasm:]` is a wasi-os surface, not an ISA fact. TypeChecker asks this rather than
+        // the emit row, so `echoc lsp --target-os wasi` and `echoc build --target-os wasi` agree
+        bool admits_wasm_surface() const {
+            return operating_system == "wasi";
+        }
+
+        // pointer width a condition-time `usize` should have. wasm32 is 4; everything
+        // else this compiler names is 8. CodegenTarget::pointer_size() is the emit-row
+        // reading of the same question, off the LLVM triple
+        unsigned pointer_size() const;
 
         // `os=darwin;arch=arm64;family=darwin;define=A;define=B;` - everything a condition can see, in
         // one string, for the module cache to fold. family is determined by os and is still here:
@@ -137,15 +167,6 @@ namespace Compiler
         // question: a fact added without a line here would silently share a cache key with a build
         // that did not have it, which is the one cache failure with no diagnostic
         std::string cache_signature() const;
-
-        // `.dylib` / `.dll` / `.so` - what this platform calls a loadable library.
-        //
-        // **a method rather than a free function of the host**, because the two callers legitimately want
-        // different facts and the spelling has to say which: Compiler::build_c_shared_library names a file
-        // this machine's dlopen will open, so it asks `host()`, while anything naming a file for the
-        // *target* asks the invocation's. A free `host_library_extension()` read the same either way, and
-        // the one that was wrong would have been wrong in silence
-        std::string shared_library_extension() const;
     };
 };
 

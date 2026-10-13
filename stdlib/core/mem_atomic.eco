@@ -24,23 +24,23 @@ namespace mem::atomic;
  * method that is an RMW.
  */
 
-#[builtin: atomic_load]
+#[echoc::builtin: atomic_load]
 public function load<T>(const T& $slot) : T;
 
-#[builtin: atomic_store]
+#[echoc::builtin: atomic_store]
 public function store<T>(T& $slot, T $value) : void;
 
-#[builtin: atomic_add]
+#[echoc::builtin: atomic_add]
 public function add<T>(T& $slot, T $delta) : T;
 
-#[builtin: atomic_sub]
+#[echoc::builtin: atomic_sub]
 public function sub<T>(T& $slot, T $delta) : T;
 
-#[builtin: atomic_exchange]
+#[echoc::builtin: atomic_exchange]
 public function exchange<T>(T& $slot, T $desired) : T;
 
-#[builtin: atomic_compare_exchange]
+#[echoc::builtin: atomic_compare_exchange]
 public function compare_exchange<T>(T& $slot, T $expected, T $desired) : bool;
 
-#[builtin: atomic_fence]
+#[echoc::builtin: atomic_fence]
 public function fence() : void;

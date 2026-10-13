@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] ReservedAttributeNamespace  tool_attribute_reserved_ns.eco:1:3
+
+  the 'echoc::' namespace is reserved for the compiler and its standard library.
+
+  1 | #[echoc::x: "no"]
+    :   ^^^^^
+  2 | function f() : void
+
+1 error, nothing was compiled.

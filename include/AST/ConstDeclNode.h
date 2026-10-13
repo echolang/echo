@@ -87,6 +87,9 @@ namespace AST
 
         ConstExpansion expansion = ConstExpansion::t_pending;
 
+        // raw `/** ... */` above the declaration. taken at parse so it cannot attach to the next one
+        std::string doc_comment;
+
         ConstDeclNode(TokenReference token_name, TypeNode *type) :
             _type_node(type), token_name(token_name)
         {};

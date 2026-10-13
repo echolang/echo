@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] slot_out_of_range.eco:5:11
+
+  'abi::slot_symbol' index 2 is out of range for 'greeter' (1 slot)
+
+  4 | 
+  5 | echo abi::slot_symbol<greeter>(2);
+    :           ^^^^^^^^^^^
+  6 | 
+
+1 error, nothing was compiled.

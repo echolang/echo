@@ -1,0 +1,42 @@
+// an enum's own methods and statics are its surface; the case constructors, value() and from() the
+// compiler mints are not. a case's docblock is carried
+
+/**
+ * Where a request ended.
+ */
+public enum Outcome : int32
+{
+    /**
+     * It worked.
+     */
+    case done = 1;
+
+    case failed = 2;
+
+    public static int32 $seen = 0;
+
+    /**
+     * Whether it worked.
+     */
+    public const function good() : bool
+    {
+        return match ($this) {
+            .done => true,
+            .failed => false,
+        };
+    }
+
+    public static function first() : Outcome
+    {
+        return .done;
+    }
+}
+
+public enum Reply
+{
+    /**
+     * A body.
+     */
+    case text(string $body);
+    case empty;
+}

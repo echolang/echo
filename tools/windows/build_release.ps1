@@ -18,6 +18,34 @@ function Invoke-Checked {
     }
 }
 
+# native stderr through `2>&1 | ForEach-Object` becomes ErrorRecords; with
+# `$ErrorActionPreference = "Stop"` the first byte on stderr kills the step
+# and GHA logs only "Process completed with exit code 1". inherit the
+# streams, snapshot LASTEXITCODE before the next cmdlet runs
+function Format-ExitCode([int]$Code) {
+    if ($Code -ge 0) {
+        return "$Code"
+    }
+    # pwsh refuses `[uint32]$negative` (checked conversion). the bits are an NTSTATUS
+    $u = [BitConverter]::ToUInt32([BitConverter]::GetBytes($Code), 0)
+    $hex = "0x{0:X8}" -f $u
+    if ($u -eq 0xC0000409) {
+        return "$Code ($hex STATUS_STACK_BUFFER_OVERRUN / abort)"
+    }
+    return "$Code ($hex)"
+}
+
+function Invoke-Native {
+    param([string]$What, [string]$File, [string[]]$Arguments = @())
+    Write-Host $What
+    & $File @Arguments
+    $code = $LASTEXITCODE
+    Write-Host "${What}: exit $(Format-ExitCode $code)"
+    if ($code -ne 0) {
+        exit $code
+    }
+}
+
 foreach ($name in @("LLVM_PATH", "BUILD_TYPE", "VERSION", "BIN_NAME", "EPM_BIN_NAME")) {
     $value = [Environment]::GetEnvironmentVariable($name)
     if ([string]::IsNullOrEmpty($value)) {
@@ -127,26 +155,32 @@ function Invoke-WithCleanPath {
 $stageBin = Join-Path $stage "bin"
 Write-Host "smoke test echoc with a clean PATH (including echoc build)"
 Invoke-WithCleanPath -BinDir $stageBin -Block {
-    $reported = ((& (Join-Path $stageBin "echoc.exe") --version) | Out-String).Trim()
+    $echoc = Join-Path $stageBin "echoc.exe"
+    $reported = ((& $echoc --version) | Out-String).Trim()
+    Write-Host "echoc --version: '$reported' (exit $LASTEXITCODE)"
+    Write-Host "expected:        '$($env:VERSION)'"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "echoc --version failed with exit $LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
     if ($reported -ne $env:VERSION) {
-        Write-Error "The binary reports '$reported', expected '$env:VERSION'."
+        Write-Host "The binary reports '$reported', expected '$env:VERSION'."
         exit 1
     }
 
     $scratch = Join-Path $env:RUNNER_TEMP "echo-smoke"
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     Set-Location $scratch
-    Set-Content -Path smoke.eco -Value "assert(1 == 1);`nvar `$xs = [1, 2, 3];`ndprint(`$xs[1]);`n" -NoNewline
-    & (Join-Path $stageBin "echoc.exe") run smoke.eco
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & (Join-Path $stageBin "echoc.exe") build smoke.eco -o smoke.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Set-Content -Path smoke.eco -Value "assert(1 == 1);`nvar `$xs = [1, 2, 3];`ndprint(`$xs[1]);`n" -NoNewline -Encoding ascii
+    # Windows `echoc run` is compile+link of a scratch exe plus exec. a fast-fail
+    # from the child is an NTSTATUS with no compiler diagnostic, so this smoke
+    # names the two halves: bundled clang/link, then the produced image
+    Invoke-Native -What "echoc build" -File $echoc -Arguments @("build", "smoke.eco", "-o", "smoke.exe")
     if (-not (Test-Path -LiteralPath "smoke.exe")) {
         Write-Error "echoc build did not write smoke.exe"
         exit 1
     }
-    & .\smoke.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Invoke-Native -What "smoke.exe" -File (Join-Path $scratch "smoke.exe") -Arguments @()
 }
 Set-Location $root
 
@@ -270,11 +304,9 @@ Invoke-WithCleanPath -BinDir (Join-Path $setupDir "bin") -Block {
     $scratch = Join-Path $env:RUNNER_TEMP "echo-setup-build"
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     Set-Location $scratch
-    Set-Content -Path hello.eco -Value "echo 1;`n" -NoNewline
-    & $installed build hello.eco -o hello.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & .\hello.exe
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Set-Content -Path hello.eco -Value "echo 1;`n" -NoNewline -Encoding ascii
+    Invoke-Native -What "setup echoc build" -File $installed -Arguments @("build", "hello.eco", "-o", "hello.exe")
+    Invoke-Native -What "hello.exe" -File (Join-Path $scratch "hello.exe") -Arguments @()
 }
 Set-Location $root
 

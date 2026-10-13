@@ -1,5 +1,6 @@
 #include "Compiler/HostTool.h"
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/ProgressReporter.h"
 
 #include <llvm/Support/FileSystem.h>
@@ -7,6 +8,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -188,6 +190,22 @@ namespace
         return line;
     }
 
+    bool env_names_match(const std::string &left, const std::string &right)
+    {
+        if (left.size() != right.size()) {
+            return false;
+        }
+
+        for (size_t i = 0; i < left.size(); i++) {
+            if (std::tolower(static_cast<unsigned char>(left[i]))
+                != std::tolower(static_cast<unsigned char>(right[i]))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     std::wstring windows_environment(const std::vector<std::pair<std::string, std::string>> &extra_env)
     {
         if (extra_env.empty()) {
@@ -216,8 +234,10 @@ namespace
             bool replaced = false;
             const std::string key = narrow(entry.c_str(), eq);
 
+            // Windows names are case-insensitive: `PATH` has to replace `Path`
+            // a second copy in the block is ignored, and the child would keep the parent's
             for (const auto &pair : extra_env) {
-                if (pair.first == key) {
+                if (env_names_match(pair.first, key)) {
                     replaced = true;
                     break;
                 }
@@ -306,6 +326,24 @@ namespace
 std::string Compiler::host_clang()
 {
     return resolve_program("clang");
+}
+
+std::string Compiler::cc_driver(const CodegenTarget &target)
+{
+    if (target.is_wasi()) {
+        const std::filesystem::path clang = wasi_sdk().clang;
+        if (!clang.empty()) {
+            return clang.string();
+        }
+
+        // sysroot without a clang in the same prefix: do not mix PATH clang
+        // with a scavenged wasi-libc
+        if (!wasi_sdk().sysroot.empty()) {
+            return {};
+        }
+    }
+
+    return "clang";
 }
 
 std::filesystem::path Compiler::process_directory()
@@ -400,7 +438,7 @@ namespace
     {
         static const std::filesystem::path dir = [] {
             const Compiler::CapturedProcess printed =
-                Compiler::run_captured({ "clang", "-print-resource-dir" });
+                Compiler::run_captured({ Compiler::host_clang(), "-print-resource-dir" });
 
             if (printed.exit_code == 0) {
                 const std::string root = trim_right(printed.output);
@@ -487,6 +525,89 @@ void Compiler::append_windows_sysroot_link_args(std::vector<std::string> &argv)
     }
     argv.push_back("-L" + (sysroot / "lib").string());
 #endif
+}
+
+bool Compiler::append_codegen_target_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    std::string &out_error
+)
+{
+    if (target.is_wasi()) {
+        return append_wasi_target_args(argv, target, out_error);
+    }
+
+    if (target.is_darwin()) {
+        return append_apple_target_args(argv, target, out_error);
+    }
+
+    if (target.is_windows()) {
+        append_windows_sysroot_cc_args(argv);
+        return true;
+    }
+
+    return true;
+}
+
+bool Compiler::append_codegen_link_args(
+    std::vector<std::string> &argv,
+    const CodegenTarget &target,
+    bool export_memory,
+    std::string &out_error,
+    const std::string &output_path
+)
+{
+    // compile -isystem directories do not belong on a link line, and the Windows
+    // link helper already carries the CRT flag those compile args also set.
+    // calling both doubled -fms-runtime-lib=static and pasted the include set
+    // onto the link
+    if (target.is_windows()) {
+        append_windows_sysroot_link_args(argv);
+    }
+    else if (!append_codegen_target_args(argv, target, out_error)) {
+        return false;
+    }
+
+    // clang turns this into `wasm-ld ... crt1-reactor.o --entry _initialize`. a C
+    // compile must not see it: CBuild reuses append_codegen_target_args
+    if (target.is_wasi() && target.is_library()) {
+        argv.push_back("-mexec-model=reactor");
+    }
+
+    // native library: clang -shared, the same driver CBuild trusts for a loadable
+    // object. wasm stays the reactor flag above; the Darwin ld / lld-link fast
+    // path is skipped in Backend::link_program for this kind
+    if (target.is_native_library()) {
+        argv.push_back("-shared");
+
+        if (!output_path.empty()) {
+            const std::string basename = std::filesystem::path(output_path).filename().string();
+
+            if (target.is_darwin()) {
+                argv.push_back("-Wl,-install_name,@rpath/" + basename);
+            }
+            else if (target.is_windows()) {
+                // MSVC link refuses a .dll as input (LNK1107). the import
+                // library sits next to the image so a C host can name it
+                std::filesystem::path implib = output_path;
+                implib.replace_extension(".lib");
+                argv.push_back("-Wl,/IMPLIB:" + implib.string());
+            }
+            else {
+                argv.push_back("-Wl,-soname," + basename);
+                argv.push_back("-Wl,-z,defs");
+                // the lib's own calls to an export stay inside the image.
+                // without it, a plugin that exports `floor` binds to libm
+                argv.push_back("-Wl,-Bsymbolic-functions");
+            }
+        }
+    }
+
+    if (target.is_wasm() && export_memory) {
+        argv.push_back("-Wl,--export-memory");
+    }
+
+    return true;
 }
 
 int Compiler::run_wait(const std::string &program, const std::vector<std::string> &argv)

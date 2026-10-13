@@ -1,0 +1,37 @@
+flags: -p decls
+modules: decls/lib_paths
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "lib_paths",
+      "declarations": [
+        {
+          "kind": "function",
+          "name": "deep",
+          "qualified": "lib_paths::deep",
+          "owner": null,
+          "const": false,
+          "visibility": "public",
+          "file": "src/inner/a.eco",
+          "line": 6,
+          "column": 17,
+          "doc": "/**\n * Named by its path from the module root.\n */",
+          "tools": [],
+          "export": null,
+          "params": [],
+          "return": {
+            "kind": "prim",
+            "name": "int32"
+          },
+          "generics": []
+        }
+      ]
+    },
+    {
+      "name": "main",
+      "declarations": []
+    }
+  ]
+}

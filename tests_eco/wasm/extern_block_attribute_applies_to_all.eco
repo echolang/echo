@@ -1,0 +1,11 @@
+extern {
+    function host_a() : void;
+    function host_b() : void;
+}
+
+function skip() : int32
+{
+    return 1;
+}
+
+echo skip();

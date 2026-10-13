@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_on_struct.eco:1:3
+
+  '#[export]' on 'Foo' emits an ABI table, so the type has to answer an extern interface
+
+  1 | #[export]
+    :   ^^^^^^
+  2 | struct Foo
+
+1 error, nothing was compiled.

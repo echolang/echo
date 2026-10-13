@@ -17,11 +17,14 @@
 namespace std::time;
 
 /**
- * C's `struct timespec` on every Unix we build for: two 64-bit fields, `time_t` then `long`.
- * Windows has no such type; the shims still write one, as a plain Echo struct of the same shape.
+ * Echo's duration split: two int64 fields. The C `timespec` libc writes is this shape on
+ * Darwin and Linux (`time_t` then 64-bit `long`). Windows has no such type; the shims still
+ * write one. WASI's C `timespec` has a 32-bit `tv_nsec` (`long` is 32-bit on wasm32) and
+ * `clockid_t` is a pointer, so that row talks to `__wasi_clock_time_get` / a converted
+ * `nanosleep` instead of this layout.
  *
- * libc *writes* into it, so both fields are declared exactly. A binding that only read could
- * leave the tail off; this one cannot.
+ * libc *writes* into it on the POSIX path, so both fields are declared exactly. A binding
+ * that only read could leave the tail off; this one cannot.
  */
 internal struct timespec
 {
@@ -29,10 +32,52 @@ internal struct timespec
     int64 $nsec;
 }
 
-#[if: family != windows]
+#[if: family != windows && family != wasi]
 internal extern {
     function clock_gettime as c_clock_gettime(int32 $clock, ptr<timespec> $ts) : int32;
     function nanosleep as c_nanosleep(ptr<timespec> $req, ptr<timespec> $rem) : int32;
+}
+#[end]
+
+#[if: family == wasi]
+// wasm32 `long` is 32 bits. clockid_t is `const struct __clockid *`, not an int, so
+// the POSIX `clock_gettime` declaration would pass the id in the wrong register.
+private struct wasi_timespec
+{
+    int64 $sec;
+    int32 $nsec;
+}
+
+internal extern {
+    function __wasi_clock_time_get as c_wasi_clock_time_get(
+        uint32 $id, uint64 $precision, ptr<uint64> $out) : uint16;
+    function nanosleep as c_wasi_nanosleep(
+        ptr<wasi_timespec> $req, ptr<wasi_timespec> $rem) : int32;
+}
+
+internal function c_clock_gettime(int32 $clock, ptr<timespec> $ts) : int32
+{
+    uint64 $ns = 0;
+    uint16 $err = c_wasi_clock_time_get($clock as uint32, 1, &$ns);
+
+    if ($err != 0) {
+        return -1;
+    }
+
+    uint64 $per_sec = NANOS_PER_SEC as uint64;
+    $ts->sec = ($ns / $per_sec) as int64;
+    $ts->nsec = ($ns % $per_sec) as int64;
+    return 0;
+}
+
+internal function c_nanosleep(ptr<timespec> $req, ptr<timespec> $rem) : int32
+{
+    wasi_timespec $wreq = wasi_timespec($req->sec, $req->nsec as int32);
+    wasi_timespec $wrem = wasi_timespec(0, 0);
+    int32 $rc = c_wasi_nanosleep(&$wreq, &$wrem);
+    $rem->sec = $wrem->sec;
+    $rem->nsec = $wrem->nsec as int64;
+    return $rc;
 }
 #[end]
 

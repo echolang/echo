@@ -17,6 +17,12 @@ namespace Compiler
     // and be able to delete, and the previous `.echo` was invisible in a listing and in most file browsers
     constexpr std::string_view k_default_build_directory = "ecobuild";
 
+    // the embedded stdlib's virtual scheme. a released echoc has no
+    // STDLIB_SOURCE_DIR on disk, so the manifest and every source are
+    // `stdlib:/core/array.eco` rather than a checkout path. one spelling,
+    // so the embedder, the parser, the cache key and the LSP cannot drift
+    constexpr std::string_view k_embedded_stdlib_scheme = "stdlib:";
+
     // how far a directory has to prove itself before anything is written into it.
     //
     // **only a directory a person named can be pointed at a source tree.** The default beside a manifest
@@ -56,6 +62,15 @@ namespace Compiler
     // leave them alone: that store is the machine's rather than this project's, shared by every project on
     // it, and the most expensive thing in a build to produce again
     bool is_compiler_supplied_module(const Parser::ModuleManifest &manifest);
+
+    // the embedded stdlib's virtual paths (`stdlib:/core/array.eco`). a
+    // released echoc has no STDLIB_SOURCE_DIR on disk, so the manifest and
+    // every source are this prefix rather than a checkout path
+    bool is_embedded_stdlib_path(const std::filesystem::path &path);
+
+    // `stdlib:/<relative>` — the path the embedded pool, the cache key and
+    // the parser all name
+    std::filesystem::path embedded_stdlib_path(std::string_view relative);
 
     // what a `#[build_dir: "..."]` names, or false with a sentence in `out_reason`.
     //

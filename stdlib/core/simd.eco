@@ -16,32 +16,32 @@ namespace simd;
  * diagnostic, `splat` is the broadcast.
  */
 
-#[builtin: simd_splat]
+#[echoc::builtin: simd_splat]
 public function splat<T, const usize N>(T $v) : simd<T, N>;
 
-#[builtin: simd_load]
+#[echoc::builtin: simd_load]
 public function load<T, const usize N>(ptr<const T> $p) : simd<T, N>;
 
-#[builtin: simd_store]
+#[echoc::builtin: simd_store]
 public function store<T, const usize N>(ptr<T> $p, simd<T, N> $v) : void;
 
-#[builtin: simd_select]
+#[echoc::builtin: simd_select]
 public function select<T, const usize N>(simd<bool, N> $m, simd<T, N> $a, simd<T, N> $b) : simd<T, N>;
 
 /**
  * Bit i is lane i, as a `uint64`. The portable contract a table probe reads.
  */
-#[builtin: simd_bitmask]
+#[echoc::builtin: simd_bitmask]
 public function bitmask<const usize N>(simd<bool, N> $m) : uint64;
 
-#[builtin: simd_from_array]
+#[echoc::builtin: simd_from_array]
 public function from_array<T, const usize N>(T[N] $a) : simd<T, N>;
 
-#[builtin: simd_to_array]
+#[echoc::builtin: simd_to_array]
 public function to_array<T, const usize N>(simd<T, N> $v) : T[N];
 
-#[intrinsic: "llvm.vector.reduce.or"]
+#[echoc::intrinsic: "llvm.vector.reduce.or"]
 public function any<const usize N>(simd<bool, N> $m) : bool;
 
-#[intrinsic: "llvm.vector.reduce.and"]
+#[echoc::intrinsic: "llvm.vector.reduce.and"]
 public function all<const usize N>(simd<bool, N> $m) : bool;

@@ -6,7 +6,7 @@
 
 namespace
 {
-    // the one table. a name is the surface spelling written in `#[core: ...]`, deliberately not the
+    // the one table. a name is the surface spelling written in `#[echoc::core: ...]`, deliberately not the
     // type's own name - the two are free to differ, and a reader of the attribute should not have to
     // guess which of them the compiler keys on
     const std::unordered_map<std::string, AST::CoreTypeKind> &core_type_table()
@@ -29,6 +29,7 @@ namespace
             { "crash_info", AST::CoreTypeKind::t_crash_info },
             { "type_id", AST::CoreTypeKind::t_type_id },
             { "erased", AST::CoreTypeKind::t_erased },
+            { "abi_header", AST::CoreTypeKind::t_abi_header },
         };
 
         return table;
@@ -105,7 +106,7 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
     AST::TypeDeclNode *view_decl = types.declaration(AST::CoreTypeKind::t_string_view);
 
     if (string_decl == nullptr || view_decl == nullptr) {
-        out_error = "no type is declared with #[core: string] and #[core: string_view]";
+        out_error = "no type is declared with #[echoc::core: string] and #[echoc::core: string_view]";
         return std::nullopt;
     }
 
@@ -136,7 +137,7 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
     // bytes in the wrong shape - which LLVM would accept as a type mismatch far from the cause
     if (string_decl->complex_type().get_property_type(layout.window_index)
         != types.string_view_type()) {
-        out_error = fmt::format("'{}'s $window is not the #[core: string_view] type",
+        out_error = fmt::format("'{}'s $window is not the #[echoc::core: string_view] type",
             string_decl->complex_type().namespaced_name());
         return std::nullopt;
     }
@@ -160,12 +161,12 @@ std::optional<AST::CoreCrashInfoLayout> AST::resolve_core_crash_info_layout(
     AST::TypeDeclNode *info_decl = types.declaration(AST::CoreTypeKind::t_crash_info);
 
     if (info_decl == nullptr) {
-        out_error = "no type is declared with #[core: crash_info]";
+        out_error = "no type is declared with #[echoc::core: crash_info]";
         return std::nullopt;
     }
 
     if (!types.has(AST::CoreTypeKind::t_string_view)) {
-        out_error = "#[core: crash_info] needs #[core: string_view] for its text fields";
+        out_error = "#[echoc::core: crash_info] needs #[echoc::core: string_view] for its text fields";
         return std::nullopt;
     }
 
@@ -208,7 +209,7 @@ std::optional<AST::CoreCrashInfoLayout> AST::resolve_core_crash_info_layout(
     const AST::ValueType view = types.string_view_type();
     auto require_view = [&out_error, &info, &view](size_t index, const char *name) {
         if (info.get_property_type(index) != view) {
-            out_error = fmt::format("'{}'s ${} is not the #[core: string_view] type",
+            out_error = fmt::format("'{}'s ${} is not the #[echoc::core: string_view] type",
                 info.namespaced_name(), name);
             return false;
         }

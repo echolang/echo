@@ -32,13 +32,13 @@ namespace mem;
  * politely. The typed `alloc`/`realloc`/`free` below are the surface, and they are the same memory with
  * the arithmetic done for you. `usize` stands in for C's `size_t`.
  */
-#[builtin: alloc_bytes]
+#[echoc::builtin: alloc_bytes]
 private function alloc_bytes(usize $bytes) : ptr<uint8>;
 
-#[builtin: realloc_bytes]
+#[echoc::builtin: realloc_bytes]
 private function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
 
-#[builtin: free_bytes]
+#[echoc::builtin: free_bytes]
 private function free_bytes(ptr<uint8> $p) : void;
 
 /**
@@ -70,13 +70,13 @@ private extern {
  * This is the allocation stride, so it includes any tail padding - `size<T>() * $n` is exactly
  * the room `$n` elements of `T` need, and `$p:$[n]` lands on element `n`.
  */
-#[builtin: size_of]
+#[echoc::builtin: size_of]
 public function size<T>() : usize;
 
 /**
  * The alignment `T` requires, in bytes, as a compile-time constant.
  */
-#[builtin: align_of]
+#[echoc::builtin: align_of]
 public function align<T>() : usize;
 
 /**
@@ -94,7 +94,7 @@ public function align<T>() : usize;
  * Write the element-wise arm anyway. This says a bulk copy is *allowed*, never that a per-element one
  * would be wrong.
  */
-#[builtin: is_trivially_copyable]
+#[echoc::builtin: is_trivially_copyable]
 public function is_trivially_copyable<T>() : bool;
 
 /**
@@ -108,7 +108,7 @@ public function is_trivially_copyable<T>() : bool;
  * unstable kernel and skip a stability it cannot observe. A float has `<` and still has `-0.0 == 0.0`,
  * so it stays on the stable path.
  */
-#[builtin: is_integer]
+#[echoc::builtin: is_integer]
 public function is_integer<T>() : bool;
 
 /**
@@ -123,7 +123,7 @@ public function is_integer<T>() : bool;
  * block, and there is nothing to do when this is false. Guarding the loop with it is what keeps an
  * `array<int32>`'s destructor free rather than a walk over `count()` elements that each do nothing.
  */
-#[builtin: needs_destruction]
+#[echoc::builtin: needs_destruction]
 public function needs_destruction<T>() : bool;
 
 /**
@@ -148,7 +148,7 @@ public function needs_destruction<T>() : bool;
  * `pop()` could only *copy* the element out, leaving the slot holding a second owner that nothing
  * would ever release.
  */
-#[builtin: take]
+#[echoc::builtin: take]
 public function take<T>(T& $place) : T;
 
 /**
@@ -178,7 +178,7 @@ public function take<T>(T& $place) : T;
  * "take, atomically" - and only for a word. A `string` or a class handle is not one; see
  * `mem::atomic` and `atomic<T>`.
  */
-#[builtin: init]
+#[echoc::builtin: init]
 public function init<T>(T& $place, T $value) : void;
 
 /**
@@ -322,7 +322,7 @@ public function bit_cast<To, From>(From $value) : To
  * they have to be copied before they are written, exactly as shared bytes do. `string` is written
  * against precisely that - see `stdlib/core/string.eco`.
  */
-#[builtin: ref_count]
+#[echoc::builtin: ref_count]
 public function refs<T>(T& $handle) : usize;
 
 /**
@@ -342,7 +342,7 @@ public function refs<T>(T& $handle) : usize;
  * leaked one, so this is how the corpus pins a reference cycle actually being collected rather
  * than merely appearing to be - see `tests_eco/classes/weak_cycle_no_leak.eco`.
  */
-#[builtin: weak_count]
+#[echoc::builtin: weak_count]
 public function weaks<T>(T& $handle) : usize;
 
 /**
@@ -377,5 +377,5 @@ public function weaks<T>(T& $handle) : usize;
  * assert(mem::live_allocations() == 0);
  * ```
  */
-#[builtin: live_allocations]
+#[echoc::builtin: live_allocations]
 public function live_allocations() : usize;

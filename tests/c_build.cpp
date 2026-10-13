@@ -7,6 +7,7 @@
 #include <Compiler/TargetFacts.h>
 
 #include <filesystem>
+#include <sstream>
 #include <vector>
 
 #include "subprocess.h"
@@ -250,6 +251,36 @@ TEST_CASE("editing only a header moves the key", "[cbuild][cache]")
     REQUIRE(after.front().find("miss") != std::string::npos);
 }
 
+TEST_CASE("a native lib's C objects do not share an exe's", "[cbuild][cache]")
+{
+    ScopedProject project("lib_vs_exe_cc");
+
+    write_shim(project, "#define ANSWER 42\n");
+
+    const Compiler::CBuildSpec spec = spec_for(project, "shimtest");
+
+    Compiler::CompilerOptions exe;
+    Compiler::CompilerOptions lib;
+    lib.codegen = lib.codegen.for_program(Compiler::ExecModel::t_library);
+
+    std::vector<std::string> exe_explain;
+    Compiler::CBuildResult exe_result;
+    std::string error;
+    REQUIRE(Compiler::build_c_sources(
+        spec, exe, project.build_dir() / "exe", project.root() / "scratch",
+        exe_explain, exe_result, error));
+    REQUIRE(error.empty());
+
+    std::vector<std::string> lib_explain;
+    Compiler::CBuildResult lib_result;
+    REQUIRE(Compiler::build_c_sources(
+        spec, lib, project.build_dir() / "lib", project.root() / "scratch",
+        lib_explain, lib_result, error));
+    REQUIRE(error.empty());
+
+    REQUIRE(key_of(exe_explain) != key_of(lib_explain));
+}
+
 TEST_CASE("a define changes the key without touching a file", "[cbuild][cache]")
 {
     ScopedProject project("changed_define");
@@ -375,9 +406,7 @@ TEST_CASE("apple target args with an empty codegen target are the Darwin SDK", "
 
 TEST_CASE("apple target args for an iOS codegen target name the SDK and triple", "[cbuild][host]")
 {
-    Compiler::CodegenTarget target;
-    target.triple = "arm64-apple-ios15.0-simulator";
-    target.apple_sdk = "iphonesimulator";
+    const Compiler::CodegenTarget target = Compiler::CodegenTarget::ios_simulator("arm64");
 
     std::vector<std::string> argv = { "clang", "-c" };
     std::string error;
@@ -389,7 +418,7 @@ TEST_CASE("apple target args for an iOS codegen target name the SDK and triple",
         REQUIRE(error.find("iphonesimulator") != std::string::npos);
     } else {
         REQUIRE(Compiler::append_apple_target_args(argv, target, error));
-        REQUIRE(flag_values(argv, "-target") == std::vector<std::string>{ target.triple });
+        REQUIRE(flag_values(argv, "-target") == std::vector<std::string>{ target.triple() });
         REQUIRE(flag_values(argv, "-isysroot") == std::vector<std::string>{ sdk.string() });
     }
 #else

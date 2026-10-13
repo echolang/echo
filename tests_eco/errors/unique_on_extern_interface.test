@@ -1,0 +1,14 @@
+expect: fail
+
+--- OUT --->
+[error] unique_on_extern_interface.eco:1:3
+
+  '#[unique]' cannot be written on an extern interface. An extern interface is a bound table of C function pointers, not storage one value can own exclusively.
+
+  1 | #[unique]
+    :   ^^^^^^^
+  2 | public extern interface greeter {
+    : ^^^^^^
+  3 |     function add(int32 $a, int32 $b) : int32;
+
+1 error, nothing was compiled.

@@ -16,7 +16,7 @@ namespace AST
     class Collector;
     class FunctionDeclNode;
 
-    // the compiler builtins a function declaration can be bound to with `#[builtin: ...]`
+    // the compiler builtins a function declaration can be bound to with `#[echoc::builtin: ...]`
     //
     // a builtin is answered by the compiler at the call site rather than being emitted as a
     // function, so it has no symbol and no body. that is what separates it from `intrinsic`,
@@ -254,7 +254,7 @@ namespace AST
         // shufflevector, load/store choose the element's alignment, select is CreateSelect,
         // bitmask is a portable iN bitcast for N<=8 and two 8-lane addv of byte powers for
         // N=16, and the array conversions are insert/extract loops. `any`/`all` stay
-        // `#[intrinsic:]` because LLVM already names those reductions
+        // `#[echoc::intrinsic:]` because LLVM already names those reductions
         t_simd_splat,
         t_simd_load,
         t_simd_store,
@@ -262,6 +262,17 @@ namespace AST
         t_simd_bitmask,
         t_simd_from_array,
         t_simd_to_array,
+
+        // the plugin ABI table. version/fingerprint/slot_count are AST facts
+        // folded at the call; symbol and slot_symbol emit string constants;
+        // bind_unchecked seats the struct from a slot pointer and an erased
+        // image. the surface lives in `abi::`
+        t_abi_version,
+        t_abi_fingerprint,
+        t_abi_slot_count,
+        t_abi_symbol,
+        t_abi_slot_symbol,
+        t_abi_bind_unchecked,
     };
 
     // **can this builtin be answered before codegen, and if not, why not?**
@@ -337,7 +348,7 @@ namespace AST
     // IntegerSize is the one extrema table: a literal's range check already reads it
     uint64_t integer_bound_bits(ValueTypePrimitive primitive, bool is_max);
 
-    // **`T::min()` / `T::max()` on an integer primitive.** interned, `#[builtin:]`, no symbol.
+    // **`T::min()` / `T::max()` on an integer primitive.** interned, `#[echoc::builtin:]`, no symbol.
     // null when `name` is neither, or `type` is not an integer. `at` names the decl on first mint.
     // a primitive has no ComplexType to hang a static on, so CallResolver asks this rather than
     // find_static_functions

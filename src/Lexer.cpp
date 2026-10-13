@@ -811,12 +811,32 @@ bool LexerFunction::MultiLineComment::parse(TokenCollection &tokens, LexerCursor
     }
 
     const auto beginning = cursor.current();
+    const uint32_t start_line = static_cast<uint32_t>(cursor.line);
+    const uint32_t start_column = static_cast<uint32_t>(cursor.char_offset);
+    const bool is_doc = cursor.begins_with("/**");
 
     cursor.skip(2);
 
     while (!cursor.is_eof()) {
         if (cursor.begins_with("*/")) {
             cursor.skip(2);
+
+            if (is_doc) {
+                DocComment comment;
+                comment.next_token_index = tokens.size();
+                comment.text = std::string(beginning, cursor.current());
+                comment.line = start_line;
+                comment.column = start_column;
+
+                if (!tokens.doc_comments.empty()
+                    && tokens.doc_comments.back().next_token_index == comment.next_token_index) {
+                    tokens.doc_comments.back() = std::move(comment);
+                }
+                else {
+                    tokens.doc_comments.push_back(std::move(comment));
+                }
+            }
+
             return true;
         }
 

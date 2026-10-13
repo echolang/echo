@@ -159,6 +159,7 @@ const char *target_kind_name(Parser::TargetKind kind)
     switch (kind) {
     case Parser::TargetKind::t_executable: return "exe";
     case Parser::TargetKind::t_test: return "test";
+    case Parser::TargetKind::t_library: return "lib";
     }
 
     return "exe";
@@ -193,6 +194,12 @@ std::string Parser::manifest_as_json(const Parser::ModuleManifest &manifest)
         json_escape(out, target.name);
         out << ", \"kind\": ";
         json_escape(out, target_kind_name(target.kind));
+
+        // only an exe can carry it, so a test or lib target says nothing it could not have written
+        if (target.kind == Parser::TargetKind::t_executable) {
+            out << ", \"install\": " << (target.install ? "true" : "false");
+        }
+
         out << ", \"requires\": ";
         json_requirements(out, target.requirements);
         out << ", \"depends\": ";

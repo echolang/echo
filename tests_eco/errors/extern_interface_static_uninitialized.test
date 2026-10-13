@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] extern_interface_static_uninitialized.eco:7:20
+
+  an 'extern interface' value only comes from a binding; declare 'greeter?' or initialize it
+
+  6 | struct Holder {
+  7 |     static greeter $g;
+    :                    ^^
+  8 | }
+
+1 error, nothing was compiled.

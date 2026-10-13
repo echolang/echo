@@ -19,7 +19,7 @@ namespace crash;
  * `$headline` is `fatal error` or `assertion failed`. `$message` is the detail (the text of
  * a `die`, empty when there was none). `$file` and `$line` are the site that stopped.
  */
-#[core: crash_info]
+#[echoc::core: crash_info]
 public struct info
 {
     public string::view $headline;
@@ -33,19 +33,19 @@ public struct info
  * report was in place. A set hook *replaces* the default print; wrap with `default_hook` to
  * keep it.
  */
-#[builtin: crash_set_hook]
+#[echoc::builtin: crash_set_hook]
 public function set_hook(extern function<void(const info&)> $hook) : extern function<void(const info&)>?;
 
 /**
  * Remove the installed hook and restore the default report. Returns what was installed, or
  * `null` if nothing was.
  */
-#[builtin: crash_take_hook]
+#[echoc::builtin: crash_take_hook]
 public function take_hook() : extern function<void(const info&)>?;
 
 /**
  * The default report: the same `fatal error` / `assertion failed` shape `die` prints, and
  * nothing else. Does not exit, so a wrapper can print then do more.
  */
-#[builtin: crash_default_hook]
+#[echoc::builtin: crash_default_hook]
 public function default_hook(const info& $info) : void;

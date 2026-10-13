@@ -3,6 +3,10 @@
 #include "Compiler/TargetSubtarget.h"
 #include "eco.h"
 
+#if ECO_USE_EMBEDDED_STDLIB
+#include "stdlib_embedded.h"
+#endif
+
 #include <llvm/Config/llvm-config.h>
 
 #include <fmt/core.h>
@@ -15,10 +19,7 @@
 namespace
 {
 
-// the basis is Compiler::k_fnv_offset_basis, in the header - the C object cache folds with it too
 using Compiler::k_fnv_offset_basis;
-
-constexpr uint64_t k_fnv_prime = 1099511628211ULL;
 
 };
 
@@ -27,8 +28,34 @@ std::string Compiler::to_hex(uint64_t value)
     return fmt::format("{:016x}", value);
 }
 
+std::vector<std::string> Compiler::embedded_stdlib_relative_paths()
+{
+#if ECO_USE_EMBEDDED_STDLIB
+    return EmbeddedModule::relative_paths();
+#else
+    return {};
+#endif
+}
+
+std::optional<std::string> Compiler::embedded_stdlib_manifest_text()
+{
+#if ECO_USE_EMBEDDED_STDLIB
+    return EmbeddedModule::manifest_text();
+#else
+    return std::nullopt;
+#endif
+}
+
 std::optional<std::string> Compiler::read_whole_file(const std::filesystem::path &path)
 {
+    if (is_embedded_stdlib_path(path)) {
+#if ECO_USE_EMBEDDED_STDLIB
+        return EmbeddedModule::content_of(path);
+#else
+        return std::nullopt;
+#endif
+    }
+
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) {
         return std::nullopt;
@@ -83,24 +110,6 @@ bool Compiler::fold_target_environment(
     return true;
 }
 
-uint64_t Compiler::fnv1a64(const void *data, size_t length, uint64_t seed)
-{
-    const auto *bytes = static_cast<const unsigned char *>(data);
-    uint64_t hash = seed;
-
-    for (size_t i = 0; i < length; i++) {
-        hash ^= bytes[i];
-        hash *= k_fnv_prime;
-    }
-
-    return hash;
-}
-
-uint64_t Compiler::fnv1a64(const std::string &text, uint64_t seed)
-{
-    return fnv1a64(text.data(), text.size(), seed);
-}
-
 bool Compiler::compute_module_keys(
     const std::vector<const Parser::ModuleManifest *> &manifests,
     const CompilerOptions &options,
@@ -130,6 +139,19 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(std::string(ECO_MODULE_CACHE_VERSION), environment);
     environment = fnv1a64(std::string(LLVM_VERSION_STRING), environment);
 
+    // a release binary's stdlib paths are `stdlib:/...`; a checkout's are
+    // the build machine's STDLIB_SOURCE_DIR. they share `~/.cache/echo/stdlib`
+    // and the key otherwise folds only the filename, so without this a `-g`
+    // object from one is served to the other with DWARF that names the
+    // wrong files
+    environment = fnv1a64(
+#if ECO_USE_EMBEDDED_STDLIB
+        std::string("embed"),
+#else
+        std::string("disk"),
+#endif
+        environment);
+
     // the triple and the CPU inside it, shared with the C object cache - see fold_target_environment
     if (!fold_target_environment(options, environment, out_error)) {
         return false;
@@ -158,6 +180,10 @@ bool Compiler::compute_module_keys(
     // with nothing anywhere saying why, since a stripped object is a perfectly valid one
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
+
+    // **and what kind of program this is.** no two kinds share an object
+    environment = fnv1a64(
+        std::string(Compiler::exec_model_environment(options)), environment);
 
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;

@@ -68,7 +68,7 @@ private struct map_slot<K, V>
     V $value;
 }
 
-#[core: map]
+#[echoc::core: map]
 public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
     // **three of the five are `private`, and which two are not is decided by the operators below rather

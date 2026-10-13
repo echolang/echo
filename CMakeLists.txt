@@ -264,6 +264,16 @@ if(APPLE)
     endif()
 endif()
 
+# `echoc build --target-os wasi` names wasm32-unknown-wasip1 on every host.
+# the WebAssembly component has to be linked even when a host compile never
+# initializes it — lookupTarget still has to resolve the triple
+if(NOT "WebAssembly" IN_LIST LLVM_TARGETS_TO_BUILD)
+    message(FATAL_ERROR
+        "LLVM was built without WebAssembly; echoc build --target-os wasi needs it"
+    )
+endif()
+list(APPEND LLVM_COMPONENTS WebAssembly)
+
 llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 # llvm_map_components_to_libnames(LLVM_LIBS support core irreader mcjit native)
 # llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_TARGETS_TO_BUILD} mcjit)

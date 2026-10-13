@@ -10,7 +10,7 @@
 
 namespace Compiler
 {
-    struct CodegenTarget;
+    class CodegenTarget;
 
     // **the sole way echoc runs another program**, and the whole of what one costs a caller.
     //
@@ -85,6 +85,68 @@ namespace Compiler
         std::vector<std::string> &argv,
         const CodegenTarget &target,
         std::string &out_error
+    );
+
+    // one WASI SDK lookup. WASI_SDK_PATH is a closed prefix: no Homebrew fill,
+    // no PATH clang mixed with that sysroot. otherwise discovery takes the first
+    // complete SDK (Unix /opt and Homebrew, Windows next to echoc). Homebrew
+    // wasi-libc / wasi-runtimes fill a leftover sysroot or resource dir only
+    // when WASI_SDK_PATH was not set. wasm-ld sits next to clang, or on PATH
+    // only when no clang was chosen and the prefix was not closed
+    struct WasiSdk
+    {
+        std::filesystem::path sysroot;
+        std::filesystem::path resource_dir;
+        std::filesystem::path clang;
+        std::filesystem::path wasm_ld;
+    };
+
+    const WasiSdk &wasi_sdk();
+
+    // columns of wasi_sdk(). kept as names CBuild, the cache key and the
+    // Catch2 suite already ask. wasm_ld is the linker append_wasi_target_args
+    // passes as `-fuse-ld=`
+    std::filesystem::path wasi_sysroot();
+    std::filesystem::path wasi_resource_dir();
+    std::filesystem::path wasi_clang();
+    std::filesystem::path wasi_wasm_ld();
+
+    // the clang that compiles C objects and drives the link for this row.
+    // a WASI row uses the SDK clang. empty when that row has a sysroot and no
+    // clang beside it: PATH clang must not be mixed with a scavenged wasi-libc.
+    // append_wasi_target_args is the sentence for that case
+    std::string cc_driver(const CodegenTarget &target);
+
+    // `-target` / `--sysroot` / `-fuse-ld=<wasm_ld>` for a WASI row. false with a
+    // sentence when a WASI sysroot is not on this machine, or wasm-ld is missing
+    bool append_wasi_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // `-target` / `--sysroot` / `-isysroot` / Windows CRT includes for this row.
+    // the dispatcher is the row's OS: WASI, Darwin/iOS, Windows, else nothing.
+    // CBuild and link_program both call this so they cannot disagree about
+    // the triple. false with a sentence when a WASI sysroot is not on this machine
+    bool append_codegen_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // compile args plus the link-only half of the row. `-mexec-model=reactor` and
+    // `-shared` are columns of `target`. `--export-memory` is the program fact
+    // `CompilerOptions::export_memory`, not a row column, because CBuild reuses
+    // append_codegen_target_args for C compiles. `output_path` is the image
+    // being linked: Darwin/ELF take its filename for install_name/soname, and
+    // Windows a native lib writes `/IMPLIB:` next to it so a C host can link
+    bool append_codegen_link_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        bool export_memory,
+        std::string &out_error,
+        const std::string &output_path = {}
     );
 
     // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt

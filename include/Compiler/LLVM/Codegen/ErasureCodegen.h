@@ -20,7 +20,7 @@ namespace Compiler::LLVM
     // owning class-handle erasure: `erased::from`, its retain/release, and `assume<T>`.
     //
     // a subsystem rather than an arm on ExprCodegen because the four builtins share one layout -
-    // `$object` and `$release` found by name on the `#[core: erased]` type - and because the count
+    // `$object` and `$release` found by name on the `#[echoc::core: erased]` type - and because the count
     // work is ClassCodegen's. ExprCodegen dispatches; this file seats the struct and asks the class
     // subsystem to move the count. missing properties throw rather than assuming slot 0
     class ErasureCodegen

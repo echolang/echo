@@ -1,0 +1,325 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "struct",
+          "name": "Pair",
+          "qualified": "Pair",
+          "visibility": "public",
+          "file": "params.eco",
+          "line": 4,
+          "column": 15,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "conforms": [],
+          "fields": [
+            {
+              "name": "a",
+              "visibility": "public",
+              "static": false,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "line": 6,
+              "default": true,
+              "default_value": "1",
+              "doc": null,
+              "tools": []
+            },
+            {
+              "name": "b",
+              "visibility": "public",
+              "static": false,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "line": 7,
+              "default": false,
+              "default_value": null,
+              "doc": null,
+              "tools": []
+            }
+          ],
+          "constructors": [
+            {
+              "kind": "constructor",
+              "name": "Pair",
+              "qualified": "Pair",
+              "owner": null,
+              "const": false,
+              "visibility": "public",
+              "file": "params.eco",
+              "line": 4,
+              "column": 15,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "a",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
+                },
+                {
+                  "name": "b",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
+                }
+              ],
+              "return": {
+                "kind": "named",
+                "name": "Pair"
+              },
+              "generics": []
+            }
+          ],
+          "methods": [
+            {
+              "kind": "method",
+              "name": "sum",
+              "qualified": "Pair::sum",
+              "owner": "Pair",
+              "const": true,
+              "visibility": "public",
+              "file": "params.eco",
+              "line": 15,
+              "column": 27,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "scale",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": true,
+                  "default_value": "2",
+                  "mode": null,
+                  "move": false
+                }
+              ],
+              "return": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "generics": []
+            },
+            {
+              "kind": "method",
+              "name": "label",
+              "qualified": "Pair::label",
+              "owner": "Pair",
+              "const": false,
+              "visibility": "public",
+              "file": "params.eco",
+              "line": 20,
+              "column": 21,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "prefix",
+                  "label": null,
+                  "type": {
+                    "kind": "ptr",
+                    "to": {
+                      "kind": "string",
+                      "const": true
+                    },
+                    "borrow": true,
+                    "weak": false,
+                    "const": false,
+                    "nullable": false
+                  },
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
+                },
+                {
+                  "name": "xs",
+                  "label": null,
+                  "type": {
+                    "kind": "array",
+                    "of": {
+                      "kind": "prim",
+                      "name": "int32"
+                    }
+                  },
+                  "default": true,
+                  "default_value": "[1, 2]",
+                  "mode": null,
+                  "move": false
+                },
+                {
+                  "name": "suffix",
+                  "label": null,
+                  "type": {
+                    "kind": "string"
+                  },
+                  "default": true,
+                  "default_value": "'!'",
+                  "mode": null,
+                  "move": false
+                },
+                {
+                  "name": "n",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": true,
+                  "default_value": "-1",
+                  "mode": null,
+                  "move": false
+                }
+              ],
+              "return": {
+                "kind": "string"
+              },
+              "generics": []
+            },
+            {
+              "kind": "static",
+              "name": "zero",
+              "qualified": "Pair::zero",
+              "owner": "Pair",
+              "const": false,
+              "visibility": "public",
+              "file": "params.eco",
+              "line": 25,
+              "column": 28,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "named",
+                "name": "Pair"
+              },
+              "generics": []
+            }
+          ],
+          "destructor": false
+        },
+        {
+          "kind": "function",
+          "name": "swap",
+          "qualified": "swap",
+          "owner": null,
+          "const": false,
+          "visibility": "public",
+          "file": "params.eco",
+          "line": 31,
+          "column": 17,
+          "doc": null,
+          "tools": [],
+          "export": null,
+          "params": [
+            {
+              "name": "x",
+              "label": null,
+              "type": {
+                "kind": "ptr",
+                "to": {
+                  "kind": "prim",
+                  "name": "int32"
+                },
+                "borrow": true,
+                "weak": false,
+                "const": false,
+                "nullable": false
+              },
+              "default": false,
+              "default_value": null,
+              "mode": "inout",
+              "move": false
+            },
+            {
+              "name": "y",
+              "label": null,
+              "type": {
+                "kind": "ptr",
+                "to": {
+                  "kind": "prim",
+                  "name": "int32"
+                },
+                "borrow": true,
+                "weak": false,
+                "const": false,
+                "nullable": false
+              },
+              "default": false,
+              "default_value": null,
+              "mode": "out",
+              "move": false
+            }
+          ],
+          "return": {
+            "kind": "prim",
+            "name": "void"
+          },
+          "generics": []
+        },
+        {
+          "kind": "function",
+          "name": "keep",
+          "qualified": "keep",
+          "owner": null,
+          "const": false,
+          "visibility": "public",
+          "file": "params.eco",
+          "line": 36,
+          "column": 17,
+          "doc": null,
+          "tools": [],
+          "export": null,
+          "params": [
+            {
+              "name": "s",
+              "label": null,
+              "type": {
+                "kind": "string"
+              },
+              "default": false,
+              "default_value": null,
+              "mode": null,
+              "move": true
+            }
+          ],
+          "return": {
+            "kind": "string"
+          },
+          "generics": []
+        }
+      ]
+    }
+  ]
+}

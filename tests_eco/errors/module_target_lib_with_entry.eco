@@ -1,0 +1,2 @@
+// the manifest named by this case gives a lib target an entry file
+echo 1;

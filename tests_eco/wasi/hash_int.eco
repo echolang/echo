@@ -1,0 +1,3 @@
+echo hash::of(1) == hash::of(1);
+echo hash::of(1) != hash::of(2);
+echo hash::of('hello') == hash::of('hello');

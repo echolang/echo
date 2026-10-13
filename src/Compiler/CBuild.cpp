@@ -11,10 +11,9 @@
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
 #include "Compiler/TargetFacts.h"
+#include "Compiler/TargetSubtarget.h"
 
 #include <fmt/core.h>
-
-
 
 #include <fstream>
 #include <map>
@@ -134,7 +133,12 @@ bool c_spec_digest(
     // iOS rows are iphonesimulator / iphoneos. hashing darwin_sdk_root here
     // while compiling against iPhoneOS is the unsound-cache case
     digest = Compiler::fnv1a64(
-        Compiler::apple_sdk_root(options.codegen.apple_sdk).string(), digest);
+        Compiler::apple_sdk_root(options.codegen.apple_sdk()).string(), digest);
+
+    if (options.codegen.is_wasi()) {
+        digest = Compiler::fnv1a64(Compiler::wasi_sysroot().string(), digest);
+        digest = Compiler::fnv1a64(Compiler::wasi_resource_dir().string(), digest);
+    }
 
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
@@ -147,6 +151,11 @@ bool c_spec_digest(
     for (const std::string &flag : spec.flags) {
         digest = Compiler::fnv1a64(flag, digest);
     }
+
+    // `-fvisibility=hidden` on a native lib changes every defined C global, so
+    // an exe and a lib of the same module cannot share a C object
+    digest = Compiler::fnv1a64(
+        std::string(Compiler::exec_model_environment(options)), digest);
 
     out_digest = digest;
 
@@ -542,16 +551,31 @@ bool Compiler::build_c_sources(
         out_explain.push_back(fmt::format("  {}  {}  miss", source.filename().string(), key));
 
         job.miss = true;
-        job.argv = { "clang", "-c" };
+        job.argv = { Compiler::cc_driver(options.codegen), "-c" };
 
         // PIC is the Unix loadable-object rule. Windows objects are already relocatable;
-        // clang-cl rejects `-fPIC`
-        if (TargetFacts::host().operating_system != "windows") {
+        // clang-cl rejects `-fPIC`. a WASI command module is static relocatable
+        if (options.codegen.c_objects_use_fpic()) {
             job.argv.push_back("-fPIC");
         }
 
-        Compiler::append_windows_sysroot_cc_args(job.argv);
-        if (!Compiler::append_apple_target_args(job.argv, options.codegen, out_error)) {
+        // a native lib's C objects would otherwise export every defined global.
+        // Echo units go through hide_non_exported_symbols; C has to say it here.
+        // authors who want a C symbol exported mark it `visibility("default")`
+        if (options.codegen.is_native_library() && !options.codegen.is_windows()) {
+            job.argv.push_back("-fvisibility=hidden");
+        }
+
+        if (!Compiler::append_codegen_target_args(job.argv, options.codegen, out_error)) {
+            return false;
+        }
+
+        if (!Compiler::append_codegen_cc_cpu_args(
+                job.argv,
+                options.codegen,
+                options.target_cpu,
+                options.target_features,
+                out_error)) {
             return false;
         }
 
@@ -654,20 +678,22 @@ bool Compiler::build_c_shared_library(
         digest = fnv1a64(word, digest);
     }
 
-    // the host's, because this is a file this machine's dlopen has to open - see runtime_library_of
+    // the host row's suffix: this is a file this machine's dlopen has to open
     out_library = directory / fmt::format(
-        "lib{}.{}{}", spec.module_name, to_hex(digest), TargetFacts::host().shared_library_extension());
+        "lib{}.{}{}", spec.module_name, to_hex(digest), CodegenTarget{}.library_suffix());
 
     if (keeping && std::filesystem::is_regular_file(out_library, ec)) {
         return true;
     }
 
     // through the clang driver rather than the system linker: a shared library's platform flags are
-    // considerably fussier than an executable's, and this path is not the one Backend::link_executable's
+    // considerably fussier than an executable's, and this path is not the one Backend::link_program's
     // fast path exists to speed up - it runs once per module per change, not once per build
-    std::vector<std::string> argv = { "clang", "-shared", "-o", out_library.string() };
-    Compiler::append_windows_sysroot_link_args(argv);
-    Compiler::append_darwin_sdk_args(argv);
+    std::vector<std::string> argv = {
+        Compiler::cc_driver(CodegenTarget{}), "-shared", "-o", out_library.string() };
+    if (!Compiler::append_codegen_link_args(argv, CodegenTarget{}, false, out_error)) {
+        return false;
+    }
 
     for (const std::filesystem::path &object : objects) {
         argv.push_back(object.string());

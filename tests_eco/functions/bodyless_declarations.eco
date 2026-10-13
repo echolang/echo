@@ -5,11 +5,11 @@ extern {
 }
 
 // LLVM supplies the body
-#[intrinsic: "llvm.fabs"]
+#[echoc::intrinsic: "llvm.fabs"]
 function magnitude(float64 $x) : float64;
 
 // the compiler answers this one at each call site, so it has no symbol at all
-#[builtin: size_of]
+#[echoc::builtin: size_of]
 function byte_size<T>() : usize;
 
 // and the implementors hold the bodies of an interface's requirements

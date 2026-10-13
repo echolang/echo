@@ -1,0 +1,82 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "struct",
+          "name": "Box",
+          "qualified": "limits::Box",
+          "visibility": "public",
+          "file": "constants.eco",
+          "line": 16,
+          "column": 15,
+          "doc": "/**\n * Takes its own docblock, not the constant's above it.\n */",
+          "tools": [],
+          "generics": [],
+          "conforms": [],
+          "constants": [
+            {
+              "kind": "const",
+              "name": "LIMIT",
+              "qualified": "limits::Box::LIMIT",
+              "visibility": "public",
+              "file": "constants.eco",
+              "line": 21,
+              "column": 18,
+              "doc": "/**\n     * Per box.\n     */",
+              "type": null,
+              "value": "8"
+            }
+          ],
+          "fields": [
+            {
+              "name": "w",
+              "visibility": "public",
+              "static": false,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "line": 26,
+              "default": true,
+              "default_value": "4",
+              "doc": "/**\n     * The width.\n     */",
+              "tools": []
+            }
+          ],
+          "constructors": [],
+          "methods": [],
+          "destructor": false
+        },
+        {
+          "kind": "const",
+          "name": "MAX_SIDE",
+          "qualified": "limits::MAX_SIDE",
+          "visibility": "public",
+          "file": "constants.eco",
+          "line": 9,
+          "column": 20,
+          "doc": "/**\n * The widest a side gets.\n */",
+          "type": "int32",
+          "value": "100"
+        },
+        {
+          "kind": "const",
+          "name": "NAME",
+          "qualified": "limits::NAME",
+          "visibility": "internal",
+          "file": "constants.eco",
+          "line": 11,
+          "column": 16,
+          "doc": null,
+          "type": null,
+          "value": "'limits'"
+        }
+      ]
+    }
+  ]
+}

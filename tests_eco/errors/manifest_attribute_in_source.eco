@@ -1,0 +1,7 @@
+// a manifest name in a source file used to compile and do nothing
+#[depends: "../x"]
+function f() : void
+{
+}
+
+echo 1;

@@ -1,0 +1,142 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "enum",
+          "name": "Outcome",
+          "qualified": "Outcome",
+          "visibility": "public",
+          "file": "enum_members.eco",
+          "line": 7,
+          "column": 13,
+          "doc": "/**\n * Where a request ended.\n */",
+          "tools": [],
+          "generics": [],
+          "conforms": [],
+          "backing": {
+            "kind": "prim",
+            "name": "int32"
+          },
+          "cases": [
+            {
+              "name": "done",
+              "discriminant": 1,
+              "payload": [],
+              "line": 12,
+              "doc": "/**\n     * It worked.\n     */"
+            },
+            {
+              "name": "failed",
+              "discriminant": 2,
+              "payload": [],
+              "line": 14,
+              "doc": null
+            }
+          ],
+          "fields": [
+            {
+              "name": "seen",
+              "visibility": "public",
+              "static": true,
+              "type": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "line": 16,
+              "default": true,
+              "default_value": "0",
+              "doc": null,
+              "tools": []
+            }
+          ],
+          "methods": [
+            {
+              "kind": "method",
+              "name": "good",
+              "qualified": "Outcome::good",
+              "owner": "Outcome",
+              "const": true,
+              "visibility": "public",
+              "file": "enum_members.eco",
+              "line": 21,
+              "column": 27,
+              "doc": "/**\n     * Whether it worked.\n     */",
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "prim",
+                "name": "bool"
+              },
+              "generics": []
+            },
+            {
+              "kind": "static",
+              "name": "first",
+              "qualified": "Outcome::first",
+              "owner": "Outcome",
+              "const": false,
+              "visibility": "public",
+              "file": "enum_members.eco",
+              "line": 29,
+              "column": 28,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "named",
+                "name": "Outcome"
+              },
+              "generics": []
+            }
+          ]
+        },
+        {
+          "kind": "enum",
+          "name": "Reply",
+          "qualified": "Reply",
+          "visibility": "public",
+          "file": "enum_members.eco",
+          "line": 35,
+          "column": 13,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "conforms": [],
+          "backing": null,
+          "cases": [
+            {
+              "name": "text",
+              "discriminant": 0,
+              "payload": [
+                {
+                  "name": "body",
+                  "type": {
+                    "kind": "string"
+                  }
+                }
+              ],
+              "line": 40,
+              "doc": "/**\n     * A body.\n     */"
+            },
+            {
+              "name": "empty",
+              "discriminant": 1,
+              "payload": [],
+              "line": 41,
+              "doc": null
+            }
+          ],
+          "fields": [],
+          "methods": []
+        }
+      ]
+    }
+  ]
+}

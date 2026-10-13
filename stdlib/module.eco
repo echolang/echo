@@ -13,7 +13,7 @@
  * existing directory needs no edit here; adding a directory does, which is the right way round.
  *
  * **The directories are the two tiers.** `core/` is the language's own vocabulary - the types the compiler
- * binds with `#[core:]`, the builtins, and the namespaces those are built out of (`contract`, `mem`, `str`,
+ * binds with `#[echoc::core:]`, the builtins, and the namespaces those are built out of (`contract`, `mem`, `str`,
  * `arr`). `std/` is ordinary utility with nothing to do with the language, and everything in it is under
  * the `std` namespace. Which tier a name is in is visible in how you spell it, so the split is not
  * bookkeeping: it is the answer to "where does this new thing go".
@@ -25,7 +25,12 @@
 #[sources: "std/math/*.eco"]
 #[sources: "std/env/*.eco"]
 #[sources: "std/io/*.eco"]
+#[if: threads]
 #[sources: "std/thread/*.eco"]
+#[end]
+#[if: dynlib]
+#[sources: "std/dynlib/*.eco"]
+#[end]
 #[sources: "std/time/*.eco"]
 
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
@@ -40,7 +45,16 @@
 // echoc is itself linked against libm, and `--target-os linux` on Windows
 // must not try to open `libm.dll`. Windows UCRT already has the symbols;
 // lld-link looking for m.lib is a missing-library error.
-#[if: os != windows]
+#[if: threads && os != windows]
 #[link: lib { name: "pthread", runtime: process }]
+#[end]
+#[if: os != windows && os != wasi]
 #[link: lib { name: "m", runtime: process }]
+#[end]
+
+// glibc keeps libdl out of libc. Darwin's dlopen is libSystem.
+// `runtime: process` is the JIT half: there is no loadable `libdl.so` on
+// some hosts, and the symbols are already mapped. Native `build` still gets `-ldl`.
+#[if: os == linux]
+#[link: lib { name: "dl", runtime: process }]
 #[end]

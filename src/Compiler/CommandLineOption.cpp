@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -38,16 +39,34 @@ namespace
         return Compiler::parse_test_filter(value, filter, out_error);
     }
 
-    bool check_target_os(const std::string &value, std::string &out_error)
+    std::vector<Compiler::OptionValue> target_os_values()
     {
-        if (Compiler::TargetFacts::is_known_operating_system(value)) {
-            return true;
+        std::vector<Compiler::OptionValue> out;
+        for (const std::string &name : Compiler::TargetFacts::known_operating_systems()) {
+            // never install: the option itself refuses it
+            // a value reaches no further than its option
+            unsigned int mask = Compiler::accepts::all & ~Compiler::accepts::install;
+            const char *summary = "evaluate conditions as this OS";
+            const char *description =
+                "Picks the '#[if: os == ...]' arms. 'build' of ios or wasi is a real cross.";
+            if (Compiler::TargetFacts::is_emit_only_operating_system(name)) {
+                mask = Compiler::accepts::build
+                    | Compiler::accepts::lsp
+                    | Compiler::accepts::clean;
+                summary = "cross-compile; 'run' and 'test' refuse this OS";
+                description =
+                    "'build', 'lsp' and 'clean' only. 'run' and 'test' would pick this OS's "
+                    "constants and then execute them on the host.";
+            }
+            out.push_back({
+                name.c_str(),
+                mask,
+                0,
+                summary,
+                description
+            });
         }
-
-        out_error = fmt::format(
-            "unknown --target-os '{}', expected one of: {}",
-            value, fmt::join(Compiler::TargetFacts::known_operating_systems(), ", "));
-        return false;
+        return out;
     }
 
     bool check_target_arch(const std::string &value, std::string &out_error)
@@ -143,6 +162,8 @@ unsigned int Compiler::bit_of(Subcommand id)
         return accepts::clean;
     case Subcommand::t_lsp:
         return accepts::lsp;
+    case Subcommand::t_install:
+        return accepts::install;
     case Subcommand::t_none:
         return 0;
     }
@@ -163,6 +184,8 @@ const char *Compiler::category_heading(OptionCategory category)
         return "What echoc tells you";
     case OptionCategory::t_removal:
         return "What clean removes";
+    case OptionCategory::t_installation:
+        return "Where install puts it";
     case OptionCategory::t_general:
         return "General";
     }
@@ -500,40 +523,46 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_target_os, "target-os", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // not install: what it installs runs on this machine, so another OS's binary has nowhere to go
+            accepts::all & ~accepts::install, 0, ExclusionGroup::t_none,
             "<name>", "",
             "evaluate '#[if:]' as if targeting this OS",
             "Look at the code the way another platform sees it. Every '#[if: os == ...]' condition is "
             "evaluated against the name you give here, so the other platform's regions are the ones that "
             "get parsed:\n"
             "  echoc build --target-os linux -o app main.eco\n"
-            "One of 'darwin', 'linux', 'windows', 'ios' or 'android'. A name outside that list is an "
+            "One of 'darwin', 'linux', 'windows', 'ios', 'android' or 'wasi'. A name outside that list is an "
             "error rather than a condition that is quietly false, because '#[if: os == darwn]' should "
             "not be a region that vanishes in silence.\n"
             "On Darwin, 'echoc build --target-os ios' is a real cross-compile: objects and C "
             "sources target the iOS simulator SDK (`<arch>-apple-ios15.0-simulator`, this "
             "machine's arch unless '--target-arch' says otherwise). Pass '--ios-device' as "
-            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc run --target-os ios' "
-            "still only picks '#[if:]' arms and JITs for this machine, like every other "
-            "'--target-os'. Other names still only pick '#[if:]' arms on every subcommand - "
-            "there is no Linux sysroot on a Mac.\n"
+            "well for the iPhoneOS SDK (`arm64-apple-ios15.0`). 'echoc build --target-os wasi' "
+            "is a real cross on every host (`wasm32-unknown-wasip1`, needs a WASI SDK or "
+            "`WASI_SDK_PATH`). 'wasi' is refused on 'run' and 'test': those would pick wasi "
+            "constants and then execute them on the host. 'echoc run --target-os ios' still "
+            "only picks '#[if:]' arms and JITs for this machine.\n"
             "'clean' takes it too, because a manifest may hide its '#[depends:]' behind a condition: "
-            "without the same flag, the graph 'clean' walks is not the graph your build produced.",
-            {}, check_target_os
+            "without the same flag, the graph 'clean' walks is not the graph your build produced.\n"
+            "'lsp' takes 'wasi' so a wasi-only project's '#[wasm:]' is accepted in the editor.",
+            target_os_values(), nullptr
         },
         {
             Opt::t_target_arch, "target-arch", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
-            accepts::all, 0, ExclusionGroup::t_none,
+            // not install, for --target-os's reason
+            accepts::all & ~accepts::install, 0, ExclusionGroup::t_none,
             "<name>", "",
             "the same for the architecture",
             "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
             "admits:\n"
             "  echoc build --target-arch x86_64 -o app main.eco\n"
-            "Same closed vocabulary a condition admits. Combined with '--target-os ios' on "
+            "One of 'arm64', 'x86_64' or 'wasm32'. Combined with '--target-os ios' on "
             "'build' it also chooses the simulator triple's arch. '--ios-device' is arm64: an "
             "explicit '--target-arch' other than arm64 is refused, while a host that is not "
-            "arm64 still emits arm64 and conditions see arm64 too. An unknown name is an error.",
+            "arm64 still emits arm64 and conditions see arm64 too. '--target-os wasi' on "
+            "'build' defaults to wasm32 when this flag is omitted, and refuses any other "
+            "arch. An unknown name is an error.",
             {}, check_target_arch
         },
         {
@@ -656,6 +685,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
                     "epm is why. It must not re-implement the attribute grammar, and it reads a manifest "
                     "*before* it has fetched anything. Combine this with another --print value and it is "
                     "refused: those other values need a compile."
+                },
+                {
+                    "decls", accepts::compiling, code_of(PrintKind::t_decls),
+                    "declarations as JSON",
+                    "Dump the resolved declarations as JSON after the semantic passes. User modules only, "
+                    "unless --decls-all is also given. Types are structured trees (prim, string, array, "
+                    "map, optional, named, ptr, function). Tool attributes and "
+                    "declaration docblocks are included."
                 }
             },
             nullptr
@@ -854,12 +891,36 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "Print the version this echoc was built as, and exit:\n"
             "  echoc --version",
             {}, nullptr
+        },
+        {
+            Opt::t_decls_all, "decls-all", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_report,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "include dependency declarations in --print decls",
+            "With --print decls, include declarations from every module in the bundle, including "
+            "dependencies and the standard library. Without --print decls it is refused:\n"
+            "  echoc build -p decls --decls-all -o app main.eco",
+            {}, nullptr
+        },
+        {
+            Opt::t_dir, "dir", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_installation,
+            accepts::install, 0, ExclusionGroup::t_none,
+            "<dir>", "",
+            "the directory programs are installed into",
+            "Install somewhere other than your own bin directory:\n"
+            "  echoc install --dir /usr/local/bin\n"
+            "Without it the directory is $ECHO_BIN_DIR when that is set, and '~/.echo/bin' when it is not "
+            "('%LOCALAPPDATA%\\echo\\bin' on Windows, which is where the echoc installer already put "
+            "echoc). The directory is created if it does not exist.",
+            {}, nullptr
         }
     };
 
     // the identity option_for relies on, asserted where the table is built rather than trusted at every
     // lookup. tests/command_line.cpp pins it too, for a release build where this does not run
-    assert(table.size() == static_cast<size_t>(Opt::t_version) + 1 && "an Opt has no row in the table");
+    assert(table.size() == static_cast<size_t>(Opt::t_dir) + 1 && "an Opt has no row in the table");
 
     return table;
 }
@@ -990,6 +1051,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "Assertions and the compiler's runtime checks are on unless you say --release, which is the "
             "opposite of what 'build' does.",
             true,
+            nullptr,
             "<sources...>",
             "the .eco files to compile and run",
             "The .eco files to compile and run. Loose files like these become the 'main' module.\n"
@@ -1011,6 +1073,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "nothing it depends on has changed, so a second build usually only recompiles the program "
             "itself. That part is never cached, because its unit is where the C 'main' is created.",
             true,
+            nullptr,
             "<sources...>",
             "the .eco files to compile",
             "The .eco files to compile. Loose files like these become the 'main' module.\n"
@@ -1019,6 +1082,27 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "cannot find fails the build rather than being quietly left out.\n"
             "Name none at all and your program is whatever manifest this invocation points at: the one "
             "--module names, or the 'module.eco' in your working directory.",
+            false
+        },
+        {
+            Subcommand::t_install, "install", accepts::install,
+            "build the declared programs onto your PATH",
+            "Build this project's programs in release and copy them onto your PATH:\n"
+            "  echoc install\n"
+            "  echoc install --target clock\n"
+            "With no '--target', it takes the exe targets marked 'install: true', or every exe when "
+            "the manifest marks none. A lib or a test is never installed.\n"
+            "They land in '~/.echo/bin' ('%LOCALAPPDATA%\\echo\\bin' on Windows), in $ECHO_BIN_DIR "
+            "when that is set, or in '--dir'. Installing twice replaces what was there. The build "
+            "itself still sits in the module's build directory, like any 'echoc build'.\n"
+            "This is not 'epm install'. That one fetches dependencies into 'vendor/'. This one "
+            "installs the project itself.",
+            false,
+            "It installs the programs a manifest declares: run it beside the 'module.eco', or "
+            "point at one with '-m'.",
+            nullptr,
+            nullptr,
+            nullptr,
             false
         },
         {
@@ -1037,6 +1121,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "Only the modules you pointed at are searched. A library you depend on keeps its own tests, "
             "and running them is a matter of pointing at it instead.",
             true,
+            nullptr,
             "<sources...>",
             "the .eco files whose tests to run",
             "The .eco files to compile and take the tests of. Loose files like these become the 'main' "
@@ -1062,6 +1147,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "refuses every flag that describes one. A flag a command accepts and silently ignores is "
             "worse than one it rejects.",
             false,
+            "It parses none and runs no pass.",
             nullptr,
             nullptr,
             nullptr,
@@ -1083,6 +1169,7 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "v1 answers diagnostics, hover, go-to-definition and document symbols. Completion is not "
             "in this yet.",
             false,
+            "It parses none and runs no pass.",
             nullptr,
             nullptr,
             nullptr,

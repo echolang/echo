@@ -1,0 +1,2 @@
+// the manifest named by this case writes a lib target with no name
+echo 1;

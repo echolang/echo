@@ -1,0 +1,17 @@
+public extern interface greeter {
+    function add(int32 $a, int32 $b) : int32;
+    function answer() : int32;
+}
+
+#[export]
+public struct English : greeter {
+    static function add(int32 $a, int32 $b) : int32 {
+        return $a + $b;
+    }
+
+    static function answer() : int32 {
+        return 42;
+    }
+}
+
+echo 1;

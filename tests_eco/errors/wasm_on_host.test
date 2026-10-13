@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] wasm_on_host.eco:1:3
+
+  a '#[wasm:]' attribute is for '--target-os wasi'
+
+  1 | #[wasm: import "env"]
+    :   ^^^^
+  2 | extern {
+
+1 error, nothing was compiled.

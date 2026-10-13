@@ -5,6 +5,7 @@
 
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
+#include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Token.h"
 
 #include <llvm/IR/DerivedTypes.h>
@@ -81,7 +82,7 @@ namespace Compiler::LLVM
         // prepended, which is why every callable target takes the environment as parameter 0
         void gen_indirect_call(AST::IndirectCallExprNode &node);
 
-        // answers a `#[builtin: ...]` call in the compiler instead of emitting a call - a builtin
+        // answers a `#[echoc::builtin: ...]` call in the compiler instead of emitting a call - a builtin
         // has no symbol at all. dispatches on AST::BuiltinKind to one of the three below
         void gen_builtin_call(AST::FunctionCallExprNode &node);
         void gen_addr_of(AST::AddrOfExprNode &node);
@@ -130,11 +131,6 @@ namespace Compiler::LLVM
 
     private:
         CodegenContext &_ctx;
-
-        // `&name` seated as `function<R(P...)>`: an Echo-shaped thunk that ignores its
-        // environment and calls the named function, so the indirect call's convention
-        // does not fork
-        llvm::Function *ensure_callable_adapt(AST::FunctionDeclNode *decl);
 
         // a call whose declaration is an interface **requirement**: the callee is loaded out of the
         // receiver's own vtable rather than looked up in the function table, because a requirement has no

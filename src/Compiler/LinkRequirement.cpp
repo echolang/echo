@@ -1,5 +1,6 @@
 #include "Compiler/LinkRequirement.h"
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/SettledPath.h"
 
 #include <fmt/core.h>
@@ -219,7 +220,7 @@ std::vector<std::filesystem::path> loadables_in_directory(
         return found;
     }
 
-    const std::string extension = Compiler::TargetFacts::host().shared_library_extension();
+    const std::string extension = Compiler::CodegenTarget{}.library_suffix();
     const std::string unversioned = "lib" + name + extension;
     const std::filesystem::path exact = directory / unversioned;
 
@@ -612,7 +613,7 @@ std::optional<std::filesystem::path> Compiler::find_loadable_library(
 
             out_refusal = fmt::format(
                 "several loadable files match '{}' in '{}': {}. Write 'file:' to name one.",
-                file.value_or("lib" + name + TargetFacts::host().shared_library_extension()),
+                file.value_or("lib" + name + std::string(CodegenTarget{}.library_suffix())),
                 directory.string(),
                 names);
         }
@@ -704,7 +705,7 @@ std::optional<std::filesystem::path> Compiler::runtime_library_of(
         // bare, for the loader to resolve the way it resolves everything else - Darwin's dyld cache
         // still answers `libpthread.dylib` with no file on disk
         const std::string file_name = requirement.file.value_or(
-            "lib" + requirement.value + TargetFacts::host().shared_library_extension());
+            "lib" + requirement.value + std::string(CodegenTarget{}.library_suffix()));
 
         return std::filesystem::path(file_name);
     }

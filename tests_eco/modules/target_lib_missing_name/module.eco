@@ -1,0 +1,4 @@
+// name is required: it is the binary
+#[module: "libnoname"]
+#[sources: "src/*.eco"]
+#[target: lib { }]

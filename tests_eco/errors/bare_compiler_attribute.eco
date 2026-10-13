@@ -1,0 +1,5 @@
+// a bare compiler stem is unknown, not reserved. the note is what points at the real spelling
+#[builtin: size_of]
+function byte_size<T>() : usize;
+
+echo 1;

@@ -1,0 +1,13 @@
+#[export]
+function render() : int32
+{
+    return 1;
+}
+
+#[export: "render"]
+function draw() : int32
+{
+    return 2;
+}
+
+echo render() + draw();

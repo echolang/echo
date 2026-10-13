@@ -42,6 +42,13 @@ bool AST::constraint_admits(const std::vector<ValueType> &constraint, const Valu
         if (allowed.is_class_kind_constraint() && bare.is_class()) {
             return true;
         }
+
+        if (allowed.is_extern_interface_kind_constraint()) {
+            const ComplexType *ct = bare.get_complex_type();
+            if (ct != nullptr && ct->is_extern_interface_kind()) {
+                return true;
+            }
+        }
     }
     return false;
 }

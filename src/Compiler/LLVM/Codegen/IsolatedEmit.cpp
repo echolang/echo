@@ -143,7 +143,13 @@ IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
 
     std::string error;
     std::unique_ptr<llvm::TargetMachine> machine = make_target_machine(
-        request.triple, request.cpu, request.features, request.no_optimize, error);
+        request.triple,
+        request.cpu,
+        request.features,
+        request.no_optimize,
+        request.pic,
+        error
+    );
 
     if (!machine) {
         result.ok = false;

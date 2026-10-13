@@ -110,6 +110,8 @@ public struct stream
 
         #[if: os == windows]
         return console_columns($this->fd);
+        #[elif: os == wasi]
+        return 0;
         #[else]
         winsize $ws = winsize(0, 0, 0, 0);
 

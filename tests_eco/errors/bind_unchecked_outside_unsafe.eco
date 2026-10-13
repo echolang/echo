@@ -1,0 +1,14 @@
+class Handle
+{
+    int32 $n;
+}
+
+public extern interface greeter {
+    function add(int32 $a, int32 $b) : int32;
+}
+
+Handle $h = Handle(1);
+erased $image = erased::from($h);
+ptr<const ptr<uint8>> $slots = null;
+greeter $g = abi::bind_unchecked<greeter>($slots, $image);
+echo 1;

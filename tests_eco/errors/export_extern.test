@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_extern.eco:3:14
+
+  an 'extern' function is imported, not exported
+
+  2 | extern {
+  3 |     function foo() : void;
+    :              ^^^
+  4 | }
+
+1 error, nothing was compiled.

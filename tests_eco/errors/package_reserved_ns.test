@@ -2,9 +2,9 @@ modules: packages/reserved_ns
 expect: fail
 
 --- OUT --->
-[error] ReservedManifestAttribute  module.eco:2:3
+[error] ReservedAttributeNamespace  module.eco:2:3
 
-  the 'echoc::' namespace is reserved for the compiler.
+  the 'echoc::' namespace is reserved for the compiler and its standard library.
 
   1 | #[module: "reserved"]
   2 | #[echoc::x: "no"]

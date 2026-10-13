@@ -27,6 +27,7 @@ namespace Compiler::LLVM
         std::string cpu;
         std::string features;
         bool no_optimize = false;
+        bool pic = true;
         bool targeting_windows = false;
         bool already_optimized = false;
         bool timings = false;

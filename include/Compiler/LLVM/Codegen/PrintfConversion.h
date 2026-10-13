@@ -19,8 +19,8 @@ namespace Compiler::LLVM
     // the promoted type is chosen to agree with the format exactly - unsigned widens to uint32 under
     // `%u` rather than to the int32 C's integer promotion would strictly give - so the two cannot drift
     // apart. a table rather than an if-cascade so that adding a primitive is one row and cannot silently
-    // reuse a neighbouring width: `usize`/`isize` print as their concrete 64 bit width, which is what
-    // ECO_TARGET_POINTER_SIZE says on every target wired up today
+    // reuse a neighbouring width: `usize`/`isize` print as their concrete width, which the
+    // caller passes from size_int_ty() (codegen) so this table does not re-ask the AST layer
     //
     // **its own header because two printers read it.** `echo` prints one scalar per statement and the
     // `dprint` builtin prints a whole value's structure, and a second copy of this table is the exact
@@ -34,7 +34,7 @@ namespace Compiler::LLVM
         AST::ValueTypePrimitive promoted;
     };
 
-    inline PrintfConversion printf_conversion_for(const AST::ValueType &type)
+    inline PrintfConversion printf_conversion_for(const AST::ValueType &type, unsigned pointer_bytes)
     {
         constexpr PrintfConversion unsupported{nullptr, AST::ValueTypePrimitive::t_void};
 
@@ -56,8 +56,12 @@ namespace Compiler::LLVM
                 return {"%d", AST::ValueTypePrimitive::t_int32};
 
             case AST::ValueTypePrimitive::t_int64:
-            case AST::ValueTypePrimitive::t_isize:
                 return {"%lld", AST::ValueTypePrimitive::t_int64};
+
+            case AST::ValueTypePrimitive::t_isize:
+                return pointer_bytes == 8
+                    ? PrintfConversion{"%lld", AST::ValueTypePrimitive::t_int64}
+                    : PrintfConversion{"%d", AST::ValueTypePrimitive::t_int32};
 
             case AST::ValueTypePrimitive::t_uint8:
             case AST::ValueTypePrimitive::t_uint16:
@@ -65,8 +69,12 @@ namespace Compiler::LLVM
                 return {"%u", AST::ValueTypePrimitive::t_uint32};
 
             case AST::ValueTypePrimitive::t_uint64:
-            case AST::ValueTypePrimitive::t_usize:
                 return {"%llu", AST::ValueTypePrimitive::t_uint64};
+
+            case AST::ValueTypePrimitive::t_usize:
+                return pointer_bytes == 8
+                    ? PrintfConversion{"%llu", AST::ValueTypePrimitive::t_uint64}
+                    : PrintfConversion{"%u", AST::ValueTypePrimitive::t_uint32};
 
             // **`%f` is `echo`'s answer, not everyone's.** it renders 42.69 as `42.690000`, which is the
             // output the corpus has always pinned. `dprint` overrides both float rows with `%g` and

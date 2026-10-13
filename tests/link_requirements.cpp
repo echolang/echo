@@ -2,6 +2,7 @@
 
 #include <AST/ASTAttributeReader.h>
 #include <AST/AttributeNode.h>
+#include <Compiler/CodegenTarget.h>
 #include <Compiler/LinkRequirement.h>
 #include <Compiler/TargetFacts.h>
 
@@ -332,7 +333,7 @@ TEST_CASE("a search path is what the JIT tries before the bare name", "[link][ji
 
     // a real DSO magic, not a placeholder string: a linker script in this slot used to win and then
     // fail at dlopen, which is the Ubuntu `libpthread.so` failure
-    const std::string extension = Compiler::TargetFacts::host().shared_library_extension();
+    const std::string extension = Compiler::CodegenTarget{}.library_suffix();
     write_fake_elf(directory / ("libfake" + extension));
 
     const std::vector<Compiler::LinkRequirement> requirements = {
@@ -353,7 +354,7 @@ TEST_CASE("a linker script is not a loadable library", "[link][jit]")
     ScopedProject project("linker_script");
 
     const fs::path directory = project.root() / "vendor";
-    const std::string extension = Compiler::TargetFacts::host().shared_library_extension();
+    const std::string extension = Compiler::CodegenTarget{}.library_suffix();
 
     write_linker_script(directory / ("libfake" + extension));
     write_fake_elf(directory / ("libfake" + extension + ".1"));
@@ -457,7 +458,7 @@ TEST_CASE("several SONAMEs refuse rather than pick one", "[link][jit]")
     ScopedProject project("ambiguous_soname");
 
     const fs::path directory = project.root() / "vendor";
-    const std::string extension = Compiler::TargetFacts::host().shared_library_extension();
+    const std::string extension = Compiler::CodegenTarget{}.library_suffix();
 
     write_linker_script(directory / ("libfake" + extension));
     write_fake_elf(directory / ("libfake" + extension + ".1"));

@@ -1,0 +1,114 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "extern interface",
+          "name": "greeter",
+          "qualified": "greeter",
+          "visibility": "public",
+          "file": "extern_interface.eco",
+          "line": 1,
+          "column": 25,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "conforms": [],
+          "requirements": [
+            {
+              "kind": "method",
+              "name": "add",
+              "qualified": "greeter::add",
+              "owner": "greeter",
+              "const": true,
+              "visibility": "public",
+              "file": "extern_interface.eco",
+              "line": 2,
+              "column": 14,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "a",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
+                },
+                {
+                  "name": "b",
+                  "label": null,
+                  "type": {
+                    "kind": "prim",
+                    "name": "int32"
+                  },
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
+                }
+              ],
+              "return": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "generics": [],
+              "link": "add"
+            },
+            {
+              "kind": "method",
+              "name": "open",
+              "qualified": "greeter::open",
+              "owner": "greeter",
+              "const": true,
+              "visibility": "public",
+              "file": "extern_interface.eco",
+              "line": 3,
+              "column": 30,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [
+                {
+                  "name": "path",
+                  "label": null,
+                  "type": {
+                    "kind": "ptr",
+                    "to": {
+                      "kind": "prim",
+                      "name": "uint8"
+                    },
+                    "borrow": false,
+                    "weak": false,
+                    "const": false,
+                    "nullable": true
+                  },
+                  "default": false,
+                  "default_value": null,
+                  "mode": null,
+                  "move": false
+                }
+              ],
+              "return": {
+                "kind": "prim",
+                "name": "int32"
+              },
+              "generics": [],
+              "link": "sqlite3_open"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

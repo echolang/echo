@@ -1,0 +1,7 @@
+struct Holder
+{
+    #[wasm: export "memory"]
+    function go() : void
+    {
+    }
+}

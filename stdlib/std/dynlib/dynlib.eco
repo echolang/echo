@@ -1,0 +1,195 @@
+/**
+ * A loadable library: a `.dylib`, a `.so`, a `.dll`.
+ *
+ * The image unloads when the last `library` (and every binding that holds its
+ * `erased`) is gone. `load<T>` opens and binds in one step.
+ */
+
+namespace std::dynlib;
+
+/**
+ * An opened shared library.
+ *
+ * `open` is the constructor. `bind<T>` reads the exported ABI table.
+ * `address` is the raw `dlsym` hatch; recast still under `unsafe`.
+ */
+#[atomic]
+public class library
+{
+    private ptr<uint8> $handle;
+
+    private constructor(ptr<uint8> $handle)
+    {
+        $this->handle:$ = $handle;
+    }
+
+    destructor()
+    {
+        if ($this->handle:$ == null) {
+            return;
+        }
+
+#[if: os == windows]
+        c_FreeLibrary($this->handle);
+#[else]
+        c_dlclose($this->handle);
+#[end]
+        $this->handle:$ = null;
+    }
+
+    /**
+     * Opens `$path`. No `lib` prefix and no suffix are invented. A path that
+     * contains a slash is that file. A bare name is searched the way the OS
+     * searches (`dlopen` / `LoadLibrary`).
+     */
+    static function open(const string& $path) : result<library, dynerror>
+    {
+        if ($path->contains('/') || $path->contains('\\')) {
+            result<bool, std::io::ioerror> $stat = std::io::exists($path);
+            if ($stat->has_value() && !$stat->unwrap()) {
+                return .error(.not_found($path));
+            }
+        }
+
+#[if: os == windows]
+        std::env::wide_string $wide = std::env::wide_string();
+        if (!$wide->load_utf8($path)) {
+            return .error(.load_failed('could not convert the library path'));
+        }
+
+        ptr<uint8> $handle = c_LoadLibraryW($wide->data());
+        if ($handle:$ == null) {
+            return .error(.load_failed('could not load the library'));
+        }
+#[else]
+        c_dlerror();
+        ptr<uint8> $handle = c_dlopen($path->cstr(), RTLD_NOW_LOCAL);
+        if ($handle:$ == null) {
+            ptr<uint8> $msg = c_dlerror();
+            if ($msg:$ == null) {
+                return .error(.load_failed('could not load the library'));
+            }
+
+            return .error(.load_failed(str::from($msg)));
+        }
+#[end]
+
+        return .ok(library($handle));
+    }
+
+    /**
+     * Bind the exported table for `T`. Missing table is `missing_interface`.
+     * A header that does not match is `abi_mismatch`.
+     */
+    const function bind<T : extern interface>() : result<T, dynerror>
+    {
+        string $sym = abi::symbol<T>();
+        ptr<uint8> $raw = guard $this->address($sym) else {
+            return .error(.missing_interface($sym));
+        };
+
+        result<T, abi::mismatch> $bound = abi::bind<T>(
+            $raw:$ as ptr<const uint8>,
+            erased::from($this));
+
+        T $value = guard $bound else ($why) {
+            return .error(.abi_mismatch($why));
+        };
+
+        return .ok($value);
+    }
+
+    /**
+     * Fill slots by each requirement's link name. No fingerprint. Missing
+     * name is `missing_symbol`.
+     */
+    const function bind_symbols<T : extern interface>() : result<T, dynerror>
+    {
+        usize $n = abi::slot_count<T>() as usize;
+        array<ptr<uint8>> $slots = [];
+        $slots->reserve($n);
+
+        usize $i = 0;
+        while ($i < $n) {
+            string $name = abi::slot_symbol<T>($i);
+            ptr<uint8> $p = guard $this->address($name) else {
+                return .error(.missing_symbol($name));
+            };
+            $slots[] = $p;
+            $i = $i + 1;
+        }
+
+        unsafe {
+            return .ok(abi::bind_unchecked<T>(
+                $slots->data() as ptr<const ptr<uint8>>,
+                erased::from($this)));
+        }
+    }
+
+    /**
+     * The address of `$name`, or `null` when the library does not export it.
+     *
+     * Recast under `unsafe` to the `extern function<...>` you mean. The
+     * signature is your promise.
+     */
+    const function address(const string& $name) : ptr<uint8>?
+    {
+        if ($this->handle:$ == null) {
+            return null;
+        }
+
+#[if: os == windows]
+        ptr<uint8> $p = c_GetProcAddress($this->handle, $name->cstr());
+#[else]
+        c_dlerror();
+        ptr<uint8> $p = c_dlsym($this->handle, $name->cstr());
+        if ($p:$ == null) {
+            c_dlerror();
+            return null;
+        }
+#[end]
+
+        if ($p:$ == null) {
+            return null;
+        }
+
+        return $p;
+    }
+}
+
+/**
+ * The file name this OS uses for a loadable library of `$stem`.
+ */
+public function file_name(const string& $stem) : string
+{
+#[if: os == windows]
+    return str::concat($stem, '.dll');
+#[elif: family == darwin]
+    return str::concat(str::concat('lib', $stem), '.dylib');
+#[else]
+    return str::concat(str::concat('lib', $stem), '.so');
+#[end]
+}
+
+/**
+ * `$dir` joined with `file_name($stem)`.
+ */
+public function path_of(const string& $dir, const string& $stem) : string
+{
+    return str::concat(str::concat($dir, '/'), file_name($stem));
+}
+
+/**
+ * Open `$dir`/`file_name($name)` and bind `T`.
+ */
+public function load<T : extern interface>(
+    const string& $dir,
+    const string& $name
+) : result<T, dynerror>
+{
+    library $lib = guard library::open(path_of($dir, $name)) else ($e) {
+        return .error($e);
+    };
+
+    return $lib->bind<T>();
+}

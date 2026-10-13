@@ -1,0 +1,7 @@
+#[export]
+function main() : int32
+{
+    return 0;
+}
+
+echo 1;

@@ -8,6 +8,8 @@
 
 namespace Compiler
 {
+    class CodegenTarget;
+
     // **the sole answer to "which CPU is the backend compiling for".**
     //
     // a CPU name and a feature string, and between them everything llvm::TargetMachine needs beyond the
@@ -22,22 +24,33 @@ namespace Compiler
     // branch does - start choosing instruction sets.
     struct Subtarget
     {
-        // never empty: the resolver's floor is "generic", which is what LLVM itself means by "the
-        // baseline this triple guarantees". an empty string is a *different* thing to LLVM's JIT than
-        // to its TargetMachine, and one of them auto-detects the host
+        // never empty: the resolver's floor is "generic", Echo's name for the baseline this
+        // triple guarantees. an empty string is a *different* thing to LLVM's JIT than to its
+        // TargetMachine, and one of them auto-detects the host. `generic` is this compiler's
+        // floor, not every LLVM table's CPU name - llvm_cpu_name is the spelling those APIs take
         std::string cpu;
 
-        // `+feature,-feature,...`, empty for every baseline row. a feature the CPU already implies does
-        // not need saying, so this is only ever what a person asked for on top
+        // `+feature,-feature,...`. empty except wasm32, which carries `+simd128` so a
+        // 16-byte vector is not silently scalarized. a feature the CPU already implies
+        // does not need saying
         std::string features;
     };
 
-    // **LLVM targets this compile may name, registered.** Native always; on Darwin also AArch64 and
-    // X86, because CodegenTarget can name `arm64-apple-ios15.0` on an Intel Mac and
+    // **LLVM targets this compile may name, registered.** Native always; WebAssembly only when
+    // the triple is wasm, so a host compile does not register a target it will not emit; on Darwin
+    // also AArch64 and X86, because CodegenTarget can name `arm64-apple-ios15.0` on an Intel Mac and
     // `x86_64-apple-ios15.0-simulator` on Apple Silicon. Idempotent, and here rather than left implicit
     // in Backend::init_target because the CPU a person wrote has to be checked at the command line,
     // which is long before the backend exists. One owner, so the two cannot register different sets
     void ensure_native_target_registered();
+    void ensure_targets_for_triple(const std::string &triple);
+
+    // **the CPU string LLVM's TargetMachine / MC / EngineBuilder accept.** Echo's floor is
+    // `generic`; x86's table has no such processor (`x86-64` / `i686` are clang's spellings).
+    // passing `generic` into createMCSubtargetInfo is the fprintf that becomes
+    // STATUS_STACK_BUFFER_OVERRUN on a Windows /MT echoc linked against /MD LLVM. Subtarget.cpu
+    // stays `generic` so the cache key does not grow an LLVM dialect
+    std::string llvm_cpu_name(const std::string &triple, const std::string &cpu);
 
     // **the platform baseline for a triple** - the default, and neither `generic` nor the host.
     //
@@ -74,6 +87,18 @@ namespace Compiler
     // TargetFacts::cache_signature() is. A field added above without a line here would silently share a
     // key with a build that did not have it, which is the one cache failure with no diagnostic
     std::string subtarget_signature(const Subtarget &subtarget);
+
+    // `-Xclang -target-cpu` / `-target-feature` for a C compile, from the same
+    // resolve_subtarget Echo's TargetMachine uses. CBuild calls this after
+    // append_codegen_target_args so the two objects cannot disagree about the CPU.
+    // `generic` is omitted: clang rejects that name on x86, and no flag is the
+    // triple's baseline, which is what `generic` means to LLVM
+    bool append_codegen_cc_cpu_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        const std::string &cpu_request,
+        const std::string &features_request,
+        std::string &out_error);
 };
 
 #endif

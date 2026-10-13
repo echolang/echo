@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] export_ptr_string.eco:2:10
+
+  cannot be exported because 'ptr<string>' names Echo-owned storage a C caller cannot keep alive or free. Pass a scalar or a pointer to bytes.
+
+  1 | #[export]
+  2 | function greet(ptr<string> $name) : void
+    :          ^^^^^
+  3 | {
+
+1 error, nothing was compiled.

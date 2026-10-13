@@ -56,8 +56,26 @@ namespace Parser
         // artifact at all**, which is what makes it unlike the kind above rather than a second flavour of
         // it: there is no entry file, no binary and nothing in the build directory - only `groups` and
         // `files`, which are the same selection `--filter` states on the command line
-        t_test
+        t_test,
+
+        // a program with no entry, whose surface is its `#[export]`s. on wasi a
+        // *reactor* (`crt1-reactor.o`, `_initialize`); on the host a shared library.
+        // `name` is required, `entry` is refused
+        t_library
     };
+
+    // `echoc build` produces an artifact for these. a test target produces none
+    inline bool is_buildable_target(TargetKind kind)
+    {
+        return kind == TargetKind::t_executable || kind == TargetKind::t_library;
+    }
+
+    // an exe names a file whose root becomes `main`. a lib and a test do not:
+    // the lib is every file, the test is a selection
+    inline bool target_has_entry(TargetKind kind)
+    {
+        return kind == TargetKind::t_executable;
+    }
 
     // one `#[requires: "name" { version:, source: git "...", rev: }]`. the compiler reads
     // the name and resolves it against the package directory; version / source / rev are
@@ -110,6 +128,11 @@ namespace Parser
         std::filesystem::path entry;
 
         TargetKind kind = TargetKind::t_executable;
+
+        // `install: true` on an exe: what `echoc install` takes when `--target` is not given
+        // a default, nothing more: `--target` still installs an unmarked exe, and a module
+        // that marks none of them installs all of them
+        bool install = false;
 
         // a `test` target's selection: the groups and the files whose tests it runs, empty meaning all of
         // them. Read by Compiler::select_tests, which is the same function `--filter` goes through - a
@@ -277,6 +300,12 @@ namespace Parser
 
         explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
 
+        // when set, `#[sources:]` patterns match these relative posix paths
+        // (`core/array.eco`) instead of globbing the filesystem. the embedded
+        // stdlib uses it so a released echoc can still honour `#[if:]` on
+        // `module.eco` without the sources being on disk
+        std::optional<std::vector<std::string>> virtual_source_pool;
+
         AST::Module &fresh_module()
         {
             AST::module_handle_t handle =
@@ -330,7 +359,8 @@ namespace Parser
         const std::filesystem::path &path,
         ManifestScratch &scratch,
         ModuleManifest &out,
-        ManifestRead read = ManifestRead::t_full);
+        ManifestRead read = ManifestRead::t_full,
+        const std::optional<std::string> &content = std::nullopt);
 
     // the directory `#[requires:]` names are resolved against. `--package-dir` wins; otherwise
     // `vendor/` beside the entry, or the ancestor named `vendor` when the entry itself sits

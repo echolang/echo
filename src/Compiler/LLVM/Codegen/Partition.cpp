@@ -8,7 +8,6 @@
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
 #include "AST/FunctionDeclNode.h"
-#include "eco.h"
 
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallVector.h>
@@ -24,6 +23,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
+
+#include <optional>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <fmt/core.h>
@@ -335,7 +336,9 @@ std::unordered_map<const llvm::Function *, AST::File *> function_homes(
             continue;
         }
 
-        if (entry_home != nullptr && function.getName() == ECO_ENTRY_SYMBOL_NAME) {
+        const auto entry_symbol = ctx.options.codegen.entry_symbol();
+        if (entry_home != nullptr && entry_symbol.has_value()
+            && function.getName() == *entry_symbol) {
             home_of[&function] = entry_home;
             continue;
         }
@@ -457,7 +460,16 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
     }
 
     for (llvm::GlobalVariable &global : module.globals()) {
-        if (global.isDeclaration() || global.hasLocalLinkage() || is_llvm_global_name(global.getName())) {
+        if (global.isDeclaration() || global.hasLocalLinkage()) {
+            continue;
+        }
+
+        // llvm.global_ctors / dtors have to be a root of `__shared` or a
+        // lib's `__eco_lib_fini` is extracted into no partition and dlclose
+        // never runs it. other `llvm.*` metadata stays out
+        if (is_llvm_global_name(global.getName())
+            && global.getName() != "llvm.global_ctors"
+            && global.getName() != "llvm.global_dtors") {
             continue;
         }
 

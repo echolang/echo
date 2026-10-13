@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <Compiler/BuildLayout.h>
+#include <Parser/ManifestParser.h>
+
 #include "subprocess.h"
 
 #include <filesystem>
@@ -75,6 +78,19 @@ bool holds_an_object(const fs::path &directory)
 }
 
 };
+
+TEST_CASE("an embedded stdlib: manifest is compiler-supplied", "[layout]")
+{
+    Parser::ModuleManifest manifest;
+    manifest.path = "stdlib:/module.eco";
+    manifest.directory = "stdlib:";
+    REQUIRE(Compiler::is_embedded_stdlib_path(manifest.path));
+    REQUIRE(Compiler::is_compiler_supplied_module(manifest));
+    REQUIRE(Compiler::embedded_stdlib_path("module.eco") == manifest.path);
+    REQUIRE(Compiler::embedded_stdlib_path("core/array.eco").generic_string()
+        == "stdlib:/core/array.eco");
+    REQUIRE(Compiler::is_embedded_stdlib_path(Compiler::k_embedded_stdlib_scheme));
+}
 
 TEST_CASE("a module's artifacts go to 'ecobuild' beside its manifest", "[layout]")
 {

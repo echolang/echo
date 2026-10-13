@@ -207,7 +207,8 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
 
     // the probe is the same word retain and last-release RMW. a plain load racing those is a
     // data race, and a failed CAS that loops back here would otherwise reload a hoisted SSA
-    if (AST::counts_are_atomic(*class_type.get_complex_type())) {
+    if (_ctx.options.codegen.has_os_threads()
+        && AST::counts_are_atomic(*class_type.get_complex_type())) {
         strong->setAtomic(CountAtomics::observe());
         strong->setAlignment(CountAtomics::word());
     }
@@ -758,7 +759,8 @@ llvm::Value *ClassCodegen::gen_count(
     const std::string name = count_name(index);
     llvm::LoadInst *count = _ctx.builder->CreateLoad(
         i64, gen_header_ptr(handle, layout.box, index, name + "_ptr"), name);
-    if (AST::counts_are_atomic(*class_type.get_complex_type())) {
+    if (_ctx.options.codegen.has_os_threads()
+        && AST::counts_are_atomic(*class_type.get_complex_type())) {
         count->setAtomic(CountAtomics::observe());
         count->setAlignment(CountAtomics::word());
     }

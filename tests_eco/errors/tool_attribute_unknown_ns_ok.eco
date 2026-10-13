@@ -1,0 +1,7 @@
+// a namespaced attribute echoc does not own is carried, not refused
+#[web::js_name: "ok"]
+function f() : void
+{
+}
+
+echo 1;

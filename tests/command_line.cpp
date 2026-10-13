@@ -150,7 +150,7 @@ TEST_CASE("the option table is indexed by its own ids", "[cli]")
 {
     const std::vector<CommandLineOption> &table = Compiler::command_line_options();
 
-    REQUIRE(table.size() == static_cast<size_t>(Opt::t_version) + 1);
+    REQUIRE(table.size() == static_cast<size_t>(Opt::t_dir) + 1);
 
     for (size_t i = 0; i < table.size(); i++) {
         REQUIRE(static_cast<size_t>(table[i].id) == i);
@@ -198,7 +198,7 @@ TEST_CASE("a flag carries no value machinery and a valued one carries exactly on
     // valued option with no acceptance rule fails here rather than accepting anything forever
     const std::set<Opt> free_text = {
         Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_package_dir, Opt::t_link, Opt::t_define,
-        Opt::t_target_cpu, Opt::t_target_features
+        Opt::t_target_cpu, Opt::t_target_features, Opt::t_dir
     };
 
     for (const CommandLineOption &option : Compiler::command_line_options()) {
@@ -280,7 +280,7 @@ TEST_CASE("every row carries a short summary and a full description", "[cli]")
 TEST_CASE("a value's code is its enumerator", "[cli]")
 {
     const std::vector<Compiler::OptionValue> &prints = Compiler::option_for(Opt::t_print).values;
-    REQUIRE(prints.size() == 7);
+    REQUIRE(prints.size() == 8);
 
     REQUIRE(prints[0].code == static_cast<unsigned int>(PrintKind::t_ast));
     REQUIRE(prints[1].code == static_cast<unsigned int>(PrintKind::t_ast_resolved));
@@ -289,6 +289,7 @@ TEST_CASE("a value's code is its enumerator", "[cli]")
     REQUIRE(prints[4].code == static_cast<unsigned int>(PrintKind::t_symbols));
     REQUIRE(prints[5].code == static_cast<unsigned int>(PrintKind::t_instances));
     REQUIRE(prints[6].code == static_cast<unsigned int>(PrintKind::t_manifest));
+    REQUIRE(prints[7].code == static_cast<unsigned int>(PrintKind::t_decls));
 
     const std::vector<Compiler::OptionValue> &explains = Compiler::option_for(Opt::t_explain).values;
     REQUIRE(explains.size() == 4);
@@ -458,7 +459,7 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({}) == "No command given.");
 
     REQUIRE(refusal({ "compile", "a.eco" })
-        == "'compile' is not an echoc command. Write 'run', 'build', 'test', 'clean' or 'lsp'.");
+        == "'compile' is not an echoc command. Write 'run', 'build', 'install', 'test', 'clean' or 'lsp'.");
 
     REQUIRE(refusal({ "run", "--nonsense", "a.eco" }) == "Unknown option '--nonsense'.");
 
@@ -485,6 +486,15 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
 
     REQUIRE(refusal({ "clean", "app.eco" })
         == "'clean' takes no source files. It parses none and runs no pass.");
+
+    // install is for this machine and names its own binaries
+    // the flags that would say otherwise are refused at the word rather than read and ignored
+    REQUIRE(refusal({ "install" }) == "<accepted>");
+    REQUIRE(refusal({ "install", "--target", "clock", "--dir", "/tmp/bin" }) == "<accepted>");
+    REQUIRE(refusal({ "install", "-o", "out" }) == "'install' does not take '-o, --output'.");
+    REQUIRE(refusal({ "install", "--target-os", "wasi" }) == "'install' does not take '--target-os'.");
+    REQUIRE(refusal({ "build", "--dir", "/tmp/bin" }) == "'build' does not take '--dir'.");
+    REQUIRE(contains(refusal({ "install", "app.eco" }), "'install' takes no source files. It installs"));
 
     REQUIRE(refusal({ "lsp" }) == "<accepted>");
     REQUIRE(refusal({ "lsp", "app.eco" })
@@ -521,8 +531,11 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     // the vocabulary another owner holds still reports through that owner's own table
     REQUIRE(contains(refusal({ "run", "--color", "alwyas", "a.eco" }), "Unknown '--color' value"));
 
-    REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "unknown --target-os 'macos'"));
+    REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "Unknown '--target-os' value 'macos'"));
     REQUIRE(contains(refusal({ "run", "--target-os", "macos", "a.eco" }), "ios"));
+    REQUIRE(contains(refusal({ "run", "--target-os", "wasi", "a.eco" }), "'run --target-os wasi'"));
+    REQUIRE(contains(refusal({ "test", "--target-os", "wasi", "a.eco" }), "'test --target-os wasi'"));
+    REQUIRE(refusal({ "lsp", "--target-os", "wasi" }) == "<accepted>");
     REQUIRE(contains(refusal({ "run", "--target-arch", "x86", "a.eco" }), "unknown --target-arch 'x86'"));
 
     REQUIRE(refusal({ "run", "--ios-device", "a.eco" }) == "'run' does not take '--ios-device'.");
@@ -551,6 +564,8 @@ TEST_CASE("the subcommand decides the build mode, and a flag overrides it", "[cl
 {
     REQUIRE(resolved({ "run", "a.eco" }).options.mode == Compiler::BuildMode::t_debug);
     REQUIRE(resolved({ "build", "-o", "x", "a.eco" }).options.mode == Compiler::BuildMode::t_release);
+    REQUIRE(resolved({ "install" }).options.mode == Compiler::BuildMode::t_release);
+    REQUIRE(resolved({ "install", "--debug" }).options.mode == Compiler::BuildMode::t_debug);
     REQUIRE(resolved({ "run", "--release", "a.eco" }).options.mode == Compiler::BuildMode::t_release);
     REQUIRE(resolved({ "build", "-o", "x", "--debug", "a.eco" }).options.mode
         == Compiler::BuildMode::t_debug);
@@ -656,6 +671,21 @@ TEST_CASE("manifest is an answer and cannot be combined with another dump", "[cl
     REQUIRE(driver.prints(PrintKind::t_manifest));
 }
 
+TEST_CASE("decls-all needs print decls", "[cli]")
+{
+    CommandLine cli;
+    std::string error;
+    REQUIRE(parse({ "build", "--decls-all", "a.eco" }, cli, error));
+
+    DriverOptions refused;
+    REQUIRE_FALSE(Compiler::resolve_driver_options(cli, refused, error));
+    REQUIRE(error.find("--print decls") != std::string::npos);
+
+    const DriverOptions driver = resolved({ "build", "-p", "decls", "--decls-all", "a.eco" });
+    REQUIRE(driver.prints(PrintKind::t_decls));
+    REQUIRE(driver.decls_all);
+}
+
 // **structure rather than a golden, and deliberately.** A two-hundred-line string literal would make
 // every wording improvement a test edit, which trains people to regenerate rather than read - and the
 // descriptions being prose somebody improves is the whole point of moving them into the table
@@ -697,6 +727,11 @@ TEST_CASE("a category with nothing in it is absent from the page", "[cli]")
     // clean compiles nothing, so it answers no question about how
     REQUIRE_FALSE(contains(clean, Compiler::category_heading(OptionCategory::t_build)));
     REQUIRE(contains(build, Compiler::category_heading(OptionCategory::t_build)));
+
+    const std::string install = page(Subcommand::t_install, TerminalCapabilities::plain());
+
+    REQUIRE_FALSE(contains(build, Compiler::category_heading(OptionCategory::t_installation)));
+    REQUIRE(contains(install, Compiler::category_heading(OptionCategory::t_installation)));
 }
 
 // **a value a subcommand cannot write is shown and marked, never hidden.** A reader who cannot see
@@ -737,11 +772,13 @@ TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
 
     REQUIRE(contains(unicode, "\u251c\u2500 ast"));
     REQUIRE(contains(unicode, "\u251c\u2500 instances"));
-    REQUIRE(contains(unicode, "\u2514\u2500 manifest"));
+    REQUIRE(contains(unicode, "\u251c\u2500 manifest"));
+    REQUIRE(contains(unicode, "\u2514\u2500 decls"));
 
     REQUIRE(contains(ascii, "|- ast"));
     REQUIRE(contains(ascii, "|- instances"));
-    REQUIRE(contains(ascii, "`- manifest"));
+    REQUIRE(contains(ascii, "|- manifest"));
+    REQUIRE(contains(ascii, "`- decls"));
 
     // the plain page is ascii to the byte, so a golden or a CI log never carries a glyph
     for (const unsigned char byte : ascii) {
@@ -877,6 +914,7 @@ TEST_CASE("the usage line is built from the table", "[cli]")
         "\n"
         "  echoc run [options] <sources...> [-- <program arguments>]\n"
         "  echoc build [options] <sources...>\n"
+        "  echoc install [options]\n"
         "  echoc test [options] <sources...>\n"
         "  echoc clean [options]\n"
         "  echoc lsp [options]\n");
@@ -950,7 +988,7 @@ TEST_CASE("one option's page is that option and nothing else", "[cli]")
     }
 
     // the facts the prose must not have to repeat, because they are on the row and would go stale
-    REQUIRE(contains(text, "Accepted by: run, build, test."));
+    REQUIRE(contains(text, "Accepted by: run, build, install, test."));
     REQUIRE(contains(text, "Defaults to 'module'."));
 
     // and no other option leaks onto it

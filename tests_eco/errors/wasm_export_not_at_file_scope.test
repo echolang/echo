@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+mode: build
+flags: --target-os wasi
+
+--- OUT --->
+[error] wasm_export_not_at_file_scope.eco:3:7
+
+  a wasm object export belongs at file scope
+
+  2 | {
+  3 |     #[wasm: export "memory"]
+    :       ^^^^
+  4 |     function go() : void
+
+1 error, nothing was compiled.

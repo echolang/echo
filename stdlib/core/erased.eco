@@ -6,7 +6,7 @@
  * is refused outside `unsafe`.
  */
 
-#[core: erased]
+#[echoc::core: erased]
 public struct erased
 {
     private ptr<uint8> $object;
@@ -27,19 +27,19 @@ public struct erased
     /**
      * A new owner of `$v`. `T` must be a class.
      */
-    #[builtin: erased_from]
+    #[echoc::builtin: erased_from]
     public static function from<T : class>(const T& $v) : erased;
 }
 
-#[builtin: erased_retain]
+#[echoc::builtin: erased_retain]
 private function erased_retain(erased& $v) : void;
 
-#[builtin: erased_release]
+#[echoc::builtin: erased_release]
 private function erased_release(erased& $v) : void;
 
 /**
  * Promise that `$v` holds a `T`. Extra retain for the handle that comes back.
  * Refused outside `unsafe`.
  */
-#[builtin: assume]
+#[echoc::builtin: assume]
 public function assume<T : class>(const erased& $v) : T;

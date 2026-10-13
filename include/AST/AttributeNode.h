@@ -8,6 +8,8 @@
 #include "Token.h"
 
 #include <optional>
+#include <unordered_map>
+#include <vector>
 
 namespace AST
 {
@@ -42,6 +44,12 @@ namespace AST
         // written on an attribute that cannot carry one has to be refused whether or not anyone is in it
         bool opens_scope = false;
 
+        // true when this was written at the file root (or a file-level namespace), not inside a type
+        // body, a function, or a nested block. a type body shares the file-root ScopeNode, so being a
+        // child of `file.root` does not answer this. Parser::parse_attribute is the writer;
+        // AST::check_wasm_surface is the reader - a wasm object export is a file-root fact
+        bool written_at_file_scope = false;
+
         AttributeNode(const TokenSlice &attribute_tokens, const TokenReference &attribute_id) :
             attribute_tokens(attribute_tokens),
             attribute_id(attribute_id)
@@ -72,6 +80,7 @@ namespace AST
 
         void push_back(AttributeNode *attribute) {
             _attributes[attribute->attribute_id.value()].push_back(attribute);
+            _order.push_back(attribute);
         }
 
         // absent is not an error - asking whether a declaration carries an attribute is the
@@ -92,8 +101,14 @@ namespace AST
             return it->second.front();
         }
 
+        // written order, so a dump can emit every tool attribute without knowing the names
+        const std::vector<AttributeNode *> &all() const {
+            return _order;
+        }
+
     private:
         std::unordered_map<std::string, std::vector<AttributeNode *>> _attributes;
+        std::vector<AttributeNode *> _order;
 
     };
 };

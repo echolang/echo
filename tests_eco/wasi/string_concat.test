@@ -1,0 +1,6 @@
+mode: build
+target: wasi
+
+--- OUT --->
+hello wasm
+5

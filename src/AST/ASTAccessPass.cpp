@@ -246,7 +246,7 @@ void AccessPass::report_conflict(
 
     // **the remedy names a type, never an operation on it.** the useful advice for a container is
     // "ask it for the range instead of handing it itself", and the operation that does so is the
-    // library's to name - a `#[core:]` name hardcoded here would be a message that stops being true
+    // library's to name - a `#[echoc::core:]` name hardcoded here would be a message that stops being true
     // the moment the standard library renames anything
     std::string remedy =
         "a value cannot be both written and read by one call - read the source into a separate "

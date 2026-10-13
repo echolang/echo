@@ -1,0 +1,2 @@
+// a module declaration's file is its path from the directory holding module.eco, not a basename two files
+// of one module could share. the loose main module keeps its basename

@@ -1,0 +1,8 @@
+mode: build
+
+--- OUT --->
+1
+--- UNIT_IR --->
+CHECK: @__eco_abi_7greeter =
+CHECK: i32 1, i32 2
+CHECK: [2 x ptr]

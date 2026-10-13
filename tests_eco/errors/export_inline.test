@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_inline.eco:3:10
+
+  an exported function cannot be '#[inline]' - that would emit it into every unit rather than once under a raw symbol
+
+  2 | #[inline]
+  3 | function twice(int32 $n) : int32
+    :          ^^^^^
+  4 | {
+
+1 error, nothing was compiled.

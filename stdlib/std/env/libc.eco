@@ -33,8 +33,22 @@ internal extern {
     // only failure `cwd` has to distinguish, and why it grows its buffer rather than
     // reading errno
     function getcwd as c_getcwd(ptr<uint8> $buf, usize $size) : ptr<uint8>;
+}
+#[end]
 
+#[if: family != windows && family != wasi]
+internal extern {
     function getpid as c_getpid() : int32;
+}
+#[end]
+
+#[if: family == wasi]
+// WASI preview 1 has no process id. wasi-libc's emulated getpid lives in a
+// separate archive this compiler does not link; pid() answers 1, the
+// conventional init process
+internal function c_getpid() : int32
+{
+    return 1;
 }
 #[end]
 

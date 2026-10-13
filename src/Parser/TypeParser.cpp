@@ -1042,6 +1042,15 @@ bool Parser::parse_constraint_atoms(
             }
 
             cursor.skip();
+        } else if (cursor.is_type(Token::Type::t_extern)
+            && cursor.peek_is_type(1, Token::Type::t_interface)) {
+            if (resolve_atoms) {
+                param.constraint.push_back(AST::ValueType::make_extern_interface_kind_constraint());
+                append_constraint_spelling(param, "extern interface");
+            }
+
+            cursor.skip();
+            cursor.skip();
         } else if (!cursor.is_type(Token::Type::t_identifier)) {
             payload.collect_unexpected_token(Token::Type::t_identifier);
             cursor.try_skip_to_next_statement();

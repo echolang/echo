@@ -1,0 +1,10 @@
+// an extern interface has no zero value. a static with no initializer is refused
+public extern interface greeter {
+    function answer() : int32;
+}
+
+struct Holder {
+    static greeter $g;
+}
+
+echo Holder::$g->answer();

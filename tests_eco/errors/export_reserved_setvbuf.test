@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_reserved_setvbuf.eco:2:10
+
+  cannot export as 'setvbuf' - that name is a compiler runtime symbol
+
+  1 | #[export]
+  2 | function setvbuf() : void
+    :          ^^^^^^^
+  3 | {
+
+1 error, nothing was compiled.

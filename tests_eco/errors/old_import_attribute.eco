@@ -1,0 +1,6 @@
+#[import: "env"]
+extern {
+    function host_log() : void;
+}
+
+host_log();

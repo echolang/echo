@@ -1,4 +1,4 @@
-# the float conversions go through `snprintf`, which is the first user of `#[core: variadic_args]` -
+# the float conversions go through `snprintf`, which is the first user of `#[echoc::core: variadic_args]` -
 # so this case is also what pins that the pack reaches C correctly
 
 --- OUT --->

@@ -1,0 +1,6 @@
+#[export]
+function greet(string $name) : void
+{
+}
+
+greet('hi');

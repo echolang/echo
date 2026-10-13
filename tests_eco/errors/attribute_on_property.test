@@ -1,0 +1,16 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] MisplacedAttribute  attribute_on_property.eco:4:7
+
+  '#[export]' cannot be written on a property. It belongs on a function or a type.
+
+  3 | {
+  4 |     #[export]
+    :       ^^^^^^^
+  5 |     public int32 $x;
+    : ^^^^^^^^^^
+  6 | 
+
+1 error, nothing was compiled.

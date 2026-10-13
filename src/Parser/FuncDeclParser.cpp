@@ -6,6 +6,7 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTAttributes.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
@@ -455,14 +456,56 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     return &closure_expr;
 }
 
-void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into)
+void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into, AST::AttributeSite site)
 {
-    // each pass emplaces its own AttributeNode over the same tokens, so a declaration reached twice
-    // accumulates two per attribute. that is already true of a TypeDeclNode, which drains in both
-    // passes, and AttributeList::get_first is what makes it not matter
+    // each pass emplaces its own AttributeNode. AttributeList::get_first and collector dedup cover it
     for (auto &attr : payload.context.scope().collect_attributes()) {
+        if (attr != nullptr) {
+            Parser::check_attribute_site(payload, *attr, site);
+        }
+
         into.push_back(attr);
     }
+}
+
+void Parser::discard_attributes(Parser::Payload &payload)
+{
+    payload.context.scope().collect_attributes();
+}
+
+void Parser::check_attribute_site(
+    Parser::Payload &payload,
+    const AST::AttributeNode &attribute,
+    AST::AttributeSite site)
+{
+    const std::optional<std::string> refusal =
+        AST::attribute_site_refusal(attribute.attribute_id.value(), site);
+
+    if (refusal.has_value()) {
+        payload.collector.collect_issue<AST::Issue::MisplacedAttribute>(
+            payload.context.code_ref(attribute.attribute_tokens), *refusal);
+    }
+}
+
+void Parser::take_leading_doc(Parser::Payload &payload)
+{
+    if (!payload.pending_doc.empty() || payload.cursor.is_done()) {
+        return;
+    }
+
+    const DocComment *doc = payload.cursor.tokens.doc_comment_at(payload.cursor.snapshot().index);
+
+    if (doc != nullptr) {
+        payload.pending_doc = doc->text;
+    }
+}
+
+std::string Parser::take_pending_doc(Parser::Payload &payload)
+{
+    take_leading_doc(payload);
+    std::string text = std::move(payload.pending_doc);
+    payload.pending_doc.clear();
+    return text;
 }
 
 void Parser::publish_declaration_markers(
@@ -479,6 +522,21 @@ void Parser::publish_declaration_markers(
     // on every intrinsic in std/math/intrinsics.eco already. AST::function_emission_kind answers those before
     // it ever looks at this flag, so the combination costs nothing and refusing it would break that file
     funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
+
+    // both passes: the symbol name must agree between them, the reason the comment at the
+    // extern_symbol arm gives. a bare `#[export]` takes the name token; a valued one is a string
+    if (auto *export_attr = funcdecl->attributes.get_first("export")) {
+        if (export_attr->value.has_value()) {
+            funcdecl->export_name = read_attribute_value(
+                payload, export_attr, "export",
+                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                    return reader.string(written);
+                });
+        }
+        else {
+            funcdecl->export_name = nametoken.value();
+        }
+    }
 }
 
 // publishes a method or static marked `#[implicit]` as one of its owner's implicit conversions, and
@@ -686,10 +744,12 @@ void Parser::publish_implicit_conversion(
 AST::FunctionDeclNode * Parser::parse_funcdecl(
     Parser::Payload &payload,
     Parser::FuncDeclKind kind,
-    Parser::VisibilityPrefix visibility
+    Parser::VisibilityPrefix visibility,
+    const std::vector<AST::AttributeNode *> *block_attributes
 )
 {
     auto &cursor = payload.cursor;
+    const std::string doc = Parser::take_pending_doc(payload);
 
     // the declaration pass stops once the signature is registered; the body pass carries on into the
     // body. read off the payload rather than taken as an argument, so no caller in between has to
@@ -750,10 +810,16 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // resolved before the name token is captured below, because the Echo name is what the symbol
     // table, the namespace and every call site use - only extern_symbol reaches the linker
     std::optional<std::string> extern_symbol;
-    if (kind == FuncDeclKind::t_extern) {
-        extern_symbol = cursor.current().value();
-
+    std::optional<std::string> requirement_link;
+    if (kind == FuncDeclKind::t_extern || kind == FuncDeclKind::t_requirement) {
         if (cursor.peek_is_type(1, Token::Type::t_as)) {
+            if (kind == FuncDeclKind::t_extern) {
+                extern_symbol = cursor.current().value();
+            }
+            else {
+                requirement_link = cursor.current().value();
+            }
+
             cursor.skip(); // the C symbol
             cursor.skip(); // the `as` keyword
 
@@ -762,6 +828,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
                 Parser::skip_refused_function(payload);
                 return nullptr;
             }
+        }
+        else if (kind == FuncDeclKind::t_extern) {
+            extern_symbol = cursor.current().value();
         }
     }
 
@@ -960,7 +1029,23 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // around one: an attribute a method left on the stack was drained by the next `struct` to come
     // along (TypeDeclParser's own collect_attributes), landing on a type declaration that never
     // asked for it
-    Parser::drain_attributes(payload, funcdecl->attributes);
+    Parser::drain_attributes(payload, funcdecl->attributes, AST::AttributeSite::t_function);
+    funcdecl->doc_comment = doc;
+
+    // an `extern { }` may carry attributes for every function in it (`#[wasm: import "env"]
+    // extern { ... }`). the block parser drained those before the `{` and hands a copy here;
+    // a function's own attribute of the same name already sits on the list, so it wins
+    if (block_attributes != nullptr) {
+        for (AST::AttributeNode *attr : *block_attributes) {
+            if (attr == nullptr) {
+                continue;
+            }
+
+            if (funcdecl->attributes.get_first(attr->attribute_id.value()) == nullptr) {
+                funcdecl->attributes.push_back(attr);
+            }
+        }
+    }
 
     // the signature is complete, so this is the earliest point the declaration can join its
     // overload set. registering in *both* passes is intentional and cheap: the symbol pass makes
@@ -993,6 +1078,10 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // it. outside the branch above rather than in its method arm, because "only a method can declare
     // one" is a diagnostic this owes and a helper called only for methods could never report it
     publish_declaration_markers(payload, funcdecl, owner_struct, nametoken);
+
+    if (kind == FuncDeclKind::t_requirement) {
+        funcdecl->abi_link_name = requirement_link.value_or(nametoken.value());
+    }
 
     // an extern declaration ends here, in both parser passes, so this is the single place that
     // owns its tail. doing it before the symbol_only return below is deliberate: the symbol pass
@@ -1082,8 +1171,11 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         // an intrinsic is spelled as a **string** because an LLVM intrinsic name is free text with
         // dots in it; a builtin is spelled as a **name**, because the set is closed and a closed
         // vocabulary reads bare - the same rule `#[if: os == darwin]` has always followed
-        if (auto *intrinsic_attr = funcdecl->attributes.get_first("intrinsic")) {
-            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, "intrinsic",
+        const std::string intrinsic_name(AST::compiler_attribute::intrinsic);
+        const std::string builtin_name(AST::compiler_attribute::builtin);
+
+        if (auto *intrinsic_attr = funcdecl->attributes.get_first(intrinsic_name)) {
+            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, intrinsic_name,
                 [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
                     return reader.string(written);
                 });
@@ -1093,8 +1185,8 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
             }
         }
 
-        if (auto *builtin_attr = funcdecl->attributes.get_first("builtin")) {
-            funcdecl->builtin = read_attribute_value(payload, builtin_attr, "builtin",
+        if (auto *builtin_attr = funcdecl->attributes.get_first(builtin_name)) {
+            funcdecl->builtin = read_attribute_value(payload, builtin_attr, builtin_name,
                 [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
                     std::optional<std::string> value = reader.name(written);
 

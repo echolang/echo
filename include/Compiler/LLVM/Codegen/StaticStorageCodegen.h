@@ -66,6 +66,12 @@ namespace Compiler::LLVM
         // static, since nothing ever pushed a node onto the chain
         void gen_teardown();
 
+        // the `linkonce_odr` walker over the teardown chain. `create_head` is a
+        // native lib's fini: this unit may reference no static of its own, and
+        // still has to walk a chain a dependency pushed. an executable passes
+        // false so a program with no static still emits no walk
+        llvm::Function *ensure_teardown_walker(bool create_head);
+
     private:
         CodegenContext &_ctx;
 
@@ -81,8 +87,9 @@ namespace Compiler::LLVM
         // look uninitialized or finished
         llvm::GlobalVariable *guard_for(const std::string &symbol);
 
-        // the slow path: CAS 0 → self, run the body, store ~0. one function for the program,
-        // linkonce_odr. the fast path stays an acquire load in `<sym>.init`
+        // the slow path: CAS 0 → self, run the body, store ~0. one function for the
+        // program, linkonce_odr. a row without OS threads is a load/store instead.
+        // the fast path stays an acquire load in `<sym>.init` when there are threads
         llvm::Function *once_helper();
 
         // the self-guarding init function, emitted on first reference in this unit. **the guard is

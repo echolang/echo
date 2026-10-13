@@ -243,6 +243,13 @@ namespace AST
         // overload resolution. a name that is not declared at all stays UnknownFunction - these
         // three are the cases where candidates exist but none or several of them answer the call
         MAKE_ISSUE_DEF1(DuplicateFunctionSignature, IssueSeverity::Error, const std::string, _message);
+
+        // two `#[export]`s of one name in the bundle. its own kind rather than a GenericError
+        // because the first site is a *label*: the sentence says the name is taken, and the
+        // collector's dedup key is that sentence - so a second location folded into the English
+        // would make two clashes at one line read as one
+        MAKE_ISSUE_DEF2(DuplicateExportName, IssueSeverity::Error, const std::string, export_name, const TokenReference, first_declaration,
+            std::vector<IssueLabel> labels() const override;);
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
 
@@ -320,6 +327,13 @@ namespace AST
         // borrow. the sentence is the diagnostic; the remedy lives in notes() so the collector's
         // dedup key is the message alone
         MAKE_ISSUE_DEF1(AssumeRequiresUnsafe, IssueSeverity::Error, const std::string, _message,
+            std::vector<IssueNote> notes() const override;);
+
+        // `abi::bind_unchecked` outside `unsafe`. its own kind because the seat
+        // is a promise the type system cannot check, the same question
+        // AssumeRequiresUnsafe answers for `assume`, and a shared kind would
+        // make the json code a lie for one of them
+        MAKE_ISSUE_DEF1(BindUncheckedRequiresUnsafe, IssueSeverity::Error, const std::string, _message,
             std::vector<IssueNote> notes() const override;);
 
         // top-level code in a file that is no target's entry. its own kind because it is the diagnostic
@@ -406,10 +420,22 @@ namespace AST
         // AttributeReader refusals, from a source `#[...]` or a manifest - one drain
         MAKE_ISSUE_DEF1(InvalidAttributeValue, IssueSeverity::Error, const std::string, _message);
 
+        // a name the compiler does not read, at the name. the sentence is the diagnostic; a bare
+        // `core` / `builtin` / `intrinsic` carries a note so the message stays the dedup key
+        MAKE_ISSUE_DEF2(UnknownAttribute, IssueSeverity::Error, const std::string, _message, const std::string, written_name,
+            std::vector<IssueNote> notes() const override;);
+
+        // a manifest name written in a source file. its own kind because the recovery is "put it
+        // in a module.eco", which is a different sentence from "unknown attribute"
+        MAKE_ISSUE_DEF1(ManifestAttributeInSource, IssueSeverity::Error, const std::string, _message);
+
+        // `#[unique]` on a function, `#[export]` on a property
+        MAKE_ISSUE_DEF1(MisplacedAttribute, IssueSeverity::Error, const std::string, _message);
+
         // -- M9 manifest -------------------------------------------------------------------------
 
         MAKE_ISSUE_DEF1(UnknownManifestAttribute, IssueSeverity::Error, const std::string, _message);
-        MAKE_ISSUE_DEF1(ReservedManifestAttribute, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ReservedAttributeNamespace, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(RepeatedManifestAttribute, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(MissingModuleAttribute, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnusableModuleName, IssueSeverity::Error, const std::string, _message);
@@ -423,6 +449,9 @@ namespace AST
         MAKE_ISSUE_DEF1(NoSuchManifest, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnusableTargetName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(TargetEntryNotASource, IssueSeverity::Error, const std::string, _message);
+        // TokenException from a module.eco. a source file's twin is FrontEndFailure; a manifest reports
+        // through the collector
+        MAKE_ISSUE_DEF1(UntokenizableManifest, IssueSeverity::Error, const std::string, _message);
 
     };
 };

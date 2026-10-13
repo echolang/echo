@@ -1,0 +1,7 @@
+#[export]
+function render(int32 $width, int32 $height) : int32
+{
+    return $width * $height;
+}
+
+echo render(2, 3);

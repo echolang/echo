@@ -1,0 +1,20 @@
+// a doc names the token after it. dropped tokens take their docs with them
+
+#[if: never_defined]
+/** never compiled */
+public function gone() : void
+{
+}
+#[end]
+
+/** after a dropped region */
+public function after_region() : void
+{
+}
+
+/** above a region that is kept */
+#[if: !never_defined]
+public function inside_region() : void
+{
+}
+#[end]

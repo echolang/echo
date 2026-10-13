@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Compiler/CodegenTarget.h"
+#include "Compiler/TargetFacts.h"
 
 #include <string>
 
@@ -98,6 +99,16 @@ namespace Compiler
         // resolved twice
         CodegenTarget codegen;
 
+        // **what a condition and TypeChecker see**, settled by TargetFacts::resolve.
+        // TypeChecker asks facts.admits_wasm_surface() for `#[wasm:]` rather than the
+        // emit row, so lsp and build agree when `--target-os wasi` is set
+        TargetFacts facts;
+
+        // file-root `#[wasm: export "memory"]`, copied from the bundle after typecheck.
+        // a program fact, not a column of the emit row: the triple does not change, and
+        // CBuild must not see `--export-memory`
+        bool export_memory = false;
+
         // one predicate, because more than one emitter asks it - the `assert` builtin and the
         // `ptr<T>` -> `T&` narrowing today, whatever check comes next tomorrow. never compare the
         // enum at a call site, or the next check added answers the question its own way
@@ -130,6 +141,11 @@ namespace Compiler
             return debug_info;
         }
     };
+
+    inline const char *exec_model_environment(const CompilerOptions &options)
+    {
+        return exec_model_environment(options.codegen);
+    }
 };
 
 #endif

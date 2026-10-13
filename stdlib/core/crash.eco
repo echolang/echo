@@ -23,14 +23,14 @@
  * A `die` ends the block it is in: statements after it are not compiled, and a function whose
  * last statement is a `die` does not also need a `return`.
  */
-#[builtin: die]
+#[echoc::builtin: die]
 public function die() : void;
 
 /**
  * The message may be any `string`. A literal is folded into the binary with the source location.
  * A computed one is written at the crash, and the location is still the `die` itself.
  */
-#[builtin: die]
+#[echoc::builtin: die]
 public function die(string $message) : void;
 
 /**
@@ -43,11 +43,11 @@ public function die(string $message) : void;
  * The condition is type-checked either way, so a release build never accepts an assert a debug
  * build would have rejected.
  */
-#[builtin: assert]
+#[echoc::builtin: assert]
 public function assert(bool $condition) : void;
 
 /**
  * The message must be a **string literal**, because the call is compiled out in release.
  */
-#[builtin: assert]
+#[echoc::builtin: assert]
 public function assert(bool $condition, string $message) : void;

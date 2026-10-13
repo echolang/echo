@@ -3,6 +3,8 @@
 #include <cstdint>
 
 #include <Lexer.h>
+#include <Parser/ConditionalFilter.h>
+#include <Compiler/TargetFacts.h>
 
 
 TEST_CASE( "Token References", "[lexer]" ) {
@@ -295,6 +297,114 @@ TEST_CASE("Multi Line Comments", "[lexer]") {
     // check the values
     REQUIRE( tokens.token_values[0] == "hey" );
     REQUIRE( tokens.token_values[1] == "ronon" );
+}
+
+TEST_CASE("Doc comments are recorded without becoming tokens", "[lexer]") {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "/** adds two numbers */\nfunction add");
+
+    REQUIRE(tokens.tokens.size() == 2);
+    REQUIRE(tokens.tokens[0].type == Token::Type::t_function);
+    REQUIRE(tokens.tokens[1].type == Token::Type::t_identifier);
+    REQUIRE(tokens.doc_comments.size() == 1);
+    REQUIRE(tokens.doc_comments[0].next_token_index == 0);
+    REQUIRE(tokens.doc_comments[0].text == "/** adds two numbers */");
+}
+
+TEST_CASE("ordinary block comments are not doc comments", "[lexer]") {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "/* not a doc */ function add");
+
+    REQUIRE(tokens.tokens.size() == 2);
+    REQUIRE(tokens.doc_comments.empty());
+}
+
+TEST_CASE("the last of two adjacent doc comments wins", "[lexer]") {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "/** first */\n/** second */\nfunction add");
+
+    REQUIRE(tokens.doc_comments.size() == 1);
+    REQUIRE(tokens.doc_comments[0].text == "/** second */");
+    REQUIRE(tokens.doc_comments[0].next_token_index == 0);
+}
+
+namespace
+{
+    // the tokens of `source` after the filter, on a linux target compiling no test blocks
+    TokenCollection filtered(const std::string &source)
+    {
+        Lexer lexer;
+        TokenCollection tokens;
+        lexer.tokenize(tokens, source);
+
+        Compiler::TargetFacts facts = Compiler::TargetFacts::host();
+        facts.operating_system = "linux";
+        facts.tests = false;
+
+        std::string error;
+        REQUIRE(Parser::filter_conditional_tokens(tokens, 0, facts, error));
+        REQUIRE(error.empty());
+        return tokens;
+    }
+}
+
+TEST_CASE("a doc comment moves with its token when a region before it is dropped", "[lexer][conditional]") {
+    const TokenCollection tokens = filtered(
+        "#[if: os == windows]\n"
+        "function gone() {}\n"
+        "#[end]\n"
+        "/** kept */\n"
+        "function kept() {}\n");
+
+    REQUIRE(tokens.token_values[0] == "function");
+    REQUIRE(tokens.doc_comment_at(0) != nullptr);
+    REQUIRE(tokens.doc_comment_at(0)->text == "/** kept */");
+}
+
+TEST_CASE("a doc comment inside a dropped region goes with it", "[lexer][conditional]") {
+    const TokenCollection tokens = filtered(
+        "#[if: os == windows]\n"
+        "/** windows only */\n"
+        "function gone() {}\n"
+        "#[end]\n"
+        "function next() {}\n");
+
+    REQUIRE(tokens.doc_comments.empty());
+    REQUIRE(tokens.doc_comment_at(0) == nullptr);
+}
+
+TEST_CASE("a doc comment above a directive documents what the region keeps", "[lexer][conditional]") {
+    const TokenCollection tokens = filtered(
+        "/** linux only */\n"
+        "#[if: os == linux]\n"
+        "function here() {}\n"
+        "#[end]\n");
+
+    REQUIRE(tokens.token_values[0] == "function");
+    REQUIRE(tokens.doc_comment_at(0) != nullptr);
+    REQUIRE(tokens.doc_comment_at(0)->text == "/** linux only */");
+}
+
+TEST_CASE("a doc comment on a dropped test block is not lent to the next declaration", "[lexer][conditional]") {
+    const TokenCollection tokens = filtered(
+        "/** about the test */\n"
+        "test adds_up { }\n"
+        "function after() {}\n");
+
+    REQUIRE(tokens.token_values[0] == "function");
+    REQUIRE(tokens.doc_comment_at(0) == nullptr);
+}
+
+TEST_CASE("a trailing doc comment names nothing after the filter", "[lexer][conditional]") {
+    const TokenCollection tokens = filtered("function only() {}\n/** dangling */\n");
+
+    REQUIRE(tokens.doc_comments.empty());
 }
 
 TEST_CASE("Multi Line Comments Unterminated", "[lexer]") {

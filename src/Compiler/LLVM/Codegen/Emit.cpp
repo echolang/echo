@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
 #include "Compiler/LLVM/Codegen/Bitcode.h"
 #include "Compiler/LLVM/Codegen/IsolatedEmit.h"
+#include "Compiler/LLVM/Codegen/LibraryVisibility.h"
 #include "Compiler/LLVM/Codegen/Partition.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/CompilationUnit.h"
@@ -19,6 +20,17 @@
 
 namespace Compiler::LLVM
 {
+
+static bool host_bitcode_round_trip_works()
+{
+    // a Windows-hosted LLVM fails the same-process bitcode round-trip,
+    // whatever the row emits
+#if defined(_WIN32)
+    return false;
+#else
+    return true;
+#endif
+}
 
 static IsolatedEmitRequest make_isolated_request(
     std::string bitcode,
@@ -36,6 +48,7 @@ static IsolatedEmitRequest make_isolated_request(
     request.cpu = sub.cpu;
     request.features = sub.features;
     request.no_optimize = ctx.options.no_optimize;
+    request.pic = ctx.options.codegen.uses_pic();
     request.targeting_windows = ctx.targeting_windows();
     request.already_optimized = already_optimized;
     request.timings = timings;
@@ -90,6 +103,13 @@ bool emit_unit_objects(
 {
     Compiler::ScopedPhase phase("emit objects");
 
+    // before partition and before an isolated snapshot, so every object of a
+    // native library is hidden-except-export even when prepare_unit runs in a
+    // worker that never sees this Backend
+    if (ctx.options.codegen.is_native_library()) {
+        hide_non_exported_symbols(ctx);
+    }
+
     const unsigned jobs = Compiler::job_count();
     const Compiler::Subtarget sub = backend.subtarget();
     const bool timings = Compiler::PhaseTimings::instance().enabled();
@@ -101,6 +121,7 @@ bool emit_unit_objects(
     env.no_optimize = ctx.options.no_optimize;
     env.targeting_windows = ctx.targeting_windows();
     env.cross = ctx.options.codegen.is_cross();
+    env.exec_model = Compiler::exec_model_environment(ctx.options.codegen);
 
     struct Output
     {
@@ -171,12 +192,13 @@ bool emit_unit_objects(
     }
 
     // a single live module, or `ECO_JOBS=1`, stays in this LLVMContext. the bitcode
-    // round-trip is the cost; run_jobs would keep one item on this thread either way
-#if defined(_WIN32)
-    const bool in_memory = true;
-#else
-    const bool in_memory = live.size() <= 1 || jobs <= 1;
-#endif
+    // round-trip is the cost; run_jobs would keep one item on this thread either way.
+    // the row says whether the target snapshots; the host check is this process's LLVM
+    const bool in_memory =
+        !host_bitcode_round_trip_works()
+        || !ctx.options.codegen.snapshots_bitcode()
+        || live.size() <= 1
+        || jobs <= 1;
 
     if (in_memory) {
         for (Output *output : live) {

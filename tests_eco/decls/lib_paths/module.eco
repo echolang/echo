@@ -1,0 +1,4 @@
+// a library whose sources sit below its root, for module_paths.eco
+
+#[module: "lib_paths"]
+#[sources: "src/**/*.eco"]

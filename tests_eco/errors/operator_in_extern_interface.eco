@@ -1,0 +1,5 @@
+public extern interface greeter {
+    operator (int32 $a) + (int32 $b): int32;
+}
+
+echo 1;

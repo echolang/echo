@@ -58,6 +58,11 @@ llvm::Value *apply_count_access(
     llvm::function_ref<llvm::Value *(bool atomic)> emit
 )
 {
+    // no OS threads: skip the typeinfo split
+    if (!ctx.options.codegen.has_os_threads()) {
+        return emit(false);
+    }
+
     if (access != CountAccess::t_from_typeinfo) {
         return emit(access == CountAccess::t_atomic);
     }

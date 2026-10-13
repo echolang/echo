@@ -13,6 +13,29 @@
 
 #include <algorithm>
 #include <cassert>
+
+namespace
+{
+    thread_local unsigned t_pointer_size = ECO_TARGET_POINTER_SIZE;
+};
+
+unsigned AST::target_pointer_size()
+{
+    return t_pointer_size;
+}
+
+AST::PointerSizeScope::PointerSizeScope(unsigned bytes)
+    : _previous(t_pointer_size)
+{
+    assert((bytes == 4 || bytes == 8) && "pointer width is 4 or 8");
+    t_pointer_size = bytes;
+}
+
+AST::PointerSizeScope::~PointerSizeScope()
+{
+    t_pointer_size = _previous;
+}
+
 std::string AST::get_primitive_name(ValueTypePrimitive primitive)
 {
     switch (primitive) {
@@ -47,9 +70,9 @@ uint8_t AST::get_primitive_size(ValueTypePrimitive primitive)
         case ValueTypePrimitive::t_uint16: return 2;
         case ValueTypePrimitive::t_uint32: return 4;
         case ValueTypePrimitive::t_uint64: return 8;
-        // pointer-width, from the one constant that knows the target
-        case ValueTypePrimitive::t_usize: return ECO_TARGET_POINTER_SIZE;
-        case ValueTypePrimitive::t_isize: return ECO_TARGET_POINTER_SIZE;
+        // pointer-width, from the invocation's emit row
+        case ValueTypePrimitive::t_usize: return static_cast<uint8_t>(target_pointer_size());
+        case ValueTypePrimitive::t_isize: return static_cast<uint8_t>(target_pointer_size());
         case ValueTypePrimitive::t_float32: return 4;
         case ValueTypePrimitive::t_float64: return 8;
         case ValueTypePrimitive::t_bool: return 1;
@@ -145,6 +168,11 @@ AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std
         break;
     case ComplexTypeKind::t_opaque:
         value_kind = ValueTypeKind::t_opaque;
+        break;
+    case ComplexTypeKind::t_extern_interface:
+        // values are structs: layout, copy, teardown, TBAA, DWARF, `T?`
+        // keep their struct arms. the kind is how a declaration is told apart
+        value_kind = ValueTypeKind::t_struct;
         break;
     }
 
@@ -417,6 +445,11 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += "UA";
         break;
 
+    case ValueTypeKind::t_kind_extern_interface:
+        assert(false && "an extern-interface constraint is not a type that mangles");
+        mangled_name += "UA";
+        break;
+
     case ValueTypeKind::t_pointer:
     case ValueTypeKind::t_weak:
         assert(false && "pointer and weak mangle in the prefix, before L");
@@ -507,6 +540,9 @@ std::string AST::ValueType::get_type_desciption() const
 
     case ValueTypeKind::t_kind_class:
         return prefix + "class" + suffix;
+
+    case ValueTypeKind::t_kind_extern_interface:
+        return prefix + "extern interface" + suffix;
 
     case ValueTypeKind::t_const_value:
         return prefix + std::to_string(_const_bits) + suffix;
@@ -744,6 +780,11 @@ void AST::TypeRegistry::derive_instantiation(
         inst->_conformances.push_back(substitute_type(conformance, subst, *this));
     }
 
+    inst->_extern_conformances.clear();
+    for (const auto &conformance : tmpl->_extern_conformances) {
+        inst->_extern_conformances.push_back(substitute_type(conformance, subst, *this));
+    }
+
     _deriving.erase(inst);
 }
 
@@ -808,6 +849,7 @@ const char *AST::type_kind_keyword(AST::ComplexTypeKind kind)
         // the keyword the author wrote. diagnostics that need to distinguish say "incomplete type"
         // from is_opaque(), not from a second keyword
         case ComplexTypeKind::t_opaque: return "struct";
+        case ComplexTypeKind::t_extern_interface: return "extern interface";
     }
 
     // no tail: every kind is above, and the switch is what makes a fifth one a compile error here

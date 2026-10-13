@@ -1,0 +1,5 @@
+string $a = 'hello';
+string $b = ' ';
+string $c = 'wasm';
+echo $a->concat($b)->concat($c);
+echo $a->size();

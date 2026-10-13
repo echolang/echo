@@ -6,11 +6,14 @@
 #include "AST/ASTValueType.h"
 
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace AST
 {
+    class Bundle;
     class CoreTypes;
     class ExprNode;
     class Collector;
@@ -49,12 +52,40 @@ namespace AST
     // is_implicitly_convertible both ask
     bool c_function_signatures_match(const CallableSignature &a, const CallableSignature &b);
 
+    // Echo's `const` on a by-value parameter is a local write-protect, not C's.
+    // two signatures that differ only by that bit (or by nullability on an
+    // address) are one C type. the fingerprint and signatures_match both ask
+    // this so they cannot disagree
+    CallableSignature c_abi_erased(const CallableSignature &signature);
+
     // **why may this declaration's address not be taken?** nullopt when it may.
     //
     // reads implicit_arg_count(), is_generic() and function_emission_kind rather than
     // re-deriving any. asked once, by AST::TypeChecker of a FunctionRefExprNode - the parser
     // mints the node and binds a unique candidate, it does not report this
     std::optional<std::string> c_function_ref_refusal(const FunctionDeclNode &decl);
+
+    // **why may this function not be exported?** nullopt when it may.
+    //
+    // composed from c_function_ref_refusal (receiver, closure, generic, builtin, intrinsic) and
+    // c_function_signature_refusal over the written C signature, plus four of its own: a
+    // static method (`is_static_method()`), an extern (that is imported), `#[inline]`
+    // (would turn it into t_odr_shared), and a synthesized declaration. composed reasons
+    // are wrapped as "cannot be exported because …"
+    // so an export is not diagnosed as an address-of. asked once by AST::check_exports
+    std::optional<std::string> export_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
+
+    // leftover `#[export]`, duplicate names, reserved C names. TypeChecker asks once.
+    // `exports_abi_tables` is CodegenTarget::exports_abi_tables()
+    void check_exports(
+        Collector &collector,
+        Bundle &bundle,
+        std::span<const char *const> reserved_entry,
+        std::span<const char *const> reserved_runtime,
+        std::string_view reserved_runtime_prefix,
+        std::span<const char *const> reserved_wasm_crt,
+        bool exports_abi_tables
+    );
 
     // the overload set `&name` denotes, re-derived from the node rather than stored - a stored
     // set goes stale the moment the tree is cloned for an instantiation, the same rule

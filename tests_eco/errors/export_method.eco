@@ -1,0 +1,12 @@
+struct Box
+{
+    int32 $n;
+
+    #[export]
+    function get() : int32
+    {
+        return $this->n;
+    }
+}
+
+echo Box(1)->get();

@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_generic.eco:2:10
+
+  cannot be exported because a generic function has no single symbol to take the address of.
+
+  1 | #[export]
+  2 | function ident<T>(T $v) : T
+    :          ^^^^^
+  3 | {
+
+1 error, nothing was compiled.

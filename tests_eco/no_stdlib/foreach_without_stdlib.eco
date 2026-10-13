@@ -1,4 +1,4 @@
-// every reader of a `#[core:]` binding has to cope with it being unbound: `--no-stdlib` is a
+// every reader of a `#[echoc::core:]` binding has to cope with it being unbound: `--no-stdlib` is a
 // legitimate program, and it is also what keeps stdlib/core/iterator.eco itself compilable
 
 struct Bag

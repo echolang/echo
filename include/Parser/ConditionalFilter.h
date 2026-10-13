@@ -54,8 +54,9 @@ namespace Parser
         constexpr const char *k_else = "else";
         constexpr const char *k_end = "end";
 
-        // is `name` one of the four? asked by AST::is_known_attribute, so the guard that catches
-        // `#[fi: ...]` does not also report a directive this filter has already dealt with
+        // is `name` one of the four? asked so the guard that catches `#[fi: ...]` does not also
+        // report a directive this filter has already dealt with. directives never reach
+        // AST::attribute_admission
         bool is_directive(const std::string &name);
     };
 

@@ -366,6 +366,19 @@ ISSUE_MESSAGE_FNC(DuplicateFunctionSignature)
     return _message;
 }
 
+ISSUE_MESSAGE_FNC(DuplicateExportName)
+{
+    return fmt::format(
+        "'{}' is already exported - two exports cannot share a name, because "
+        "the name is the symbol the host looks up",
+        export_name);
+}
+
+std::vector<AST::IssueLabel> AST::Issue::DuplicateExportName::labels() const
+{
+    return label_outside_primary(code_ref, first_declaration, "first exported here");
+}
+
 ISSUE_MESSAGE_FNC(NoMatchingOverload)
 {
     return _message;
@@ -417,6 +430,16 @@ ISSUE_MESSAGE_FNC(AssumeRequiresUnsafe)
 }
 
 std::vector<AST::IssueNote> AST::Issue::AssumeRequiresUnsafe::notes() const
+{
+    return { IssueNote { NoteKind::t_help, "write it inside an 'unsafe' block" } };
+}
+
+ISSUE_MESSAGE_FNC(BindUncheckedRequiresUnsafe)
+{
+    return _message;
+}
+
+std::vector<AST::IssueNote> AST::Issue::BindUncheckedRequiresUnsafe::notes() const
 {
     return { IssueNote { NoteKind::t_help, "write it inside an 'unsafe' block" } };
 }
@@ -538,8 +561,24 @@ ISSUE_MESSAGE_FNC(DuplicateDestructor) { return _message; }
 ISSUE_MESSAGE_FNC(InvalidImplicitConversion) { return _message; }
 ISSUE_MESSAGE_FNC(InvalidAttributeValue) { return _message; }
 
+ISSUE_MESSAGE_FNC(UnknownAttribute) { return _message; }
+
+std::vector<AST::IssueNote> AST::Issue::UnknownAttribute::notes() const
+{
+    if (written_name != "core" && written_name != "builtin" && written_name != "intrinsic") {
+        return {};
+    }
+
+    return { IssueNote { NoteKind::t_note, fmt::format(
+        "'{}' belongs to the standard library, spelled 'echoc::{}'; a program cannot write it.",
+        written_name, written_name) } };
+}
+
+ISSUE_MESSAGE_FNC(ManifestAttributeInSource) { return _message; }
+ISSUE_MESSAGE_FNC(MisplacedAttribute) { return _message; }
+
 ISSUE_MESSAGE_FNC(UnknownManifestAttribute) { return _message; }
-ISSUE_MESSAGE_FNC(ReservedManifestAttribute) { return _message; }
+ISSUE_MESSAGE_FNC(ReservedAttributeNamespace) { return _message; }
 ISSUE_MESSAGE_FNC(RepeatedManifestAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(MissingModuleAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(UnusableModuleName) { return _message; }
@@ -566,3 +605,4 @@ ISSUE_MESSAGE_FNC(ModuleDependencyCycle) { return _message; }
 ISSUE_MESSAGE_FNC(NoSuchManifest) { return _message; }
 ISSUE_MESSAGE_FNC(UnusableTargetName) { return _message; }
 ISSUE_MESSAGE_FNC(TargetEntryNotASource) { return _message; }
+ISSUE_MESSAGE_FNC(UntokenizableManifest) { return _message; }

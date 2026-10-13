@@ -1,0 +1,15 @@
+stdlib: off
+expect: fail
+mode: build
+flags: --target-os wasi
+
+--- OUT --->
+[error] wasm_no_value.eco:1:3
+
+  the 'wasm' attribute needs a value - write '#[wasm: import "..."]' or '#[wasm: export "memory"]'
+
+  1 | #[wasm]
+    :   ^^^^
+  2 | extern {
+
+1 error, nothing was compiled.

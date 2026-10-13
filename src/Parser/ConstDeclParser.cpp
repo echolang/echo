@@ -60,6 +60,9 @@ AST::ConstDeclNode *Parser::parse_constdecl(
     auto &cursor = payload.cursor;
 
     assert(cursor.is_type(Token::Type::t_const) && "parse_constdecl called off a 'const'");
+
+    // take the docblock before anything can fail, or the next declaration steals it
+    const std::string doc = Parser::take_pending_doc(payload);
     cursor.skip(); // the `const`
 
     // the written type, when there is one. `const usize MAX = 100;` types its literal here, at the
@@ -147,6 +150,7 @@ AST::ConstDeclNode *Parser::parse_constdecl(
     auto &const_node = payload.context.emplace_node<AST::ConstDeclNode>(name_token, type);
     const_node.declared_in = AST::origin_at(payload.context);
     const_node.visibility = visibility.value;
+    const_node.doc_comment = doc;
     const_node.value = parse_expr(payload, type);
 
     if (const_node.value == nullptr) {

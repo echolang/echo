@@ -2,7 +2,7 @@
  * The three-way answer a comparison can give, and the operator that produces it.
  *
  * `less`, `equal`, `greater`. Payload-free, so a match is a switch on the tag and `==` is the
- * language's own. Nothing in the compiler knows what an ordering is. There is no `#[core:]`
+ * language's own. Nothing in the compiler knows what an ordering is. There is no `#[echoc::core:]`
  * binding and there is deliberately none. `<=>` is a declared infix operator, the same shape
  * `..` is: under `--no-stdlib` the symbol is simply not there.
  *

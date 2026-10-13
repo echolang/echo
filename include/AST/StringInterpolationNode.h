@@ -56,7 +56,7 @@ namespace AST
         // the `t_string_interp_begin` token: where the literal starts, quote included
         TokenReference token_string;
 
-        // the `#[core: string]` type, stamped at construction for LiteralStringExprNode's reason -
+        // the `#[echoc::core: string]` type, stamped at construction for LiteralStringExprNode's reason -
         // `result_type()` is const and takes nothing, so it cannot go looking for one
         std::optional<ValueType> core_string_type;
 

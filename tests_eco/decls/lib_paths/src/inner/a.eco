@@ -1,0 +1,9 @@
+namespace lib_paths;
+
+/**
+ * Named by its path from the module root.
+ */
+public function deep() : int32
+{
+    return 1;
+}

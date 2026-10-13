@@ -1,0 +1,4 @@
+// `install` is a bool, not a word that reads like one
+#[module: "installword"]
+#[sources: "src/*.eco"]
+#[target: exe { name: "app", entry: "src/main.eco", install: "yes" }]

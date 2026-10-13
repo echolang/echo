@@ -59,6 +59,12 @@ namespace
             { "simd_bitmask", AST::BuiltinKind::t_simd_bitmask },
             { "simd_from_array", AST::BuiltinKind::t_simd_from_array },
             { "simd_to_array", AST::BuiltinKind::t_simd_to_array },
+            { "abi_version", AST::BuiltinKind::t_abi_version },
+            { "abi_fingerprint", AST::BuiltinKind::t_abi_fingerprint },
+            { "abi_slot_count", AST::BuiltinKind::t_abi_slot_count },
+            { "abi_symbol", AST::BuiltinKind::t_abi_symbol },
+            { "abi_slot_symbol", AST::BuiltinKind::t_abi_slot_symbol },
+            { "abi_bind_unchecked", AST::BuiltinKind::t_abi_bind_unchecked },
         };
         return table;
     }
@@ -87,6 +93,9 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_integer_min:
         case AST::BuiltinKind::t_integer_max:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
             return AST::BuiltinFoldability::t_ast_fact;
 
         // and the two that read a DataLayout. they still fold, at codegen, where there is one
@@ -139,6 +148,9 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             return AST::BuiltinFoldability::t_not_a_query;
     }
 
@@ -197,6 +209,12 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             return false;
     }
 
@@ -258,6 +276,12 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             return false;
     }
 
@@ -327,6 +351,12 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             return std::nullopt;
     }
 
@@ -385,6 +415,12 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             return false;
     }
 

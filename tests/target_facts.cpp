@@ -12,7 +12,15 @@ TEST_CASE("ios and android are known operating systems", "[target]")
 {
     REQUIRE(Compiler::TargetFacts::is_known_operating_system("ios"));
     REQUIRE(Compiler::TargetFacts::is_known_operating_system("android"));
+    REQUIRE(Compiler::TargetFacts::is_known_operating_system("wasi"));
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_operating_system("macos"));
+}
+
+TEST_CASE("wasi is emit-only so run and test refuse it", "[target]")
+{
+    REQUIRE(Compiler::TargetFacts::is_emit_only_operating_system("wasi"));
+    REQUIRE_FALSE(Compiler::TargetFacts::is_emit_only_operating_system("ios"));
+    REQUIRE_FALSE(Compiler::TargetFacts::is_emit_only_operating_system("linux"));
 }
 
 TEST_CASE("family is a closed axis derived from os", "[target]")
@@ -21,6 +29,7 @@ TEST_CASE("family is a closed axis derived from os", "[target]")
     REQUIRE(Compiler::TargetFacts::is_known_family("darwin"));
     REQUIRE(Compiler::TargetFacts::is_known_family("linux"));
     REQUIRE(Compiler::TargetFacts::is_known_family("windows"));
+    REQUIRE(Compiler::TargetFacts::is_known_family("wasi"));
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_family("unix"));
     REQUIRE_FALSE(Compiler::TargetFacts::is_known_family("apple"));
 
@@ -40,6 +49,9 @@ TEST_CASE("family is a closed axis derived from os", "[target]")
 
     facts.operating_system = "windows";
     REQUIRE(facts.family() == "windows");
+
+    facts.operating_system = "wasi";
+    REQUIRE(facts.family() == "wasi");
 
     facts.operating_system = "";
     REQUIRE(facts.family().empty());
@@ -77,20 +89,11 @@ TEST_CASE("from_triple maps Android before Linux and iOS before Darwin", "[targe
     const Compiler::TargetFacts windows = Compiler::TargetFacts::from_triple("x86_64-pc-windows-msvc");
     REQUIRE(windows.operating_system == "windows");
     REQUIRE(windows.family() == "windows");
-}
 
-TEST_CASE("shared_library_extension follows family, not os", "[target]")
-{
-    Compiler::TargetFacts facts;
-
-    facts.operating_system = "ios";
-    REQUIRE(facts.shared_library_extension() == ".dylib");
-
-    facts.operating_system = "android";
-    REQUIRE(facts.shared_library_extension() == ".so");
-
-    facts.operating_system = "windows";
-    REQUIRE(facts.shared_library_extension() == ".dll");
+    const Compiler::TargetFacts wasi = Compiler::TargetFacts::from_triple("wasm32-unknown-wasip1");
+    REQUIRE(wasi.operating_system == "wasi");
+    REQUIRE(wasi.family() == "wasi");
+    REQUIRE(wasi.architecture == "wasm32");
 }
 
 TEST_CASE("resolve accepts ios and android as a target os", "[target]")
@@ -105,6 +108,11 @@ TEST_CASE("resolve accepts ios and android as a target os", "[target]")
     REQUIRE(Compiler::TargetFacts::resolve("android", "", {}, facts, error));
     REQUIRE(facts.operating_system == "android");
     REQUIRE(facts.family() == "linux");
+
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "wasm32", {}, facts, error));
+    REQUIRE(facts.operating_system == "wasi");
+    REQUIRE(facts.family() == "wasi");
+    REQUIRE(facts.architecture == "wasm32");
 }
 
 TEST_CASE("resolve refuses a target os outside the vocabulary", "[target]")
@@ -168,4 +176,69 @@ TEST_CASE("axis_equals matches family independently of the specific os", "[targe
 
     REQUIRE(facts.axis_equals("os", "darwin", matched, error));
     REQUIRE_FALSE(matched);
+}
+
+TEST_CASE("wasi implies wasm32 and wasm32 requires wasi", "[target]")
+{
+    Compiler::TargetFacts facts;
+    std::string error;
+
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "", {}, facts, error));
+    REQUIRE(facts.operating_system == "wasi");
+    REQUIRE(facts.architecture == "wasm32");
+    REQUIRE(facts.pointer_size() == 4);
+    REQUIRE(facts.admits_wasm_surface());
+    REQUIRE_FALSE(facts.threads());
+    REQUIRE_FALSE(facts.dynlib());
+    REQUIRE(facts.has_define("threads") == false);
+    REQUIRE(facts.has_define("dynlib") == false);
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("linux", "wasm32", {}, facts, error));
+    REQUIRE(error.find("wasm32 is only emitted for wasi") != std::string::npos);
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("wasi", "arm64", {}, facts, error));
+    REQUIRE(error.find("wasi is wasm32") != std::string::npos);
+}
+
+TEST_CASE("host facts have threads and dynlib", "[target]")
+{
+    const Compiler::TargetFacts host = Compiler::TargetFacts::host();
+    if (host.operating_system != "wasi") {
+        REQUIRE(host.threads());
+        REQUIRE(host.dynlib());
+        REQUIRE(host.has_define("threads"));
+        REQUIRE(host.has_define("dynlib"));
+        REQUIRE_FALSE(host.admits_wasm_surface());
+        REQUIRE(host.pointer_size() == 8);
+    }
+}
+
+TEST_CASE("resolve refuses --define threads because threads is a capability", "[target]")
+{
+    Compiler::TargetFacts facts;
+    std::string error;
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("", "", { "threads" }, facts, error));
+    REQUIRE(error.find("platform capability") != std::string::npos);
+
+    REQUIRE_FALSE(Compiler::TargetFacts::resolve("", "", { "dynlib" }, facts, error));
+    REQUIRE(error.find("platform capability") != std::string::npos);
+}
+
+TEST_CASE("cache_signature folds threads and dynlib", "[target]")
+{
+    Compiler::TargetFacts facts;
+    facts.operating_system = "linux";
+    facts.architecture = "arm64";
+
+    const std::string with = facts.cache_signature();
+    REQUIRE(with.find("threads=1;") != std::string::npos);
+    REQUIRE(with.find("dynlib=1;") != std::string::npos);
+
+    // capabilities follow the os. assigning the field is the whole of the change
+    facts.operating_system = "wasi";
+    const std::string without = facts.cache_signature();
+    REQUIRE(without.find("threads=0;") != std::string::npos);
+    REQUIRE(without.find("dynlib=0;") != std::string::npos);
+    REQUIRE(without != with);
 }

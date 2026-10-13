@@ -61,7 +61,7 @@ std::string spelling_of(const std::string &spelled)
 
 TEST_CASE("a bare name means itself, not a constant", "[attributes]")
 {
-    ParsedAttribute parsed = attribute_of("core: array");
+    ParsedAttribute parsed = attribute_of("echoc::core: array");
 
     REQUIRE(parsed.value().kind == AttributeValueKind::t_name);
     REQUIRE(parsed.value().text == "array");
@@ -94,7 +94,7 @@ TEST_CASE("a string may be a tag, so a package name stays free text", "[attribut
 TEST_CASE("one token of lookahead is what separates a tag from a name", "[attributes]")
 {
     // `array` is followed by the `]` that closes the attribute, which starts no value - so it is a
-    // name. this is the whole of the ambiguity, and getting it wrong makes every `#[core:]` a tag
+    // name. this is the whole of the ambiguity, and getting it wrong makes every `#[echoc::core:]` a tag
     REQUIRE_FALSE(attribute_of("core: array").value().has_tag());
     REQUIRE(attribute_of("link: lib \"m\"").value().has_tag());
 }
@@ -171,7 +171,7 @@ TEST_CASE("a malformed value is reported and costs one message", "[attributes]")
     // the recovery is the balanced `[ ... ]` rather than a hunt for a statement terminator, so the
     // declaration after a broken attribute still parses
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "#[core: { 1: \"x\" }]\nstruct Fine { int32 $a; }\n");
+        "#[echoc::core: { 1: \"x\" }]\nstruct Fine { int32 $a; }\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
 }
@@ -207,9 +207,9 @@ TEST_CASE("a tagged list is one tagged thing, until its tag is taken", "[attribu
 
 TEST_CASE("the reader accumulates refusals rather than reporting them", "[attributes]")
 {
-    ParsedAttribute parsed = attribute_of("core: \"array\"");
+    ParsedAttribute parsed = attribute_of("echoc::core: \"array\"");
 
-    AST::AttributeReader reader("core");
+    AST::AttributeReader reader("echoc::core");
     REQUIRE_FALSE(reader.name(parsed.value()).has_value());
     REQUIRE(reader.has_refusals());
 

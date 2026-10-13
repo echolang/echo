@@ -30,7 +30,7 @@ namespace mem;
  * `mem::buffer<T>()` and `resize`, one of which produces a fresh region and the other of which
  * consumes the old one.
  */
-#[core: buffer]
+#[echoc::core: buffer]
 #[unique]
 public struct buffer<T>
 {

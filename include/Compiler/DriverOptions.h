@@ -80,7 +80,8 @@ namespace Compiler
         unsigned timeout_ms = 0;
 
         // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what
-        // they mean for `#[if:]`. Compiler::resolve_codegen_target is the owner of what they emit
+        // they mean for `#[if:]` (including wasi→wasm32 and `--ios-device`→arm64).
+        // Compiler::resolve_codegen_target is the owner of what they emit
         std::string target_os;
         std::string target_arch;
 
@@ -88,7 +89,8 @@ namespace Compiler
         // not the simulator. false is the default and the simulator. not a fact a
         // condition can see - Compiler::CodegenTarget is the emission half. it does
         // imply arm64 for facts when `--target-arch` was not stated, via
-        // Compiler::facts_architecture, so a condition cannot still see the host arch
+        // TargetFacts::resolve, so a condition cannot still see the host arch.
+        // wasi is the same door: facts are wasm32 on every subcommand
         bool ios_device = false;
 
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order
@@ -112,9 +114,17 @@ namespace Compiler
         // vocabulary, settled at the one call site that builds a reporter
         bool verbose = false;
 
+        // `install` only, and stated only: empty means no `--dir`
+        // Compiler::resolve_install_dir is the arm order
+        // not on `options`, because where a binary is copied changes no emitted byte
+        std::filesystem::path install_dir;
+
         // `clean` only
         bool dry_run = false;
         bool with_stdlib = false;
+
+        // with --print decls: include dependency and stdlib declarations. refused without -p decls
+        bool decls_all = false;
 
         ColorChoice color = ColorChoice::t_auto;
         DiagnosticFormat format = DiagnosticFormat::t_auto;

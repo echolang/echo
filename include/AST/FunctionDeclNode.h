@@ -12,6 +12,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/AttributeNode.h"
 
+#include <cassert>
 #include <optional>
 #include <string>
 #include <vector>
@@ -350,6 +351,13 @@ namespace AST
         // point back at, and this has none
         bool is_implicitly_generated = false;
 
+        // author wrote the declaration, compiler wrote the body
+        bool body_is_synthesized = false;
+
+        bool has_synthesized_body() const {
+            return is_implicitly_generated || body_is_synthesized;
+        }
+
         // `#[inline]`: emit this body into every unit that calls it, rather than once in the unit that
         // declares it. The request is "copy me to the call site's compilation unit", and that is exactly
         // AST::FunctionEmission::t_odr_shared - the same treatment a generic instantiation gets.
@@ -387,6 +395,9 @@ namespace AST
         // the list of attributes that are attached to this function
         AttributeList attributes;
 
+        // the `/** ... */` immediately preceding this declaration, original text, or empty
+        std::string doc_comment;
+
         // A function can be marked as intrinsic, meaning it is implemented in the compiler
         // the string represents the name of the intrinsic function to be called
         // those function must be mapped by the compiler, unknown intrinsic functions will
@@ -403,7 +414,23 @@ namespace AST
             return extern_symbol.has_value();
         }
 
-        // marked `#[builtin: size_of]`: the compiler answers a call to this function directly
+        // dlsym name of an extern-interface requirement. default is the Echo
+        // name; `function sqlite3_open as open(...)` stores the C symbol here.
+        // not `extern_symbol`: that field makes function_emission_kind
+        // t_extern_symbol and drops the forwarder body. absent means not a requirement
+        std::optional<std::string> abi_link_name;
+
+        const std::string &requirement_link_name() const {
+            assert(abi_link_name.has_value() && "a requirement's link name is set when it is parsed");
+            return *abi_link_name;
+        }
+
+        // `#[export]` / `#[export: "name"]`: this function's symbol is the raw unmangled name
+        // (default: its own unqualified name), C ABI. on a wasm row it is also in the module's
+        // export section
+        std::optional<std::string> export_name;
+
+        // marked `#[echoc::builtin: size_of]`: the compiler answers a call to this function directly
         // instead of emitting one. distinct from `intrinsic`, which names an *LLVM* intrinsic and
         // therefore still produces an llvm::Function - a builtin has no symbol at all, and its
         // call sites fold to a constant. the type it is asking about arrives in instantiation_args

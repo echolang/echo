@@ -15,7 +15,7 @@ namespace AST
     class ExprNode;
     class FunctionDeclNode;
 
-    // **is this the C variadic marker?** `#[core: variadic_args]`, with `const` and borrowing
+    // **is this the C variadic marker?** `#[echoc::core: variadic_args]`, with `const` and borrowing
     // ignored - the question is which type was named, and a `const variadic_args&` is as much a
     // refusal as a plain one everywhere but the parameter it is legal in
     bool is_variadic_args(const ValueType &type, const CoreTypes &core);

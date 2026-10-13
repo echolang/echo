@@ -6,9 +6,11 @@
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTDiagnosticRenderer.h"
+#include "AST/ASTValueType.h"
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTMonomorphizer.h"
 #include "AST/ASTMangler.h"
+#include "AST/ASTWasm.h"
 #include "AST/FunctionDeclNode.h"
 #include "Parser/ManifestParser.h"
 #include "Parser/ModuleParser.h"
@@ -18,11 +20,14 @@
 #include "Compiler/CommandLine.h"
 #include "Compiler/CommandLineHelp.h"
 #include "Compiler/CommandLineOption.h"
+#include "Compiler/DeclsJson.h"
 #include "Compiler/DriverOptions.h"
 #include "Compiler/ParsePipeline.h"
 #include "Compiler/Lsp/LspServer.h"
 #include "Compiler/CompilerException.h"
+#include "Compiler/CrashReport.h"
 #include "Compiler/HostTool.h"
+#include "Compiler/Install.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
@@ -55,6 +60,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_set>
 
 // the files an argument names, expanding wildcards. `missing` counts the paths that were named
 // literally and are not there - a caller has to refuse those rather than compile what is left, since
@@ -114,10 +120,11 @@ static bool resolve_target_facts(
 
     if (!Compiler::TargetFacts::resolve(
             driver.target_os,
-            Compiler::facts_architecture(driver.ios_device, driver.target_arch),
+            driver.target_arch,
             driver.defines,
             out,
-            error)) {
+            error,
+            driver.ios_device)) {
         diagnostics.render_untyped("Invalid Target", error);
         return false;
     }
@@ -182,6 +189,11 @@ struct Program
     //
     // read only through Parser::module_contribution_for, which is the one owner of what a module compiles
     Parser::ActiveTargets active_targets;
+
+    // settled here with the Program. a lib has no entry and a different
+    // suffix; everything else is a command. the whole row, so run_front_end
+    // copies it once rather than overwriting exec_model on the invocation's
+    Compiler::CodegenTarget codegen;
 };
 
 // what an invocation settles once, before any program is compiled.
@@ -277,13 +289,13 @@ static int build_bundle(
     // regenerating the embeddable header is a build step, not a compile step. running it on
     // every `echoc run` would rewrite a tracked file as a side effect of compiling
     if (driver.emit_stdlib_header) {
-        if (AST::Module *stdlib = bundle.modules.find_module_ptr("stdlib")) {
-            AST::write_embedded_module(*stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
-        }
-        else {
+        if (bundle.modules.find_module_ptr("stdlib") == nullptr) {
             std::cerr << "--emit-stdlib-header needs the standard library in the build." << std::endl;
             return 1;
         }
+
+        AST::write_embedded_stdlib(
+            STDLIB_SOURCE_DIR, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
     }
 
     if (driver.prints(Compiler::PrintKind::t_symbols)) {
@@ -322,6 +334,55 @@ static void print_resolved_ast(const Compiler::DriverOptions &driver, AST::Bundl
     }
 }
 
+// manifest roots plus loose `.eco` files as a module of their own
+static std::set<std::string> invocation_root_modules(const Invocation &invocation)
+{
+    std::set<std::string> result;
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        if (Compiler::manifest_is_a_root(manifest, invocation.roots)) {
+            result.insert(manifest.name);
+        }
+    }
+
+    if (!invocation.sources.empty()) {
+        result.insert(ECO_MAIN_MODULE_NAME);
+    }
+
+    return result;
+}
+
+// the roots, minus the toolchain. `-p decls` describes the program
+static std::unordered_set<std::string> decls_user_modules(const Invocation &invocation)
+{
+    std::unordered_set<std::string> names;
+
+    for (const std::string &name : invocation_root_modules(invocation)) {
+        const auto manifest = std::find_if(
+            invocation.manifests.begin(), invocation.manifests.end(),
+            [&name](const Parser::ModuleManifest &m) { return m.name == name; });
+
+        if (manifest == invocation.manifests.end() || !Compiler::is_compiler_supplied_module(*manifest)) {
+            names.insert(name);
+        }
+    }
+
+    return names;
+}
+
+static void print_decls(
+    const Compiler::DriverOptions &driver,
+    const Invocation &invocation,
+    AST::Bundle &bundle
+)
+{
+    if (!driver.prints(Compiler::PrintKind::t_decls)) {
+        return;
+    }
+
+    std::cout << Compiler::decls_as_json(bundle, decls_user_modules(invocation), driver.decls_all);
+}
+
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
 // a pass added to one entry point and forgotten in the other is a silent behaviour difference.
 // Compiler::run_semantic_pipeline is the sequence; this is the driver's ProgressStep, dump, flush
@@ -330,7 +391,8 @@ static int run_semantic_passes(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
-    const Compiler::CompilerOptions &options
+    const Compiler::CompilerOptions &options,
+    const Invocation &invocation
 )
 {
     Compiler::ProgressStep step(
@@ -353,6 +415,7 @@ static int run_semantic_passes(
     step.finish(compiled);
 
     print_resolved_ast(driver, bundle);
+    print_decls(driver, invocation, bundle);
 
     // **stdout is flushed first, always.** Diagnostics go to stderr and a JIT'd program's output goes to
     // stdout; the two are unbuffered and buffered respectively, so a reader that merged them would see
@@ -585,7 +648,7 @@ static bool emit_and_link_modules(
         return false;
     }
 
-    return compiler.link_executable(output, objects, link);
+    return compiler.link_program(output, objects, link);
 }
 
 // the inputs each freshly emitted module was built from, so the next miss can name what changed.
@@ -658,6 +721,11 @@ struct FrontEnd
     const Program *program = nullptr;
 
     Compiler::CompilerOptions options;
+
+    // usize width for this program, from the emit row. lives as long as this FrontEnd
+    // so parse, typecheck, and codegen (integer literals) agree. restoring on destroy
+    // is what keeps an in-process wasm32 compile from poisoning later tests
+    std::optional<AST::PointerSizeScope> pointer_size;
 
     // empty unless something downstream reads one - see needs_cache_keys
     std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
@@ -836,28 +904,99 @@ static bool select_targets(
     // **the subcommand decides which kinds it is even looking at**, and without this arm `echoc build`
     // starts building the test targets a manifest declares: they are in the same list, and a target with no
     // entry file would then be handed to codegen as a program whose body is every file root
-    const Parser::TargetKind wanted = driver.subcommand == Compiler::Subcommand::t_test
-        ? Parser::TargetKind::t_test
-        : Parser::TargetKind::t_executable;
+    const auto accepts = [&](Parser::TargetKind kind) {
+        if (driver.subcommand == Compiler::Subcommand::t_test) {
+            return kind == Parser::TargetKind::t_test;
+        }
+
+        // `install` for `run`'s reason, plus one more: a lib has no entry and nothing to put on a PATH
+        if (driver.subcommand == Compiler::Subcommand::t_run
+            || driver.subcommand == Compiler::Subcommand::t_install) {
+            return kind == Parser::TargetKind::t_executable;
+        }
+
+        return Parser::is_buildable_target(kind);
+    };
 
     std::vector<Parser::ModuleTarget> candidates;
 
     for (const Parser::ModuleTarget &target : entry.targets) {
-        if (target.kind == wanted) {
+        if (accepts(target.kind)) {
             candidates.push_back(target);
         }
     }
 
+    const auto refuse_lib = [&](const Parser::ModuleTarget &target) {
+        if (driver.subcommand == Compiler::Subcommand::t_install) {
+            diagnostics.render_untyped("Nothing To Install", fmt::format(
+                "'{}' is a lib target, and 'install' installs programs. Build it with "
+                "'echoc build --target {}'.",
+                target.name, target.name));
+            return;
+        }
+
+        diagnostics.render_untyped("No Entry To Run", fmt::format(
+            "'{}' is a lib target and has no entry to run. Build it with 'echoc build --target {}'.",
+            target.name, target.name));
+    };
+
+    // `install: true` is a default, nothing more
+    // unnamed, the marked exes are what `install` takes, or every exe when none is marked
+    // named, `--target` wins whatever the marks say
+    if (driver.targets.empty() && driver.subcommand == Compiler::Subcommand::t_install) {
+        std::vector<Parser::ModuleTarget> marked;
+
+        std::copy_if(
+            candidates.begin(),
+            candidates.end(),
+            std::back_inserter(marked),
+            [](const Parser::ModuleTarget &target) { return target.install; });
+
+        if (!marked.empty()) {
+            candidates = std::move(marked);
+        }
+    }
+
     if (driver.targets.empty()) {
+        // run and install both skip libs
+        // the empty-candidate loop is the one place that still sees the original list, so the
+        // two refusals cannot drift
+        if (candidates.empty()
+            && (driver.subcommand == Compiler::Subcommand::t_run
+                || driver.subcommand == Compiler::Subcommand::t_install)) {
+            for (const Parser::ModuleTarget &target : entry.targets) {
+                if (target.kind == Parser::TargetKind::t_library) {
+                    refuse_lib(target);
+                    return false;
+                }
+            }
+        }
+
         out = candidates;
         return true;
     }
 
     for (const std::string &named : driver.targets) {
-        auto found = std::find_if(candidates.begin(), candidates.end(),
+        auto declared = std::find_if(
+            entry.targets.begin(),
+            entry.targets.end(),
             [&named](const Parser::ModuleTarget &target) { return target.name == named; });
 
-        if (found == candidates.end()) {
+        if (declared == entry.targets.end()) {
+            diagnostics.render_untyped("No Such Target", fmt::format(
+                "'{}' declares no target called '{}'. It declares: {}.",
+                entry.name, named, target_name_list(candidates)));
+            return false;
+        }
+
+        if (!accepts(declared->kind)) {
+            if ((driver.subcommand == Compiler::Subcommand::t_run
+                    || driver.subcommand == Compiler::Subcommand::t_install)
+                && declared->kind == Parser::TargetKind::t_library) {
+                refuse_lib(*declared);
+                return false;
+            }
+
             diagnostics.render_untyped("No Such Target", fmt::format(
                 "'{}' declares no target called '{}'. It declares: {}.",
                 entry.name, named, target_name_list(candidates)));
@@ -867,7 +1006,7 @@ static bool select_targets(
         // a name written twice is one program, not two links over one path
         if (std::none_of(out.begin(), out.end(),
                 [&named](const Parser::ModuleTarget &target) { return target.name == named; })) {
-            out.push_back(*found);
+            out.push_back(*declared);
         }
     }
 
@@ -888,24 +1027,11 @@ static std::set<std::string> resolve_test_modules(
     const Invocation &invocation
 )
 {
-    std::set<std::string> result;
-
     if (driver.subcommand != Compiler::Subcommand::t_test) {
-        return result;
+        return {};
     }
 
-    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        if (Compiler::manifest_is_a_root(manifest, invocation.roots)) {
-            result.insert(manifest.name);
-        }
-    }
-
-    // loose `.eco` files are a module of their own, and the one an invocation pointed at most directly
-    if (!invocation.sources.empty()) {
-        result.insert(ECO_MAIN_MODULE_NAME);
-    }
-
-    return result;
+    return invocation_root_modules(invocation);
 }
 
 // **which programs this invocation produces, and where each one goes.**
@@ -1041,6 +1167,21 @@ static bool resolve_programs(
     // **the *executable* targets and not every target**, or a manifest declaring only `#[target: test]`
     // would fall through to the loop below and build no program at all, silently
     if (entry == nullptr || !Compiler::module_declares_a_program(*entry)) {
+        // an installed program is found by its name, and nothing here has one
+        // dropping a binary called `main` onto somebody's PATH is worse than a refusal
+        // so this is one before `--target` is even looked at
+        if (driver.subcommand == Compiler::Subcommand::t_install) {
+            diagnostics.render_untyped("Nothing To Install", entry == nullptr
+                ? "'install' installs a program a manifest names, and this one is the source files on the "
+                  "command line. Give the project a 'module.eco' with "
+                  "'#[target: exe { name: ..., entry: ... }]'."
+                : fmt::format(
+                    "'{}' declares no programs, so there is no name to install one under. Add "
+                    "'#[target: exe {{ name: ..., entry: ... }}]' to its manifest.",
+                    entry->name));
+            return false;
+        }
+
         if (!driver.targets.empty()) {
             diagnostics.render_untyped("No Such Target", entry == nullptr
                 ? "'--target' names a program a manifest declares, and this build's program is the source "
@@ -1068,8 +1209,9 @@ static bool resolve_programs(
             /*name=*/{},
             entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
             /*entry_file=*/{},
-            driver.output,
-            /*active_targets=*/{}
+            out.codegen.output_path(driver.output),
+            /*active_targets=*/{},
+            out.codegen
         });
 
         return true;
@@ -1100,12 +1242,31 @@ static bool resolve_programs(
     }
 
     for (const Parser::ModuleTarget &target : selected) {
+        const Compiler::CodegenTarget row = out.codegen.for_program(
+            target.kind == Parser::TargetKind::t_library
+                ? Compiler::ExecModel::t_library
+                : Compiler::ExecModel::t_command);
+
+        if (row.is_library()) {
+            if (auto refusal = Compiler::library_refusal(out.target_facts)) {
+                diagnostics.render_untyped("Lib Needs Host", *refusal);
+                return false;
+            }
+        }
+
+        const std::filesystem::path named = driver.output.empty()
+            ? out.layout.target_binary(
+                *entry,
+                row.is_library() ? row.library_file_name(target.name) : target.name)
+            : driver.output;
+
         Program program {
             target.name,
             entry->name,
             target.entry,
-            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output,
-            /*active_targets=*/{}
+            row.output_path(named),
+            /*active_targets=*/{},
+            row
         };
 
         // **only the target being built, and only in the module that declared it.** Two targets of one
@@ -1131,16 +1292,18 @@ static bool resolve_invocation(
         return false;
     }
 
-    // `build` is the only subcommand that emits objects, so it is the only one that fills a row.
-    // `run` / `test` keep the default-empty CodegenTarget (the host), which is what keeps
-    // `--target-os ios` a facts-only look at another platform's branch
-    if (driver.subcommand == Compiler::Subcommand::t_build) {
+    // `build` emits objects, so it always fills a row. emit-only OSes (wasi) fill a row
+    // on every analysis path so `usize` and `#[wasm:]` match `build`. `run` / `test`
+    // keep the host row, which is what keeps `--target-os ios` a facts-only look
+    // `install` is a `build`, and the same row is what lets it reuse that build's objects
+    if (driver.subcommand == Compiler::Subcommand::t_build
+        || driver.subcommand == Compiler::Subcommand::t_install
+        || Compiler::TargetFacts::is_emit_only_operating_system(out.target_facts.operating_system)) {
         std::string error;
 
         if (!Compiler::resolve_codegen_target(
                 out.target_facts,
                 driver.ios_device,
-                driver.target_arch,
                 out.codegen,
                 error)) {
             diagnostics.render_untyped("Invalid Target", error);
@@ -1195,7 +1358,22 @@ static bool resolve_invocation(
     // after the graph and the sources, both of which it reads, and before anything parses
     out.test_modules = resolve_test_modules(driver, out);
 
-    return resolve_programs(driver, diagnostics, out);
+    if (!resolve_programs(driver, diagnostics, out)) {
+        return false;
+    }
+
+    if (driver.options.track_allocations || driver.options.report_allocations) {
+        for (const Program &program : out.programs) {
+            if (program.codegen.is_library()) {
+                diagnostics.render_untyped(
+                    "Nothing To Track",
+                    "'--track-allocations' reports from main's epilogue, and a lib has none");
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 // the front end for **one program**: parse the whole bundle, then run the semantic passes over it.
@@ -1218,6 +1396,15 @@ static bool run_front_end(
     out.program = &program;
     out.compiled = compiled_manifests(invocation, program);
 
+    // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
+    // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
+    // passes. the row is the Program's: resolve_programs already set exec_model on it
+    out.options = driver.options;
+    out.options.codegen = program.codegen;
+    out.options.facts = invocation.target_facts;
+
+    out.pointer_size.emplace(out.options.codegen.pointer_size());
+
     // **after the facts and not before**, which is why the parser is built here rather than handed in: it
     // takes them at construction, so there is no window in which one exists that has not been told what
     // platform it is reading for. Neither subcommand touches it once the front end is done
@@ -1230,18 +1417,15 @@ static bool run_front_end(
         }
     }
 
-    // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
-    // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
-    // passes, and that is the whole of what it owes
-    out.options = driver.options;
-    out.options.codegen = invocation.codegen;
-
     {
         Compiler::ScopedPhase phase("semantic passes");
-        if (run_semantic_passes(driver, diagnostics, bundle, out.options) != 0) {
+        if (run_semantic_passes(driver, diagnostics, bundle, out.options, invocation) != 0) {
             return false;
         }
     }
+
+    // the link flag, read off the checked bundle
+    out.options.export_memory = AST::wasm_exports_memory(bundle);
 
     if (needs_cache_keys(driver)
         && !compute_cache_keys(
@@ -1623,7 +1807,7 @@ static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompile
 // `run`, and a linked test runner cannot drift on `--print ir` or `-O`.
 //
 // nullopt is success; anything else is the exit status the subcommand owes its caller
-static std::optional<int> compile_and_link_executable(
+static std::optional<int> compile_and_link_program(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     FrontEnd &front,
@@ -1845,13 +2029,10 @@ int main_run(
         report_cache_plan(
             driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
 
-#if defined(_WIN32)
-        const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run.exe";
-#else
-        const std::filesystem::path runner = front.layout().scratch_dir() / "eco_run";
-#endif
+        const std::filesystem::path runner = Compiler::CodegenTarget{}.output_path(
+            front.layout().scratch_dir() / "eco_run");
 
-        if (const std::optional<int> failed = compile_and_link_executable(
+        if (const std::optional<int> failed = compile_and_link_program(
                 driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program)) {
             return failed.value();
         }
@@ -1983,7 +2164,7 @@ static bool resolve_test_selection(
 // **compiles the module and runs its tests, each in a process of its own.**
 //
 // Unix shares prepare_jit with `run` so the two cannot drift. Windows (no fork into a JIT) compiles
-// a linked runner through compile_and_link_executable - the same function `build` uses - and spawns
+// a linked runner through compile_and_link_program - the same function `build` uses - and spawns
 // it once per test. Isolation is "one process per test"; fork vs. spawn is TestRunner's question.
 int main_test(
     const Compiler::DriverOptions &driver,
@@ -2063,9 +2244,9 @@ int main_test(
         driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
         /*bypassed=*/true);
 
-    runner = front.layout().scratch_dir() / "eco_tests.exe";
+    runner = Compiler::CodegenTarget{}.output_path(front.layout().scratch_dir() / "eco_tests");
 
-    if (const std::optional<int> failed = compile_and_link_executable(
+    if (const std::optional<int> failed = compile_and_link_program(
             driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
             driver.whole_program)) {
         return failed.value();
@@ -2197,7 +2378,7 @@ static int build_one_program(
     LLVMCompiler compiler(options);
     compiler.set_entry(entry_module, front.entry_file());
 
-    if (const std::optional<int> failed = compile_and_link_executable(
+    if (const std::optional<int> failed = compile_and_link_program(
             driver, diagnostics, front, bundle, compiler, output, plan, whole_program)) {
         return failed.value();
     }
@@ -2215,16 +2396,16 @@ static int build_one_program(
     return 0;
 }
 
-int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+// every program the invocation resolved, built in order, false on the first that fails
+//
+// what `build` is, and the first half of what `install` is
+// one loop, so the second cannot grow a different idea of what building several targets means
+static bool build_programs(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation
+)
 {
-    // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
-    const auto started = std::chrono::steady_clock::now();
-
-    Invocation invocation;
-    if (!resolve_invocation(driver, diagnostics, invocation)) {
-        return 1;
-    }
-
     const bool several = invocation.programs.size() > 1;
 
     for (const Program &program : invocation.programs) {
@@ -2242,9 +2423,28 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
             // and `--diagnostics json` promises diagnostics then *one* of them - and an error in code the
             // targets share would otherwise be reported once per target, which is the same mistake said
             // several times rather than more help
-            return 1;
+            return false;
         }
     }
+
+    return true;
+}
+
+int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+{
+    // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
+    const auto started = std::chrono::steady_clock::now();
+
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    if (!build_programs(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    const bool several = invocation.programs.size() > 1;
 
     Compiler::ProgressReporter::instance().close(
         several
@@ -2255,6 +2455,88 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
 
     // once for the invocation rather than once per program: the tree is cumulative, so what it reports is
     // where the whole compile went - which is the question somebody timing a multi-target build has
+    std::cout << Compiler::PhaseTimings::instance().report();
+
+    return 0;
+}
+
+// `build`, then a copy of each binary into the install directory
+//
+// built where `build` would have put it, then copied
+// the module cache and the build directory stay exactly what an `echoc build` leaves
+// a link that fails halfway never touches the copy somebody is already running
+int main_install(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+{
+    const auto started = std::chrono::steady_clock::now();
+
+    // where, before what: a directory that cannot be named is a refusal worth having
+    // before the compile rather than after it
+    std::filesystem::path directory;
+    std::string reason;
+
+    if (!Compiler::resolve_install_dir(driver.install_dir, directory, reason)) {
+        diagnostics.render_untyped("No Install Directory", reason);
+        return 1;
+    }
+
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    const std::string refusal = Compiler::install_dir_refusal(directory, invocation.layout, invocation.manifests);
+
+    if (!refusal.empty()) {
+        diagnostics.render_untyped("Cannot Install Here", refusal);
+        return 1;
+    }
+
+    if (!build_programs(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    std::vector<std::filesystem::path> installed;
+
+    for (const Program &program : invocation.programs) {
+        const std::filesystem::path file_name = program.output.filename();
+
+        if (!Compiler::install_binary(program.output, directory, file_name, reason)) {
+            Compiler::ProgressReporter::instance().suspend();
+            diagnostics.render_untyped("Install Failed", reason);
+            return 1;
+        }
+
+        installed.push_back(directory / file_name);
+    }
+
+    Compiler::ProgressReporter::instance().close(
+        installed.size() > 1
+            ? fmt::format("installed {} programs", installed.size())
+            : fmt::format("installed '{}'", installed.front().filename().string()),
+        Compiler::progress_elapsed_ms(started));
+
+    // always, and on stdout
+    // the checklist is a terminal's, and somebody who just changed what a name on their PATH
+    // runs is owed the path it now runs, whether they are looking at a terminal or not
+    for (size_t i = 0; i < installed.size(); i++) {
+        std::cout << "installed " << invocation.programs[i].name << " -> " << installed[i].string()
+                  << std::endl;
+    }
+
+    if (!Compiler::directory_is_on_path(directory)) {
+        const char *these = installed.size() > 1 ? "these" : "this";
+#if defined(_WIN32)
+        const std::string hint = fmt::format(
+            "'{}' is not on your PATH. Add it to run {} by name.",
+            directory.string(), these);
+#else
+        const std::string hint = fmt::format(
+            "'{}' is not on your PATH. Add it to run {} by name:\n  export PATH=\"{}:$PATH\"",
+            directory.string(), these, directory.string());
+#endif
+        diagnostics.render_untyped("Not On PATH", hint, AST::IssueSeverity::Warning);
+    }
+
     std::cout << Compiler::PhaseTimings::instance().report();
 
     return 0;
@@ -2478,6 +2760,9 @@ static int main_lsp(const Compiler::DriverOptions &driver)
 
 int main(int argc, char *argv[], char *envp[])
 {
+    // ahead of everything, so an exception escaping anything below says what it was
+    Compiler::install_crash_reporting();
+
     // before any write: on Windows this sets the console to UTF-8 and turns on virtual-terminal
     // processing. A pipe is left alone; see Compiler::prepare_terminal
     Compiler::prepare_terminal();
@@ -2586,6 +2871,9 @@ int main(int argc, char *argv[], char *envp[])
 
     case Compiler::Subcommand::t_build:
         return main_build(driver, diagnostics);
+
+    case Compiler::Subcommand::t_install:
+        return main_install(driver, diagnostics);
 
     case Compiler::Subcommand::t_test:
         return main_test(driver, diagnostics, capabilities, envp);

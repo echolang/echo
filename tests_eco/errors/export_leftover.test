@@ -1,0 +1,13 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] export_leftover.eco:1:3
+
+  '#[export]' has no declaration after it. It belongs on a function or a type.
+
+  1 | #[export]
+    :   ^^^^^^
+  2 | echo 1;
+
+1 error, nothing was compiled.

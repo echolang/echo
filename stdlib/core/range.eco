@@ -3,7 +3,7 @@
  *
  * **Nothing in the compiler knows what a range is.** `..` and `..=` are ordinary declared infix
  * operators, `range<T>` is an ordinary struct, and `foreach` reaches it through the same two
- * interfaces a type of your own would declare. There is no `#[core:]` binding here and there is
+ * interfaces a type of your own would declare. There is no `#[echoc::core:]` binding here and there is
  * deliberately none: a core name exists so the compiler can *say* a type it mints itself, and the
  * compiler never mints a range - `slice<T>` is unbound for exactly that reason.
  *

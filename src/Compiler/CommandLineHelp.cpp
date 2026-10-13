@@ -581,6 +581,7 @@ void Compiler::CommandLineHelp::render_help(Subcommand subject) const
              OptionCategory::t_target,
              OptionCategory::t_report,
              OptionCategory::t_removal,
+             OptionCategory::t_installation,
              OptionCategory::t_general }) {
         render_category(subject, category, column);
     }

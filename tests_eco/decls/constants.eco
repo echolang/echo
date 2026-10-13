@@ -1,0 +1,27 @@
+// a constant is a declaration of its own: qualified through its namespace or its owner, with its type
+// and value as written. its docblock is its own, and does not leak onto what follows
+
+namespace limits;
+
+/**
+ * The widest a side gets.
+ */
+public const int32 MAX_SIDE = 100;
+
+internal const NAME = 'limits';
+
+/**
+ * Takes its own docblock, not the constant's above it.
+ */
+public struct Box
+{
+    /**
+     * Per box.
+     */
+    public const LIMIT = 8;
+
+    /**
+     * The width.
+     */
+    public int32 $w = 4;
+}

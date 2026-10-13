@@ -2,7 +2,7 @@
 #include "AST/FunctionDeclNode.h"
 
 // the order of the arms is the whole content of this function, because the properties overlap: a
-// `#[builtin:]` and a `#[intrinsic:]` may both be generic, and the monomorphizer instantiates them like
+// `#[echoc::builtin:]` and a `#[echoc::intrinsic:]` may both be generic, and the monomorphizer instantiates them like
 // anything else, so an instance carries `is_instantiated()` *and* whichever attribute its template had.
 // Asking "was this generated?" first would answer t_odr_shared for `size_of<int32>` and emit a body for
 // a function that has no symbol at all.
@@ -32,13 +32,15 @@ AST::FunctionEmission AST::function_emission_kind(const AST::FunctionDeclNode *d
         return FunctionEmission::t_intrinsic;
     }
 
-    // the two ways a definition gets here without anybody writing it: the monomorphizer cloned it from a
-    // template, or the parser / the ownership pass built it from a type's shape.
+    // a compiler-written body, so two units may both need the symbol: the monomorphizer cloned it
+    // from a template, the parser / ownership pass built it from a type's shape, or an
+    // extern-interface forwarder was planted onto an author-written requirement
+    // (`has_synthesized_body()`).
     //
     // `#[inline]` joins them by *asking* for the same treatment. It reaches this arm rather than an earlier
     // one because everything above has no body for us to copy anywhere - which is also why the stdlib
     // marking every intrinsic `#[inline]` is harmless rather than a contradiction
-    if (decl->is_instantiated() || decl->is_implicitly_generated || decl->is_inline) {
+    if (decl->is_instantiated() || decl->has_synthesized_body() || decl->is_inline) {
         return FunctionEmission::t_odr_shared;
     }
 

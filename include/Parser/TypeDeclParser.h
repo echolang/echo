@@ -13,27 +13,37 @@ namespace Parser
     // not the others - which for the type-name pass would mean a name never becoming a namespace symbol,
     // and an unqualified use of it silently typing as `unknown` rather than as a diagnostic
     inline bool starts_typedecl(const Cursor &cursor) {
-        return cursor.is_type(Token::Type::t_struct)
+        if (cursor.is_type(Token::Type::t_struct)
             || cursor.is_type(Token::Type::t_class)
             || cursor.is_type(Token::Type::t_interface)
-            || cursor.is_type(Token::Type::t_enum);
+            || cursor.is_type(Token::Type::t_enum)) {
+            return true;
+        }
+
+        return cursor.is_type(Token::Type::t_extern)
+            && cursor.peek_is_type(1, Token::Type::t_interface);
     }
 
     // `extern struct Name;` - the incomplete-type declaration. `extern` then a type keyword, so
     // `extern function<...>` (a C function-pointer *type*) and `extern { }` (a C surface block)
-    // stay the other two productions. class/interface/enum after `extern` match so the parser
-    // can refuse them by name rather than falling through to the block
+    // stay the other two productions. class/enum after `extern` match so the parser
+    // can refuse them by name rather than falling through to the block. `extern interface`
+    // is a complete type and belongs to starts_typedecl
     inline bool starts_extern_typedecl(const Cursor &cursor) {
         return cursor.is_type(Token::Type::t_extern)
             && (cursor.peek_is_type(1, Token::Type::t_struct)
                 || cursor.peek_is_type(1, Token::Type::t_class)
-                || cursor.peek_is_type(1, Token::Type::t_interface)
                 || cursor.peek_is_type(1, Token::Type::t_enum));
     }
 
     // which storage class the keyword under the cursor declares. only meaningful when
-    // starts_typedecl is true
+    // starts_typedecl is true. does not consume
     inline AST::ComplexTypeKind typedecl_kind(const Cursor &cursor) {
+        if (cursor.is_type(Token::Type::t_extern)
+            && cursor.peek_is_type(1, Token::Type::t_interface)) {
+            return AST::ComplexTypeKind::t_extern_interface;
+        }
+
         if (cursor.is_type(Token::Type::t_class)) {
             return AST::ComplexTypeKind::t_class;
         }
@@ -47,6 +57,27 @@ namespace Parser
         }
 
         return AST::ComplexTypeKind::t_struct;
+    }
+
+    // consumes the keyword(s) a type declaration opens with: one token, or
+    // `extern interface`. the one owner, so pass 1 and parse_typedecl cannot
+    // disagree about how far the name sits
+    inline AST::ComplexTypeKind consume_typedecl_keyword(Cursor &cursor) {
+        const AST::ComplexTypeKind kind = typedecl_kind(cursor);
+
+        if (kind == AST::ComplexTypeKind::t_extern_interface) {
+            cursor.skip(); // extern
+            cursor.skip(); // interface
+            return kind;
+        }
+
+        cursor.skip();
+        return kind;
+    }
+
+    // how far past the keyword(s) the type name sits, for pass 1's peek
+    inline size_t typedecl_name_offset(const Cursor &cursor) {
+        return typedecl_kind(cursor) == AST::ComplexTypeKind::t_extern_interface ? 2 : 1;
     }
 
     // a struct or class body is walked in *both* the declaration and the body pass, by the same code,

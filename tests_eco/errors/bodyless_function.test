@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] BodylessFunction  bodyless_function.eco:5:10
 
-  'mystery(int32)' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
+  'mystery(int32)' was declared but never given a body - write one, or say where its implementation comes from with an 'extern' block.
 
   4 | // declaration
   5 | function mystery(int32 $x) : int32;

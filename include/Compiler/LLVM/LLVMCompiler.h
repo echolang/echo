@@ -11,6 +11,7 @@
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/AbiTableCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
@@ -44,8 +45,13 @@ public:
 
     // names the program: the module whose file-scope statements become the entry point, and - when a
     // `#[target:]` named one - the single file of it that they come from. Must be set before
-    // compile_bundle; defaults to ECO_MAIN_MODULE_NAME and every file root of it
-    void set_entry(const std::string &module_name, const std::filesystem::path &entry_file = {});
+    // compile_bundle; defaults to ECO_MAIN_MODULE_NAME and every file root of it.
+    // a reactor has no entry function: CodegenTarget::entry_symbol() is empty and compile_bundle
+    // skips emit_entry_point
+    void set_entry(
+        const std::string &module_name,
+        const std::filesystem::path &entry_file = {}
+    );
 
     // **this compile is for a test run, so no file root becomes the program at all.** Beside set_entry
     // because it is the other half of the same question and both have to be answered before
@@ -94,6 +100,11 @@ public:
     // walk already emitted. A native runner's `main` then dispatches; the JIT path calls each
     // symbol from TestRunner
     void emit_entry_file_roots(Compiler::LLVM::CmpUnit &main_cmp_unit);
+
+    // the C entry function the row named: prologue, file roots, teardown. compile_bundle
+    // calls this only when CodegenTarget::entry_symbol() is set; a reactor is the absence
+    void emit_entry_point(Compiler::LLVM::CmpUnit &main_cmp_unit, const char *symbol);
+
     void emit_test_dispatch();
 
     void visitScope(AST::ScopeNode &node);
@@ -204,8 +215,8 @@ public:
         std::vector<std::filesystem::path> &out_objects);
 
     // links what emit_objects produced, plus anything a cache supplied
-    bool link_executable(
-        const std::string &executable_name,
+    bool link_program(
+        const std::string &program_name,
         const std::vector<std::filesystem::path> &objects,
         const std::vector<Compiler::LinkRequirement> &link
     );
@@ -220,6 +231,7 @@ private:
     Compiler::LLVM::TypeDeclCodegen _struct;
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
+    Compiler::LLVM::AbiCodegen _abi;
     Compiler::LLVM::AtomicCodegen _atomics;
     Compiler::LLVM::SimdCodegen _simd;
     Compiler::LLVM::MemoryCodegen _memory;

@@ -4,6 +4,7 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,62 @@ namespace
     {
         return fmt::format("line {}: {}", line, message);
     }
+
+    // a doc names the token after it. a dropped token takes its doc. see `step_over` for directives
+    class DocCursor
+    {
+    public:
+        DocCursor(std::vector<DocComment> &docs, size_t from)
+            : _docs(docs)
+        {
+            // an earlier file's docs sit below `from`, and that file's slice never moves
+            const auto first = std::lower_bound(_docs.begin(), _docs.end(), from,
+                [](const DocComment &doc, size_t index) {
+                    return doc.next_token_index < index;
+                }
+            );
+            _read = static_cast<size_t>(first - _docs.begin());
+            _write = _read;
+        }
+
+        // the token at `original` was kept, and now sits at `kept`
+        void keep(size_t original, size_t kept)
+        {
+            while (_read < _docs.size() && _docs[_read].next_token_index < original) {
+                _read++;
+            }
+
+            while (_read < _docs.size() && _docs[_read].next_token_index == original) {
+                _docs[_read].next_token_index = kept;
+                if (_write != _read) {
+                    _docs[_write] = std::move(_docs[_read]);
+                }
+                _write++;
+                _read++;
+            }
+        }
+
+        // [first, after) was a directive. the doc names the token after it
+        void step_over(size_t first, size_t after)
+        {
+            for (size_t at = _read; at < _docs.size() && _docs[at].next_token_index < after; at++) {
+                if (_docs[at].next_token_index >= first) {
+                    _docs[at].next_token_index = after;
+                }
+            }
+        }
+
+        // drop unread docs so one at end of file does not name the next file's first token
+        void finish()
+        {
+            _docs.erase(_docs.begin() + static_cast<std::ptrdiff_t>(_write), _docs.end());
+        }
+
+    private:
+        std::vector<DocComment> &_docs;
+        size_t _read = 0;
+        size_t _write = 0;
+    };
 
     // one directive, located: which of the four it is, where its condition sits, and where the whole thing
     // ends. `condition_end` is exclusive and equals `condition_start` when there is no condition
@@ -439,6 +496,7 @@ bool Parser::filter_conditional_tokens(
     // neither: it is one self-assignment per kept token until something is dropped, and the two parallel
     // vectors still advance at one site, which is what kept a rebuild honest
     size_t write = from;
+    DocCursor docs(tokens.doc_comments, from);
 
     // emitting when every open frame is. one predicate rather than a running flag, because an `#[elif]`
     // deep in a nest changes only its own frame and the answer has to be recomputed from all of them
@@ -506,6 +564,7 @@ bool Parser::filter_conditional_tokens(
                         tokens.token_values[write] = std::move(tokens.token_values[at]);
                     }
 
+                    docs.keep(at, write);
                     write++;
                 }
             }
@@ -518,6 +577,8 @@ bool Parser::filter_conditional_tokens(
         if (!read_directive(tokens, index, directive, out_error)) {
             return false;
         }
+
+        docs.step_over(index, directive.after);
 
         if (name == ConditionalDirective::k_if) {
             Frame frame;
@@ -586,6 +647,8 @@ bool Parser::filter_conditional_tokens(
         out_error = locate(frames.back().line, "'#[if: ...]' is never closed - add '#[end]'");
         return false;
     }
+
+    docs.finish();
 
     // `erase` rather than `resize`: Token has no default constructor, so a resize that could grow does not
     // compile - and this only ever shrinks, which is what makes erase-to-the-end the honest spelling

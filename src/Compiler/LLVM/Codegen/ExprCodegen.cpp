@@ -24,6 +24,7 @@
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/AbiTableCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
@@ -47,6 +48,7 @@
 #include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -54,6 +56,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
 
@@ -155,52 +158,7 @@ void ExprCodegen::gen_literal_bool(AST::LiteralBoolExprNode &node)
 
 void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
 {
-    const std::string &bytes = node.get_string_value();
-
-    // the bytes themselves, always: a private NUL-terminated global. the NUL costs one byte and buys
-    // `->c_str()` for free on a literal, which is the whole C-interop story for one
-    llvm::Value *byte_pointer = _ctx.builder->CreateGlobalStringPtr(bytes, "str");
-
-    const AST::ValueType type = node.result_type();
-
-    // no stdlib, no `string` type - the literal stays the bare address it has always been. this is the
-    // path that compiles `stdlib/core/string.eco` itself. asks for a *layout*, since what follows
-    // GEPs the window out of it
-    if (!type.has_property_layout()) {
-        _ctx.push_scalar(byte_pointer);
-        return;
-    }
-
-    // resolved once by compile_bundle, which is also where a malformed stdlib string is reported
-    const AST::CoreStringLayout &layout = _ctx.core_string_layout();
-
-    auto *string_struct = llvm::cast<llvm::StructType>(_ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit));
-    auto *view_struct = llvm::cast<llvm::StructType>(string_struct->getElementType(layout.window_index));
-
-    // **the whole point of this function.** a literal is a *constant* of the string type, not a call to
-    // one of its constructors: the bytes are already in the binary, the size is known here, and the
-    // owner is null - so nothing is allocated and nothing is retained. a null owner is also what makes
-    // the retain and release the ownership pass wraps this value in no-ops, since both are null-guarded
-    std::vector<llvm::Constant *> view_fields(2);
-    view_fields[layout.bytes_index] = llvm::cast<llvm::Constant>(byte_pointer);
-    view_fields[layout.size_index] =
-        llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
-
-    // every field, then the two the layout names. SSO storage on `string` is extra
-    // properties the constant must still fill - getNullValue so a new one is
-    // zero rather than a missing operand LLVM rejects
-    const unsigned field_count = string_struct->getNumElements();
-    std::vector<llvm::Constant *> string_fields(field_count);
-
-    for (unsigned i = 0; i < field_count; i++) {
-        string_fields[i] = llvm::Constant::getNullValue(string_struct->getElementType(i));
-    }
-
-    string_fields[layout.window_index] = llvm::ConstantStruct::get(view_struct, view_fields);
-    string_fields[layout.owner_index] =
-        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));
-
-    _ctx.push_scalar(llvm::ConstantStruct::get(string_struct, string_fields));
+    _ctx.push_scalar(_ctx.string_constant(node.get_string_value(), node.result_type()));
 }
 
 void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
@@ -733,7 +691,8 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 continue;
             }
 
-            const PrintfConversion conversion = printf_conversion_for(result_type);
+            const PrintfConversion conversion = printf_conversion_for(
+                result_type, _ctx.size_int_ty()->getBitWidth() / 8);
             if (conversion.format == nullptr) {
                 throw _ctx.error(fmt::format(
                     "Unsupported argument type '{}' for 'echo' {}",
@@ -989,7 +948,15 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
         : return_abi_for(
             _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit));
 
-    _ctx.emit_call({ fn_type, fn }, args, abi);
+    llvm::CallInst *call = _ctx.emit_call({ fn_type, fn }, args, abi);
+    if (call != nullptr) {
+        _ctx.types->apply_c_integer_ext(
+            *call,
+            signature,
+            c_function
+                ? TypeLowering::FunctionCallingShape::t_c
+                : TypeLowering::FunctionCallingShape::t_echo);
+    }
 }
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
@@ -1128,6 +1095,15 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_simd_to_array:
             _ctx.simd->gen_simd_builtin(node, kind);
             return;
+
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
+            _ctx.abi->gen_builtin(node, kind);
+            return;
     }
 }
 
@@ -1163,12 +1139,11 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
     const auto [bytes, size] = _ctx.gen_string_window(_ctx.string_as_view(value, type, ""), "");
 
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
 
     // stdout is buffered and this write is not, so flushing first keeps a string in order with the
     // printf every other `echo` emits. AbortCodegen flushes for the same reason before its own write
     _ctx.builder->CreateCall(
-        _ctx.libc_callee("fflush", i32, { _ctx.opaque_ptr_type() }),
+        _ctx.libc_callee(Compiler::RuntimeSymbol::t_fflush, i32, { _ctx.opaque_ptr_type() }),
         { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())) });
 
     _ctx.emit_libc_write(1, bytes, size);
@@ -1177,7 +1152,9 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
     // whatever it is handed. writing it separately rather than copying the bytes to append it: the
     // bytes may be a shared substring, and there is nowhere to put a longer copy
     _ctx.emit_libc_write(
-        1, _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"), llvm::ConstantInt::get(i64, 1));
+        1,
+        _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"),
+        llvm::ConstantInt::get(_ctx.size_int_ty(), 1));
 }
 
 void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
@@ -1371,6 +1348,12 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_simd_bitmask:
         case AST::BuiltinKind::t_simd_from_array:
         case AST::BuiltinKind::t_simd_to_array:
+        case AST::BuiltinKind::t_abi_version:
+        case AST::BuiltinKind::t_abi_fingerprint:
+        case AST::BuiltinKind::t_abi_slot_count:
+        case AST::BuiltinKind::t_abi_symbol:
+        case AST::BuiltinKind::t_abi_slot_symbol:
+        case AST::BuiltinKind::t_abi_bind_unchecked:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }
@@ -1514,7 +1497,7 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
     if (kind == AST::BuiltinKind::t_process_argc) {
         _ctx.push(_ctx.types->coerce_value(
             CodegenValue::scalar(_ctx.process->gen_argc("argc")),
-            AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+            AST::ValueType(AST::ValueTypePrimitive::t_usize),
             node.decl->get_return_type(), *_ctx.current_cmp_unit));
         return;
     }
@@ -1592,11 +1575,13 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
     }
 
     if (!node.as_callable) {
-        _ctx.push_scalar(fn);
+        _ctx.push_scalar(_ctx.types->ensure_function_adapt(
+            node.decl, TypeLowering::FunctionCallingShape::t_c));
         return;
     }
 
-    llvm::Function *adapt = ensure_callable_adapt(node.decl);
+    llvm::Function *adapt = _ctx.types->ensure_function_adapt(
+        node.decl, TypeLowering::FunctionCallingShape::t_echo);
     llvm::StructType *callable_type = _ctx.types->callable_llvm_type();
     llvm::Value *value = llvm::UndefValue::get(callable_type);
     value = _ctx.builder->CreateInsertValue(value, adapt, 0, "ref.fn");
@@ -1606,67 +1591,6 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
         1,
         "ref.env");
     _ctx.push_scalar(value);
-}
-
-llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
-{
-    const std::string name = "__eco_adapt." + AST::mangle_function_name(decl);
-
-    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
-        return existing;
-    }
-
-    llvm::Function *target = _ctx.llvm_function(decl);
-
-    if (target == nullptr) {
-        throw _ctx.error(fmt::format(
-            "function reference has no symbol to adapt {}",
-            _ctx.function_context()));
-    }
-
-    llvm::FunctionType *adapt_ty = _ctx.types->get_llvm_function_type(
-        decl->callable_type().signature(),
-        *_ctx.current_cmp_unit,
-        TypeLowering::FunctionCallingShape::t_echo);
-
-    llvm::Function *adapt = llvm::Function::Create(
-        adapt_ty,
-        llvm::GlobalValue::LinkOnceODRLinkage,
-        name,
-        _ctx.current_module());
-
-    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
-    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
-    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", adapt));
-
-    const ReturnAbi abi = _ctx.types->return_abi_of(decl, *_ctx.current_cmp_unit);
-
-    std::vector<llvm::Value *> forwarded;
-    unsigned i = 0;
-
-    if (abi.is_indirect()) {
-        forwarded.push_back(adapt->getArg(i++));
-    }
-
-    // skip the environment the indirect call always passes
-    if (i < adapt->arg_size()) {
-        i++;
-    }
-
-    for (; i < adapt->arg_size(); i++) {
-        forwarded.push_back(adapt->getArg(i));
-    }
-
-    llvm::CallInst *call = _ctx.builder->CreateCall(target, forwarded);
-
-    if (abi.is_indirect() || decl->get_return_type().is_void()) {
-        _ctx.builder->CreateRetVoid();
-    }
-    else {
-        _ctx.builder->CreateRet(call);
-    }
-
-    return adapt;
 }
 
 void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)
