@@ -214,7 +214,13 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     //
     // `!$w` at gen_unary_expr's `!` arm reads gen_has_value and inverts it exactly this way, down to the
     // value name, so those two emit the same instruction rather than agreeing by inspection either
-    if (lhsret.is_wrapped_optional() || rhsret.is_wrapped_optional() || lhsret.is_weak() || rhsret.is_weak()) {
+    //
+    // a C function pointer is the other kind with no arm below: like a weak, presence is the whole of
+    // what it answers, and `$hook == null` reached the unlowered throw as a compiler bug
+    const bool presence_only = lhsret.is_weak() || rhsret.is_weak()
+        || lhsret.is_c_function() || rhsret.is_c_function();
+
+    if (lhsret.is_wrapped_optional() || rhsret.is_wrapped_optional() || presence_only) {
         // through AST::is_written_null rather than the raw tag: an implicit cast reconciling the null
         // with the optional's type hides it, and this arm and AST::binary_has_builtin_meaning - which
         // decided this comparison *has* a built-in lowering at all - have to agree about which operand
@@ -237,9 +243,9 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         // **the two shapes part company here.** an optional falls through: only against a written `null`,
         // never against another optional - `$a == $b` over two `int32?`s is a question about the values,
         // and answering it here would silently compare presence instead, so it stays unhandled and the
-        // type checker's ordinary rules report it. a weak has no arm below it at all, so anything else
-        // over one got past a gate that should have refused it
-        if (lhsret.is_weak() || rhsret.is_weak()) {
+        // type checker's ordinary rules report it. a weak and a C function pointer have no arm below
+        // them at all, so anything else over one got past a gate that should have refused it
+        if (presence_only) {
             throw unlowered(lhsret, rhsret);
         }
     }
@@ -2045,6 +2051,112 @@ void ExprCodegen::gen_operator(AST::OperatorNode &node)
         node.token_literal.value()));
 }
 
+namespace
+{
+    bool match_remainder_arm(const AST::MatchExprNode::Arm &arm, const AST::ComplexType &ct)
+    {
+        if (arm.is_else() || !arm.case_ordinal.has_value()) {
+            return false;
+        }
+
+        return ct.enum_cases()[arm.case_ordinal.value()].is_open_remainder;
+    }
+
+    // leftover is default (no discriminant). unlisted named cases go to else when both exist
+    struct MatchSwitch
+    {
+        std::vector<llvm::BasicBlock *> arm_blocks;
+        llvm::BasicBlock *default_block = nullptr;
+        bool has_catch_all = false;
+    };
+
+    MatchSwitch wire_match_switch(
+        llvm::LLVMContext &llvm,
+        llvm::Function *function,
+        llvm::IRBuilder<> &builder,
+        llvm::Value *tag,
+        const AST::MatchExprNode &node,
+        const AST::ComplexType &ct
+    )
+    {
+        llvm::BasicBlock *else_block = nullptr;
+        llvm::BasicBlock *remainder_block = nullptr;
+
+        MatchSwitch wired;
+        wired.arm_blocks.reserve(node.arms.size());
+
+        for (const AST::MatchExprNode::Arm &arm : node.arms) {
+            const bool is_else = arm.is_else();
+            const bool is_remainder = match_remainder_arm(arm, ct);
+
+            wired.arm_blocks.push_back(llvm::BasicBlock::Create(
+                llvm,
+                is_else ? "match.else" : (is_remainder ? "match.other" : "match.arm"),
+                function));
+
+            if (is_else) {
+                else_block = wired.arm_blocks.back();
+            } else if (is_remainder) {
+                remainder_block = wired.arm_blocks.back();
+            }
+        }
+
+        wired.has_catch_all = remainder_block != nullptr || else_block != nullptr;
+        wired.default_block = remainder_block != nullptr ? remainder_block : else_block;
+
+        if (wired.default_block == nullptr) {
+            wired.default_block = llvm::BasicBlock::Create(llvm, "match.unreachable", function);
+        }
+
+        llvm::SwitchInst *branch = builder.CreateSwitch(
+            tag, wired.default_block, static_cast<unsigned>(ct.enum_cases().size()));
+
+        const auto add_case = [&](int64_t discriminant, llvm::BasicBlock *block) {
+            branch->addCase(
+                llvm::ConstantInt::get(
+                    llvm::cast<llvm::IntegerType>(tag->getType()),
+                    static_cast<uint64_t>(discriminant),
+                    /*IsSigned=*/true),
+                block);
+        };
+
+        for (size_t i = 0; i < node.arms.size(); i++) {
+            const AST::MatchExprNode::Arm &arm = node.arms[i];
+
+            if (arm.is_else() || match_remainder_arm(arm, ct)) {
+                continue;
+            }
+
+            add_case(
+                ct.enum_cases()[arm.case_ordinal.value()].discriminant,
+                wired.arm_blocks[i]);
+        }
+
+        if (remainder_block != nullptr && else_block != nullptr) {
+            for (const AST::ComplexType::EnumCase &entry : ct.enum_cases()) {
+                if (entry.is_open_remainder) {
+                    continue;
+                }
+
+                bool has_arm = false;
+
+                for (const AST::MatchExprNode::Arm &arm : node.arms) {
+                    if (arm.case_ordinal == entry.ordinal) {
+                        has_arm = true;
+                        break;
+                    }
+                }
+
+                if (!has_arm) {
+                    add_case(entry.discriminant, else_block);
+                }
+            }
+        }
+
+        return wired;
+    }
+};
+
 void ExprCodegen::gen_match(AST::MatchExprNode &node)
 {
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
@@ -2108,63 +2220,15 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
 
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.done", function);
 
-    // **the default block is the leftover arm, the `else` arm, or unreachable.** unreachable is not
-    // a shortcut: AST::MatchResolution refuses a match that does not cover every case, so a tag
-    // outside the set is a value the program cannot hold - except on an open integer enum, where
-    // the leftover case *is* every tag the named cases did not claim. that arm must be the default
-    // of the switch, never an addCase: it has no discriminant
-    llvm::BasicBlock *default_block = nullptr;
-
-    std::vector<llvm::BasicBlock *> arm_blocks;
-    arm_blocks.reserve(node.arms.size());
-
-    auto remainder_arm = [&](const AST::MatchExprNode::Arm &arm) {
-        if (arm.is_else() || !arm.case_ordinal.has_value()) {
-            return false;
-        }
-
-        return ct->enum_cases()[arm.case_ordinal.value()].is_open_remainder;
-    };
-
-    for (const AST::MatchExprNode::Arm &arm : node.arms) {
-        const bool is_else = arm.is_else();
-        const bool is_remainder = remainder_arm(arm);
-
-        arm_blocks.push_back(llvm::BasicBlock::Create(
-            *_ctx.llvm_context,
-            is_else ? "match.else" : (is_remainder ? "match.other" : "match.arm"),
-            function));
-
-        if (is_else || is_remainder) {
-            default_block = arm_blocks.back();
-        }
-    }
-
-    const bool has_default = default_block != nullptr;
-
-    if (!has_default) {
-        default_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.unreachable", function);
-    }
-
-    llvm::SwitchInst *branch = _ctx.builder->CreateSwitch(
-        tag, default_block, static_cast<unsigned>(node.arms.size()));
-
-    for (size_t i = 0; i < node.arms.size(); i++) {
-        const AST::MatchExprNode::Arm &arm = node.arms[i];
-
-        if (arm.is_else() || remainder_arm(arm)) {
-            continue;  // the default block, which takes no case of its own
-        }
-
-        const AST::ComplexType::EnumCase &entry = ct->enum_cases()[arm.case_ordinal.value()];
-
-        branch->addCase(
-            llvm::ConstantInt::get(
-                llvm::cast<llvm::IntegerType>(tag->getType()),
-                static_cast<uint64_t>(entry.discriminant),
-                /*IsSigned=*/true),
-            arm_blocks[i]);
-    }
+    // leftover, else, or unreachable. leftover has no discriminant, so it cannot be an addCase
+    MatchSwitch wired = wire_match_switch(
+        *_ctx.llvm_context,
+        function,
+        *_ctx.builder,
+        tag,
+        node,
+        *ct
+    );
 
     // the value each arm produced and the block it ended in, which is what the phi is built from. the
     // ended-in block is the load-bearing half - an arm holding a branch of its own leaves the builder
@@ -2175,7 +2239,7 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
     for (size_t i = 0; i < node.arms.size(); i++) {
         const AST::MatchExprNode::Arm &arm = node.arms[i];
 
-        _ctx.set_insert_point(arm_blocks[i]);
+        _ctx.set_insert_point(wired.arm_blocks[i]);
 
         // the arm's scope first - the bindings are ordinary locals of that block, so this
         // is what seats and initializes them, and a block arm's statements follow in the same walk
@@ -2238,8 +2302,8 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
         }
     }
 
-    if (!has_default) {
-        _ctx.set_insert_point(default_block);
+    if (!wired.has_catch_all) {
+        _ctx.set_insert_point(wired.default_block);
         _ctx.builder->CreateUnreachable();
     }
 

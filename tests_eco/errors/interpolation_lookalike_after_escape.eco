@@ -1,0 +1,3 @@
+// stepping over a `\u{...}` escape must not step over what follows it: a `{word}` right after one
+// is still the lookalike it always was
+echo "\u{E9}{oops}";

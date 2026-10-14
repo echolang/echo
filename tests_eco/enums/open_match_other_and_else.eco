@@ -1,0 +1,38 @@
+// leftover is .other. unlisted named is else. they are two arms.
+enum V : int32
+{
+    case a = 1;
+    case b = 2;
+    case other;
+}
+
+function describe(V $v) : string
+{
+    return match ($v) {
+        .a => "a",
+        .other => "other",
+        else => "else",
+    };
+}
+
+echo describe(V::from(9));
+echo describe(V::b);
+echo describe(V::a);
+
+function show(V $v) : void
+{
+    match ($v) {
+        .a => { echo "a"; },
+        .other => { echo "other"; },
+        else => { echo "else"; },
+    }
+}
+
+show(V::from(9));
+show(V::b);
+show(V::a);
+
+// else before .other: leftover still hits .other
+echo match (V::from(9)) { .a => "a", else => "else", .other => "other" };
+echo match (V::b) { .a => "a", else => "else", .other => "other" };
+echo match (V::a) { .a => "a", else => "else", .other => "other" };

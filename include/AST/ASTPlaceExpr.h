@@ -411,7 +411,10 @@ namespace AST
     // **would this return hand the caller an address that dies with the call?**
     // AddrOf of callee-frame value storage is yes. a T& local walks init_expr so
     // `return $t` and `return $t->field` follow the binding; `&$t` names the slot.
-    // a ptr load copies bits and is not. the VarDeclNode is the root the diagnostic names
+    // a match that yields a place asks the same of each arm: gen_place of `$local`
+    // and `$binding->field` name callee-frame storage; a payload binding still
+    // walks its initializer onto the subject. a ptr load copies bits and is not.
+    // the VarDeclNode is the root the diagnostic names
     VarDeclNode *names_callee_frame_storage(ExprNode *expr, FunctionDeclNode *function);
 
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers

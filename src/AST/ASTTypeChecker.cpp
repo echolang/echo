@@ -742,10 +742,16 @@ void TypeChecker::visitReturn(ReturnNode &node)
         if (declared.is_pointer() && node.expr->result_type().is_pointer()
             && _current_function != nullptr) {
             if (VarDeclNode *root = names_callee_frame_storage(node.expr, _current_function)) {
+                // a minted root is a value the author never named - a `match` subject computed
+                // in this frame - so the sentence cannot quote it
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_return.value()),
-                    fmt::format("cannot return the address of local '{}' - its storage ends with the call",
-                        root->name_full()));
+                    root->token_varname.is_minted()
+                        ? std::string("cannot return a borrow into a value computed inside this call - its "
+                                      "storage ends with the call. Return a copy, or match over storage the "
+                                      "caller owns")
+                        : fmt::format("cannot return the address of local '{}' - its storage ends with the call",
+                            root->name_full()));
             }
         }
     }

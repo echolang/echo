@@ -50,6 +50,8 @@ namespace
         ValueType handle;
         ValueType nullable_handle;
         ValueType weak_handle;
+        ValueType c_function;
+        ValueType nullable_c_function;
     };
 
     Shapes shapes()
@@ -68,6 +70,8 @@ namespace
         out.handle = EchoTests::type_named(module, "C")->value_type();
         out.nullable_handle = ValueType::make_nullable(out.handle);
         out.weak_handle = ValueType::make_weak(out.handle);
+        out.c_function = ValueType::make_c_function(ValueType::make_void(), {});
+        out.nullable_c_function = ValueType::make_nullable(out.c_function);
         out.wrapped_i32 = out.bundle->collector.type_registry.get_or_create_optional(out.i32);
 
         return out;
@@ -113,13 +117,15 @@ TEST_CASE("binary_has_builtin_meaning keeps a BinaryExprNode when the parser sho
         { Token::Type::t_op_shl, value(s.unknown), value(s.i32), true, "and defers whatever the symbol" },
         { Token::Type::t_op_add, value(s.i32), value(s.unknown), true, "either side" },
 
-        // **presence.** one rule for all four shapes TypeLowering::gen_has_value answers for
+        // **presence.** one rule for the shapes TypeLowering::gen_has_value answers for
         { Token::Type::t_logical_eq, value(s.wrapped_i32), written_null(), true, "a wrapped optional" },
         { Token::Type::t_logical_neq, value(s.address), written_null(), true, "an address" },
         { Token::Type::t_logical_eq, value(s.nullable_handle), written_null(), true, "a nullable class handle" },
         { Token::Type::t_logical_eq, value(s.handle), written_null(), true, "a non-nullable class keeps == so the refusal is one message" },
         { Token::Type::t_logical_eq, value(s.weak_handle), written_null(), true, "a weak handle" },
         { Token::Type::t_logical_eq, written_null(), value(s.weak_handle), true, "either way round" },
+        { Token::Type::t_logical_eq, value(s.nullable_c_function), written_null(), true, "a C function pointer" },
+        { Token::Type::t_logical_eq, value(s.c_function), written_null(), true, "a non-nullable C function keeps == so the refusal is one message" },
         { Token::Type::t_open_angle, value(s.handle), written_null(), false, "and only the two identity comparisons" },
 
         // **identity against a written null is always builtin**, so the node stays a BinaryExprNode
@@ -137,6 +143,10 @@ TEST_CASE("binary_has_builtin_meaning keeps a BinaryExprNode when the parser sho
         // weak - presence, and nothing else. `strong($w)` is how the object is asked after
         { Token::Type::t_logical_eq, value(s.weak_handle), value(s.weak_handle), false, "two weaks do not compare" },
         { Token::Type::t_logical_eq, value(s.weak_handle), value(s.handle), false, "nor a weak against a handle" },
+
+        // C function pointer - presence, and nothing else. `&name` is how one is named
+        { Token::Type::t_logical_eq, value(s.c_function), value(s.c_function), false, "two C function pointers do not compare" },
+        { Token::Type::t_logical_eq, value(s.c_function), value(s.address), false, "nor a C function pointer against an address" },
 
         // addresses
         { Token::Type::t_logical_eq, value(s.address), value(s.address), true, "addresses compare" },

@@ -1,0 +1,8 @@
+// `\u{...}` is the one escape whose own spelling carries braces, so the scan for a `{word}` that
+// looks like a hole has to step over the whole escape. it stepped over one character, read `{E9}`
+// as a malformed hole, and refused every codepoint escape in a `"` string
+echo "h\u{E9}llo";
+
+int32 $n = 3;
+echo "caf\u{E9} {$n}";
+echo "\u{1F600}";

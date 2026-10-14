@@ -1166,8 +1166,9 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "Stdout carries only LSP frames. Logging goes to stderr, or to the client as "
             "window/logMessage. A test block is dropped before it is parsed, the same as every command "
             "that is not 'test'.\n"
-            "v1 answers diagnostics, hover, go-to-definition and document symbols. Completion is not "
-            "in this yet.",
+            "It answers diagnostics, hover, go-to-definition, document symbols, find-references, "
+            "workspace symbols, signature help, completion, rename, document highlight and inlay "
+            "hints.",
             false,
             "It parses none and runs no pass.",
             nullptr,

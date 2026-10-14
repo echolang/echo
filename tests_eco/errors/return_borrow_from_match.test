@@ -1,0 +1,40 @@
+expect: fail
+
+--- OUT --->
+[error] return_borrow_from_match.eco:16:5
+
+  cannot return a borrow into a value computed inside this call - its storage ends with the call. Return a copy, or match over storage the caller owns
+
+  15 | {
+  16 |     return match (make()) {
+     :     ^^^^^^
+  17 |         Shape::circle($l) => $l,
+
+[error] return_borrow_from_match.eco:25:5
+
+  cannot return the address of local '$s' - its storage ends with the call
+
+  24 |     $s = make();
+  25 |     return match ($s) {
+     :     ^^^^^^
+  26 |         Shape::circle($l) => $l,
+
+[error] return_borrow_from_match.eco:34:5
+
+  cannot return the address of local '$held' - its storage ends with the call
+
+  33 |     string $held = 'a label long enough to live on the heap';
+  34 |     return match ($s) {
+     :     ^^^^^^
+  35 |         Shape::circle($l) => $held,
+
+[error] return_borrow_from_match.eco:54:5
+
+  cannot return the address of local '$p' - its storage ends with the call
+
+  53 |     Packed $p = Packed::wrap(Named('a label long enough to live on the heap'));
+  54 |     return match ($p) {
+     :     ^^^^^^
+  55 |         Packed::wrap($n) => $n->text,
+
+4 errors, nothing was compiled.

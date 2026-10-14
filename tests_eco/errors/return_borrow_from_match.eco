@@ -1,0 +1,60 @@
+// a `match` whose arms hand back storage hands back whatever gen_place would address. a payload
+// binding, an arm-local, and a field of a binding all die with the call when the storage lives here
+enum Shape
+{
+    case circle(string $label);
+    case square(string $label);
+}
+
+function make() : Shape
+{
+    return Shape::circle('a label long enough to live on the heap');
+}
+
+function from_temporary() : const string&
+{
+    return match (make()) {
+        Shape::circle($l) => $l,
+        Shape::square($l) => $l,
+    };
+}
+
+function from_local() : const string&
+{
+    $s = make();
+    return match ($s) {
+        Shape::circle($l) => $l,
+        Shape::square($l) => $l,
+    };
+}
+
+function from_arm_local(const Shape& $s) : const string&
+{
+    string $held = 'a label long enough to live on the heap';
+    return match ($s) {
+        Shape::circle($l) => $held,
+        Shape::square($l) => $held,
+    };
+}
+
+struct Named
+{
+    string $text;
+}
+
+enum Packed
+{
+    case wrap(Named $n);
+    case empty;
+}
+
+function from_binding_field() : const string&
+{
+    Packed $p = Packed::wrap(Named('a label long enough to live on the heap'));
+    return match ($p) {
+        Packed::wrap($n) => $n->text,
+        Packed::empty => die('empty'),
+    };
+}
+
+echo 1;

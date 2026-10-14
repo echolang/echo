@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] InterpolationWithoutDollar  interpolation_lookalike_after_escape.eco:3:6
+
+  '{oops}' is not a hole - a hole starts with '{$'. Bind the value first, or write '\{' for a literal brace
+
+  2 | // is still the lookalike it always was
+  3 | echo "\u{E9}{oops}";
+    :      ^^^^^^^^^^^^^^
+  4 | 
+
+  help: write the call or the constant into a variable and interpolate that: `int32 $t = twice($n);` then `"{$t}"`. a constant is not a variable, so `{LIMIT}` cannot be written `{$LIMIT}`
+
+1 error, nothing was compiled.

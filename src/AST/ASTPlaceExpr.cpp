@@ -241,6 +241,67 @@ VarDeclNode *names_callee_frame_storage_walk(
         }
     }
 
+    // a match that hands back storage hands back whatever gen_place would address. a payload
+    // binding is a T& local, so `$l` and `$l->field` walk the initializer onto the subject;
+    // a value local, a field of one, and a by-value parameter are the slot itself. without
+    // this arm `return match (make()) { .a($v) => $v }` handed out a dead payload.
+    //
+    // each arm walks with its own copy of `visited`: every arm reaches the one subject, and a
+    // second arm meeting it again is a sibling path rather than a cycle
+    if (expr->get_node_type() == NodeType::n_expr_match) {
+        auto *match = static_cast<MatchExprNode *>(expr);
+
+        for (const MatchExprNode::Arm &arm : match->arms) {
+            if (!match->arm_yields_address(arm) || arm.value == nullptr) {
+                continue;
+            }
+
+            ExprNode *place = strip_implicit_casts(arm.value);
+
+            if (place == nullptr) {
+                continue;
+            }
+
+            std::unordered_set<const VarDeclNode *> arm_visited = visited;
+
+            if (is_unaccounted_storage(*place)) {
+                continue;
+            }
+
+            VarDeclNode *root = place_root_of(place);
+
+            if (root == nullptr) {
+                if (VarDeclNode *nested = names_callee_frame_storage_walk(
+                        place, function, arm_visited)) {
+                    return nested;
+                }
+
+                continue;
+            }
+
+            if (is_pointer_typed_parameter(root, function)) {
+                continue;
+            }
+
+            if (is_borrow_local(root, function)) {
+                if (!arm_visited.insert(root).second) {
+                    return root;
+                }
+
+                if (VarDeclNode *from_init = names_callee_frame_storage_walk(
+                        root->init_expr, function, arm_visited)) {
+                    return from_init;
+                }
+
+                continue;
+            }
+
+            return root;
+        }
+
+        return nullptr;
+    }
+
     // a load of pointer bits copies an address; it is not callee-frame storage
     return nullptr;
 }

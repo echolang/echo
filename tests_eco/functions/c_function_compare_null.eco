@@ -1,0 +1,18 @@
+// a C function pointer answers presence against a written null, like a weak handle. it had no arm in
+// codegen, so `$hook == null` was an internal compiler error rather than a comparison
+function hook() : void
+{
+}
+
+extern function<void()>? $set = &hook;
+extern function<void()>? $unset = null;
+
+echo $set == null;
+echo $set != null;
+echo $unset == null;
+echo null == $unset;
+echo !$set;
+
+if ($unset == null) {
+    echo 'unset';
+}

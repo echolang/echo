@@ -199,8 +199,9 @@ public interface failable<E>
  * One requirement, and it is an operator, because a primitive cannot declare a method and
  * `int32` has to be sortable. A type with no declaration - an integer, a float, a pointer -
  * conforms **structurally** when the language already spells `<` for it. A struct or a class
- * stays **nominal**: write `: contract::comparable<Self>` and declare the operator, or
- * `sort()` refuses at the call. A `<` you happened to write is not an opt-in.
+ * stays **nominal**: write `: contract::comparable<Gate>`, naming the type itself (there is no
+ * `Self`), and declare the operator, or `sort()` refuses at the call. A `<` you happened to
+ * write is not an opt-in.
  *
  * `bool` has no `<`. A float does, including NaN, so `comparable` means "has `<`" rather than
  * "is a mathematical total order". `ordering::total` is the IEEE path when you need one.

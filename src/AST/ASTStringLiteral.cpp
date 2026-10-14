@@ -261,9 +261,15 @@ std::optional<std::string> AST::interpolation_lookalike(const std::string &raw)
     };
 
     for (size_t i = 0; i < raw.size(); i++) {
-        // `\{` is the escape that writes a literal brace, so it is not a lookalike
+        // an escape is not text, so none of it can start a lookalike: `\{` writes a literal brace,
+        // and `\u{E9}` is the one escape whose own spelling carries braces. skipping only the
+        // character after the `\` left `{E9}` behind, and every `"\u{...}"` was refused as a hole
         if (raw[i] == '\\') {
-            if (i + 1 < raw.size()) {
+            if (i + 2 < raw.size() && raw[i + 1] == 'u' && raw[i + 2] == '{') {
+                const size_t close = raw.find('}', i + 3);
+                i = close == std::string::npos ? raw.size() : close;
+            }
+            else if (i + 1 < raw.size()) {
                 i++;
             }
             continue;

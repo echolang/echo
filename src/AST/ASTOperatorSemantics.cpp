@@ -287,6 +287,13 @@ namespace AST
             return false;
         }
 
+        // a C function pointer is the same split: presence against a written null, and nothing else.
+        // two of them have no identity operator; `&name` is how one is named. lockstep with
+        // ExprCodegen::gen_binary_expr's presence_only arm
+        if (lhs.type.is_c_function() || rhs.type.is_c_function()) {
+            return false;
+        }
+
         // an address, reached through `:$` - the six comparisons, and offsetting by an element count.
         // two addresses subtract to a distance and cannot be added
         if (lhs.type.is_pointer() || rhs.type.is_pointer()) {

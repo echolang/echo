@@ -1,0 +1,53 @@
+// the other half of errors/return_borrow_from_match: a match over storage the *caller* owns may hand a
+// payload borrow back. each arm reaches the one subject, so a second arm meeting it again is not a cycle
+enum Shape
+{
+    case circle(string $label);
+    case square(string $label);
+
+    const function label() : const string&
+    {
+        return match ($this) {
+            Shape::circle($l) => $l,
+            Shape::square($l) => $l,
+        };
+    }
+}
+
+struct Holder
+{
+    Shape $shape;
+    static Shape $shared = Shape::square('static');
+}
+
+function from_param(const Shape& $s) : const string&
+{
+    return match ($s) {
+        Shape::circle($l) => $l,
+        Shape::square($l) => $l,
+    };
+}
+
+function from_field(const Holder& $h) : const string&
+{
+    return match ($h->shape) {
+        Shape::circle($l) => $l,
+        Shape::square($l) => $l,
+    };
+}
+
+function from_static() : const string&
+{
+    return match (Holder::$shared) {
+        Shape::circle($l) => $l,
+        Shape::square($l) => $l,
+    };
+}
+
+$s = Shape::circle('param');
+echo from_param($s);
+echo $s->label();
+
+$h = Holder(Shape::square('field'));
+echo from_field($h);
+echo from_static();
