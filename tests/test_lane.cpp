@@ -129,7 +129,8 @@ bool EchoTests::parse_e2e_shard(
     std::string_view text,
     unsigned &index,
     unsigned &count,
-    std::string &error)
+    std::string &error
+)
 {
     const auto slash = text.find('/');
     if (slash == std::string_view::npos) {

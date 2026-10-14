@@ -721,6 +721,7 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // as non-exhaustive against a set of nothing
     instantiated->_enum_cases = tmpl->_enum_cases;
     instantiated->enum_backing = tmpl->enum_backing;
+    instantiated->enum_backing_refused = tmpl->enum_backing_refused;
     instantiated->enum_closed_from = tmpl->enum_closed_from;
 
     instantiated->template_ref = tmpl;

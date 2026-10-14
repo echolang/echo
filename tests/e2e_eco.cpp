@@ -1,10 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "Compiler/HostTool.h"
-#include "eco_test_file.h"
-#include "subprocess.h"
-#include "test_lane.h"
-
 #include <algorithm>
 #include <cassert>
 #include <condition_variable>
@@ -17,6 +12,11 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include "Compiler/HostTool.h"
+#include "eco_test_file.h"
+#include "subprocess.h"
+#include "test_lane.h"
 
 // end-to-end suite
 //
@@ -38,7 +38,7 @@ namespace
 
     bool wasi_corpus_ready()
     {
-        if (Compiler::wasi_sysroot().empty()) {
+        if (Compiler::wasi_clang().empty() || Compiler::wasi_sysroot().empty()) {
             return false;
         }
 

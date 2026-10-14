@@ -34,7 +34,7 @@ namespace
     }
 }
 
-TEST_CASE( "ptr<ptr<T>> parses, closing on a split >>", "[parser][pointer]" )
+TEST_CASE("ptr<ptr<T>> parses, closing on a split >>", "[parser][pointer]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle("ptr<ptr<int>> $pp;");
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
@@ -45,7 +45,7 @@ TEST_CASE( "ptr<ptr<T>> parses, closing on a split >>", "[parser][pointer]" )
     REQUIRE(type.pointee().pointee().is_primitive_of_type(AST::ValueTypePrimitive::t_int32));
 }
 
-TEST_CASE( "A generic application can be a pointee", "[parser][pointer][generics]" )
+TEST_CASE("A generic application can be a pointee", "[parser][pointer][generics]")
 {
     // the old parser owned the closing `>` of `ptr<`, so it explicitly refused to parse a
     // generic application inside one
@@ -63,7 +63,7 @@ TEST_CASE( "A generic application can be a pointee", "[parser][pointer][generics
     REQUIRE(type.pointee().get_type_desciption() == "Box<int32>");
 }
 
-TEST_CASE( "A borrow is spelled with a trailing &", "[parser][pointer]" )
+TEST_CASE("A borrow is spelled with a trailing &", "[parser][pointer]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(R"(
         $var = 10;
@@ -77,7 +77,7 @@ TEST_CASE( "A borrow is spelled with a trailing &", "[parser][pointer]" )
     REQUIRE(type.pointee().is_primitive_of_type(AST::ValueTypePrimitive::t_int32));
 }
 
-TEST_CASE( "A space before & does not lose the reference", "[parser][pointer]" )
+TEST_CASE("A space before & does not lose the reference", "[parser][pointer]")
 {
     // the lexer only emits t_ref when the & abuts a name character, so `int &$x` and
     // `int & $x` arrive as different tokens. in type position both mean a borrow
@@ -97,7 +97,7 @@ TEST_CASE( "A space before & does not lose the reference", "[parser][pointer]" )
     REQUIRE(tight_fn->args[0]->type() == loose_fn->args[0]->type());
 }
 
-TEST_CASE( "A borrow is a legal return type", "[parser][pointer]" )
+TEST_CASE("A borrow is a legal return type", "[parser][pointer]")
 {
     // `T&` used to be handled by the var-decl parser rather than the type parser, so it was
     // only recognised where a variable was being declared
@@ -114,14 +114,14 @@ TEST_CASE( "A borrow is a legal return type", "[parser][pointer]" )
     REQUIRE(fn->get_return_type().get_type_desciption() == "int32&");
 }
 
-TEST_CASE( "A pointer type renders once in the AST dump", "[parser][pointer]" )
+TEST_CASE("A pointer type renders once in the AST dump", "[parser][pointer]")
 {
     // TypeNode used to carry its own const/pointer bools alongside the ValueType and render
     // both, so `const int $x` printed as `type<const const int32>`
     REQUIRE_NODE_DESC("const int $x = 5;", "vardecl<type<const int32>>($x) = literal<int32>(5)");
 }
 
-TEST_CASE( "A borrow is a legal struct property", "[parser][pointer]" )
+TEST_CASE("A borrow is a legal struct property", "[parser][pointer]")
 {
     // the struct body kept its own hand-rolled list of "what starts a property declaration" and
     // no entry in it allowed for the `&` suffix, so a borrow property was silently not a property
@@ -140,7 +140,7 @@ TEST_CASE( "A borrow is a legal struct property", "[parser][pointer]" )
     REQUIRE(type.pointee().is_primitive_of_type(AST::ValueTypePrimitive::t_int32));
 }
 
-TEST_CASE( "A borrow property accepts the spaced spelling too", "[parser][pointer]" )
+TEST_CASE("A borrow property accepts the spaced spelling too", "[parser][pointer]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle("struct Holder { int & $target; }");
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
@@ -148,7 +148,7 @@ TEST_CASE( "A borrow property accepts the spaced spelling too", "[parser][pointe
     REQUIRE(decl_type(*bundle, "$target").is_pointer());
 }
 
-TEST_CASE( "A borrow is a legal generic argument", "[parser][pointer][generics]" )
+TEST_CASE("A borrow is a legal generic argument", "[parser][pointer][generics]")
 {
     // spelled through `ptr<...>` because a bare `Box<int> $b;` is not recognised as a statement
     // at all - the scope dispatch has no entry for a generic application, independent of
@@ -172,7 +172,7 @@ TEST_CASE( "A borrow is a legal generic argument", "[parser][pointer][generics]"
     REQUIRE(type.pointee().get_complex_type()->get_property_type("item").is_pointer());
 }
 
-TEST_CASE( "A reference cannot be taken twice", "[parser][pointer]" )
+TEST_CASE("A reference cannot be taken twice", "[parser][pointer]")
 {
     // note the spacing: `int&&` lexes as the single logical-and token, so the type parser never
     // sees two references and the dedicated diagnostic only fires on the spaced spelling. both
@@ -185,7 +185,7 @@ TEST_CASE( "A reference cannot be taken twice", "[parser][pointer]" )
     REQUIRE(glued->collector.has_critical_issues());
 }
 
-TEST_CASE( "':$:$' is an address-of, and a third has nothing left to reach", "[parser][pointer]" )
+TEST_CASE("':$:$' is an address-of, and a third has nothing left to reach", "[parser][pointer]")
 {
     // `$out:$:$` is not two markers - the parser collapses it to `&$out`, which is what makes the
     // identity in the doc hold without a special case in the adjustment pass
@@ -210,7 +210,7 @@ TEST_CASE( "':$:$' is an address-of, and a third has nothing left to reach", "[p
     )", "':$' needs an expression with storage to reach the pointer of");
 }
 
-TEST_CASE( "A borrow cast accepts both '&' spellings", "[parser][pointer]" )
+TEST_CASE("A borrow cast accepts both '&' spellings", "[parser][pointer]")
 {
     // the narrowing `ptr<T>` -> `T&` asserts non-nullness, so it has to be written out. the cast
     // production keys on `identifier & (`, and the lexer's t_ref/t_and split means both spacings

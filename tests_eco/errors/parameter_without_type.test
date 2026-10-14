@@ -1,0 +1,67 @@
+expect: fail
+
+--- OUT --->
+[error] ParameterNeedsType  parameter_without_type.eco:5:17
+
+  The parameter '$v' needs a type - write it before the name, as in 'int32 $v'.
+
+  4 | 
+  5 |     constructor($v)
+    :                 ^^
+  6 |     {
+
+[error] ParameterNeedsType  parameter_without_type.eco:13:17
+
+  The parameter '$radius' needs a type - write it before the name, as in 'int32 $radius'.
+
+  12 | {
+  13 |     case circle($radius);
+     :                 ^^^^^^^
+  14 | }
+
+[error] ParameterNeedsType  parameter_without_type.eco:16:24
+
+  The parameter '$b' needs a type - write it before the name, as in 'int32 $b'.
+
+  15 | 
+  16 | operator (Point $a) + ($b) : Point
+     :                        ^^
+  17 | {
+
+[error] ParameterNeedsType  parameter_without_type.eco:21:16
+
+  The parameter '$c' needs a type - write it before the name, as in 'int32 $c'.
+
+  20 | 
+  21 | function count($c) : int32
+     :                ^^
+  22 | {
+
+[error] ParameterNeedsType  parameter_without_type.eco:26:43
+
+  The parameter '$v' needs a type - write it before the name, as in 'int32 $v'.
+
+  25 | 
+  26 | function apply(function<int32(int32)> $f, $v) : int32
+     :                                           ^^
+  27 | {
+
+[error] ParameterNeedsType  parameter_without_type.eco:31:21
+
+  The parameter '$items' needs a type - write it before the name, as in 'int32 $items'.
+
+  30 | 
+  31 | function consume(mv $items) : int32
+     :                     ^^^^^^
+  32 | {
+
+[error] ParameterNeedsType  parameter_without_type.eco:36:19
+
+  The parameter '$n' needs a type - write it before the name, as in 'int32 $n'.
+
+  35 | 
+  36 | $twice = function($n) : int32 {
+     :                   ^^
+  37 |     return $n;
+
+7 errors, nothing was compiled.

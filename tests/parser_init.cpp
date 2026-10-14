@@ -4,11 +4,10 @@
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
-
-#include "helpers.h"
-
 #include <string>
 #include <vector>
+
+#include "helpers.h"
 
 using namespace AST;
 

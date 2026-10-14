@@ -1,0 +1,40 @@
+expect: fail
+
+--- OUT --->
+[error] return_borrow_through_a_call.eco:19:5
+
+  cannot return the address of local '$local' - its storage ends with the call
+
+  18 |     Foo $local = Foo(1);
+  19 |     return pass($local);
+     :     ^^^^^^
+  20 | }
+
+[error] return_borrow_through_a_call.eco:25:5
+
+  cannot return the address of local '$local' - its storage ends with the call
+
+  24 |     Foo $local = Foo(2);
+  25 |     return $local->get();
+     :     ^^^^^^
+  26 | }
+
+[error] return_borrow_through_a_call.eco:32:5
+
+  cannot return the address of local '$local' - its storage ends with the call
+
+  31 |     Foo& $r = pass($local);
+  32 |     return $r;
+     :     ^^^^^^
+  33 | }
+
+[error] return_borrow_through_a_call.eco:39:5
+
+  cannot return the address of local '$local' - its storage ends with the call
+
+  38 |     Foo& $r = $local;
+  39 |     return pass(pass($r))->get();
+     :     ^^^^^^
+  40 | }
+
+4 errors, nothing was compiled.

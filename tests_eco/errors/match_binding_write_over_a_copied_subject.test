@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConstViolation  match_binding_write_over_a_copied_subject.eco:11:12
+
+  Const violation: cannot write through 'const int32&' - its pointee is const
+
+  10 |     .held($n) => {
+  11 |         $n = 2;
+     :            ^
+  12 |         $s = Slot::empty;
+
+1 error, nothing was compiled.

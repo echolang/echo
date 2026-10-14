@@ -1,0 +1,11 @@
+flags: --track-allocations
+
+--- OUT --->
+2
+square gone
+2
+square gone
+25
+42
+square gone
+0

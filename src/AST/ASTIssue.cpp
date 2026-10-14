@@ -361,6 +361,11 @@ ISSUE_MESSAGE_FNC(DuplicateParameterLabel)
     return _message;
 }
 
+ISSUE_MESSAGE_FNC(ParameterNeedsType)
+{
+    return _message;
+}
+
 ISSUE_MESSAGE_FNC(DuplicateFunctionSignature)
 {
     return _message;

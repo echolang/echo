@@ -451,8 +451,7 @@ void Compiler::CommandLineHelp::render_option(
         const bool last = i + 1 == option.values.size();
 
         write_row(
-            spaces(BRANCH_INDENT) + styled(last ? _theme.last_branch : _theme.branch,
-                Compiler::sgr::dim) + styled(value.name, Compiler::sgr::secondary),
+            spaces(BRANCH_INDENT) + styled(last ? _theme.last_branch : _theme.branch, Compiler::sgr::dim) + styled(value.name, Compiler::sgr::secondary),
             BRANCH_INDENT + BRANCH_WIDTH + static_cast<unsigned int>(std::strlen(value.name)),
             value.summary,
             marker_for(option, value, subject),

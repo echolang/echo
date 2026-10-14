@@ -391,13 +391,12 @@ void Compiler::Lsp::PositionIndex::build(AST::Bundle &bundle)
                 }
             }
 
-            std::stable_sort(entries.begin(), entries.end(),
-                [](const Entry &a, const Entry &b) {
-                    if (a.line != b.line) {
-                        return a.line < b.line;
-                    }
-                    return a.column < b.column;
-                });
+            std::stable_sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) {
+                if (a.line != b.line) {
+                    return a.line < b.line;
+                }
+                return a.column < b.column;
+            });
 
             for (Entry &entry : entries) {
                 if (entry.role == EntryRole::t_use && writes.count({ entry.line, entry.column }) > 0) {
@@ -446,13 +445,12 @@ const Compiler::Lsp::PositionIndex::Entry *Compiler::Lsp::PositionIndex::entry_a
     probe.line = line;
     probe.column = column + 1;
 
-    auto it = std::upper_bound(entries.begin(), entries.end(), probe,
-        [](const Entry &a, const Entry &b) {
-            if (a.line != b.line) {
-                return a.line < b.line;
-            }
-            return a.column < b.column;
-        });
+    auto it = std::upper_bound(entries.begin(), entries.end(), probe, [](const Entry &a, const Entry &b) {
+        if (a.line != b.line) {
+            return a.line < b.line;
+        }
+        return a.column < b.column;
+    });
 
     const Entry *use = nullptr;
     const Entry *decl = nullptr;

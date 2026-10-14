@@ -50,7 +50,8 @@ namespace AST
     //     reach the join, so its moves go with it, which is what keeps `if (...) { return .ok($out); }`
     //     in. a `match` arm is the same question: one that always leaves does not rejoin. a match
     //     used as a return value still joins its arms at a phi, so handing over on only one of
-    //     them is the conditional move OwnershipPass reports
+    //     them is the conditional move OwnershipPass reports. `&&` / `||` skip the right
+    //     operand (`AST::binary_skips_rhs`)
     //   - **no closure captures the declaration.** the capture is read whenever the callable is, which is
     //     a point no walk of this body can see
     //

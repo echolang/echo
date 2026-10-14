@@ -1,0 +1,33 @@
+function keep(string $s) : bool
+{
+    return $s->size() > 0;
+}
+
+function first_or(bool $c, string $s) : bool
+{
+    return $c || keep($s);
+}
+
+function first_and(bool $c, string $s) : bool
+{
+    return $c && keep($s);
+}
+
+function counted(int32 $n) : bool
+{
+    return $n > 0 || $n == -1;
+}
+
+function present_or_die(string? $s) : string
+{
+    string $out = $s ?? die('absent');
+    return $out;
+}
+
+echo first_or(true, str::from(11));
+echo first_or(false, str::from(12));
+echo first_and(false, str::from(13));
+echo first_and(true, str::from(14));
+echo counted(0);
+echo present_or_die(str::from(15));
+echo mem::live_allocations();

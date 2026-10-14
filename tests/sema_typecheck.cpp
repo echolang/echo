@@ -778,8 +778,7 @@ TEST_CASE("live_allocations is refused when nothing is counting", "[sema][memory
 
     auto refused = EchoTests::tests_make_parsed_bundle(program, untracked);
 
-    REQUIRE(has_issue_containing(*refused,
-        "'live_allocations' has nothing to read without allocation tracking"));
+    REQUIRE(has_issue_containing(*refused, "'live_allocations' has nothing to read without allocation tracking"));
     REQUIRE(refused->collector.has_critical_issues());
 
     // and with the flag it is an ordinary call. the negative control matters here more than usual: a

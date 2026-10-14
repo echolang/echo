@@ -494,8 +494,7 @@ static ModulePlan plan_module_artifacts(
 
         // deliberately not gated on that: a read-only store still serves what is already in it, and a build
         // that refused to reuse an object it can see would be slower for no reason at all
-        std::error_code ec;
-        if (std::filesystem::is_regular_file(object, ec)) {
+        if (Compiler::cached_object_is_hit(object)) {
             plan.cached.insert(manifest.name);
             plan.reused.push_back(object);
             continue;
@@ -1004,8 +1003,9 @@ static bool select_targets(
         }
 
         // a name written twice is one program, not two links over one path
-        if (std::none_of(out.begin(), out.end(),
-                [&named](const Parser::ModuleTarget &target) { return target.name == named; })) {
+        if (std::none_of(out.begin(), out.end(), [&named](const Parser::ModuleTarget &target) {
+            return target.name == named;
+        })) {
             out.push_back(*declared);
         }
     }
@@ -1071,10 +1071,9 @@ static bool resolve_programs(
         // the root's own name, resolved through the loaded set rather than from the path - the manifest
         // decides what its module is called. Through Compiler::manifest_is_a_root and not a comparison
         // of its own, which is what taught it that `-m lib` and `-m lib/module.eco` are one root
-        auto found = std::find_if(out.manifests.begin(), out.manifests.end(),
-            [&out](const Parser::ModuleManifest &manifest) {
-                return Compiler::manifest_is_a_root(manifest, out.roots);
-            });
+        auto found = std::find_if(out.manifests.begin(), out.manifests.end(), [&out](const Parser::ModuleManifest &manifest) {
+            return Compiler::manifest_is_a_root(manifest, out.roots);
+        });
 
         if (found == out.manifests.end()) {
             std::cerr << "Internal: the root manifest '" << out.roots.front().string()
@@ -1200,8 +1199,7 @@ static bool resolve_programs(
                 "'build' needs '-o, --output <file>' - nothing here names the binary. {}",
                 entry == nullptr
                     ? "A program built from loose source files has no other name to take."
-                    : fmt::format("'{}' declares no programs, so its manifest does not name one either.",
-                        entry->name)));
+                    : fmt::format("'{}' declares no programs, so its manifest does not name one either.", entry->name)));
             return false;
         }
 
@@ -2275,8 +2273,7 @@ int main_test(
         std::vector<std::string> argv = { program_name(driver, program) };
 
         if (compiler.run_main(argv, environment) != 0) {
-            diagnostics.render_untyped("Test Prologue Failed",
-                "the compiled entry point did not return 0, so the tests were not started.");
+            diagnostics.render_untyped("Test Prologue Failed", "the compiled entry point did not return 0, so the tests were not started.");
             return 1;
         }
     }
@@ -2449,8 +2446,7 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
     Compiler::ProgressReporter::instance().close(
         several
             ? fmt::format("built {} targets", invocation.programs.size())
-            : fmt::format("built '{}'",
-                std::filesystem::path(invocation.programs.front().output).filename().string()),
+            : fmt::format("built '{}'", std::filesystem::path(invocation.programs.front().output).filename().string()),
         Compiler::progress_elapsed_ms(started));
 
     // once for the invocation rather than once per program: the tree is cumulative, so what it reports is
@@ -2597,10 +2593,9 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
     // **the standard library is always in the graph and is never what was asked for.** So "is there
     // anything to clean" is a question about the rest of it - an empty list here means the invocation
     // pointed at nothing, not that the graph came back empty
-    const bool project_present = std::any_of(manifests.begin(), manifests.end(),
-        [](const Parser::ModuleManifest &manifest) {
-            return !Compiler::is_compiler_supplied_module(manifest);
-        });
+    const bool project_present = std::any_of(manifests.begin(), manifests.end(), [](const Parser::ModuleManifest &manifest) {
+        return !Compiler::is_compiler_supplied_module(manifest);
+    });
 
     if (!project_present && !including_stdlib) {
         std::cerr << "Nothing to clean: no 'module.eco' in the working directory, and no -m was given."

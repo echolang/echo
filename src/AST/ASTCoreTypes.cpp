@@ -137,16 +137,14 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
     // bytes in the wrong shape - which LLVM would accept as a type mismatch far from the cause
     if (string_decl->complex_type().get_property_type(layout.window_index)
         != types.string_view_type()) {
-        out_error = fmt::format("'{}'s $window is not the #[echoc::core: string_view] type",
-            string_decl->complex_type().namespaced_name());
+        out_error = fmt::format("'{}'s $window is not the #[echoc::core: string_view] type", string_decl->complex_type().namespaced_name());
         return std::nullopt;
     }
 
     // the owner carries the reference count, so it has to be a class - that is what makes a literal's
     // null owner free and a copy of a string one retain
     if (!string_decl->complex_type().get_property_type(layout.owner_index).is_class()) {
-        out_error = fmt::format("'{}'s $owner must be a class - it is what holds the reference count",
-            string_decl->complex_type().namespaced_name());
+        out_error = fmt::format("'{}'s $owner must be a class - it is what holds the reference count", string_decl->complex_type().namespaced_name());
         return std::nullopt;
     }
 
@@ -209,8 +207,7 @@ std::optional<AST::CoreCrashInfoLayout> AST::resolve_core_crash_info_layout(
     const AST::ValueType view = types.string_view_type();
     auto require_view = [&out_error, &info, &view](size_t index, const char *name) {
         if (info.get_property_type(index) != view) {
-            out_error = fmt::format("'{}'s ${} is not the #[echoc::core: string_view] type",
-                info.namespaced_name(), name);
+            out_error = fmt::format("'{}'s ${} is not the #[echoc::core: string_view] type", info.namespaced_name(), name);
             return false;
         }
 

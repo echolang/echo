@@ -47,8 +47,9 @@ namespace
 template <typename Phases>
 auto find_phase(Phases &phases, std::string_view name)
 {
-    return std::find_if(phases.begin(), phases.end(),
-        [&name](const auto &entry) { return entry.name == name; });
+    return std::find_if(phases.begin(), phases.end(), [&name](const auto &entry) {
+        return entry.name == name;
+    });
 }
 
 };

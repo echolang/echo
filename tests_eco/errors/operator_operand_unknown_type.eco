@@ -1,0 +1,11 @@
+struct Point
+{
+    int32 $x;
+}
+
+operator (Point $a) + (Distance $b) : Point
+{
+    return $a;
+}
+
+echo 1;

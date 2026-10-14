@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "subprocess.h"
-
 #include <filesystem>
 #include <fstream>
 #include <string>
+
+#include "subprocess.h"
 
 // what `-g` promises beyond "some metadata appeared", which is all an IR golden can see.
 //

@@ -178,13 +178,16 @@ AST::ConstDeclNode *Parser::parse_constdecl(
     // **find before create**: Namespace::push_symbol replaces the slot and frees what was there, so
     // publishing over a type symbol would leave that type unresolvable with no diagnostic anywhere
     if (auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *target)) {
-        if (auto *previous_type = existing->node.get_ptr<AST::TypeDeclNode>()) {
+        // has_type and not get_ptr: get_ptr asserts the type rather than asking it, so as a test it is
+        // always true and reads a constant as a type declaration
+        if (existing->node.has_type<AST::TypeDeclNode>()) {
+            const auto &previous_type = existing->node.get<AST::TypeDeclNode>();
             payload.collector.collect_issue<AST::Issue::TypeRedeclaration>(
-                payload.context.code_ref(name_token), name_token.value(), previous_type->name_token.value());
+                payload.context.code_ref(name_token), name_token.value(), previous_type.name_token.value());
             return nullptr;
         }
 
-        if (existing->node.get_ptr<AST::ConstDeclNode>() != nullptr) {
+        if (existing->node.has_type<AST::ConstDeclNode>()) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(name_token),
                 fmt::format("The constant '{}' is already declared.", name_token.value()));

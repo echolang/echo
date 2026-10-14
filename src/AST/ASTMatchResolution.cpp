@@ -8,10 +8,13 @@
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
+#include "AST/ASTMutation.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTRegion.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeUnify.h"
+#include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/MatchExprNode.h"
@@ -23,6 +26,100 @@
 
 namespace AST
 {
+
+namespace
+{
+
+class UnprovenWriteFinder : public RecursiveVisitor
+{
+public:
+    bool found() const { return _found; }
+
+    void visit_assign(AssignNode &node) override
+    {
+        _found = true;
+        RecursiveVisitor::visit_assign(node);
+    }
+
+    void visit_addr_of_expr(AddrOfExprNode &node) override
+    {
+        _found = true;
+        RecursiveVisitor::visit_addr_of_expr(node);
+    }
+
+    void visit_move_expr(MoveExprNode &node) override
+    {
+        _found = true;
+        RecursiveVisitor::visit_move_expr(node);
+    }
+
+    void visitFunctionCallExpr(FunctionCallExprNode &node) override
+    {
+        if (!is_print_call(node)) {
+            _found = true;
+        }
+
+        RecursiveVisitor::visitFunctionCallExpr(node);
+    }
+
+    void visit_indirect_call_expr(IndirectCallExprNode &node) override
+    {
+        _found = true;
+        RecursiveVisitor::visit_indirect_call_expr(node);
+    }
+
+private:
+    bool _found = false;
+};
+
+bool arm_has_unproven_write(MatchExprNode::Arm &arm)
+{
+    UnprovenWriteFinder finder;
+
+    if (arm.scope != nullptr) {
+        arm.scope->accept(finder);
+    }
+
+    if (arm.value != nullptr) {
+        arm.value->accept(finder);
+    }
+
+    return finder.found();
+}
+
+bool binding_arm_may_write(MatchExprNode &node, ExprNode *place)
+{
+    VarDeclNode *root = place_root_of(place);
+
+    for (MatchExprNode::Arm &arm : node.arms) {
+        if (arm.bindings.empty()) {
+            continue;
+        }
+
+        if (root == nullptr) {
+            // no frame local to ask is_never_written of. a call in the arm might
+            // mutate a static; `=> $l` does not, and copying would make a return of
+            // that payload dangle
+            if (arm_has_unproven_write(arm)) {
+                return true;
+            }
+
+            continue;
+        }
+
+        if (arm.scope != nullptr && !is_never_written(*root, *arm.scope)) {
+            return true;
+        }
+
+        if (arm.value != nullptr && !is_never_written(*root, *arm.value)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+}
 
 MatchResolution::MatchResolution(Bundle &bundle)
     : FixpointLowering(bundle)
@@ -101,7 +198,11 @@ void MatchResolution::resolve(MatchExprNode &node)
             // copies of itself to keep in step. the seated type is then simply what the edge answers
             ValueType seated = derived;
 
-            if (is_place_expression(*subject->init_expr)) {
+            if (is_place_expression(*subject->init_expr)
+                && binding_arm_may_write(node, subject->init_expr)) {
+                seated = ValueType::make_const(derived);
+            }
+            else if (is_place_expression(*subject->init_expr)) {
                 subject->init_expr = receiver_for_member_call(*_current_module, subject->init_expr);
                 seated = subject->init_expr->result_type();
             }

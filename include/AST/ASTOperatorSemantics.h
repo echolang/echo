@@ -154,6 +154,11 @@ namespace AST
     // - the parser folds it away, since it carries no semantics
     bool unary_has_builtin_meaning(const Operator *op, const OperandFacts &operand);
 
+    // **does this operator skip its right operand?** `&&` and `||`. LastRead and
+    // OwnershipPass both ask it, so a skipped path cannot be a handover in one
+    // walk and unconditional in the other. codegen and const_fold follow
+    bool binary_skips_rhs(Token::Type op);
+
     // **does this symbol lower over one lane of this type?** the one matrix.
     //
     // `binary_operand_refusal` is the sentence. `SimdCodegen` throws if a pair this

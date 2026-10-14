@@ -347,8 +347,7 @@ namespace AST
 
         // both receiver spellings at once: a body that has one has the other, and a frame that set
         // only the mutable node would let `const function` inside it bind `$this` to null
-        SelfScope(Context &context, TypeDeclNode *self_struct, TypeNode *self_type,
-            TypeNode *self_const_type = nullptr) :
+        SelfScope(Context &context, TypeDeclNode *self_struct, TypeNode *self_type, TypeNode *self_const_type = nullptr) :
             context(context),
             previous_struct(context.self_struct_ptr),
             previous_type(context.self_type_ptr),

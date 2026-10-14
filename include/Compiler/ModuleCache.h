@@ -104,6 +104,8 @@ namespace Compiler
     std::filesystem::path module_object_path(
         const Parser::ModuleManifest &manifest, const ModuleCacheKey &key, const BuildLayout &layout);
 
+    bool cached_object_is_hit(const std::filesystem::path &object);
+
     // the record of what the last build of this module was made of, for explaining a miss. One per module
     // rather than one per key, because the interesting comparison is against whatever was there before
     std::filesystem::path module_inputs_path(

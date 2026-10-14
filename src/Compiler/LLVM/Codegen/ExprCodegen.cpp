@@ -183,7 +183,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     if (node.op_node != nullptr && node.op_node->op != nullptr) {
         const Token::Type op = node.op_node->op->type;
 
-        if (op == Token::Type::t_logical_and || op == Token::Type::t_logical_or) {
+        if (AST::binary_skips_rhs(op)) {
             gen_logical_short_circuit(node);
             return;
         }
@@ -623,8 +623,7 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
                 _ctx.push_scalar(_ctx.builder->CreateNeg(value));
             }
             else {
-                throw _ctx.error(fmt::format("unary '-' is not supported for operand type '{}' {}",
-                    type.get_type_desciption(), _ctx.function_context()));
+                throw _ctx.error(fmt::format("unary '-' is not supported for operand type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
             }
             break;
 
@@ -633,8 +632,7 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
                 _ctx.push_scalar(_ctx.builder->CreateNot(value, "bitnot"));
             }
             else {
-                throw _ctx.error(fmt::format("unary '~' is not supported for operand type '{}' {}",
-                    type.get_type_desciption(), _ctx.function_context()));
+                throw _ctx.error(fmt::format("unary '~' is not supported for operand type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
             }
             break;
 
@@ -652,14 +650,12 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
                     _ctx.types->gen_has_value(operand, type), "is_null"));
             }
             else {
-                throw _ctx.error(fmt::format("unary '!' is not supported for operand type '{}' {}",
-                    type.get_type_desciption(), _ctx.function_context()));
+                throw _ctx.error(fmt::format("unary '!' is not supported for operand type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
             }
             break;
 
         default:
-            throw _ctx.error(fmt::format("unsupported unary operator '{}' {}",
-                node.token_operator.value(), _ctx.function_context()));
+            throw _ctx.error(fmt::format("unsupported unary operator '{}' {}", node.token_operator.value(), _ctx.function_context()));
     }
 }
 
@@ -1633,8 +1629,7 @@ void ExprCodegen::gen_null_assert(llvm::Value *address, const TokenReference &at
 
     // through the same runtime *and the same message shape* `die` and `assert` use. the location
     // is the operand's token - a cast node carries none of its own
-    _ctx.abort->gen_abort_if(is_null,
-        "fatal error", "null pointer cast to a reference", at);
+    _ctx.abort->gen_abort_if(is_null, "fatal error", "null pointer cast to a reference", at);
 }
 
 void ExprCodegen::gen_index(AST::IndexExprNode &node)

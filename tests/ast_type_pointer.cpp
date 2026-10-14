@@ -16,7 +16,7 @@ namespace
     ValueType ref_to(ValueType pointee) { return ValueType::make_pointer(pointee, false); }
 }
 
-TEST_CASE( "A pointer nests instead of saturating", "[types][pointer]" )
+TEST_CASE("A pointer nests instead of saturating", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
     ValueType once = ptr_to(i32);
@@ -35,7 +35,7 @@ TEST_CASE( "A pointer nests instead of saturating", "[types][pointer]" )
     REQUIRE(twice.pointee().pointee() == i32);
 }
 
-TEST_CASE( "A pointer is not its pointee's kind", "[types][pointer]" )
+TEST_CASE("A pointer is not its pointee's kind", "[types][pointer]")
 {
     ValueType p = ptr_to(prim(ValueTypePrimitive::t_int32));
 
@@ -47,7 +47,7 @@ TEST_CASE( "A pointer is not its pointee's kind", "[types][pointer]" )
     REQUIRE(value_type_of(p).is_integer_type());
 }
 
-TEST_CASE( "value_type_of reaches exactly one level", "[types][pointer]" )
+TEST_CASE("value_type_of reaches exactly one level", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
 
@@ -58,7 +58,7 @@ TEST_CASE( "value_type_of reaches exactly one level", "[types][pointer]" )
     REQUIRE(value_type_of(ptr_to(ptr_to(i32))) == ptr_to(i32));
 }
 
-TEST_CASE( "ptr<T> and T& differ only in nullability", "[types][pointer]" )
+TEST_CASE("ptr<T> and T& differ only in nullability", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
     ValueType nullable = ptr_to(i32);
@@ -72,7 +72,7 @@ TEST_CASE( "ptr<T> and T& differ only in nullability", "[types][pointer]" )
     REQUIRE(nullable != borrow);
 }
 
-TEST_CASE( "const binds to the level it sits on", "[types][pointer]" )
+TEST_CASE("const binds to the level it sits on", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
 
@@ -89,7 +89,7 @@ TEST_CASE( "const binds to the level it sits on", "[types][pointer]" )
     REQUIRE(const_pointee.pointee().is_const());
 }
 
-TEST_CASE( "Pointer types render their spelling", "[types][pointer]" )
+TEST_CASE("Pointer types render their spelling", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
 
@@ -104,7 +104,7 @@ TEST_CASE( "Pointer types render their spelling", "[types][pointer]" )
     REQUIRE(ref_to(ValueType::make_const(i32)).get_type_desciption() == "const int32&");
 }
 
-TEST_CASE( "Pointer mangling is recursive and leaves pointer-free types untouched", "[types][pointer]" )
+TEST_CASE("Pointer mangling is recursive and leaves pointer-free types untouched", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
 
@@ -121,7 +121,7 @@ TEST_CASE( "Pointer mangling is recursive and leaves pointer-free types untouche
     REQUIRE(ptr_to(ValueType::make_const(i32)).get_mangled_name() == "MRNCLPi");
 }
 
-TEST_CASE( "Equal pointer types hash equal, distinct ones do not collide", "[types][pointer]" )
+TEST_CASE("Equal pointer types hash equal, distinct ones do not collide", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
     std::hash<ValueType> h;
@@ -140,7 +140,7 @@ TEST_CASE( "Equal pointer types hash equal, distinct ones do not collide", "[typ
     REQUIRE(seen.size() == 4);
 }
 
-TEST_CASE( "A generic instantiation interns per pointer depth", "[types][pointer][generics]" )
+TEST_CASE("A generic instantiation interns per pointer depth", "[types][pointer][generics]")
 {
     TypeRegistry reg;
     TypeParamRegistry params;
@@ -166,7 +166,7 @@ TEST_CASE( "A generic instantiation interns per pointer depth", "[types][pointer
     REQUIRE(of_pointer->get_property_type("item") == ptr_to(i32));
 }
 
-TEST_CASE( "contains_type_param sees through a pointer", "[types][pointer][generics]" )
+TEST_CASE("contains_type_param sees through a pointer", "[types][pointer][generics]")
 {
     TypeParamRegistry params;
     ComplexType box("Box");
@@ -179,7 +179,7 @@ TEST_CASE( "contains_type_param sees through a pointer", "[types][pointer][gener
     REQUIRE_FALSE(contains_type_param(ptr_to(prim(ValueTypePrimitive::t_int32))));
 }
 
-TEST_CASE( "contains_type_param sees through a tagged optional", "[types][pointer][generics]" )
+TEST_CASE("contains_type_param sees through a tagged optional", "[types][pointer][generics]")
 {
     TypeRegistry reg;
     TypeParamRegistry params;
@@ -199,7 +199,7 @@ TEST_CASE( "contains_type_param sees through a tagged optional", "[types][pointe
     REQUIRE_FALSE(contains_type_param(tagged_concrete));
 }
 
-TEST_CASE( "target_type_of follows every level, value_type_of exactly one", "[types][pointer]" )
+TEST_CASE("target_type_of follows every level, value_type_of exactly one", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
 
@@ -213,7 +213,7 @@ TEST_CASE( "target_type_of follows every level, value_type_of exactly one", "[ty
     REQUIRE(target_type_of(ref_to(ptr_to(ref_to(i32)))) == i32);
 }
 
-TEST_CASE( "Implicit convertibility is looser than identity, and directional", "[types][pointer]" )
+TEST_CASE("Implicit convertibility is looser than identity, and directional", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
 
@@ -238,7 +238,7 @@ TEST_CASE( "Implicit convertibility is looser than identity, and directional", "
     REQUIRE_FALSE(is_implicitly_convertible(i32, ref_to(i32)));
 }
 
-TEST_CASE( "A borrow may gain const on its pointee, never lose it", "[types][pointer]" )
+TEST_CASE("A borrow may gain const on its pointee, never lose it", "[types][pointer]")
 {
     ValueType i32 = prim(ValueTypePrimitive::t_int32);
     ValueType const_i32 = ValueType::make_const(i32);
@@ -262,7 +262,7 @@ TEST_CASE( "A borrow may gain const on its pointee, never lose it", "[types][poi
     REQUIRE_FALSE(is_implicitly_convertible(ValueType::make_const(ref_to(const_i32)), ref_to(i32)));
 }
 
-TEST_CASE( "substitute_type keeps const at the level it was written", "[types][pointer][generics]" )
+TEST_CASE("substitute_type keeps const at the level it was written", "[types][pointer][generics]")
 {
     TypeRegistry reg;
     TypeParamRegistry params;

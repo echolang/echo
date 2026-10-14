@@ -731,8 +731,7 @@ void TypeChecker::visitReturn(ReturnNode &node)
             if (const char *reason = null_rejection_reason(declared)) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_return.value()),
-                    fmt::format("cannot return null as '{}' - {}",
-                        declared.get_type_desciption(), reason));
+                    fmt::format("cannot return null as '{}' - {}", declared.get_type_desciption(), reason));
             }
         }
 
@@ -750,8 +749,7 @@ void TypeChecker::visitReturn(ReturnNode &node)
                         ? std::string("cannot return a borrow into a value computed inside this call - its "
                                       "storage ends with the call. Return a copy, or match over storage the "
                                       "caller owns")
-                        : fmt::format("cannot return the address of local '{}' - its storage ends with the call",
-                            root->name_full()));
+                        : fmt::format("cannot return the address of local '{}' - its storage ends with the call", root->name_full()));
             }
         }
     }
@@ -911,8 +909,7 @@ void TypeChecker::check_conformances(TypeDeclNode &node)
 
             _collector.collect_issue<Issue::UnmetInterfaceRequirement>(
                 code_ref_for(node.declaration_site_token()),
-                fmt::format("'{}' says it conforms to '{}', but {}.",
-                    node.type_name(), interface.get_type_desciption(), detail));
+                fmt::format("'{}' says it conforms to '{}', but {}.", node.type_name(), interface.get_type_desciption(), detail));
 
             continue;
         }
@@ -1488,13 +1485,7 @@ void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
 
     // the parameter is `T&`, so AST::CallResolver wrapped the place in the `&` this looks through - one
     // level out from the value itself, exactly as ref_count's and dprint's arguments are
-    auto *address = node.arguments[0];
-
-    if (address->get_node_type() != NodeType::n_expr_addrof) {
-        return;
-    }
-
-    if (AST::is_unaccounted_storage(*static_cast<AddrOfExprNode *>(address)->operand)) {
+    if (AST::is_unaccounted_address(*node.arguments[0])) {
         return;
     }
 
@@ -1511,9 +1502,9 @@ void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token_function_name),
             "'mem::take' can only empty storage reached through a pointer, such as an element of a buffer "
-            "you allocated. This source is a variable, a property or a temporary, and the scope or the "
-            "value holding it already owes it a teardown - so taking it here would destroy it twice. "
-            "Write 'mv' to hand a variable over.");
+            "you allocated. This source is a variable, a borrow of one, a property or a temporary, and the "
+            "scope or the value holding it already owes it a teardown - so taking it here would destroy it "
+            "twice. Write 'mv' to hand a variable over.");
 
         return;
     }
@@ -1521,9 +1512,9 @@ void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
     _collector.collect_issue<Issue::GenericError>(
         code_ref_for(node.token_function_name),
         "'mem::init' can only fill storage reached through a pointer, such as an element of a buffer you "
-        "allocated. This destination is a variable, a property or a temporary, and something already owes "
-        "whatever it holds a teardown - so initializing it here would leak that value. Write an ordinary "
-        "'=', which ends the old value before storing the new one.");
+        "allocated. This destination is a variable, a borrow of one, a property or a temporary, and "
+        "something already owes whatever it holds a teardown - so initializing it here would leak that "
+        "value. Write an ordinary '=', which ends the old value before storing the new one.");
 }
 
 // `mem::atomic::` is a word RMW and nothing else. reported here for check_ref_count_argument's
@@ -1773,8 +1764,7 @@ void TypeChecker::check_call_argument(
             else {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(at),
-                    fmt::format("argument {} of '{}' is '{}', which cannot be null - {}",
-                        arg_number, callee_name(), param_type.get_type_desciption(), reason));
+                    fmt::format("argument {} of '{}' is '{}', which cannot be null - {}", arg_number, callee_name(), param_type.get_type_desciption(), reason));
             }
         }
         return;
@@ -1947,30 +1937,26 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
             if (type.is_pointer()) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_function_name),
-                    fmt::format("cannot echo an address of type '{}' - echo prints values",
-                        type.get_type_desciption()));
+                    fmt::format("cannot echo an address of type '{}' - echo prints values", type.get_type_desciption()));
             }
             else if (type.has_complex_type()) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_function_name),
-                    fmt::format("'echo' has no way to print a '{}' - print its members instead",
-                        type.get_type_desciption()));
+                    fmt::format("'echo' has no way to print a '{}' - print its members instead", type.get_type_desciption()));
             }
             else if (type.has_signature()) {
                 // reported here for the reason the two above are: ExprCodegen has no printf conversion
                 // for it and throws an *internal compiler error*, which is not the user's mistake to read
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_function_name),
-                    fmt::format("'echo' has no way to print a '{}' - call it and print the result",
-                        type.get_type_desciption()));
+                    fmt::format("'echo' has no way to print a '{}' - call it and print the result", type.get_type_desciption()));
             }
             else if (!type.is_primitive() || type.is_void()) {
                 // simd, weak, inline array, void: kinds the arms above do not cover and
                 // printf_conversion_for has no row for. a primitive that is not void is the table
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_function_name),
-                    fmt::format("'echo' has no way to print a '{}'",
-                        type.get_type_desciption()));
+                    fmt::format("'echo' has no way to print a '{}'", type.get_type_desciption()));
             }
         }
     }
@@ -2107,8 +2093,7 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
             else {
                 _collector.collect_issue<Issue::InvalidTypeConversion>(
                     code_ref_for(*_context_token),
-                    fmt::format("cannot implicitly convert '{}' to '{}'",
-                        from.get_type_desciption(), node.cast_to.get_type_desciption()));
+                    fmt::format("cannot implicitly convert '{}' to '{}'", from.get_type_desciption(), node.cast_to.get_type_desciption()));
             }
         }
     }
@@ -2307,9 +2292,7 @@ void TypeChecker::visitUnaryExpr(UnaryExprNode &node)
         if (!unary_has_builtin_meaning(op, operand)) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.token_operator),
-                fmt::format("operator '{}' is not supported on an operand of type '{}'",
-                    node.token_operator.value(),
-                    operand.type.get_type_desciption()));
+                fmt::format("operator '{}' is not supported on an operand of type '{}'", node.token_operator.value(), operand.type.get_type_desciption()));
         }
     }
 
@@ -2366,8 +2349,7 @@ void TypeChecker::check_const_target(AssignNode &node)
         if (pointer_type.is_pointer() && pointer_type.pointee().is_const()) {
             _collector.collect_issue<Issue::ConstViolation>(
                 code_ref_for(node.token_assign),
-                fmt::format("cannot write through '{}' - its pointee is const",
-                    pointer_type.get_type_desciption()));
+                fmt::format("cannot write through '{}' - its pointee is const", pointer_type.get_type_desciption()));
         }
 
         return;
@@ -2401,8 +2383,7 @@ void TypeChecker::check_const_target(AssignNode &node)
     if (storage.is_pointer()) {
         _collector.collect_issue<Issue::ConstViolation>(
             code_ref_for(node.token_assign),
-            fmt::format("cannot re-seat '{}' - the pointer is const, only its pointee may be written",
-                storage.get_type_desciption()));
+            fmt::format("cannot re-seat '{}' - the pointer is const, only its pointee may be written", storage.get_type_desciption()));
         return;
     }
 
@@ -2508,18 +2489,15 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     std::string message;
     switch (dest) {
         case Destination::t_declaration:
-            message = fmt::format("cannot implicitly convert '{}' to '{}'{}",
-                from.get_type_desciption(), to.get_type_desciption(), hint);
+            message = fmt::format("cannot implicitly convert '{}' to '{}'{}", from.get_type_desciption(), to.get_type_desciption(), hint);
             break;
 
         case Destination::t_assignment:
-            message = fmt::format("cannot assign '{}' to '{}'{}",
-                from.get_type_desciption(), to.get_type_desciption(), hint);
+            message = fmt::format("cannot assign '{}' to '{}'{}", from.get_type_desciption(), to.get_type_desciption(), hint);
             break;
 
         case Destination::t_return:
-            message = fmt::format("cannot return '{}' from a function declared '{}'{}",
-                from.get_type_desciption(), to.get_type_desciption(), hint);
+            message = fmt::format("cannot return '{}' from a function declared '{}'{}", from.get_type_desciption(), to.get_type_desciption(), hint);
             break;
     }
 
@@ -2547,8 +2525,7 @@ void TypeChecker::visit_assign(AssignNode &node)
             if (const char *reason = null_rejection_reason(target_type)) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_assign),
-                    fmt::format("cannot assign null to '{}' - {}",
-                        target_type.get_type_desciption(), reason));
+                    fmt::format("cannot assign null to '{}' - {}", target_type.get_type_desciption(), reason));
             }
         }
 

@@ -10,7 +10,7 @@
         REQUIRE(op->type == lit_type); \
     }
 
-TEST_CASE( "predefined token operators", "[AST Ops]" )
+TEST_CASE("predefined token operators", "[AST Ops]")
 {
     auto registry = AST::OperatorRegistry();
 
@@ -69,7 +69,7 @@ namespace
     }
 }
 
-TEST_CASE( "a declared symbol is matched as a token sequence", "[AST Ops]" )
+TEST_CASE("a declared symbol is matched as a token sequence", "[AST Ops]")
 {
     auto registry = AST::OperatorRegistry();
 
@@ -167,7 +167,7 @@ TEST_CASE( "a declared symbol is matched as a token sequence", "[AST Ops]" )
     }
 }
 
-TEST_CASE( "a custom operator carries its own precedence and fixities", "[AST Ops]" )
+TEST_CASE("a custom operator carries its own precedence and fixities", "[AST Ops]")
 {
     auto registry = AST::OperatorRegistry();
 
@@ -191,7 +191,7 @@ TEST_CASE( "a custom operator carries its own precedence and fixities", "[AST Op
     REQUIRE_FALSE( op->has_fixity(AST::OpFixity::t_suffix) );
 }
 
-TEST_CASE( "the built in precedence tiers keep their order", "[AST Ops]" )
+TEST_CASE("the built in precedence tiers keep their order", "[AST Ops]")
 {
     // smaller binds tighter, and the tiers are spaced so a declared number has room between them.
     // the numbers are published in book/concept/operators.md, so this is a contract

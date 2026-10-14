@@ -41,7 +41,7 @@ namespace
     }
 }
 
-TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
+TEST_CASE("argument_fit ranks conversions best to worst", "[fnmatch]")
 {
     REQUIRE( AST::argument_fit(t_int32, nullptr, t_int32) == ArgumentFit::t_exact );
 
@@ -114,7 +114,7 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     REQUIRE( AST::argument_fit(t_int32, nullptr, ValueType::make_pointer(t_int32, false)) == ArgumentFit::t_none );
 }
 
-TEST_CASE( "a borrow parameter is answered by a conversion to what it borrows", "[fnmatch]" )
+TEST_CASE("a borrow parameter is answered by a conversion to what it borrows", "[fnmatch]")
 {
     // AST::implicit_conversion_target is the peel that makes the declared conversion and the borrow of
     // its result compose on one argument. without it the arm could never fire for a borrow parameter at
@@ -143,7 +143,7 @@ TEST_CASE( "a borrow parameter is answered by a conversion to what it borrows", 
     REQUIRE( AST::implicit_conversion_target(nullable) == nullable );
 }
 
-TEST_CASE( "arity filters before anything else", "[fnmatch]" )
+TEST_CASE("arity filters before anything else", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> candidates = {
         candidate({ t_int32 }),
@@ -157,7 +157,7 @@ TEST_CASE( "arity filters before anything else", "[fnmatch]" )
     REQUIRE( match(candidates, { t_int32, t_int32, t_int32 }).outcome == FunctionMatch::Outcome::t_no_viable );
 }
 
-TEST_CASE( "a lone candidate is taken without consulting types", "[fnmatch]" )
+TEST_CASE("a lone candidate is taken without consulting types", "[fnmatch]")
 {
     // this is what keeps a program with no overloads behaving exactly as it did before overload
     // resolution existed: a bad argument stays the type checker's diagnostic to report, with its
@@ -167,7 +167,7 @@ TEST_CASE( "a lone candidate is taken without consulting types", "[fnmatch]" )
     REQUIRE( match(candidates, { ValueType::make_pointer(t_float64, true) }).outcome == FunctionMatch::Outcome::t_resolved );
 }
 
-TEST_CASE( "an exact match beats a conversion", "[fnmatch]" )
+TEST_CASE("an exact match beats a conversion", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> candidates = {
         candidate({ t_int32 }),
@@ -178,7 +178,7 @@ TEST_CASE( "an exact match beats a conversion", "[fnmatch]" )
     REQUIRE( match(candidates, { t_int32 }).decl == candidates[0].decl );
 }
 
-TEST_CASE( "no candidate accepts the arguments", "[fnmatch]" )
+TEST_CASE("no candidate accepts the arguments", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> candidates = {
         candidate({ ValueType::make_pointer(t_int32, true) }),
@@ -192,7 +192,7 @@ TEST_CASE( "no candidate accepts the arguments", "[fnmatch]" )
     REQUIRE( result.tied.size() == 2 );
 }
 
-TEST_CASE( "an equally good pair on different arguments is ambiguous", "[fnmatch]" )
+TEST_CASE("an equally good pair on different arguments is ambiguous", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> candidates = {
         candidate({ t_int32, t_float64 }),
@@ -205,7 +205,7 @@ TEST_CASE( "an equally good pair on different arguments is ambiguous", "[fnmatch
     REQUIRE( result.tied.size() == 2 );
 }
 
-TEST_CASE( "a concrete overload settles a tie against a template", "[fnmatch]" )
+TEST_CASE("a concrete overload settles a tie against a template", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> candidates = {
         candidate({ t_int32 }, true),
@@ -217,7 +217,7 @@ TEST_CASE( "a concrete overload settles a tie against a template", "[fnmatch]" )
     REQUIRE( result.decl == candidates[1].decl );
 }
 
-TEST_CASE( "how well each argument fits is compared before generic-ness", "[fnmatch]" )
+TEST_CASE("how well each argument fits is compared before generic-ness", "[fnmatch]")
 {
     // the template arrives already substituted with what it would be instantiated as, so it is
     // exact where the concrete overload would narrow. the specific-beats-generic rule must not
@@ -232,7 +232,7 @@ TEST_CASE( "how well each argument fits is compared before generic-ness", "[fnma
     REQUIRE( result.decl == candidates[0].decl );
 }
 
-TEST_CASE( "an undetermined argument is neutral, not a tiebreaker", "[fnmatch]" )
+TEST_CASE("an undetermined argument is neutral, not a tiebreaker", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> candidates = {
         candidate({ t_int32, t_int32 }),
@@ -257,7 +257,7 @@ TEST_CASE( "an undetermined argument is neutral, not a tiebreaker", "[fnmatch]" 
     REQUIRE( match(separable, { t_int64, t_bool }).outcome == FunctionMatch::Outcome::t_ambiguous );
 }
 
-TEST_CASE( "a promotion beats a conversion, and an exact match beats both", "[fnmatch]" )
+TEST_CASE("a promotion beats a conversion, and an exact match beats both", "[fnmatch]")
 {
     const std::vector<FunctionCandidate> widen_or_cross = {
         candidate({ t_int64 }),
@@ -283,7 +283,7 @@ TEST_CASE( "a promotion beats a conversion, and an exact match beats both", "[fn
     REQUIRE( match(equally_lossy, { t_int32 }).outcome == FunctionMatch::Outcome::t_ambiguous );
 }
 
-TEST_CASE( "no candidates at all is distinct from none matching", "[fnmatch]" )
+TEST_CASE("no candidates at all is distinct from none matching", "[fnmatch]")
 {
     // the caller turns this one into UnknownFunction and the other into NoMatchingOverload -
     // a name nobody declared is a different mistake from a name declared differently

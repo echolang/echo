@@ -4,7 +4,7 @@
 #include <AST/NullNode.h>
 #include <AST/ScopeNode.h>
 
-TEST_CASE( "Node References", "[AST]" )
+TEST_CASE("Node References", "[AST]")
 {
     auto null_node = AST::NullNode();
     auto scope_node = AST::ScopeNode();
@@ -32,7 +32,7 @@ TEST_CASE( "Node References", "[AST]" )
     REQUIRE( ref1_node.node_description() == "null<[unknown]>" );
 }
 
-TEST_CASE( "Node Reference List", "[AST]" )
+TEST_CASE("Node Reference List", "[AST]")
 {
     auto nodes = AST::NodeCollection();
     auto &null_node = nodes.emplace_back<AST::NullNode>();

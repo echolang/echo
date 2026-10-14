@@ -4,11 +4,10 @@
 #include <AST/ASTOps.h>
 #include <AST/ASTValueType.h>
 #include <AST/TypeDeclNode.h>
-
-#include "helpers.h"
-
 #include <algorithm>
 #include <vector>
+
+#include "helpers.h"
 
 // AST::binary_has_builtin_meaning - "does this operator stay a BinaryExprNode for these operands?"
 //
@@ -452,6 +451,17 @@ TEST_CASE("a shift is performed at its left operand's type, whatever the count i
     // and the count still cannot pull an unsigned operand signed
     REQUIRE(binary_operation_type(shr, s.u32, s.i32) == s.u32);
     REQUIRE(binary_operation_type(shr, s.u32, s.i32).is_unsigned_integer());
+}
+
+// AST::binary_skips_rhs - LastRead and OwnershipPass both ask it
+TEST_CASE("&& and || skip their right operand, and nothing else does", "[AST][operators]")
+{
+    REQUIRE(binary_skips_rhs(Token::Type::t_logical_and));
+    REQUIRE(binary_skips_rhs(Token::Type::t_logical_or));
+    REQUIRE_FALSE(binary_skips_rhs(Token::Type::t_and));
+    REQUIRE_FALSE(binary_skips_rhs(Token::Type::t_or));
+    REQUIRE_FALSE(binary_skips_rhs(Token::Type::t_logical_eq));
+    REQUIRE_FALSE(binary_skips_rhs(Token::Type::t_op_add));
 }
 
 // AST::shift_count_refusal - "is this count answerable at all?"

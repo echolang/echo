@@ -426,8 +426,7 @@ bool Comparison::same_constant(const llvm::Constant *left, const llvm::Constant 
         }
 
         if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(expression)) {
-            if (!same_type(gep->getSourceElementType(),
-                    llvm::cast<llvm::GEPOperator>(other)->getSourceElementType())) {
+            if (!same_type(gep->getSourceElementType(), llvm::cast<llvm::GEPOperator>(other)->getSourceElementType())) {
                 return false;
             }
         }
@@ -810,8 +809,7 @@ const char *Comparison::compare_operation(const llvm::Instruction &left, const l
     }
 
     if (auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&left)) {
-        return same_type(gep->getSourceElementType(),
-                   llvm::cast<llvm::GetElementPtrInst>(&right)->getSourceElementType())
+        return same_type(gep->getSourceElementType(), llvm::cast<llvm::GetElementPtrInst>(&right)->getSourceElementType())
             ? nullptr
             : "indexed type";
     }

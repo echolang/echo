@@ -50,8 +50,7 @@ void Parser::read_manifest_requires(
 {
     for (const AST::AttributeValue *entry : AST::AttributeReader::each(written)) {
         if (!entry->has_tag() || !entry->is(AST::AttributeValueKind::t_record)) {
-            reader.refuse(entry->span,
-                "a requirement is '\"name\" { version:, source: git \"...\", rev: }'.");
+            reader.refuse(entry->span, "a requirement is '\"name\" { version:, source: git \"...\", rev: }'.");
             continue;
         }
 

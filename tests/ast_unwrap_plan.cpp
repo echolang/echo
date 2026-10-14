@@ -110,8 +110,7 @@ TEST_CASE("a non-nullable subject with no protocol bound is refused, and says so
     REQUIRE(lookup.plan.kind == AST::UnwrapSource::t_builtin_nullable);
 }
 
-TEST_CASE("guard_payload_refusal is silent on a widening and on an unsettled payload",
-    "[AST][nullability]")
+TEST_CASE("guard_payload_refusal is silent on a widening and on an unsettled payload", "[AST][nullability]")
 {
     // one wording for its two moments - the parser's, for a `T?`, and AST::GuardLowering's, for a subject
     // whose payload only a conformance could give. empty means "nothing to refuse", so an asker calls it

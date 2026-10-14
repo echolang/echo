@@ -1,0 +1,26 @@
+struct Holder
+{
+    string $name;
+
+    function steal() : Holder
+    {
+        return mem::take<Holder>($this);
+    }
+}
+
+function grab(string& $s) : string
+{
+    return mem::take<string>($s);
+}
+
+function refill(string& $s) : void
+{
+    mem::init<string>($s, str::from(1));
+}
+
+function rebind() : string
+{
+    string $local = str::from(2);
+    string& $r = $local;
+    return mem::take<string>($r);
+}

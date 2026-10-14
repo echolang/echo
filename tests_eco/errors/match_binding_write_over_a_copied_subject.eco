@@ -1,0 +1,15 @@
+enum Slot
+{
+    case held(int32 $n);
+    case empty;
+}
+
+Slot $s = Slot::held(1);
+
+match ($s) {
+    .held($n) => {
+        $n = 2;
+        $s = Slot::empty;
+    }
+    .empty => {}
+}

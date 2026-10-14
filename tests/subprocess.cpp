@@ -1,13 +1,12 @@
-#include "subprocess.h"
-
-#include "Compiler/HostTool.h"
-
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#include "subprocess.h"
+#include "Compiler/HostTool.h"
 
 namespace EchoTests
 {

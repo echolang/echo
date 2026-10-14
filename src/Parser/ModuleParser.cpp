@@ -95,10 +95,9 @@ AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module
     // that something may shorten the range before the slice is taken - see AST::Module::TokenFilter
     const Compiler::TargetFacts facts = facts_for(module);
 
-    return module.tokenize(*_lexer.get(), file,
-        [&facts](TokenCollection &tokens, size_t from, std::string &out_error) {
-            return Parser::filter_conditional_tokens(tokens, from, facts, out_error);
-        });
+    return module.tokenize(*_lexer.get(), file, [&facts](TokenCollection &tokens, size_t from, std::string &out_error) {
+        return Parser::filter_conditional_tokens(tokens, from, facts, out_error);
+    });
 }
 
 void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &collector) const

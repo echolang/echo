@@ -172,9 +172,14 @@ bool has_import(
     return false;
 }
 
+bool wasi_can_link()
+{
+    return !Compiler::wasi_clang().empty() && !Compiler::wasi_sysroot().empty();
+}
+
 void require_wasi_sdk()
 {
-    if (!Compiler::wasi_sysroot().empty()) {
+    if (wasi_can_link()) {
         return;
     }
 
@@ -327,7 +332,7 @@ TEST_CASE("wasi static init is a non-atomic once", "[target][wasi]")
     REQUIRE(ir.output.find("pthread_self") == std::string::npos);
     REQUIRE(ir.output.find("cmpxchg") == std::string::npos);
     REQUIRE(ir.output.find("sched_yield") == std::string::npos);
-    if (!Compiler::wasi_sysroot().empty()) {
+    if (wasi_can_link()) {
         REQUIRE(ir.exit_code == 0);
     }
 }
@@ -428,7 +433,7 @@ TEST_CASE("wasi allocation counter is a non-atomic add", "[target][wasi]")
         "-p ir -o hello.wasm hello.eco");
     INFO(ir.output);
     REQUIRE(ir.output.find("atomicrmw") == std::string::npos);
-    if (!Compiler::wasi_sysroot().empty()) {
+    if (wasi_can_link()) {
         REQUIRE(ir.exit_code == 0);
     }
 }
@@ -490,9 +495,9 @@ TEST_CASE("codegen target args for wasi come from append_wasi_target_args", "[ta
     std::vector<std::string> argv = { "clang" };
     std::string error;
 
-    if (Compiler::wasi_sysroot().empty()) {
+    if (!wasi_can_link()) {
         REQUIRE_FALSE(Compiler::append_codegen_target_args(argv, target, error));
-        REQUIRE(error.find("WASI SDK") != std::string::npos);
+        REQUIRE(error.find("WASI") != std::string::npos);
         return;
     }
 
@@ -557,7 +562,7 @@ TEST_CASE("an extern block import attribute applies to every function", "[target
     REQUIRE(ir.output.find("wasm-import-name") != std::string::npos);
     REQUIRE(ir.output.find("\"host_a\"") != std::string::npos);
     REQUIRE(ir.output.find("\"host_b\"") != std::string::npos);
-    if (!Compiler::wasi_sysroot().empty()) {
+    if (wasi_can_link()) {
         REQUIRE(ir.exit_code == 0);
     }
 }
@@ -693,7 +698,7 @@ TEST_CASE("a cross-module C callback is a unit-local adapter", "[target][wasi]")
     REQUIRE(ir.output.find("ODR") == std::string::npos);
     REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "zeroext"));
     REQUIRE(define_line_has(ir.output, "__eco_c_adapt.", "signext"));
-    if (!Compiler::wasi_sysroot().empty()) {
+    if (wasi_can_link()) {
         REQUIRE(ir.exit_code == 0);
     }
 }

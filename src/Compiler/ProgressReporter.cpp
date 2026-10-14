@@ -709,8 +709,7 @@ void Compiler::ProgressReporter::close(
     const bool ok = state != ProgressState::t_failed;
 
     *_out << "\n  "
-          << styled(ok ? _theme.done : _theme.failed, ok ? sgr::success : sgr::error,
-                _capabilities.color)
+          << styled(ok ? _theme.done : _theme.failed, ok ? sgr::success : sgr::error, _capabilities.color)
           << "  " << fmt::format("{} in {} ms", what, milliseconds) << "\n\n"
           << std::flush;
 }

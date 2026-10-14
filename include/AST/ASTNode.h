@@ -155,8 +155,9 @@ namespace AST
                 auto &bucket = found->second;
 
                 bucket.erase(
-                    std::remove_if(bucket.begin(), bucket.end(),
-                        [&gone](Node *node) { return gone.count(node) > 0; }),
+                    std::remove_if(bucket.begin(), bucket.end(), [&gone](Node *node) {
+                        return gone.count(node) > 0;
+                    }),
                     bucket.end());
             }
         }

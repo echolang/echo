@@ -118,6 +118,27 @@ bool is_unaccounted_storage(const ExprNode &expr)
     return false;
 }
 
+bool is_unaccounted_address(const ExprNode &address)
+{
+    const ExprNode *cur = strip_implicit_casts(&address);
+
+    if (cur == nullptr) {
+        return false;
+    }
+
+    if (cur->get_node_type() == NodeType::n_expr_addrof) {
+        const ExprNode *operand = static_cast<const AddrOfExprNode *>(cur)->operand;
+        return operand != nullptr && is_unaccounted_storage(*operand);
+    }
+
+    // taking through a T& local would empty storage the borrow still names
+    if (cur->get_node_type() == NodeType::n_varref) {
+        return false;
+    }
+
+    return true;
+}
+
 VarDeclNode *place_root_of(ExprNode *expr)
 {
     ExprNode *anchor = place_anchor(expr);
@@ -179,6 +200,82 @@ bool is_borrow_local(const VarDeclNode *decl, const FunctionDeclNode *function)
 
     const ValueType type = decl->type();
     return type.is_pointer() && !type.is_nullable();
+}
+
+VarDeclNode *names_callee_frame_storage_walk(
+    ExprNode *expr,
+    FunctionDeclNode *function,
+    std::unordered_set<const VarDeclNode *> &visited
+);
+
+// CallResolver's AddrOf(Deref) for a T& that is already an address. peel it
+// so `return pass($r)` still sees the borrow local
+ExprNode *borrowed_through_deref(ExprNode *argument)
+{
+    ExprNode *address = strip_implicit_casts(argument);
+
+    if (address == nullptr || address->get_node_type() != NodeType::n_expr_addrof) {
+        return address;
+    }
+
+    ExprNode *operand = strip_implicit_casts(static_cast<AddrOfExprNode *>(address)->operand);
+
+    if (operand == nullptr || operand->get_node_type() != NodeType::n_expr_deref) {
+        return address;
+    }
+
+    return static_cast<DerefExprNode *>(operand)->operand;
+}
+
+VarDeclNode *names_callee_frame_storage_through_call(
+    ExprNode *call,
+    FunctionDeclNode *function,
+    const std::unordered_set<const VarDeclNode *> &visited
+)
+{
+    const ValueType result = call->result_type();
+
+    if (!result.is_pointer() || result.is_nullable()) {
+        return nullptr;
+    }
+
+    const FunctionDeclNode *callee = nullptr;
+    std::vector<ExprNode *> *arguments = nullptr;
+
+    if (call->get_node_type() == NodeType::n_expr_call) {
+        auto *direct = static_cast<FunctionCallExprNode *>(call);
+        callee = direct->decl;
+        arguments = &direct->arguments;
+    }
+    else {
+        arguments = &static_cast<IndirectCallExprNode *>(call)->arguments;
+    }
+
+    const bool yields_mutable = !result.pointee().is_const();
+    const bool parameters_align = callee != nullptr && callee->args.size() == arguments->size();
+
+    for (size_t i = 0; i < arguments->size(); i++) {
+        if ((*arguments)[i] == nullptr) {
+            continue;
+        }
+
+        if (yields_mutable && parameters_align && callee->args[i]->has_type()) {
+            const ValueType parameter = callee->args[i]->type();
+
+            if (parameter.is_pointer() && parameter.pointee().is_const()) {
+                continue;
+            }
+        }
+
+        std::unordered_set<const VarDeclNode *> argument_visited = visited;
+
+        if (VarDeclNode *root = names_callee_frame_storage_walk(
+                borrowed_through_deref((*arguments)[i]), function, argument_visited)) {
+            return root;
+        }
+    }
+
+    return nullptr;
 }
 
 VarDeclNode *names_callee_frame_storage_walk(
@@ -300,6 +397,10 @@ VarDeclNode *names_callee_frame_storage_walk(
         }
 
         return nullptr;
+    }
+
+    if (is_call_expression(*expr)) {
+        return names_callee_frame_storage_through_call(expr, function, visited);
     }
 
     // a load of pointer bits copies an address; it is not callee-frame storage

@@ -8,7 +8,7 @@
 
 #include "helpers.h"
 
-TEST_CASE( "type inference", "[Integration][Autocast][Numbers]" )
+TEST_CASE("type inference", "[Integration][Autocast][Numbers]")
 {
     REQUIRE_NODE_DESC(
         "$a = 1;",
@@ -53,7 +53,7 @@ TEST_CASE( "type inference", "[Integration][Autocast][Numbers]" )
     );
 }
 
-TEST_CASE( "init autocast (T = int)", "[Integration][Autocast][Numbers]" )
+TEST_CASE("init autocast (T = int)", "[Integration][Autocast][Numbers]")
 {
     // basic int
     REQUIRE_NODE_DESC(
@@ -97,7 +97,7 @@ TEST_CASE( "init autocast (T = int)", "[Integration][Autocast][Numbers]" )
     );
 }
 
-TEST_CASE( "init autocast (T = float)", "[Integration][Autocast][Numbers]" )
+TEST_CASE("init autocast (T = float)", "[Integration][Autocast][Numbers]")
 {
     // int
     REQUIRE_NODE_DESC(
@@ -149,7 +149,7 @@ TEST_CASE( "init autocast (T = float)", "[Integration][Autocast][Numbers]" )
 // `literal<int32>(1 [true])`, which reads as though the language had a number for `true` - it does
 // not, and a variable still converts (`int32 $n = $flag;`) exactly as a float still truncates. what
 // changed is only what a *written* literal may mean
-TEST_CASE( "a bool literal at a numeric destination", "[Integration][Autocast][Numbers]" )
+TEST_CASE("a bool literal at a numeric destination", "[Integration][Autocast][Numbers]")
 {
     EchoTests::assert_code_emits_issue(
         "int $a = true;",

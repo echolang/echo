@@ -1,0 +1,38 @@
+expect: fail
+
+--- OUT --->
+[error] IntegerOverflow  enum_value_out_of_range.eco:1:33
+
+  Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
+
+  1 | enum Small : int8 { case high = 300; case low = -129; }
+    :                                 ^^^
+  2 | enum Byte : uint8 { case neg = -1; case hex = 0x1FF; }
+
+[error] IntegerUnderflow  enum_value_out_of_range.eco:1:49
+
+  Integer underflow: The literal '-129' is too small for the integer type 'int8'. The minimum value is '-128'.
+
+  1 | enum Small : int8 { case high = 300; case low = -129; }
+    :                                                 ^^^^
+  2 | enum Byte : uint8 { case neg = -1; case hex = 0x1FF; }
+
+[error] InvalidTypeConversion  enum_value_out_of_range.eco:2:32
+
+  Invalid type conversion: The integer literal '-1' cannot be implicitly converted to an unsigned integer because it is negative.
+
+  1 | enum Small : int8 { case high = 300; case low = -129; }
+  2 | enum Byte : uint8 { case neg = -1; case hex = 0x1FF; }
+    :                                ^^
+  3 | 
+
+[error] IntegerOverflow  enum_value_out_of_range.eco:2:47
+
+  Integer overflow: The literal '0x1FF' is too large for the integer type 'uint8'. The maximum value is '255'.
+
+  1 | enum Small : int8 { case high = 300; case low = -129; }
+  2 | enum Byte : uint8 { case neg = -1; case hex = 0x1FF; }
+    :                                               ^^^^^
+  3 | 
+
+4 errors, nothing was compiled.

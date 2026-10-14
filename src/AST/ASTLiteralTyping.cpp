@@ -102,13 +102,34 @@ namespace AST
         return trimmed_float_literal(std::to_string(value)) + "f";
     }
 
+    // **both bounds, because the sign is part of the token**: the lexer folds a leading `-` into the
+    // literal, so `-3000000000` is one spelling, and asking only for the upper bound left it an int32
+    // that codegen truncated to 1294967296
+    std::optional<ValueTypePrimitive> LiteralIntExprNode::decimal_width(const std::string &spelling)
+    {
+        const InfInt value(spelling);
+
+        for (const ValueTypePrimitive width : {
+                ValueTypePrimitive::t_int32, ValueTypePrimitive::t_int64, ValueTypePrimitive::t_uint64 }) {
+            const IntegerSize size = get_integer_size(width);
+
+            if (value >= InfInt(size.get_max_negative_value()) && value <= InfInt(size.get_max_positive_value())) {
+                return width;
+            }
+        }
+
+        return std::nullopt;
+    }
+
     ValueTypePrimitive LiteralIntExprNode::spelled_width(const TokenReference &token)
     {
-        const InfInt value(token.value());
+        const std::optional<ValueTypePrimitive> width = decimal_width(token.value());
 
-        return value > get_integer_size(ValueTypePrimitive::t_int32).get_max_positive_value()
-            ? ValueTypePrimitive::t_int64
-            : ValueTypePrimitive::t_int32;
+        // a written spelling no type holds is refused by Parser::make_integer_literal before a node is
+        // minted, and every other caller mints a small virtual token
+        assert(width.has_value() && "an integer literal no integer type holds reached a node");
+
+        return width.value_or(ValueTypePrimitive::t_uint64);
     }
 
     // ---------------------------------------------------------------------------
@@ -292,8 +313,7 @@ namespace AST
                 return typed(&casted);
             }
 
-            return refused(&node, LiteralRefusal::t_invalid_conversion,
-                bool_family_refusal(node.result_type(), destination));
+            return refused(&node, LiteralRefusal::t_invalid_conversion, bool_family_refusal(node.result_type(), destination));
         }
 
         return refused(&node, LiteralRefusal::t_invalid_conversion, fmt::format(
@@ -370,8 +390,7 @@ namespace AST
         }
 
         if (destination.is_boolean_type()) {
-            return refused(&node, LiteralRefusal::t_invalid_conversion,
-                bool_family_refusal(node.result_type(), destination));
+            return refused(&node, LiteralRefusal::t_invalid_conversion, bool_family_refusal(node.result_type(), destination));
         }
 
         return refused(&node, LiteralRefusal::t_invalid_conversion, fmt::format(
@@ -387,8 +406,7 @@ namespace AST
         }
 
         // the mirror of the arm above, and refused for its reason: `int32 $k = true;` names no number
-        return refused(&node, LiteralRefusal::t_invalid_conversion,
-            bool_family_refusal(node.result_type(), destination));
+        return refused(&node, LiteralRefusal::t_invalid_conversion, bool_family_refusal(node.result_type(), destination));
     }
 
     LiteralTyping type_literal_at(ExprNode *literal, const ValueType &destination, NodeCollection &nodes)

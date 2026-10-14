@@ -1,0 +1,40 @@
+struct Point
+{
+    int32 $x;
+
+    constructor($v)
+    {
+        $this->x = $v;
+    }
+}
+
+enum Shape
+{
+    case circle($radius);
+}
+
+operator (Point $a) + ($b) : Point
+{
+    return $a;
+}
+
+function count($c) : int32
+{
+    return $c;
+}
+
+function apply(function<int32(int32)> $f, $v) : int32
+{
+    return $f($v);
+}
+
+function consume(mv $items) : int32
+{
+    return 1;
+}
+
+$twice = function($n) : int32 {
+    return $n;
+};
+
+echo count(1);

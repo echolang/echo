@@ -131,14 +131,18 @@ TEST_CASE("a cast folds only when it leaves the value alone", "[const_fold]")
     REQUIRE(fold_value("float64", "1.5").result == ConstFoldResult::Result::t_refused);
 }
 
-TEST_CASE("a literal too wide for the type the parser gave it is refused", "[const_fold]")
+TEST_CASE("an untyped decimal wider than int64 folds as uint64", "[const_fold]")
 {
-    // in a position with no destination to type it, a literal is int32 unless it needs int64 - and
-    // nothing types one as unsigned, so a value above the int64 maximum has no type that holds it. the
-    // folder refuses rather than reinterpreting, which would answer -1
+    // the default is the first of int32 / int64 / uint64 that holds the spelling, so this
+    // comparison is uint64 and folds rather than wrapping to -1
     auto bundle = EchoTests::tests_make_parsed_bundle("if (18446744073709551615 > 1) { echo 1; }\n");
 
-    REQUIRE(fold_last_condition(*bundle).result == ConstFoldResult::Result::t_refused);
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ConstFoldResult folded = fold_last_condition(*bundle);
+
+    REQUIRE(folded.is_folded());
+    REQUIRE(folded.as_bool());
 }
 
 TEST_CASE("the widest unsigned literal survives being carried", "[const_fold]")

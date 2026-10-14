@@ -347,7 +347,16 @@ namespace AST
         //
         // 0 joining: the tail is unreachable, `_flow` stays `before`. 1 joining: that arm *is* the
         // join. several: `initialized` and `maybe_moved` union, `moved` only where every arm moved it
-        void join_exclusive(const FlowFacts &before, std::vector<FlowFacts> joining);
+        void join_exclusive(
+            const FlowFacts &before,
+            std::vector<FlowFacts> joining,
+            const std::string &remedy = "Move it on every branch, or after the 'if'."
+        );
+
+        // join a skipped `&&` / `||` / `??` / `?->` operand so a never-returning
+        // rhs cannot look like a second path
+        template<typename Walk>
+        ExprNode *walk_skippable_operand(ExprNode *operand, const std::string &op, Walk &&walk);
 
         // binds a discarded owning value to a synthesized local of the enclosing frame, so the scope
         // destroys it. the frame's ordinary reverse-order drop then covers it with no special case
@@ -447,7 +456,7 @@ namespace AST
         // a local moved out of on one branch of an `if` but not the other. the chapter says the
         // variable is unset afterwards, which settles reading it - but not who destroys the value on
         // the branch that kept it. see the definition
-        void report_conditional_move(const VarDeclNode *decl);
+        void report_conditional_move(const VarDeclNode *decl, const std::string &remedy);
 
         // --- copy or move ---------------------------------------------------------------------
 

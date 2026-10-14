@@ -1,0 +1,39 @@
+enum Flag : int32
+{
+    case low = 0x10;
+    case mask = 0b101;
+    case below = -7;
+    case other;
+}
+
+enum Narrow : int8
+{
+    case top = 127;
+    case bottom = -128;
+}
+
+enum Wide : uint64
+{
+    case max = 18446744073709551615;
+    case one = 1;
+}
+
+enum WideHex : uint64
+{
+    case max = 0xFFFFFFFFFFFFFFFF;
+    case zero = 0;
+}
+
+echo Flag::low->value();
+echo Flag::mask->value();
+echo Flag::below->value();
+echo Narrow::top->value();
+echo Narrow::bottom->value();
+echo Wide::max->value();
+echo WideHex::max->value();
+
+Flag $f = Flag::from(16);
+echo match ($f) { .low => "low", .mask => "mask", .below => "below", .other => "other" };
+
+Wide $w = Wide::max;
+echo match ($w) { .max => "max", .one => "one" };

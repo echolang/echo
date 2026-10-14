@@ -67,7 +67,8 @@ namespace Parser
         AST::ComplexType &owner,
         const TokenReference &name_token,
         AST::MemberKind kind,
-        const AST::ValueType &return_type);
+        const AST::ValueType &return_type
+    );
 
     void push_enum_const_receiver(
         Payload &payload,

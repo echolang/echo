@@ -97,28 +97,52 @@ bool emit_module_object(
         assign_odr_comdats(module);
     }
 
-    std::error_code ec;
-    llvm::raw_fd_ostream dest(object_path.string(), ec, llvm::sys::fs::OF_None);
+    llvm::Expected<llvm::sys::fs::TempFile> staged =
+        llvm::sys::fs::TempFile::create(object_path.string() + ".tmp-%%%%%%%%");
 
-    if (ec) {
-        error = "Could not open file: " + ec.message();
+    if (!staged) {
+        error = "Could not open file: " + llvm::toString(staged.takeError());
         return false;
     }
 
-    llvm::legacy::PassManager pass;
-    auto FileType = llvm::CodeGenFileType::ObjectFile;
+    bool written = false;
 
-    if (isel_times != nullptr) {
-        pass.add(new ISelTimePass(isel_times));
+    {
+        llvm::raw_fd_ostream dest(staged->FD, false);
+        llvm::legacy::PassManager pass;
+        auto FileType = llvm::CodeGenFileType::ObjectFile;
+
+        if (isel_times != nullptr) {
+            pass.add(new ISelTimePass(isel_times));
+        }
+
+        if (target_machine.addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+            error = "TargetMachine can't emit a file of this type";
+        }
+        else {
+            pass.run(module);
+            dest.flush();
+
+            if (dest.has_error()) {
+                error = "Could not write '" + object_path.string() + "': " + dest.error().message();
+                dest.clear_error();
+            }
+            else {
+                written = true;
+            }
+        }
     }
 
-    if (target_machine.addPassesToEmitFile(pass, dest, nullptr, FileType)) {
-        error = "TargetMachine can't emit a file of this type";
+    if (!written) {
+        llvm::consumeError(staged->discard());
         return false;
     }
 
-    pass.run(module);
-    dest.flush();
+    if (llvm::Error kept = staged->keep(object_path.string())) {
+        error = "Could not write '" + object_path.string() + "': " + llvm::toString(std::move(kept));
+        return false;
+    }
+
     return true;
 }
 

@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] IntegerOverflow  decimal_literal_fits_no_integer.eco:7:27
+
+  Integer overflow: The literal '99999999999999999999' does not fit any integer type - the largest is 'uint64'.
+
+  6 | 
+  7 | enum E : int64 { case a = 99999999999999999999; }
+    :                           ^^^^^^^^^^^^^^^^^^^^
+  8 | 
+
+[error] IntegerOverflow  decimal_literal_fits_no_integer.eco:4:6
+
+  Integer overflow: The literal '18446744073709551616' does not fit any integer type - the largest is 'uint64'.
+
+  3 | 
+  4 | echo 18446744073709551616;
+    :      ^^^^^^^^^^^^^^^^^^^^
+  5 | echo -9223372036854775809;
+
+[error] IntegerOverflow  decimal_literal_fits_no_integer.eco:5:6
+
+  Integer overflow: The literal '-9223372036854775809' does not fit any integer type - the smallest is 'int64', whose minimum is '-9223372036854775808'.
+
+  4 | echo 18446744073709551616;
+  5 | echo -9223372036854775809;
+    :      ^^^^^^^^^^^^^^^^^^^^
+  6 | 
+
+3 errors, nothing was compiled.

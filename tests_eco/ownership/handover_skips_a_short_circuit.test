@@ -1,0 +1,10 @@
+flags: --track-allocations
+
+--- OUT --->
+1
+1
+0
+1
+0
+15
+0

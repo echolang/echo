@@ -147,9 +147,13 @@ namespace AST
             ValueTypePrimitive value;
         };
 
-        // **the sole owner of the decimal integer default** - int32, unless the digits do not fit one,
-        // in which case int64. out of line because deciding it exactly means arbitrary precision, and
-        // owned here rather than spelled beside the node in the parser
+        // **the sole owner of the decimal integer default** - the first of int32, int64 and uint64 whose
+        // range holds the signed value, or nothing when none does. out of line because deciding it
+        // exactly means arbitrary precision, and owned here rather than spelled beside the node in the
+        // parser. Parser::make_integer_literal refuses the nothing before a node exists
+        static std::optional<ValueTypePrimitive> decimal_width(const std::string &spelling);
+
+        // decimal_width of a spelling already known to fit
         static ValueTypePrimitive spelled_width(const TokenReference &token);
 
         LiteralIntExprNode(TokenReference token) :
@@ -160,8 +164,11 @@ namespace AST
             LiteralPrimitiveExprNode(token, fallback.value)
         {};
 
+        // the destination is the default too: a chosen type is never un-chosen, so the default is never
+        // read here - and the token need not be decimal digits at all (a float being cast, a generic
+        // value parameter's name), so reading a width off it would be asking a spelling it is not
         LiteralIntExprNode(TokenReference token, ValueTypePrimitive expected) :
-            LiteralPrimitiveExprNode(token, spelled_width(token), expected)
+            LiteralPrimitiveExprNode(token, expected, expected)
         {
             assert(
                 expected == ValueTypePrimitive::t_int8 ||

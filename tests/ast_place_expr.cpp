@@ -272,8 +272,9 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
     for (int tag = 0; tag <= static_cast<int>(NodeType::n_member_access); tag++) {
         const auto kind = static_cast<NodeType>(tag);
 
-        const bool stated = std::any_of(expected.begin(), expected.end(),
-            [kind](const auto &entry) { return entry.first == kind; });
+        const bool stated = std::any_of(expected.begin(), expected.end(), [kind](const auto &entry) {
+            return entry.first == kind;
+        });
         const bool statement =
             std::find(not_expressions.begin(), not_expressions.end(), kind) != not_expressions.end();
 

@@ -4,6 +4,7 @@
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTDeclarationOrigin.h"
 #include "AST/ASTFunctionRegistry.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTOps.h"
@@ -23,6 +24,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
+#include "Parser/ExprParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/TypeParser.h"
 
@@ -98,6 +100,84 @@ AST::VarDeclNode *declare_payload_property(
         AST::enum_payload_property_name(case_ordinal, field->name()),
         field->type_node()->type,
         field->token_varname);
+}
+
+void read_case_value(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    AST::ComplexType::EnumCase &entry,
+    const TokenReference &value_token
+)
+{
+    const AST::ComplexType &owner = enum_node->complex_type();
+
+    if (!owner.enum_backing.has_value()) {
+        if (owner.enum_backing_refused) {
+            return;
+        }
+
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(value_token),
+            fmt::format(
+                "'{}' has no backing type, so a case cannot carry a value - write `enum {} : int32` "
+                "or `enum {} : string`.",
+                enum_node->type_name(), enum_node->type_name(), enum_node->type_name()));
+        return;
+    }
+
+    const AST::ValueType &backing = owner.enum_backing.value();
+
+    if (value_token.type() == Token::Type::t_string_literal) {
+        if (!payload.collector.core_types.is_string(backing)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(value_token),
+                fmt::format(
+                    "'{}' is backed by '{}', so a case's value has to be an integer literal.",
+                    enum_node->type_name(), backing.get_type_desciption()));
+            return;
+        }
+
+        // **decoded here, where the collector is**, exactly as Parser::parse_operand decodes the
+        // literal it builds - a token's value is what was written, quotes and escapes included, and
+        // what a case *is* backed by is the bytes. reported here too, a bad escape needing a
+        // collector that a ComplexType has no access to
+        std::string decoded;
+
+        if (auto error = AST::decode_string_literal(value_token.value(), decoded)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(value_token), error->message);
+        }
+
+        entry.backing_string = decoded;
+        return;
+    }
+
+    if (!backing.is_integer_type()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(value_token),
+            fmt::format(
+                "'{}' is backed by '{}', so a case's value has to be a string literal.",
+                enum_node->type_name(), backing.get_type_desciption()));
+        return;
+    }
+
+    AST::LiteralIntExprNode *literal = Parser::make_integer_literal(payload, value_token);
+
+    if (literal == nullptr) {
+        return;
+    }
+
+    const AST::NodeReference typed = Parser::apply_literal_typing(payload, literal, backing);
+
+    if (!typed.has_type<AST::LiteralIntExprNode>()) {
+        return;
+    }
+
+    const AST::LiteralIntExprNode &value = typed.get<AST::LiteralIntExprNode>();
+
+    entry.discriminant = backing.is_unsigned_integer()
+        ? static_cast<int64_t>(value.uint64_value())
+        : value.int64_value();
 }
 
 // **the body of a case constructor, which is a constructor body in every respect but its name.**
@@ -361,7 +441,8 @@ void Parser::parse_enum_case(
         const TokenReference assign_token = cursor.current();
         cursor.skip();
 
-        if (cursor.is_type({ Token::Type::t_integer_literal, Token::Type::t_string_literal })) {
+        if (AST::token_is_integer_literal(cursor.current().type())
+            || cursor.is_type(Token::Type::t_string_literal)) {
             // emplace rather than assign: a TokenReference holds its collection by reference and so
             // has no copy assignment
             value_token.emplace(cursor.current());
@@ -421,23 +502,7 @@ void Parser::parse_enum_case(
     }
 
     if (value_token.has_value()) {
-        if (value_token->type() == Token::Type::t_string_literal) {
-            // **decoded here, where the collector is**, exactly as Parser::parse_operand decodes the
-            // literal it builds - a token's value is what was written, quotes and escapes included, and
-            // what a case *is* backed by is the bytes. reported here too, a bad escape needing a
-            // collector that a ComplexType has no access to
-            std::string decoded;
-
-            if (auto error = AST::decode_string_literal(value_token->value(), decoded)) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(value_token.value()), error->message);
-            }
-
-            entry.backing_string = decoded;
-        }
-        else {
-            entry.discriminant = std::stoll(value_token->value());
-        }
+        read_case_value(payload, enum_node, entry, value_token.value());
     }
 
     if (entry.has_payload() && entry.has_explicit_discriminant) {

@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "subprocess.h"
-
 #include <filesystem>
 #include <string>
+
+#include "subprocess.h"
 
 // what `#[target: test]` promises: that a module can name selections of its own tests, that a bare
 // `echoc test` runs all of them anyway, and that a test target is invisible to `build` and to `run`.

@@ -162,11 +162,9 @@ std::vector<std::pair<std::string, std::string>> AST::collect_stdlib_files(const
         add_file(it->path());
     }
 
-    std::sort(files.begin(), files.end(),
-        [](const std::pair<std::string, std::string> &a,
-            const std::pair<std::string, std::string> &b) {
-            return a.first < b.first;
-        });
+    std::sort(files.begin(), files.end(), [](const std::pair<std::string, std::string> &a, const std::pair<std::string, std::string> &b) {
+        return a.first < b.first;
+    });
 
     return files;
 }

@@ -745,8 +745,7 @@ void StmtCodegen::gen_loop_control(AST::LoopControlNode &node)
         // Parser::parse_loop_control refuses one outside a loop and builds no node for it, so this is a
         // compiler bug rather than a program error - and the alternative is a branch to a null block,
         // which llvm reports nowhere near here
-        throw _ctx.error(fmt::format("a '{}' reached codegen with no enclosing loop {}",
-            node.keyword(), _ctx.function_context()));
+        throw _ctx.error(fmt::format("a '{}' reached codegen with no enclosing loop {}", node.keyword(), _ctx.function_context()));
     }
 
     const CodegenContext::LoopTarget &target = _ctx.loop_targets.back();

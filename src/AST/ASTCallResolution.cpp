@@ -672,9 +672,7 @@ namespace AST
                 // `null` is no longer a call at all (`binary_has_builtin_meaning`). operands are
                 // `parse_time_operand`, AST::PointerAdjuster running long after the fixpoint this sits in
                 if (op != nullptr && call.arguments.size() == 2) {
-                    const auto refusal = binary_operand_refusal(op,
-                        parse_time_operand(call.arguments[0]),
-                        parse_time_operand(call.arguments[1]));
+                    const auto refusal = binary_operand_refusal(op, parse_time_operand(call.arguments[0]), parse_time_operand(call.arguments[1]));
 
                     if (refusal.has_value()) {
                         _collector.collect_issue<Issue::NoMatchingOverload>(at, *refusal);
@@ -713,9 +711,7 @@ namespace AST
                 if (op != nullptr && !op->is_custom() && call.arguments.size() == 2
                     && !candidates_mention_operands(candidates, argument_types)) {
                     _collector.collect_issue<Issue::NoMatchingOverload>(at,
-                        binary_unsupported_operands(op,
-                            parse_time_operand(call.arguments[0]),
-                            parse_time_operand(call.arguments[1])));
+                        binary_unsupported_operands(op, parse_time_operand(call.arguments[0]), parse_time_operand(call.arguments[1])));
                     return Result::t_failed;
                 }
 

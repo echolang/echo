@@ -1,0 +1,40 @@
+expect: fail
+
+--- OUT --->
+[error] ConditionalMove  owning_move_in_a_short_circuit.eco:22:12
+
+  '$or' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it before the '||', whose right side does not always run.
+
+  21 | {
+  22 |     Buffer $or = Buffer(mem::alloc<uint8>(1));
+     :            ^^^
+  23 |     if ($c || eat(mv $or)) {}
+
+[error] ConditionalMove  owning_move_in_a_short_circuit.eco:28:12
+
+  '$and' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it before the '&&', whose right side does not always run.
+
+  27 | {
+  28 |     Buffer $and = Buffer(mem::alloc<uint8>(1));
+     :            ^^^^
+  29 |     if ($c && eat(mv $and)) {}
+
+[error] ConditionalMove  owning_move_in_a_short_circuit.eco:34:12
+
+  '$absent' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it before the '??', whose right side does not always run.
+
+  33 | {
+  34 |     Buffer $absent = Buffer(mem::alloc<uint8>(1));
+     :            ^^^^^^^
+  35 |     Sink $got = $s ?? fallback(mv $absent);
+
+[error] ConditionalMove  owning_move_in_a_short_circuit.eco:40:12
+
+  '$present' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it before the '?->', whose right side does not always run.
+
+  39 | {
+  40 |     Buffer $present = Buffer(mem::alloc<uint8>(1));
+     :            ^^^^^^^^
+  41 |     bool? $ate = $s?->eat(mv $present);
+
+4 errors, nothing was compiled.

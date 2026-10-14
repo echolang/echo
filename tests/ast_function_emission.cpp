@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTFunctionEmission.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/ASTModule.h>
+
+#include "helpers.h"
 
 // AST::function_emission_kind is the sole owner of "does this declaration have a symbol, does this compiler
 // emit its body, and where does the definition go". Three readers derive from it - both loops of

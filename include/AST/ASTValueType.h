@@ -1427,6 +1427,10 @@ namespace AST
         // declaration. what reads it is the synthesized `value()` and the choice of `__tag`'s own type
         std::optional<ValueType> enum_backing;
 
+        // true when `: T` was written and refused. case values stay silent then, so
+        // `enum Bad : float64 { case a = 1; }` is one error, not two
+        bool enum_backing_refused = false;
+
         // the synthesized unlabeled `from` of a closed integer-backed enum, or null. identity for
         // `AST::enum_lut_of`, so codegen does not recover it from the name "from"
         FunctionDeclNode *enum_closed_from = nullptr;

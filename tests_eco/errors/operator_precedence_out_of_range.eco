@@ -1,0 +1,8 @@
+// a precedence is a positive tier on the operator table's scale. a number past `int` used to throw
+// out of the compiler, and zero is the table's "not an operator"
+
+operator(99999999999, left) (int32 $a) huge (int32 $b) : int32 { return $a + $b; }
+operator(0, left) (int32 $a) zero (int32 $b) : int32 { return $a - $b; }
+
+echo 1 huge 2;
+echo 5 zero 3;

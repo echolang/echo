@@ -307,6 +307,10 @@ namespace AST
     // The member peel is place_anchor's, so the two cannot disagree about a base
     bool is_unaccounted_storage(const ExprNode &expr);
 
+    // a `T&` argument to `mem::take` / `mem::init`: AddrOf peels to
+    // is_unaccounted_storage, a varref is a borrow local and is accounted
+    bool is_unaccounted_address(const ExprNode &address);
+
     // **is there anything here to mint storage for at all?** the half the two requesting arms - a member
     // access's base and an `&`'s operand - genuinely share, so `$o->get()->tag` and `$o->get()->size()`
     // cannot answer it differently.
@@ -413,8 +417,9 @@ namespace AST
     // `return $t` and `return $t->field` follow the binding; `&$t` names the slot.
     // a match that yields a place asks the same of each arm: gen_place of `$local`
     // and `$binding->field` name callee-frame storage; a payload binding still
-    // walks its initializer onto the subject. a ptr load copies bits and is not.
-    // the VarDeclNode is the root the diagnostic names
+    // walks its initializer onto the subject. a call returning `T&` walks every
+    // argument, skipping a const parameter when the result is mutable. a ptr load
+    // copies bits and is not. the VarDeclNode is the root the diagnostic names
     VarDeclNode *names_callee_frame_storage(ExprNode *expr, FunctionDeclNode *function);
 
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers

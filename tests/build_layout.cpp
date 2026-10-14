@@ -2,13 +2,12 @@
 
 #include <Compiler/BuildLayout.h>
 #include <Parser/ManifestParser.h>
-
-#include "subprocess.h"
-
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <string>
+
+#include "subprocess.h"
 
 // where a build puts what it produces, and what it is allowed to put there.
 //

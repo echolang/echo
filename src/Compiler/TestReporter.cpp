@@ -189,9 +189,7 @@ void Compiler::TestReporter::write_listing_line(const TestResult &result)
     // and it is the same reason: an SGR sequence has no width, so colouring anything that is measured is how
     // a column stops lining up
     _out << "  "
-         << styled(failed ? _theme.failed : _theme.done,
-                   failed ? sgr::error : sgr::success,
-                   _capabilities.color);
+         << styled(failed ? _theme.failed : _theme.done, failed ? sgr::error : sgr::success, _capabilities.color);
 
     _out << fmt::format(
         " {:<{}} {:>{}} ms",

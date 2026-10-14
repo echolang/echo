@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "subprocess.h"
-
 #include <string>
+
+#include "subprocess.h"
 
 // `--explain time` is a tree of names, not a golden of milliseconds. a subprocess is what pins that
 // the nested rows actually appear on an invocation, which is the thing a unit test of PhaseTimings

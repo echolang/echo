@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "subprocess.h"
-
 #include <filesystem>
 #include <sstream>
 #include <string>
+
+#include "subprocess.h"
 
 // what `echoc clean` removes, and - the half that matters - what it refuses to.
 //

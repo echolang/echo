@@ -270,8 +270,7 @@ bool Parser::expect_attribute_colon(Parser::Payload &payload)
     // colon immediately followed by a `$` means something else. a space disambiguates, and saying so
     // beats letting the attribute fail as a mysteriously missing colon
     if (payload.cursor.is_type(Token::Type::t_ptr_of)) {
-        refuse(payload, payload.cursor.current(),
-            "Write a space after ':' in an attribute value - ':$' is the pointer-of operator");
+        refuse(payload, payload.cursor.current(), "Write a space after ':' in an attribute value - ':$' is the pointer-of operator");
         return false;
     }
 

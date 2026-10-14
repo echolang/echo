@@ -1,0 +1,95 @@
+enum Message
+{
+    case text(string $body);
+    case none;
+}
+
+function consume(mv Message $m) : void {}
+
+function reset(Message& $m) : void
+{
+    $m = Message::none;
+}
+
+struct Inbox
+{
+    Message $last;
+
+    function drain() : void
+    {
+        match ($this->last) {
+            .text($body) => {
+                $this->last = Message::none;
+                echo $body;
+            }
+            .none => {}
+        }
+    }
+}
+
+struct Store
+{
+    static Message $current = Message::text(str::from(5005));
+
+    static function clear() : void
+    {
+        Store::$current = Message::none;
+    }
+}
+
+function through_a_static() : void
+{
+    match (Store::$current) {
+        .text($body) => {
+            Store::clear();
+            echo $body;
+        }
+        .none => {}
+    }
+}
+
+function reassigned() : void
+{
+    Message $m = Message::text(str::from(1001));
+    match ($m) {
+        .text($body) => {
+            $m = Message::none;
+            echo $body;
+        }
+        .none => {}
+    }
+}
+
+function moved() : void
+{
+    Message $m = Message::text(str::from(2002));
+    match ($m) {
+        .text($body) => {
+            consume(mv $m);
+            echo $body;
+        }
+        .none => {
+            consume(mv $m);
+        }
+    }
+}
+
+function reset_through_a_call() : void
+{
+    Message $m = Message::text(str::from(3003));
+    match ($m) {
+        .text($body) => {
+            reset($m);
+            echo $body;
+        }
+        .none => {}
+    }
+}
+
+reassigned();
+moved();
+reset_through_a_call();
+Inbox $inbox = Inbox(Message::text(str::from(4004)));
+$inbox->drain();
+through_a_static();
+echo mem::live_allocations();

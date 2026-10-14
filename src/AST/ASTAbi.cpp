@@ -114,7 +114,9 @@ bool AST::type_exports_abi_table(const TypeDeclNode &node, bool exports_abi_tabl
 }
 
 std::optional<std::string> AST::abi_table_export_refusal(
-    const TypeDeclNode &node, bool exports_abi_tables)
+    const TypeDeclNode &node,
+    bool exports_abi_tables
+)
 {
     const AttributeNode *export_attr = node.attributes.get_first("export");
 

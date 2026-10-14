@@ -184,6 +184,17 @@ bool Parser::parse_parameter_list(
         auto *param = parse_varexpr(payload, &into);
 
         if (param != nullptr) {
+            if (!param->has_type()) {
+                payload.collector.collect_issue<AST::Issue::ParameterNeedsType>(
+                    payload.context.code_ref(param->token_varname),
+                    fmt::format(
+                        "The parameter '{}' needs a type - write it before the name, as in 'int32 {}'.",
+                        param->name_full(),
+                        param->name_full()));
+                param->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
+                    AST::ValueType::make_unknown()));
+            }
+
             param->takes_ownership = takes_ownership;
             param->access_effect = access_effect;
             if (label.has_value()) {
@@ -476,7 +487,8 @@ void Parser::discard_attributes(Parser::Payload &payload)
 void Parser::check_attribute_site(
     Parser::Payload &payload,
     const AST::AttributeNode &attribute,
-    AST::AttributeSite site)
+    AST::AttributeSite site
+)
 {
     const std::optional<std::string> refusal =
         AST::attribute_site_refusal(attribute.attribute_id.value(), site);
@@ -1175,10 +1187,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         const std::string builtin_name(AST::compiler_attribute::builtin);
 
         if (auto *intrinsic_attr = funcdecl->attributes.get_first(intrinsic_name)) {
-            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, intrinsic_name,
-                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
-                    return reader.string(written);
-                });
+            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, intrinsic_name, [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                return reader.string(written);
+            });
 
             if (!funcdecl->intrinsic) {
                 return nullptr;
@@ -1186,18 +1197,16 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         }
 
         if (auto *builtin_attr = funcdecl->attributes.get_first(builtin_name)) {
-            funcdecl->builtin = read_attribute_value(payload, builtin_attr, builtin_name,
-                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
-                    std::optional<std::string> value = reader.name(written);
+            funcdecl->builtin = read_attribute_value(payload, builtin_attr, builtin_name, [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                std::optional<std::string> value = reader.name(written);
 
-                    if (value.has_value() && !AST::is_known_builtin(value.value())) {
-                        reader.refuse(written.span,
-                            fmt::format("Unknown compiler builtin '{}'.", value.value()));
-                        value.reset();
-                    }
+                if (value.has_value() && !AST::is_known_builtin(value.value())) {
+                    reader.refuse(written.span, fmt::format("Unknown compiler builtin '{}'.", value.value()));
+                    value.reset();
+                }
 
-                    return value;
-                });
+                return value;
+            });
 
             if (!funcdecl->builtin) {
                 return nullptr;

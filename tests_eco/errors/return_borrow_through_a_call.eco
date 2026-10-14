@@ -1,0 +1,40 @@
+struct Foo
+{
+    int32 $v;
+
+    function get() : int32&
+    {
+        return &$this->v;
+    }
+}
+
+function pass(Foo& $f) : Foo&
+{
+    return $f;
+}
+
+function through_a_function() : Foo&
+{
+    Foo $local = Foo(1);
+    return pass($local);
+}
+
+function through_a_method() : int32&
+{
+    Foo $local = Foo(2);
+    return $local->get();
+}
+
+function through_a_binding() : Foo&
+{
+    Foo $local = Foo(3);
+    Foo& $r = pass($local);
+    return $r;
+}
+
+function through_a_nested_call() : int32&
+{
+    Foo $local = Foo(4);
+    Foo& $r = $local;
+    return pass(pass($r))->get();
+}

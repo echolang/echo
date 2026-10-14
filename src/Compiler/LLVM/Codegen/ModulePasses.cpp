@@ -30,7 +30,10 @@ void Compiler::LLVM::run_module_passes(
 }
 
 void Compiler::LLVM::prepare_module(
-    llvm::Module &module, llvm::TargetMachine *target_machine, bool optimize)
+    llvm::Module &module,
+    llvm::TargetMachine *target_machine,
+    bool optimize
+)
 {
     run_module_passes(module, target_machine, [optimize](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
         modulePM.addPass(llvm::GlobalDCEPass());

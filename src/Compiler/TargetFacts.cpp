@@ -227,8 +227,7 @@ bool TargetFacts::axis_equals(
     assert(spec != nullptr && "axis_equals called with a name is_axis rejected");
 
     if (!vocabulary_contains(*spec->vocabulary, value)) {
-        out_error = fmt::format("unknown {} '{}', expected one of: {}", axis, value,
-            fmt::join(*spec->vocabulary, ", "));
+        out_error = fmt::format("unknown {} '{}', expected one of: {}", axis, value, fmt::join(*spec->vocabulary, ", "));
         return false;
     }
 

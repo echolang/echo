@@ -25,11 +25,9 @@ namespace
             : _docs(docs)
         {
             // an earlier file's docs sit below `from`, and that file's slice never moves
-            const auto first = std::lower_bound(_docs.begin(), _docs.end(), from,
-                [](const DocComment &doc, size_t index) {
-                    return doc.next_token_index < index;
-                }
-            );
+            const auto first = std::lower_bound(_docs.begin(), _docs.end(), from, [](const DocComment &doc, size_t index) {
+                return doc.next_token_index < index;
+            });
             _read = static_cast<size_t>(first - _docs.begin());
             _write = _read;
         }
@@ -248,8 +246,7 @@ namespace
         }
 
         if (cursor >= tokens.size()) {
-            out_error = locate(out.line,
-                fmt::format("'#[{}' is missing its closing ']'", out.name));
+            out_error = locate(out.line, fmt::format("'#[{}' is missing its closing ']'", out.name));
             return false;
         }
 
@@ -440,8 +437,7 @@ namespace
         std::string &out_error)
     {
         if (directive.condition_start >= directive.condition_end) {
-            out_error = locate(directive.line,
-                fmt::format("'#[{}: ...]' needs a condition", directive.name));
+            out_error = locate(directive.line, fmt::format("'#[{}: ...]' needs a condition", directive.name));
             return false;
         }
 
@@ -601,8 +597,7 @@ bool Parser::filter_conditional_tokens(
         }
 
         if (frames.empty()) {
-            out_error = locate(directive.line,
-                fmt::format("'#[{}]' has no open '#[if: ...]'", name));
+            out_error = locate(directive.line, fmt::format("'#[{}]' has no open '#[if: ...]'", name));
             return false;
         }
 

@@ -479,8 +479,7 @@ namespace
     }
 
     // does this signature still mention an associated type nothing has bound yet?
-    bool mentions_unbound(const WantedSignature &wanted, const AST::TypeSubstitution &subst,
-        const std::vector<AST::TypeParamDecl *> &associated)
+    bool mentions_unbound(const WantedSignature &wanted, const AST::TypeSubstitution &subst, const std::vector<AST::TypeParamDecl *> &associated)
     {
         for (const AST::TypeParamDecl *assoc : associated) {
             if (subst.covers(assoc)) {

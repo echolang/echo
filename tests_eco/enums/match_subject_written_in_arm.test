@@ -1,0 +1,9 @@
+flags: --track-allocations
+
+--- OUT --->
+1001
+2002
+3003
+4004
+5005
+0

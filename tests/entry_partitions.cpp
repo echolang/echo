@@ -73,8 +73,7 @@ TEST_CASE("an entry unit's partition objects reuse across a one-file edit", "[ca
         "    return 22;\n"
         "}\n");
 
-    write_file(project.root() / "src" / "main.eco",
-        "echo left() + right();\n");
+    write_file(project.root() / "src" / "main.eco", "echo left() + right();\n");
 
     const fs::path cache = project.root() / "cache";
     const std::string args = "build -o out --build-dir " + quoted(cache);
@@ -175,6 +174,44 @@ TEST_CASE("an entry unit's partition keys are stable across identical rebuilds",
     REQUIRE(second.exit_code == 0);
 
     REQUIRE(partition_object_names(cache / "app" / "scratch") == before);
+}
+
+TEST_CASE("an edit that only changes which constant repeats is not served a stale partition", "[cache][partition]")
+{
+    ScopedProject project("entry_partition_repeated_constant");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"*.eco\"]\n");
+
+    write_file(project.root() / "main.eco",
+        "echo 7;\n"
+        "echo 9;\n"
+        "echo 7;\n");
+
+    const fs::path cache = project.root() / "cache";
+    const std::string args = "build -o out --build-dir " + quoted(cache);
+
+    const ProcessResult first = project.echoc(args);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+
+    const ProcessResult ran = EchoTests::run_binary(project.root() / "out");
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output == "7\n9\n7\n");
+
+    write_file(project.root() / "main.eco",
+        "echo 7;\n"
+        "echo 9;\n"
+        "echo 9;\n");
+
+    const ProcessResult second = project.echoc(args);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+
+    const ProcessResult ran_again = EchoTests::run_binary(project.root() / "out");
+    REQUIRE(ran_again.exit_code == 0);
+    REQUIRE(ran_again.output == "7\n9\n9\n");
 }
 
 TEST_CASE("a large this-module copy constructor links across entry partitions", "[cache][partition]")

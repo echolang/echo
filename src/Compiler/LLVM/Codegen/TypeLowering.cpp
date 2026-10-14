@@ -1719,8 +1719,7 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
 
         std::string declared_at;
         if (param->name_token.has_value()) {
-            declared_at = fmt::format(" declared at {}:{}",
-                param->name_token.value().line(), param->name_token.value().char_offset());
+            declared_at = fmt::format(" declared at {}:{}", param->name_token.value().line(), param->name_token.value().char_offset());
         }
 
         throw _ctx.error(fmt::format(
@@ -1928,8 +1927,7 @@ llvm::Value *TypeLowering::coerce_ssa(llvm::Value *value, const AST::ValueType &
         }
     }
 
-    throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
-        from.get_type_desciption(), to.get_type_desciption(), _ctx.function_context()));
+    throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}", from.get_type_desciption(), to.get_type_desciption(), _ctx.function_context()));
 }
 
 CodegenValue TypeLowering::coerce_value(

@@ -58,10 +58,9 @@ namespace
             return "";
         }
 
-        std::optional<std::string> group = Parser::read_attribute_value(payload, written, "group",
-            [](AST::AttributeReader &reader, const AST::AttributeValue &value) {
-                return reader.string(value);
-            });
+        std::optional<std::string> group = Parser::read_attribute_value(payload, written, "group", [](AST::AttributeReader &reader, const AST::AttributeValue &value) {
+            return reader.string(value);
+        });
 
         return group.value_or("");
     }

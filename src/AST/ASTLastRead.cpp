@@ -1,12 +1,15 @@
 #include "AST/ASTLastRead.h"
 
 #include "AST/ASTControlFlow.h"
+#include "AST/ASTOps.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ExprNode.h"
 #include "AST/ForStatementNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/MatchExprNode.h"
+#include "AST/OperatorNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
@@ -166,6 +169,24 @@ namespace
                 if (rejoins) {
                     _position.branches--;
                 }
+            }
+        }
+
+        void visitBinaryExpr(AST::BinaryExprNode &node) override
+        {
+            value_edge(node.lhs);
+
+            const Token::Type op = node.op_node->op->type;
+            const bool skippable = AST::binary_skips_rhs(op);
+
+            if (skippable) {
+                _position.branches++;
+            }
+
+            value_edge(node.rhs);
+
+            if (skippable) {
+                _position.branches--;
             }
         }
 

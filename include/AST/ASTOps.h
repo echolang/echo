@@ -210,8 +210,7 @@ namespace AST
     struct CustomOperator : public Operator
     {
         CustomOperator(const std::string &spelling) :
-            Operator(Token::Type::t_op_custom, spelling,
-                OpPrecedence{OpAssociativity::left, CUSTOM_OP_DEFAULT_PRECEDENCE})
+            Operator(Token::Type::t_op_custom, spelling, OpPrecedence{OpAssociativity::left, CUSTOM_OP_DEFAULT_PRECEDENCE})
         {
         }
     };

@@ -225,6 +225,11 @@ namespace AST
         return false;
     }
 
+    bool binary_skips_rhs(Token::Type op)
+    {
+        return op == Token::Type::t_logical_and || op == Token::Type::t_logical_or;
+    }
+
     bool binary_has_builtin_meaning(
         const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs)
     {
@@ -316,8 +321,7 @@ namespace AST
         // `&&` / `||` stay scalar-bool: gen_binary_expr's short-circuit lowering is type-blind,
         // so a true here would CreateCondBr on a mask
         if (lhs.type.is_simd() || rhs.type.is_simd()) {
-            return op->type != Token::Type::t_logical_and
-                && op->type != Token::Type::t_logical_or;
+            return !binary_skips_rhs(op->type);
         }
 
         // **two payload-free enums compare by their discriminant, and that is a built-in meaning rather
@@ -376,9 +380,7 @@ namespace AST
         // a bool is a yes/no rather than a small number: `&&`/`||` combine two, `==`/`!=` ask whether
         // they agree, and ordering one against another is refused the way ordering two class handles is
         if (lhs.type.is_boolean_type() && rhs.type.is_boolean_type()) {
-            return op->type == Token::Type::t_logical_and
-                || op->type == Token::Type::t_logical_or
-                || op->is_identity_comparison();
+            return binary_skips_rhs(op->type) || op->is_identity_comparison();
         }
 
         // a float meeting another number, which codegen promotes both sides of. no `**` - that arm
@@ -506,8 +508,7 @@ namespace AST
                     ? fmt::format("cannot compare '{}' against null - it is always there, write "
                         "'{}?' if it may be absent",
                         other.get_type_desciption(), other.get_type_desciption())
-                    : fmt::format("cannot compare '{}' against null - null-check the address with ':$'",
-                        other.get_type_desciption());
+                    : fmt::format("cannot compare '{}' against null - null-check the address with ':$'", other.get_type_desciption());
             }
 
             return std::nullopt;
@@ -549,7 +550,7 @@ namespace AST
         // `&&` / `||` are not this: they are not builtin, and the unsupported-operand
         // sentence is the one that says so. a second sentence here would be two errors
         if (lhs.is_simd() || rhs.is_simd()) {
-            if (op->type == Token::Type::t_logical_and || op->type == Token::Type::t_logical_or) {
+            if (binary_skips_rhs(op->type)) {
                 return std::nullopt;
             }
 
@@ -614,10 +615,7 @@ namespace AST
     std::string binary_unsupported_operands(
         const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs)
     {
-        return fmt::format("operator '{}' is not supported on operands of type '{}' and '{}'",
-            op != nullptr ? op->spelling : "?",
-            lhs.type.get_type_desciption(),
-            rhs.type.get_type_desciption());
+        return fmt::format("operator '{}' is not supported on operands of type '{}' and '{}'", op != nullptr ? op->spelling : "?", lhs.type.get_type_desciption(), rhs.type.get_type_desciption());
     }
 
     std::optional<ValueType> common_numeric_type(const ValueType &lhs, const ValueType &rhs)

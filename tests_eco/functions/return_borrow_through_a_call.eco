@@ -1,0 +1,45 @@
+struct Counter
+{
+    int32 $n;
+
+    function slot() : int32&
+    {
+        return &$this->n;
+    }
+}
+
+function pass(Counter& $c) : Counter&
+{
+    return $c;
+}
+
+function slot_of(Counter& $c) : int32&
+{
+    Counter& $same = pass($c);
+    return $same->slot();
+}
+
+function lookup(map<string, int32>& $m) : int32&
+{
+    string $key = 'b';
+    return $m->at($key);
+}
+
+function nested(Counter& $c) : Counter&
+{
+    return pass(pass($c));
+}
+
+Counter $c = Counter(1);
+int32& $s = slot_of($c);
+$s = 7;
+echo $c->n;
+nested($c)->n = 9;
+echo $c->n;
+
+map<string, int32> $m;
+$m['a'] = 1;
+$m['b'] = 2;
+int32& $v = lookup($m);
+$v = 20;
+echo $m['b'];

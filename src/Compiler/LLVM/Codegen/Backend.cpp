@@ -944,8 +944,7 @@ void Backend::prune_to_entry()
         before, survivors.size(),
         _jit_roots.empty()
             ? entry
-            : fmt::format("{} and {} root{}", entry, _jit_roots.size(),
-                _jit_roots.size() == 1 ? "" : "s"));
+            : fmt::format("{} and {} root{}", entry, _jit_roots.size(), _jit_roots.size() == 1 ? "" : "s"));
 
     for (const std::string &name : survivors) {
         _prune_report += fmt::format("    {}\n", name);

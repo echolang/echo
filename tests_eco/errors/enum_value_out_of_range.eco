@@ -1,0 +1,2 @@
+enum Small : int8 { case high = 300; case low = -129; }
+enum Byte : uint8 { case neg = -1; case hex = 0x1FF; }

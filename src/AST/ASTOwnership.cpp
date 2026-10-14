@@ -11,6 +11,7 @@
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTOps.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTExternInterface.h"
 #include "AST/ASTNullability.h"
@@ -120,24 +121,25 @@ namespace
         return root;
     }
 
-    // **an explicit `as I` / `as C` copies the object's reference.** a cast is materializable, so
-    // the place test below would move it and plant no retain. `$s as Other` is a new owner of the
-    // same object - the implicit widening already copies via place_under_implicit_cast, and this
-    // is that rule for the written form. `$s as Other?` retains only on the hit path, which is
-    // codegen's: a miss owns nothing
-    bool explicit_interface_cast_copies_source(const TypeCastNode &cast)
+    // an explicit `as` is a new owner of the source. `$x as I?` recast is the
+    // exception: codegen retains only on the hit path
+    bool explicit_cast_copies_source(const TypeCastNode &cast)
     {
-        if (cast.is_implcit || cast.expr == nullptr || cast.result_type().is_wrapped_optional()) {
+        if (cast.is_implcit || cast.expr == nullptr) {
             return false;
         }
 
-        const CastLookup lookup = cast_plan_for(*cast.expr, cast.result_type());
+        const ValueType to = cast.result_type();
+        const CastLookup lookup = cast_plan_for(*cast.expr, to);
         if (lookup.result != CastLookup::Result::t_ok) {
             return false;
         }
 
-        return lookup.plan.kind == CastKind::t_interface
-            || lookup.plan.kind == CastKind::t_interface_recast;
+        if (lookup.plan.kind == CastKind::t_interface_recast && to.is_wrapped_optional()) {
+            return false;
+        }
+
+        return true;
     }
 
 }
@@ -208,8 +210,9 @@ void OwnershipPass::synthesize_pending_class_deinits()
         candidates.emplace_back(inst->mangled_token(), inst);
     }
 
-    std::sort(candidates.begin(), candidates.end(),
-        [](const auto &a, const auto &b) { return a.first < b.first; });
+    std::sort(candidates.begin(), candidates.end(), [](const auto &a, const auto &b) {
+        return a.first < b.first;
+    });
 
     for (const auto &[mangled, ct] : candidates) {
         if (!ct->is_class_kind() || ct->deinit() != nullptr) {
@@ -529,8 +532,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // its own: the bytes are destroyed at the end of this statement, so nothing will ever read
             // what was written. refused rather than bound, which is also what keeps AssignNode::target a
             // place - the wrapper would not be one
-            MaterializationScope target_scope(*this,
-                "writing to", "would be lost, because the value is destroyed at the end of this statement");
+            MaterializationScope target_scope(*this, "writing to", "would be lost, because the value is destroyed at the end of this statement");
 
             // a whole-variable target is *written*, not read, so a moved-from variable being re-seated
             // is not a use-after-move. the arm below already says so - it clears the moved state and
@@ -924,7 +926,11 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
     return child;
 }
 
-void OwnershipPass::join_exclusive(const FlowFacts &before, std::vector<FlowFacts> joining)
+void OwnershipPass::join_exclusive(
+    const FlowFacts &before,
+    std::vector<FlowFacts> joining,
+    const std::string &remedy
+)
 {
     _flow = before;
 
@@ -964,9 +970,34 @@ void OwnershipPass::join_exclusive(const FlowFacts &before, std::vector<FlowFact
         }
         else {
             _flow.maybe_moved.insert(decl);
-            report_conditional_move(decl);
+            report_conditional_move(decl, remedy);
         }
     }
+}
+
+template<typename Walk>
+ExprNode *OwnershipPass::walk_skippable_operand(
+    ExprNode *operand,
+    const std::string &op,
+    Walk &&walk
+)
+{
+    const FlowFacts before = _flow;
+    operand = walk(operand);
+
+    std::vector<FlowFacts> joining;
+    joining.push_back(before);
+
+    if (operand == nullptr || !expression_never_returns(*operand)) {
+        joining.push_back(std::move(_flow));
+    }
+
+    join_exclusive(before, std::move(joining), fmt::format(
+        "Move it before the '{}', whose right side does not always run.",
+        op
+    ));
+
+    return operand;
 }
 
 // **the one loop walk**, which both loop statements above go through. what a `for` adds is the step, and
@@ -1302,8 +1333,7 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
     // their receiver and no enumeration of shapes could be trusted to catch the next one - so the one
     // position where the question does not arise is worth stating rather than approximating
     if (kept == MaterializationScope::BoundValue::t_kept && value->result_type().is_pointer()) {
-        refuse_pending_temporaries(mark,
-            "the pointer in", "would be an address into a value destroyed at the end of this statement");
+        refuse_pending_temporaries(mark, "the pointer in", "would be an address into a value destroyed at the end of this statement");
         return value;
     }
 
@@ -1388,7 +1418,7 @@ void OwnershipPass::refuse_pending_temporaries(size_t mark, const char *action, 
     _pending_temporaries.resize(mark);
 }
 
-void OwnershipPass::report_conditional_move(const VarDeclNode *decl)
+void OwnershipPass::report_conditional_move(const VarDeclNode *decl, const std::string &remedy)
 {
     // the chapter's rule - "an `if` that moves on one side and not the other leaves the variable
     // unset afterwards" - settles *reading* the variable, and the merge above implements it. what it
@@ -1406,8 +1436,9 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl)
     _collector.collect_issue<Issue::ConditionalMove>(
         code_ref_for(decl->token_varname), fmt::format(
             "'{}' owns a resource and is moved out of on only one branch, so nothing would destroy it "
-            "on the other. Move it on every branch, or after the 'if'.",
-            decl->name_full()
+            "on the other. {}",
+            decl->name_full(),
+            remedy
         )
     );
 }
@@ -1576,7 +1607,18 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         {
             auto *bin = static_cast<BinaryExprNode *>(expr);
             bin->lhs = walk_value_edge(bin->lhs);
-            bin->rhs = walk_value_edge(bin->rhs);
+
+            const Token::Type op = bin->op_node->op->type;
+
+            if (binary_skips_rhs(op)) {
+                bin->rhs = walk_skippable_operand(bin->rhs, bin->op_node->token_literal.value(), [this](ExprNode *rhs) {
+                    return walk_value_edge(rhs);
+                });
+            }
+            else {
+                bin->rhs = walk_value_edge(bin->rhs);
+            }
+
             break;
         }
 
@@ -1709,7 +1751,9 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // the continuation is rooted at the marker, which stands for the base rather than
             // holding it - so it cannot ask for the base a second time. a place continuation
             // copies on the present path; a computed one is already an owner
-            chain->continuation = arrive_computed_place(chain->continuation);
+            chain->continuation = walk_skippable_operand(chain->continuation, "?->", [this](ExprNode *continuation) {
+                return arrive_computed_place(continuation);
+            });
             break;
         }
 
@@ -1728,7 +1772,9 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         {
             auto *coalesce = static_cast<NullCoalesceExprNode *>(expr);
             coalesce->lhs = walk_expression(coalesce->lhs);
-            coalesce->rhs = arrive_computed_place(coalesce->rhs);
+            coalesce->rhs = walk_skippable_operand(coalesce->rhs, "??", [this](ExprNode *rhs) {
+                return arrive_computed_place(rhs);
+            });
 
             ExprNode *lhs = coalesce->lhs;
 
@@ -1932,9 +1978,7 @@ ExprNode *OwnershipPass::resolve_value_arrival(
         const bool addressed = expr != nullptr && expr->get_node_type() == NodeType::n_expr_addrof;
         const size_t mark = _pending_temporaries.size();
 
-        MaterializationScope scope(*this,
-            addressed ? "the address of" : "a borrow of",
-            "would point into a value destroyed at the end of this statement");
+        MaterializationScope scope(*this, addressed ? "the address of" : "a borrow of", "would point into a value destroyed at the end of this statement");
 
         ExprNode *arrived = arrive_value(expr, wanted, param, destination);
 
@@ -2084,7 +2128,7 @@ ExprNode *OwnershipPass::arrive_value(
     if (expr->get_node_type() == NodeType::n_type_cast) {
         auto *cast = static_cast<TypeCastNode *>(expr);
 
-        if (explicit_interface_cast_copies_source(*cast)) {
+        if (explicit_cast_copies_source(*cast)) {
             cast->expr = arrive_value(
                 cast->expr, ValueType::make_mutable(value_result_type(*cast->expr)),
                 nullptr, destination);

@@ -303,6 +303,12 @@ std::filesystem::path Compiler::module_object_path(
     return layout.module_dir(manifest) / fmt::format("{}-{}.o", manifest.name, key.hex);
 }
 
+bool Compiler::cached_object_is_hit(const std::filesystem::path &object)
+{
+    std::error_code ec;
+    return std::filesystem::is_regular_file(object, ec) && std::filesystem::file_size(object, ec) > 0 && !ec;
+}
+
 std::filesystem::path Compiler::module_inputs_path(
     const Parser::ModuleManifest &manifest,
     const BuildLayout &layout
@@ -365,10 +371,9 @@ std::string Compiler::explain_miss(const std::filesystem::path &inputs_path, con
     // every input this build has agrees with the record, so the difference is either an input the record has
     // and this build does not - a deleted file - or something outside the file list entirely
     for (const auto &[recorded_path, digest] : recorded) {
-        const bool still_present = std::any_of(key.inputs.begin(), key.inputs.end(),
-            [&recorded_path](const std::pair<std::filesystem::path, uint64_t> &input) {
-                return input.first.string() == recorded_path;
-            });
+        const bool still_present = std::any_of(key.inputs.begin(), key.inputs.end(), [&recorded_path](const std::pair<std::filesystem::path, uint64_t> &input) {
+            return input.first.string() == recorded_path;
+        });
 
         if (!still_present) {
             return fmt::format("'{}' is gone", std::filesystem::path(recorded_path).filename().string());

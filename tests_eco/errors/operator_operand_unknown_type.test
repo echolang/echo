@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] operator_operand_unknown_type.eco:6:24
+
+  Unknown type 'Distance'
+
+  5 | 
+  6 | operator (Point $a) + (Distance $b) : Point
+    :                        ^^^^^^^^
+  7 | {
+
+1 error, nothing was compiled.

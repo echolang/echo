@@ -229,11 +229,9 @@ struct TokenCollection
 
     // the last `/** ... */` whose following token is `index`, or null
     const DocComment *doc_comment_at(size_t index) const {
-        const auto after = std::upper_bound(doc_comments.begin(), doc_comments.end(), index,
-            [](size_t wanted, const DocComment &doc) {
-                return wanted < doc.next_token_index;
-            }
-        );
+        const auto after = std::upper_bound(doc_comments.begin(), doc_comments.end(), index, [](size_t wanted, const DocComment &doc) {
+            return wanted < doc.next_token_index;
+        });
 
         if (after == doc_comments.begin() || std::prev(after)->next_token_index != index) {
             return nullptr;

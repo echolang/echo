@@ -1,0 +1,13 @@
+// a second constant of one name is refused with a sentence. the parser used to ask whether the first
+// one was a *type* with an accessor that asserts instead of asking, and died reading a constant as one
+
+const A = 1;
+const A = 2;
+
+struct S
+{
+    const X = 1;
+    const X = 2;
+}
+
+echo A;

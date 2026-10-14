@@ -149,8 +149,7 @@ TEST_CASE("completion: locals keep their types when lines above them moved", "[l
     session.did_open(path, 1, k_point + body + "}\n");
     session.rebuild();
 
-    const auto answer = complete(session, path,
-        "// one\n// two\n// three\n" + k_point + body + "    $|\n}\n");
+    const auto answer = complete(session, path, "// one\n// two\n// three\n" + k_point + body + "    $|\n}\n");
 
     const auto *p = item_of(answer, "$p");
     REQUIRE(p != nullptr);
@@ -290,8 +289,7 @@ TEST_CASE("completion: shorthand offers the destination's cases", "[lsp]")
     REQUIRE(has(declared, "meter"));
     REQUIRE(has(declared, "mile"));
 
-    const auto returned = complete(session, path,
-        unit + "function pick() : Unit { return .| }\n", true);
+    const auto returned = complete(session, path, unit + "function pick() : Unit { return .| }\n", true);
     REQUIRE(has(returned, "mile"));
 
     // a `.` that starts no shorthand answers nothing

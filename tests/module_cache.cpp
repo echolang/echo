@@ -1,16 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "Parser/ManifestParser.h"
-#include "Parser/ManifestPackage.h"
-#include "Compiler/SettledPath.h"
-
-#include "subprocess.h"
-
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include "Parser/ManifestParser.h"
+#include "Parser/ManifestPackage.h"
+#include "Compiler/SettledPath.h"
+#include "subprocess.h"
 
 // what the module system promises a *project* rather than a compilation: that `echoc run` in a directory
 // holding a module.eco needs no arguments, and that a module's compiled identity is a function of its own
@@ -452,8 +451,7 @@ TEST_CASE("a library's object does not depend on how many emit workers ran", "[c
 
     write_library(project.root() / "lib", "shared");
 
-    write_file(project.root() / "app" / "app.eco",
-        "echo shared::twice(21);\n");
+    write_file(project.root() / "app" / "app.eco", "echo shared::twice(21);\n");
 
     const fs::path manifest = project.root() / "lib" / "module.eco";
 
@@ -547,8 +545,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         // matters is a *project* whose own manifest is the program. It must miss every time, and the reason
         // has to read as "this is the program" rather than as a file having changed
         ScopedProject inner("store_entry");
-        write_file(inner.root() / "module.eco",
-            "#[module: \"selfprog\"]\n#[sources: \"*.eco\"]\n");
+        write_file(inner.root() / "module.eco", "#[module: \"selfprog\"]\n#[sources: \"*.eco\"]\n");
         write_file(inner.root() / "app.eco", "echo 1;\n");
 
         const std::string inner_args =
@@ -608,8 +605,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         write_file(inner.root() / "app" / "app.eco", "echo rolib::twice(21);\n");
 
         std::error_code ec;
-        fs::permissions(inner.root() / "lib", fs::perms::owner_read | fs::perms::owner_exec,
-            fs::perm_options::replace, ec);
+        fs::permissions(inner.root() / "lib", fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace, ec);
 
         // no --build-dir, so the default store is `ecobuild` inside that unwritable directory
         const ProcessResult result = inner.echoc(
@@ -662,6 +658,28 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
         const ProcessResult ran = EchoTests::run_binary(app_dir / "out");
         REQUIRE(ran.output.find("42") != std::string::npos);
+    }
+
+    SECTION("an empty artifact is rebuilt rather than linked")
+    {
+        std::ofstream(stored_object, std::ios::binary | std::ios::trunc);
+
+        const ProcessResult after = project.echoc(args, app_dir);
+
+        INFO(after.output);
+        REQUIRE(after.exit_code == 0);
+        REQUIRE(line_starting_with(after.output, "storelib").find("miss") != std::string::npos);
+
+        const ProcessResult ran = EchoTests::run_binary(app_dir / "out");
+        REQUIRE(ran.output.find("42") != std::string::npos);
+
+        std::error_code ec;
+        REQUIRE(fs::file_size(stored_object, ec) > 0);
+        REQUIRE_FALSE(ec);
+
+        for (const auto &entry : fs::recursive_directory_iterator(project.build_dir())) {
+            REQUIRE(entry.path().filename().string().find(".tmp-") == std::string::npos);
+        }
     }
 }
 

@@ -1,0 +1,19 @@
+// an untyped decimal literal is the first of int32, int64 and uint64 that holds it, and the sign
+// counts. a negative one used to default to int32 however wide it was, and codegen truncated it
+
+echo -2147483648;
+echo -2147483649;
+echo -3000000000;
+echo -3000000000 + 1;
+echo -9223372036854775807;
+echo -9223372036854775808;
+
+$x = -4294967295;
+echo $x;
+
+$y = 4294967295;
+echo $y;
+
+echo 9223372036854775807;
+echo 9223372036854775808;
+echo 18446744073709551615;

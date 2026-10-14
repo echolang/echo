@@ -1,0 +1,3 @@
+enum Unit : string { case meter = 3; }
+enum Code : int32 { case ok = "ok"; }
+enum Plain { case a = 1; }

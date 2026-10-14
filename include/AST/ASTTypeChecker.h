@@ -57,8 +57,7 @@ namespace AST
         // refuses a read of a property this site is not allowed to name. takes the property the
         // caller already resolved, so the name is looked up once per member access. `t_owner` is
         // AST::can_reach_private_member; `t_module` is AST::visible_from against the type's origin
-        void check_member_visibility(MemberAccessNode &node, const ComplexType &complex,
-            const ComplexType::Property &property);
+        void check_member_visibility(MemberAccessNode &node, const ComplexType &complex, const ComplexType::Property &property);
 
         // **refuses a call to something this site is not allowed to name.** asked of a *settled* call, so
         // an invisible declaration still took part in overload resolution and the program is refused by

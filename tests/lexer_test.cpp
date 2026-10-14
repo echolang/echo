@@ -7,7 +7,8 @@
 #include <Compiler/TargetFacts.h>
 
 
-TEST_CASE( "Token References", "[lexer]" ) {
+TEST_CASE("Token References", "[lexer]")
+{
 
     TokenCollection tokens;
 
@@ -24,7 +25,7 @@ TEST_CASE( "Token References", "[lexer]" ) {
     REQUIRE( bar.type() == Token::Type::t_identifier );
 }
 
-TEST_CASE( "Numeric Literals", "[lexer]" )
+TEST_CASE("Numeric Literals", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -100,7 +101,7 @@ TEST_CASE( "Numeric Literals", "[lexer]" )
 // ordinary t_dot tokens, and LexerFunction::NumericLiteral runs ahead of the symbol trie - so without
 // one character of lookahead `0..10` lexes as the float `0.0`, a stray `.` and `10`, and no `..` is
 // ever formed for AST::OperatorRegistry to match
-TEST_CASE( "A range's dots are not a decimal point", "[lexer]" )
+TEST_CASE("A range's dots are not a decimal point", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -149,7 +150,8 @@ TEST_CASE( "A range's dots are not a decimal point", "[lexer]" )
     REQUIRE( tokens.token_values[0] == "1.0" );
 }
 
-TEST_CASE( "Strings", "[lexer]" ) {
+TEST_CASE("Strings", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -204,14 +206,15 @@ TEST_CASE( "Strings", "[lexer]" ) {
     REQUIRE( tokens.token_values[0] == "'🍕'" );
 }
 
-TEST_CASE( "Unterminated String", "[lexer]" ) {
+TEST_CASE("Unterminated String", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
     REQUIRE_THROWS_AS( lexer.tokenize(tokens, "'foo"), Lexer::UnterminatedStringException );
 }
 
-TEST_CASE( "Variable Names", "[lexer]" )
+TEST_CASE("Variable Names", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -227,7 +230,7 @@ TEST_CASE( "Variable Names", "[lexer]" )
     REQUIRE( tokens.token_values[2] == "$bar" );
 }
 
-TEST_CASE( "Variable Names Incomplete", "[lexer]" )
+TEST_CASE("Variable Names Incomplete", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -243,7 +246,8 @@ TEST_CASE( "Variable Names Incomplete", "[lexer]" )
 }
 
 
-TEST_CASE( "HexLiterals", "[lexer]" ) {
+TEST_CASE("HexLiterals", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -271,7 +275,8 @@ TEST_CASE( "HexLiterals", "[lexer]" ) {
     REQUIRE( tokens.token_values[0] == "0x1234567890ABCDEF" );
 }
 
-TEST_CASE( "Single Line Comments", "[lexer]" ) {
+TEST_CASE("Single Line Comments", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -284,7 +289,8 @@ TEST_CASE( "Single Line Comments", "[lexer]" ) {
     REQUIRE( tokens.token_values[0] == "foo" );
 }
 
-TEST_CASE("Multi Line Comments", "[lexer]") {
+TEST_CASE("Multi Line Comments", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -299,7 +305,8 @@ TEST_CASE("Multi Line Comments", "[lexer]") {
     REQUIRE( tokens.token_values[1] == "ronon" );
 }
 
-TEST_CASE("Doc comments are recorded without becoming tokens", "[lexer]") {
+TEST_CASE("Doc comments are recorded without becoming tokens", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -313,7 +320,8 @@ TEST_CASE("Doc comments are recorded without becoming tokens", "[lexer]") {
     REQUIRE(tokens.doc_comments[0].text == "/** adds two numbers */");
 }
 
-TEST_CASE("ordinary block comments are not doc comments", "[lexer]") {
+TEST_CASE("ordinary block comments are not doc comments", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -323,7 +331,8 @@ TEST_CASE("ordinary block comments are not doc comments", "[lexer]") {
     REQUIRE(tokens.doc_comments.empty());
 }
 
-TEST_CASE("the last of two adjacent doc comments wins", "[lexer]") {
+TEST_CASE("the last of two adjacent doc comments wins", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -354,7 +363,8 @@ namespace
     }
 }
 
-TEST_CASE("a doc comment moves with its token when a region before it is dropped", "[lexer][conditional]") {
+TEST_CASE("a doc comment moves with its token when a region before it is dropped", "[lexer][conditional]")
+{
     const TokenCollection tokens = filtered(
         "#[if: os == windows]\n"
         "function gone() {}\n"
@@ -367,7 +377,8 @@ TEST_CASE("a doc comment moves with its token when a region before it is dropped
     REQUIRE(tokens.doc_comment_at(0)->text == "/** kept */");
 }
 
-TEST_CASE("a doc comment inside a dropped region goes with it", "[lexer][conditional]") {
+TEST_CASE("a doc comment inside a dropped region goes with it", "[lexer][conditional]")
+{
     const TokenCollection tokens = filtered(
         "#[if: os == windows]\n"
         "/** windows only */\n"
@@ -379,7 +390,8 @@ TEST_CASE("a doc comment inside a dropped region goes with it", "[lexer][conditi
     REQUIRE(tokens.doc_comment_at(0) == nullptr);
 }
 
-TEST_CASE("a doc comment above a directive documents what the region keeps", "[lexer][conditional]") {
+TEST_CASE("a doc comment above a directive documents what the region keeps", "[lexer][conditional]")
+{
     const TokenCollection tokens = filtered(
         "/** linux only */\n"
         "#[if: os == linux]\n"
@@ -391,7 +403,8 @@ TEST_CASE("a doc comment above a directive documents what the region keeps", "[l
     REQUIRE(tokens.doc_comment_at(0)->text == "/** linux only */");
 }
 
-TEST_CASE("a doc comment on a dropped test block is not lent to the next declaration", "[lexer][conditional]") {
+TEST_CASE("a doc comment on a dropped test block is not lent to the next declaration", "[lexer][conditional]")
+{
     const TokenCollection tokens = filtered(
         "/** about the test */\n"
         "test adds_up { }\n"
@@ -401,13 +414,15 @@ TEST_CASE("a doc comment on a dropped test block is not lent to the next declara
     REQUIRE(tokens.doc_comment_at(0) == nullptr);
 }
 
-TEST_CASE("a trailing doc comment names nothing after the filter", "[lexer][conditional]") {
+TEST_CASE("a trailing doc comment names nothing after the filter", "[lexer][conditional]")
+{
     const TokenCollection tokens = filtered("function only() {}\n/** dangling */\n");
 
     REQUIRE(tokens.doc_comments.empty());
 }
 
-TEST_CASE("Multi Line Comments Unterminated", "[lexer]") {
+TEST_CASE("Multi Line Comments Unterminated", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -476,7 +491,8 @@ TEST_CASE("Predefined Keywords", "[lexer]")
 // this used to be an "Operator Prepass" test over a per-file registry the lexer fed back into
 // itself. what it pinned that is still worth pinning is that `<=>` reaches the parser *at all*, as
 // two tokens the registry can put back together
-TEST_CASE( "A custom operator symbol lexes as ordinary tokens", "[lexer]" ) {
+TEST_CASE("A custom operator symbol lexes as ordinary tokens", "[lexer]")
+{
     Lexer lexer;
     TokenCollection tokens;
 
@@ -507,7 +523,7 @@ TEST_CASE( "A custom operator symbol lexes as ordinary tokens", "[lexer]" ) {
         REQUIRE( token.type != Token::Type::t_op_custom );
     }
 }
-TEST_CASE( "The pointer-of operator lexes without disturbing colons", "[lexer][pointer]" )
+TEST_CASE("The pointer-of operator lexes without disturbing colons", "[lexer][pointer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -526,7 +542,7 @@ TEST_CASE( "The pointer-of operator lexes without disturbing colons", "[lexer][p
     REQUIRE( tokens[6].type() == Token::Type::t_identifier );
 }
 
-TEST_CASE( "The pointer-of operator chains", "[lexer][pointer]" )
+TEST_CASE("The pointer-of operator chains", "[lexer][pointer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -540,7 +556,7 @@ TEST_CASE( "The pointer-of operator chains", "[lexer][pointer]" )
     REQUIRE( tokens[2].type() == Token::Type::t_ptr_of );
 }
 
-TEST_CASE( "'&' is a reference only when it abuts a name", "[lexer][pointer]" )
+TEST_CASE("'&' is a reference only when it abuts a name", "[lexer][pointer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -563,7 +579,7 @@ TEST_CASE( "'&' is a reference only when it abuts a name", "[lexer][pointer]" )
     REQUIRE( tight[2].type() == Token::Type::t_varname );
 }
 
-TEST_CASE( "'&&' is one token, not two references", "[lexer][pointer]" )
+TEST_CASE("'&&' is one token, not two references", "[lexer][pointer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -576,7 +592,7 @@ TEST_CASE( "'&&' is one token, not two references", "[lexer][pointer]" )
     REQUIRE( tokens[1].type() == Token::Type::t_logical_and );
 }
 
-TEST_CASE( "An attribute needs a space before a '$' value", "[lexer][pointer]" )
+TEST_CASE("An attribute needs a space before a '$' value", "[lexer][pointer]")
 {
     Lexer lexer;
 
@@ -613,7 +629,7 @@ TEST_CASE( "An attribute needs a space before a '$' value", "[lexer][pointer]" )
     REQUIRE( has_varname );
 }
 
-TEST_CASE( "Keywords are whole words", "[lexer]" )
+TEST_CASE("Keywords are whole words", "[lexer]")
 {
     Lexer lexer;
 
@@ -687,7 +703,7 @@ TEST_CASE( "Keywords are whole words", "[lexer]" )
     REQUIRE( symbols[2].type() == Token::Type::t_identifier );
 }
 
-TEST_CASE( "foreach and the double arrow", "[lexer]" )
+TEST_CASE("foreach and the double arrow", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;

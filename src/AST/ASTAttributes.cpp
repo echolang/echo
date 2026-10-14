@@ -104,8 +104,9 @@ namespace
     template <size_t N>
     const DeclarationAttribute *find_row(const DeclarationAttribute (&rows)[N], std::string_view name)
     {
-        const auto found = std::find_if(std::begin(rows), std::end(rows),
-            [name](const DeclarationAttribute &row) { return row.name == name; });
+        const auto found = std::find_if(std::begin(rows), std::end(rows), [name](const DeclarationAttribute &row) {
+            return row.name == name;
+        });
 
         return found == std::end(rows) ? nullptr : found;
     }

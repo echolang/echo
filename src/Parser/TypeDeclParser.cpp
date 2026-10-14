@@ -196,8 +196,7 @@ static void parse_associated_type(
     AST::TypeParamDecl *decl = owner.find_associated_type(name_token.value());
 
     if (decl != nullptr && collect_members) {
-        refuse(name_token, fmt::format("'{}' is already an associated type of '{}'.",
-            name_token.value(), struct_node.type_name()));
+        refuse(name_token, fmt::format("'{}' is already an associated type of '{}'.", name_token.value(), struct_node.type_name()));
         return;
     }
 
@@ -353,6 +352,7 @@ static void parse_conformance_clause(
             if (!refusal.empty()) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(entry_token), refusal);
+                owner.enum_backing_refused = true;
             }
             else if (owner.enum_backing.has_value()) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -786,9 +786,7 @@ static void parse_destructor(
     if (rebuilt.size() > implicit) {
         payload.collector.collect_issue<AST::Issue::DestructorHasParameters>(
             payload.context.code_ref(dtor_token),
-            fmt::format("A destructor takes no parameters - '{}' declares {}.",
-                struct_node->type_name(),
-                rebuilt.size() - implicit));
+            fmt::format("A destructor takes no parameters - '{}' declares {}.", struct_node->type_name(), rebuilt.size() - implicit));
 
         // the extra parameters are dropped rather than carried: nothing ever passes an argument to a
         // destructor, so a signature that declares one would fail at the drop site instead of here
@@ -970,32 +968,31 @@ static void bind_core_type_attribute(Parser::Payload &payload, AST::TypeDeclNode
 
     // a **name**, not a string: the set AST::core_type_kind_for accepts is closed, and a closed
     // vocabulary is spelled bare wherever it appears inside a `#[...]`
-    Parser::read_attribute_value(payload, core_attr, core_name,
-        [&](AST::AttributeReader &reader, const AST::AttributeValue &written) {
-            std::optional<std::string> value = reader.name(written);
+    Parser::read_attribute_value(payload, core_attr, core_name, [&](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+        std::optional<std::string> value = reader.name(written);
 
-            if (!value.has_value()) {
-                return value;
-            }
-
-            std::optional<AST::CoreTypeKind> kind = AST::core_type_kind_for(value.value());
-
-            if (!kind.has_value()) {
-                reader.refuse(written.span, fmt::format("Unknown core type '{}'.", value.value()));
-                return value;
-            }
-
-            if (auto *bound = payload.collector.core_types.declaration(kind.value());
-                bound != nullptr && bound != struct_node) {
-                reader.refuse(written.span, fmt::format(
-                    "The core type '{}' is already declared as '{}'.",
-                    value.value(), bound->namespaced_type_name()));
-                return value;
-            }
-
-            payload.collector.core_types.bind(kind.value(), struct_node);
+        if (!value.has_value()) {
             return value;
-        });
+        }
+
+        std::optional<AST::CoreTypeKind> kind = AST::core_type_kind_for(value.value());
+
+        if (!kind.has_value()) {
+            reader.refuse(written.span, fmt::format("Unknown core type '{}'.", value.value()));
+            return value;
+        }
+
+        if (auto *bound = payload.collector.core_types.declaration(kind.value());
+            bound != nullptr && bound != struct_node) {
+            reader.refuse(written.span, fmt::format(
+                "The core type '{}' is already declared as '{}'.",
+                value.value(), bound->namespaced_type_name()));
+            return value;
+        }
+
+        payload.collector.core_types.bind(kind.value(), struct_node);
+        return value;
+    });
 }
 
 // `#[unique]` - exactly one value may name this type's storage, so it is moved and never copied.

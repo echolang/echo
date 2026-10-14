@@ -452,8 +452,7 @@ TEST_CASE("a C shared library links against the host libc", "[cbuild]")
     // passed Darwin's SDK to `ld`; this is the clang -shared twin, and it
     // is what failed with `library 'System' not found` on Homebrew clang
     ScopedProject project("shared_libc");
-    write_file(project.root() / "c" / "answer.c",
-        "int eco_shim_answer(void) { return 42; }\n");
+    write_file(project.root() / "c" / "answer.c", "int eco_shim_answer(void) { return 42; }\n");
 
     Compiler::CBuildSpec spec;
     spec.module_name = "answer";

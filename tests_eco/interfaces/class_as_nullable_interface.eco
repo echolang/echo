@@ -1,0 +1,52 @@
+interface Shape
+{
+    function area() : int32;
+}
+
+class Square : Shape
+{
+    int32 $side;
+
+    destructor()
+    {
+        echo 'square gone';
+    }
+
+    function area() : int32 { return $this->side * $this->side; }
+}
+
+function into_nullable() : void
+{
+    Square $sq = Square(3);
+    Shape? $s = $sq as Shape?;
+    echo mem::refs($sq);
+}
+
+function into_interface() : void
+{
+    Square $sq = Square(4);
+    Shape $s = $sq as Shape;
+    echo mem::refs($sq);
+}
+
+function kept() : Shape?
+{
+    Square $sq = Square(5);
+    return $sq as Shape?;
+}
+
+function strings() : void
+{
+    string $t = str::from(42);
+    string? $o = $t as string?;
+    string $u = $t as string;
+    echo $u;
+}
+
+into_nullable();
+into_interface();
+Shape? $k = kept();
+echo $k?->area() ?? 0;
+strings();
+$k = null;
+echo mem::live_allocations();

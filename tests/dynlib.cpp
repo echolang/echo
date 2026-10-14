@@ -1,10 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "Compiler/CodegenTarget.h"
-
 #include <filesystem>
 #include <string>
 
+#include "Compiler/CodegenTarget.h"
 #include "subprocess.h"
 
 // std::dynlib opens a native #[target: lib] and looks up #[export]s. subprocess
@@ -410,8 +409,7 @@ TEST_CASE("a plugin can use strings internally", "[dynlib]")
     INFO(plug.output);
     REQUIRE(plug.exit_code == 0);
 
-    const ProcessResult ran = build_and_run_host(project,
-        open_plugin(plugin_image(project)) + call_i32("greet_len"));
+    const ProcessResult ran = build_and_run_host(project, open_plugin(plugin_image(project)) + call_i32("greet_len"));
     INFO(ran.output);
     REQUIRE(ran.exit_code == 0);
     REQUIRE(EchoTests::output_equals_lines(ran.output, { "5" }));
@@ -432,8 +430,7 @@ TEST_CASE("a plugin can use a class internally", "[dynlib]")
     INFO(plug.output);
     REQUIRE(plug.exit_code == 0);
 
-    const ProcessResult ran = build_and_run_host(project,
-        open_plugin(plugin_image(project)) + call_i32("boxed"));
+    const ProcessResult ran = build_and_run_host(project, open_plugin(plugin_image(project)) + call_i32("boxed"));
     INFO(ran.output);
     REQUIRE(ran.exit_code == 0);
     REQUIRE(EchoTests::output_equals_lines(ran.output, { "7" }));
@@ -688,4 +685,3 @@ TEST_CASE("a binding keeps the image loaded after the library local is gone", "[
     REQUIRE(ran.exit_code == 0);
     REQUIRE(ran.output.find("5") != std::string::npos);
 }
-

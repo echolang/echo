@@ -1,13 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "Compiler/CodegenTarget.h"
-#include "Compiler/HostTool.h"
-
 #include <filesystem>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "Compiler/CodegenTarget.h"
+#include "Compiler/HostTool.h"
 #include "subprocess.h"
 
 // what `#[target:]` promises: that a module can hold several programs, that only the one being built runs,

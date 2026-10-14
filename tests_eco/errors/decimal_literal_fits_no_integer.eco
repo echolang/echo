@@ -1,0 +1,7 @@
+// a decimal spelling no integer type holds is refused where it is written. it used to reach codegen,
+// where reading it threw out of the compiler. the enum case value goes through the same gate
+
+echo 18446744073709551616;
+echo -9223372036854775809;
+
+enum E : int64 { case a = 99999999999999999999; }

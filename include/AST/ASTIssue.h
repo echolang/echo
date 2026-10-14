@@ -180,15 +180,12 @@ namespace AST
         MAKE_UNCODED_ISSUE_DEF(GenericWarning, IssueSeverity::Warning);
         MAKE_UNCODED_ISSUE_DEF(GenericInfo, IssueSeverity::Info);
 
-        MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual,
-            std::string primary_label() const override;);
-        MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration,
-            std::vector<IssueLabel> labels() const override;);
+        MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual, std::string primary_label() const override;);
+        MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration, std::vector<IssueLabel> labels() const override;);
         // a second declaration of a type name that is already declared in this namespace. carries a
         // name and the previous declaration's token rather than a TypeDeclNode *, so a `class` or
         // an `enum` can reuse the kind unchanged - hence the type-neutral name
-        MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token,
-            std::vector<IssueLabel> labels() const override;);
+        MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token, std::vector<IssueLabel> labels() const override;);
         MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
         MAKE_ISSUE_DEF1(UnknownFunction, IssueSeverity::Error, const std::string, function_name);
         // a bare identifier in an operand position that names no constant. its own kind rather than a
@@ -199,8 +196,7 @@ namespace AST
         // `{twice($n)}` or `{LIMIT}` in a `"` string. a hole opens only on `{$`, so these used to
         // print as source text with no diagnostic - which is how every sampler hashed the same key.
         // the snippet is the `{...}` that looked like a hole; the help is the bind, never `{$LIMIT}`
-        MAKE_ISSUE_DEF1(InterpolationWithoutDollar, IssueSeverity::Error, const std::string, snippet,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(InterpolationWithoutDollar, IssueSeverity::Error, const std::string, snippet, std::vector<IssueNote> notes() const override;);
 
         MAKE_ISSUE_DEF1(UnknownUse, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(DuplicateUse, IssueSeverity::Error, const std::string, _message);
@@ -221,15 +217,13 @@ namespace AST
         // the same shape as UnknownMember on purpose: "no such member" and "no such static" are one
         // kind of mistake on two axes, and a reader who wrote the wrong one of `->` and `::` needs the
         // two messages to look alike enough to see which they got
-        MAKE_ISSUE_DEF2(UnknownStaticFunction, IssueSeverity::Error, const std::string, function_name, const std::string, type_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(UnknownStaticFunction, IssueSeverity::Error, const std::string, function_name, const std::string, type_name, std::vector<IssueNote> notes() const override;);
         // `T(...)` after substitution named a type that has no constructors - a primitive, an
         // interface, or a type whose implicit constructor was refused (a private field without a
         // default) and that wrote none of its own. its own kind because UnknownFunction would name
         // the type-parameter token (`T`)
         // rather than the type it became, and the remedy is not "declare a function of that name"
-        MAKE_ISSUE_DEF1(CannotConstructType, IssueSeverity::Error, const std::string, type_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(CannotConstructType, IssueSeverity::Error, const std::string, type_name, std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(ArgumentTypeMismatch, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvedTypeParameter, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnsatisfiedTypeConstraint, IssueSeverity::Error, const std::string, _message);
@@ -248,8 +242,7 @@ namespace AST
         // because the first site is a *label*: the sentence says the name is taken, and the
         // collector's dedup key is that sentence - so a second location folded into the English
         // would make two clashes at one line read as one
-        MAKE_ISSUE_DEF2(DuplicateExportName, IssueSeverity::Error, const std::string, export_name, const TokenReference, first_declaration,
-            std::vector<IssueLabel> labels() const override;);
+        MAKE_ISSUE_DEF2(DuplicateExportName, IssueSeverity::Error, const std::string, export_name, const TokenReference, first_declaration, std::vector<IssueLabel> labels() const override;);
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
 
@@ -276,73 +269,64 @@ namespace AST
         MAKE_ISSUE_DEF1(InitReadsUnassignedField, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(DerivedFieldHasDefault, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(DuplicateParameterLabel, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ParameterNeedsType, IssueSeverity::Error, const std::string, _message);
 
         // two `test` blocks of one name in one file. its own kind rather than DuplicateFunctionSignature's
         // second reading, because a test is in no overload set: that message talks about a signature and a
         // candidate, and here there is neither - only a name that has to be unique somewhere, and the
         // *somewhere* is the file rather than the module, which is the half worth saying
-        MAKE_ISSUE_DEF1(DuplicateTestName, IssueSeverity::Error, const std::string, test_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(DuplicateTestName, IssueSeverity::Error, const std::string, test_name, std::vector<IssueNote> notes() const override;);
 
         // a `.f(...)` that nothing gave an owner to. its own kind because the remedy is not "fix the
         // name" but "say where this value goes" - a reader shown UnknownFunction here goes looking for
         // a declaration that exists, under a type they were not told to name
-        MAKE_ISSUE_DEF1(UnboundShorthandCall, IssueSeverity::Error, const std::string, function_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(UnboundShorthandCall, IssueSeverity::Error, const std::string, function_name, std::vector<IssueNote> notes() const override;);
 
         // an overload set that cannot be chosen between *because* an argument is an unbound shorthand.
         // its own kind rather than AmbiguousCall's second reading, because AmbiguousCall's remedy is
         // "an explicit cast on the argument picks one" - and a shorthand has no type to cast from, so
         // the one thing that message tells the reader to do is the one thing they cannot
-        MAKE_ISSUE_DEF1(AmbiguousShorthandCall, IssueSeverity::Error, const std::string, _message,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(AmbiguousShorthandCall, IssueSeverity::Error, const std::string, _message, std::vector<IssueNote> notes() const override;);
 
         // `static` written where no type owns the declaration. its own kind rather than a GenericError
         // because the remedy is structural - the declaration has to move inside a type - and a tool that
         // can offer that wants to know which diagnostic it is looking at
-        MAKE_ISSUE_DEF1(StaticOutsideType, IssueSeverity::Error, const std::string, function_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(StaticOutsideType, IssueSeverity::Error, const std::string, function_name, std::vector<IssueNote> notes() const override;);
 
         // `const static function`. its own kind because the two modifiers are not redundant, they
         // contradict: `const` qualifies a receiver and a static has none, so neither one is the mistake
         // on its own and a message about either alone would be wrong
-        MAKE_ISSUE_DEF1(ConstOnStaticFunction, IssueSeverity::Error, const std::string, function_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(ConstOnStaticFunction, IssueSeverity::Error, const std::string, function_name, std::vector<IssueNote> notes() const override;);
 
         // a `T&` formed from a raw address outside an `unsafe` block. its own kind because it is *the*
         // semantic boundary of the type model: a borrow's type is a contract every later access is
         // optimized against, and this is the one place a program can assert that contract over storage
         // the compiler cannot check
-        MAKE_ISSUE_DEF1(UnsafePromotion, IssueSeverity::Error, const std::string, borrow_type,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(UnsafePromotion, IssueSeverity::Error, const std::string, borrow_type, std::vector<IssueNote> notes() const override;);
 
         // ptr<T> <-> extern function<...> outside `unsafe`. its own kind because the promise is
         // a typed callable, not a T& whose later accesses carry a type family. rewording
         // UnsafePromotion would move every promotion golden for a sentence that is a lie here
-        MAKE_ISSUE_DEF2(UnsafeFunctionPointerCast, IssueSeverity::Error, const std::string, from_type, const std::string, to_type,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(UnsafeFunctionPointerCast, IssueSeverity::Error, const std::string, from_type, const std::string, to_type, std::vector<IssueNote> notes() const override;);
 
         // `assume<T>` outside `unsafe`. its own kind because the recovery is a promise the type
         // system cannot check, which is a different question from UnsafePromotion's raw-storage
         // borrow. the sentence is the diagnostic; the remedy lives in notes() so the collector's
         // dedup key is the message alone
-        MAKE_ISSUE_DEF1(AssumeRequiresUnsafe, IssueSeverity::Error, const std::string, _message,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(AssumeRequiresUnsafe, IssueSeverity::Error, const std::string, _message, std::vector<IssueNote> notes() const override;);
 
         // `abi::bind_unchecked` outside `unsafe`. its own kind because the seat
         // is a promise the type system cannot check, the same question
         // AssumeRequiresUnsafe answers for `assume`, and a shared kind would
         // make the json code a lie for one of them
-        MAKE_ISSUE_DEF1(BindUncheckedRequiresUnsafe, IssueSeverity::Error, const std::string, _message,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(BindUncheckedRequiresUnsafe, IssueSeverity::Error, const std::string, _message, std::vector<IssueNote> notes() const override;);
 
         // top-level code in a file that is no target's entry. its own kind because it is the diagnostic
         // that makes `#[target:]` mean something: a module declaring targets shares every non-entry file
         // between all of them, so code at the root of one would be checked and then emitted into no
         // program at all. That is what a non-entry *module's* file root has always silently got, and a
         // manifest naming its entries is the one place there is enough said to refuse it instead
-        MAKE_ISSUE_DEF2(TopLevelCodeOutsideEntry, IssueSeverity::Error, const std::string, module_name, const std::string, file_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(TopLevelCodeOutsideEntry, IssueSeverity::Error, const std::string, module_name, const std::string, file_name, std::vector<IssueNote> notes() const override;);
 
         // a `private` property reached from outside the type that declared it. its own kind because it
         // is the diagnostic that makes an invariant enforceable rather than merely documented - every
@@ -352,8 +336,7 @@ namespace AST
         // UnknownStaticFunction beside it, and its own kind for the same reason: the search was of
         // a type's static storage and not of any namespace, so neither UnknownVariable nor
         // UnknownMember is describing what was actually looked for
-        MAKE_ISSUE_DEF2(UnknownStaticProperty, IssueSeverity::Error, const std::string, property_name, const std::string, type_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(UnknownStaticProperty, IssueSeverity::Error, const std::string, property_name, const std::string, type_name, std::vector<IssueNote> notes() const override;);
 
         // a `private` **method** called from outside the type that declared it. a kind of its own rather
         // than PrivateMember's second reading, for two reasons that are the same reason: the advice
@@ -371,8 +354,7 @@ namespace AST
         //
         // `declared_in` still travels: visibility's module axis reads it, and a token-less origin
         // (a compiler-minted declaration) has no label to draw
-        MAKE_ISSUE_DEF3(InaccessibleDeclaration, IssueSeverity::Error, const std::string, _message, const DeclarationOrigin, declared_in, const std::optional<TokenReference>, declaration_token,
-            std::vector<IssueLabel> labels() const override;);
+        MAKE_ISSUE_DEF3(InaccessibleDeclaration, IssueSeverity::Error, const std::string, _message, const DeclarationOrigin, declared_in, const std::optional<TokenReference>, declaration_token, std::vector<IssueLabel> labels() const override;);
 
         // two arguments of one call name overlapping storage, and at least one of them is written
         // through. its own kind rather than a GenericError because it is the diagnostic that makes an
@@ -391,8 +373,7 @@ namespace AST
         // `&` / `:$` / `weak(...)` of something that is not a place
         MAKE_ISSUE_DEF1(AddressOfTemporary, IssueSeverity::Error, const std::string, _message);
         // address or increment of a member of a temporary
-        MAKE_ISSUE_DEF2(TemporaryMember, IssueSeverity::Error, const std::string, _message, const std::string, remedy,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(TemporaryMember, IssueSeverity::Error, const std::string, _message, const std::string, remedy, std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(AssignToNonPlace, IssueSeverity::Error, const std::string, _message);
 
         MAKE_ISSUE_DEF1(UseAfterMove, IssueSeverity::Error, const std::string, _message);
@@ -401,8 +382,7 @@ namespace AST
         // `mv` of a value that is already a temporary - a call result, not a field
         MAKE_ISSUE_DEF1(MoveOfTemporary, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(MoveRequired, IssueSeverity::Error, const std::string, _message);
-        MAKE_ISSUE_DEF2(CannotCopy, IssueSeverity::Error, const std::string, _message, const std::string, remedy,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(CannotCopy, IssueSeverity::Error, const std::string, _message, const std::string, remedy, std::vector<IssueNote> notes() const override;);
 
         MAKE_ISSUE_DEF1(NotIterable, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(ForeachBinding, IssueSeverity::Error, const std::string, _message);
@@ -422,8 +402,7 @@ namespace AST
 
         // a name the compiler does not read, at the name. the sentence is the diagnostic; a bare
         // `core` / `builtin` / `intrinsic` carries a note so the message stays the dedup key
-        MAKE_ISSUE_DEF2(UnknownAttribute, IssueSeverity::Error, const std::string, _message, const std::string, written_name,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(UnknownAttribute, IssueSeverity::Error, const std::string, _message, const std::string, written_name, std::vector<IssueNote> notes() const override;);
 
         // a manifest name written in a source file. its own kind because the recovery is "put it
         // in a module.eco", which is a different sentence from "unknown attribute"
@@ -442,8 +421,7 @@ namespace AST
         MAKE_ISSUE_DEF1(InvalidManifestScope, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(EmptySourcePattern, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvableDependency, IssueSeverity::Error, const std::string, _message);
-        MAKE_ISSUE_DEF2(PackageNotVendored, IssueSeverity::Error, const std::string, _message, bool, on_path_dependency,
-            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF2(PackageNotVendored, IssueSeverity::Error, const std::string, _message, bool, on_path_dependency, std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(DuplicateModuleName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(ModuleDependencyCycle, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(NoSuchManifest, IssueSeverity::Error, const std::string, _message);

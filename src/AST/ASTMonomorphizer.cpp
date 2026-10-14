@@ -74,10 +74,7 @@ namespace AST
 
         case InstantiationBlame::t_argument_count:
             _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
-                fmt::format("Argument count mismatch for generic function '{}': it takes {}, {} given",
-                    tmpl->func_name(),
-                    tmpl->args.size() - tmpl->implicit_arg_count(),
-                    call->arguments.size() - tmpl->implicit_arg_count()));
+                fmt::format("Argument count mismatch for generic function '{}': it takes {}, {} given", tmpl->func_name(), tmpl->args.size() - tmpl->implicit_arg_count(), call->arguments.size() - tmpl->implicit_arg_count()));
             is_error = true;
             return std::nullopt;
 

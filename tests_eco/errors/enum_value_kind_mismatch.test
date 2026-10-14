@@ -1,0 +1,30 @@
+expect: fail
+
+--- OUT --->
+[error] enum_value_kind_mismatch.eco:1:35
+
+  'Unit' is backed by 'string', so a case's value has to be a string literal.
+
+  1 | enum Unit : string { case meter = 3; }
+    :                                   ^
+  2 | enum Code : int32 { case ok = "ok"; }
+
+[error] enum_value_kind_mismatch.eco:2:31
+
+  'Code' is backed by 'int32', so a case's value has to be an integer literal.
+
+  1 | enum Unit : string { case meter = 3; }
+  2 | enum Code : int32 { case ok = "ok"; }
+    :                               ^^^^
+  3 | enum Plain { case a = 1; }
+
+[error] enum_value_kind_mismatch.eco:3:23
+
+  'Plain' has no backing type, so a case cannot carry a value - write `enum Plain : int32` or `enum Plain : string`.
+
+  2 | enum Code : int32 { case ok = "ok"; }
+  3 | enum Plain { case a = 1; }
+    :                       ^
+  4 | 
+
+3 errors, nothing was compiled.

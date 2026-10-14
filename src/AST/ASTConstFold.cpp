@@ -707,7 +707,7 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             const Token::Type op = binary.op_node->op->type;
             const std::string &spelling = binary.op_node->op->spelling;
 
-            if (op == Token::Type::t_logical_and || op == Token::Type::t_logical_or) {
+            if (binary_skips_rhs(op)) {
                 if (!is_foldable_bool(folded_at)) {
                     return ConstFoldResult::refused(fmt::format(
                         "'{}' joins two 'bool's, and these are '{}'.",

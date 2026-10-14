@@ -145,7 +145,8 @@ namespace Compiler::LLVM
         llvm::CallInst *emit_call(
             llvm::FunctionCallee callee,
             std::vector<llvm::Value *> &args,
-            const ReturnAbi &abi);
+            const ReturnAbi &abi
+        );
 
         // the llvm::Function a declaration was emitted as, declared into this unit
         // on demand. null when nothing was emitted for it; the caller phrases the diagnostic

@@ -159,7 +159,9 @@ namespace EchoTests
     // the captured stream is exactly these lines, in order. reopen / two-call
     // cases need the sequence, not that each digit appears somewhere
     inline bool output_equals_lines(
-        const std::string &output, std::initializer_list<std::string> want)
+        const std::string &output,
+        std::initializer_list<std::string> want
+    )
     {
         std::vector<std::string> lines;
         std::istringstream stream(output);

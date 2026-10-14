@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] init_on_a_variable.eco:10:6
 
-  'mem::init' can only fill storage reached through a pointer, such as an element of a buffer you allocated. This destination is a variable, a property or a temporary, and something already owes whatever it holds a teardown - so initializing it here would leak that value. Write an ordinary '=', which ends the old value before storing the new one.
+  'mem::init' can only fill storage reached through a pointer, such as an element of a buffer you allocated. This destination is a variable, a borrow of one, a property or a temporary, and something already owes whatever it holds a teardown - so initializing it here would leak that value. Write an ordinary '=', which ends the old value before storing the new one.
 
    9 | 
   10 | mem::init<string>($s, $v);

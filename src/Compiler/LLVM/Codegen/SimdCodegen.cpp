@@ -310,8 +310,7 @@ namespace Compiler::LLVM
                         n, _ctx.function_context()));
                 }
 
-                static_assert(AST::k_simd_max_bytes == 16,
-                    "simd::bitmask's wide path splits 16 lanes; a wider cap needs a new lowering");
+                static_assert(AST::k_simd_max_bytes == 16, "simd::bitmask's wide path splits 16 lanes; a wider cap needs a new lowering");
 
                 llvm::Type *i8 = llvm::Type::getInt8Ty(ll);
                 auto *bytes_ty = llvm::FixedVectorType::get(i8, n);

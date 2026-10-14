@@ -4,7 +4,6 @@
 #include "eco.h"
 
 #include <llvm/ADT/DenseMap.h>
-#include <llvm/ADT/DenseSet.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -30,7 +29,8 @@ struct StableHash
 {
     uint64_t digest = Compiler::k_fnv_offset_basis;
     llvm::DenseMap<const llvm::Type *, unsigned> type_ids;
-    llvm::DenseSet<const llvm::Constant *> const_seen;
+    llvm::DenseMap<const llvm::Constant *, uint64_t> const_ids;
+    llvm::DenseMap<const llvm::Metadata *, uint64_t> md_ids;
 
     void fold_bytes(const void *data, size_t length)
     {
@@ -104,7 +104,7 @@ struct StableHash
 
         if (auto *structure = llvm::dyn_cast<llvm::StructType>(type)) {
             if (structure->isOpaque()) {
-                fold_u64(1);
+                fold_u64(2);
                 fold_str(structure->getName());
                 return;
             }
@@ -127,12 +127,17 @@ struct StableHash
             return;
         }
 
-        if (!const_seen.insert(constant).second) {
+        auto found = const_ids.find(constant);
+        if (found != const_ids.end()) {
             fold_u64(1);
+            fold_u64(found->second);
             return;
         }
 
+        const uint64_t id = const_ids.size() + 1;
+        const_ids[constant] = id;
         fold_u64(2);
+        fold_u64(id);
         fold_u64(constant->getValueID());
         fold_type(constant->getType());
 
@@ -190,17 +195,22 @@ struct StableHash
         }
     }
 
-    void fold_md(const llvm::Metadata *metadata, llvm::DenseSet<const llvm::Metadata *> &seen)
+    void fold_md(const llvm::Metadata *metadata)
     {
         if (metadata == nullptr) {
             fold_u64(0);
             return;
         }
 
-        if (!seen.insert(metadata).second) {
+        auto found = md_ids.find(metadata);
+        if (found != md_ids.end()) {
             fold_u64(1);
+            fold_u64(found->second);
             return;
         }
+
+        const uint64_t id = md_ids.size() + 1;
+        md_ids[metadata] = id;
 
         if (auto *text = llvm::dyn_cast<llvm::MDString>(metadata)) {
             fold_u64(2);
@@ -223,7 +233,7 @@ struct StableHash
             fold_u64(node->getNumOperands());
 
             for (const llvm::MDOperand &operand : node->operands()) {
-                fold_md(operand.get(), seen);
+                fold_md(operand.get());
             }
         }
     }
@@ -408,8 +418,7 @@ struct StableHash
 
                 for (const auto &item : attached) {
                     fold_u64(item.first);
-                    llvm::DenseSet<const llvm::Metadata *> seen;
-                    fold_md(item.second, seen);
+                    fold_md(item.second);
                 }
             }
         }

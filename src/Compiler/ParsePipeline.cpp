@@ -134,10 +134,9 @@ namespace
         }
 
         for (AST::File &file : module->files()) {
-            const bool is_an_entry = std::any_of(manifest.targets.begin(), manifest.targets.end(),
-                [&file](const Parser::ModuleTarget &target) {
-                    return target.entry == file.get_path();
-                });
+            const bool is_an_entry = std::any_of(manifest.targets.begin(), manifest.targets.end(), [&file](const Parser::ModuleTarget &target) {
+                return target.entry == file.get_path();
+            });
 
             const bool is_scoped = !std::binary_search(
                 manifest.sources.begin(), manifest.sources.end(), file.get_path());

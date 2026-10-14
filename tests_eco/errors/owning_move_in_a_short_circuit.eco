@@ -1,0 +1,42 @@
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+class Sink
+{
+    function eat(mv Buffer $b) : bool { return true; }
+}
+
+function eat(mv Buffer $b) : bool { return true; }
+
+function fallback(mv Buffer $b) : Sink { return Sink(); }
+
+function either(bool $c) : void
+{
+    Buffer $or = Buffer(mem::alloc<uint8>(1));
+    if ($c || eat(mv $or)) {}
+}
+
+function both(bool $c) : void
+{
+    Buffer $and = Buffer(mem::alloc<uint8>(1));
+    if ($c && eat(mv $and)) {}
+}
+
+function coalesced(Sink? $s) : void
+{
+    Buffer $absent = Buffer(mem::alloc<uint8>(1));
+    Sink $got = $s ?? fallback(mv $absent);
+}
+
+function chained(Sink? $s) : void
+{
+    Buffer $present = Buffer(mem::alloc<uint8>(1));
+    bool? $ate = $s?->eat(mv $present);
+}

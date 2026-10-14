@@ -9,7 +9,7 @@
 namespace AST
 {
     class TypeNode;
-}
+};
 
 namespace Parser
 {

@@ -13,6 +13,7 @@
 #include "Parser/TypeParser.h"
 
 #include <algorithm>
+#include <charconv>
 #include <fmt/core.h>
 #include <vector>
 
@@ -164,7 +165,24 @@ Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
     if (cursor.is_type(Token::Type::t_open_paren) && cursor.peek_is_type(1, Token::Type::t_integer_literal)) {
         cursor.skip(); // `(`
 
-        header.precedence = std::stoi(cursor.current().value());
+        // from_chars rather than stoi, which throws on a number past `int`. zero is AST::OpPrecedence's
+        // "not an operator", so a tier is positive. refused, the clause still parses and the operator
+        // keeps the default tier, so the rest of the declaration is checked as written
+        const std::string &written = cursor.current().value();
+        int tier = 0;
+        const auto [end, error] = std::from_chars(written.data(), written.data() + written.size(), tier);
+
+        if (error != std::errc() || end != written.data() + written.size() || tier <= 0) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                fmt::format(
+                    "'{}' is not a precedence - write a positive tier on the operator table's scale, where "
+                    "'*' is 40 and '+' is 50.",
+                    written));
+        } else {
+            header.precedence = tier;
+        }
+
         cursor.skip();
 
         if (cursor.is_type(Token::Type::t_comma)) {
@@ -461,8 +479,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
             interface_owner = payload.context.self_struct_ptr;
         }
         else if (payload.context.self_struct_ptr->complex_type().is_extern_interface_kind()) {
-            return refuse(operator_token,
-                "An extern interface cannot declare an operator - a slot is a C function, not a symbol.");
+            return refuse(operator_token, "An extern interface cannot declare an operator - a slot is a C function, not a symbol.");
         }
         else {
             return refuse(operator_token,
@@ -543,8 +560,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
         cursor.restore(*header.index_params);
         cursor.skip(); // `[`
 
-        if (!parse_parameter_list(payload, rebuilt, funcscope, operator_token,
-                Token::Type::t_close_bracket)) {
+        if (!parse_parameter_list(payload, rebuilt, funcscope, operator_token, Token::Type::t_close_bracket)) {
             funcdecl->replace_args(std::move(rebuilt));
             return nullptr;
         }
@@ -781,9 +797,13 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
             operands.push_back(AST::OperandFacts{AST::value_type_of(type)});
         }
 
-        const bool builtin_wins = header.fixity == AST::OpFixity::t_infix
+        const bool operand_unknown = std::any_of(operands.begin(), operands.end(), [](const AST::OperandFacts &facts) {
+            return facts.type.is_unknown();
+        });
+
+        const bool builtin_wins = !operand_unknown && (header.fixity == AST::OpFixity::t_infix
             ? AST::binary_has_builtin_meaning(op, operands[0], operands[1])
-            : AST::unary_has_builtin_meaning(op, operands[0]);
+            : AST::unary_has_builtin_meaning(op, operands[0]));
 
         if (builtin_wins) {
             // **a bare type parameter is the same refusal with a different reason.** the predicate
@@ -792,8 +812,9 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
             // not what a reader wrote. an unconstrained operator over a type parameter would have
             // to be chosen per instantiation, and the symbol is one global set with no receiver
             // to key on
-            const bool over_bare_param = std::any_of(operands.begin(), operands.end(),
-                [](const AST::OperandFacts &facts) { return facts.type.is_type_param(); });
+            const bool over_bare_param = std::any_of(operands.begin(), operands.end(), [](const AST::OperandFacts &facts) {
+                return facts.type.is_type_param();
+            });
 
             // **a generic application of a named type is the spelling that refusal already
             // recommends.** `binary_has_builtin_meaning` answers true for any type that still
@@ -801,10 +822,9 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
             // otherwise be refused as stealing a builtin even though that is exactly
             // `operator (Vec<T> $a) + (Vec<T> $b)`. a `ptr<T>` or `simd<T, N>` is not this: those
             // are not a named type, and their builtin meaning really does win
-            const bool named_generic = std::any_of(operands.begin(), operands.end(),
-                [](const AST::OperandFacts &facts) {
-                    return facts.type.has_complex_type() && AST::contains_type_param(facts.type);
-                });
+            const bool named_generic = std::any_of(operands.begin(), operands.end(), [](const AST::OperandFacts &facts) {
+                return facts.type.has_complex_type() && AST::contains_type_param(facts.type);
+            });
 
             if (over_bare_param) {
                 // a *constrained* template is not a claim on a primitive site. builtin meaning
@@ -864,10 +884,9 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // declaration would register and every single use site would report UnresolvedTypeParameter,
     // which is the same class of silent-until-used failure the built-in check above prevents
     for (const auto *param : funcdecl->type_parameters) {
-        const bool mentioned = std::any_of(funcdecl->args.begin(), funcdecl->args.end(),
-            [param](const AST::VarDeclNode *arg) {
-                return arg != nullptr && arg->has_type() && AST::contains_type_param(arg->type(), param);
-            });
+        const bool mentioned = std::any_of(funcdecl->args.begin(), funcdecl->args.end(), [param](const AST::VarDeclNode *arg) {
+            return arg != nullptr && arg->has_type() && AST::contains_type_param(arg->type(), param);
+        });
 
         if (!mentioned) {
             return refuse(*header.symbol_token,

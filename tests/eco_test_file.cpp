@@ -232,7 +232,8 @@ std::string EcoTestFile::compiler_flags(const std::filesystem::path &corpus_root
 
 std::filesystem::path EcoTestFile::linked_binary(
     const std::filesystem::path &scratch,
-    const std::filesystem::path &stem) const
+    const std::filesystem::path &stem
+) const
 {
     std::filesystem::path binary = scratch / stem;
     if (target == CorpusTarget::t_wasi) {
@@ -363,8 +364,7 @@ namespace
             return true;
         }
 
-        out_error = locate(origin, record.number,
-            "setting 'expect' must be 'ok', 'fail' or an exit status like '3', got: " + value);
+        out_error = locate(origin, record.number, "setting 'expect' must be 'ok', 'fail' or an exit status like '3', got: " + value);
         return false;
     }
 
@@ -398,8 +398,7 @@ namespace
             spellings += (spellings.empty() ? "'" : "' or '") + std::string(option.first);
         }
 
-        out_error = locate(origin, record.number,
-            "setting '" + key + "' must be " + spellings + "', got: " + value);
+        out_error = locate(origin, record.number, "setting '" + key + "' must be " + spellings + "', got: " + value);
         return false;
     }
 
@@ -459,8 +458,7 @@ namespace
             // spawn would fail in a way that names neither this file nor this line
             for (const std::string &pair : out_file.environment) {
                 if (pair.find('=') == std::string::npos) {
-                    out_error = locate(origin, record.number,
-                        "setting 'env' takes KEY=VALUE pairs, got: " + pair);
+                    out_error = locate(origin, record.number, "setting 'env' takes KEY=VALUE pairs, got: " + pair);
                     return false;
                 }
             }
@@ -501,8 +499,7 @@ namespace
             const auto [ptr, ec] = std::from_chars(first, last, parsed);
 
             if (ec != std::errc() || ptr != last) {
-                out_error = locate(origin, record.number,
-                    "setting 'timeout' takes a millisecond count, got: " + value);
+                out_error = locate(origin, record.number, "setting 'timeout' takes a millisecond count, got: " + value);
                 return false;
             }
 
@@ -515,8 +512,7 @@ namespace
             known += (known.empty() ? "" : ", ") + std::string(accepted);
         }
 
-        out_error = locate(origin, record.number,
-            "unknown setting '" + key + "', expected one of: " + known);
+        out_error = locate(origin, record.number, "unknown setting '" + key + "', expected one of: " + known);
         return false;
     }
 };
@@ -562,8 +558,7 @@ bool parse_eco_test_file(
         }
 
         if (looks_like_delimiter(line)) {
-            out_error = locate(origin, record.number,
-                "looks like a section header but is not: '" + line + "' (expected '--- NAME --->')");
+            out_error = locate(origin, record.number, "looks like a section header but is not: '" + line + "' (expected '--- NAME --->')");
             return false;
         }
     }
@@ -639,8 +634,7 @@ bool parse_eco_test_file(
                 known += std::string(", ") + dump_section_name(candidate);
             }
 
-            out_error = locate(origin, header.number,
-                "unknown section '" + name + "', expected one of: " + known);
+            out_error = locate(origin, header.number, "unknown section '" + name + "', expected one of: " + known);
             return false;
         }
 
@@ -650,8 +644,7 @@ bool parse_eco_test_file(
         }
 
         if (section.directives.empty()) {
-            out_error = locate(origin, header.number,
-                "section '" + name + "' has no directives - an empty check section asserts nothing");
+            out_error = locate(origin, header.number, "section '" + name + "' has no directives - an empty check section asserts nothing");
             return false;
         }
 

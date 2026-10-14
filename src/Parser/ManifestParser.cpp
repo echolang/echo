@@ -361,8 +361,7 @@ void read_manifest_targets(
         // **an untagged target is an executable**, so the tag is what a second kind will cost rather than
         // what the first one already does - the rule `#[depends:]`'s bare path follows
         if (entry->has_tag()
-            && !reader.tag(*entry, target_kind_table(), "target kind",
-                Compiler::scheme_list_of(target_kind_table()), kind)) {
+            && !reader.tag(*entry, target_kind_table(), "target kind", Compiler::scheme_list_of(target_kind_table()), kind)) {
             continue;
         }
 
@@ -1071,10 +1070,9 @@ bool resolve_manifest_targets(
         // **an allow-list, because the deny-list a binary name needs is not writable**: `..` holds no
         // character worth forbidding and still climbs out of the build directory, and `.`, `*` and a
         // newline are each a name some shell or some filesystem reads as something other than a word
-        if (target.name.empty() || !std::all_of(target.name.begin(), target.name.end(),
-                [](unsigned char c) {
-                    return std::isalnum(c) != 0 || c == '_' || c == '-';
-                })) {
+        if (target.name.empty() || !std::all_of(target.name.begin(), target.name.end(), [](unsigned char c) {
+            return std::isalnum(c) != 0 || c == '_' || c == '-';
+        })) {
             report_at<AST::Issue::UnusableTargetName>(into, target.line, fmt::format(
                 "'{}' is not a usable target name - it becomes the name of a binary, so it may hold "
                 "only letters, digits, '_' and '-'.", target.name));

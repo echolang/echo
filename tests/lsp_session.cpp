@@ -482,8 +482,7 @@ TEST_CASE("a struct literal of a module's type in a loose file is an error", "[l
     const Compiler::DriverOptions driver = lsp_driver();
     Compiler::Lsp::Session session(driver);
     session.set_workspace_root(project.root);
-    session.did_open(project.root / "loose/e.eco", 1,
-        "function e() : int32\n{\n    $p = m::P{ $a: 1 };\n    return 1;\n}\n");
+    session.did_open(project.root / "loose/e.eco", 1, "function e() : int32\n{\n    $p = m::P{ $a: 1 };\n    return 1;\n}\n");
     session.rebuild();
 
     REQUIRE(session.has_snapshot());

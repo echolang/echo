@@ -8,7 +8,7 @@
 
 #include "helpers.h"
 
-TEST_CASE( "implicit casting rules", "[Integration][Autocast][Expressions]" )
+TEST_CASE("implicit casting rules", "[Integration][Autocast][Expressions]")
 {
     // auto cast to float
     REQUIRE_NODE_DESC(

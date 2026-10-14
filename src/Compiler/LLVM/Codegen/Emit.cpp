@@ -8,6 +8,7 @@
 #include "Compiler/LLVM/Codegen/Partition.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/CompilationUnit.h"
+#include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/TargetSubtarget.h"
@@ -88,12 +89,6 @@ static bool run_isolated_emits(std::vector<IsolatedEmitRequest> &requests, unsig
     return true;
 }
 
-static bool partition_object_is_hit(const std::filesystem::path &path)
-{
-    std::error_code ec;
-    return std::filesystem::is_regular_file(path, ec) && std::filesystem::file_size(path, ec) > 0;
-}
-
 bool emit_unit_objects(
     CodegenContext &ctx,
     Backend &backend,
@@ -164,7 +159,7 @@ bool emit_unit_objects(
                     output.dest.parent_path() / ("p." + part.hex + ".o");
                 output.pieces.push_back(piece);
 
-                if (partition_object_is_hit(piece)) {
+                if (Compiler::cached_object_is_hit(piece)) {
                     continue;
                 }
 

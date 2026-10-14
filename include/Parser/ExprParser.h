@@ -5,6 +5,7 @@
 
 #include "Parser/ParserPayload.h"
 #include "AST/ExprNode.h"
+#include "AST/LiteralValueNode.h"
 #include "AST/StaticPropertyExprNode.h"
 
 #include <unordered_map>
@@ -13,6 +14,11 @@ namespace Parser
 {
     AST::ExprNode *parse_expr(Payload &payload, AST::TypeNode *expected_type = nullptr);
     const AST::NodeReference parse_expr_ref(Payload &payload, AST::TypeNode *expected_type = nullptr);
+
+    AST::LiteralIntExprNode *make_integer_literal(Payload &payload, const TokenReference &token);
+
+    AST::NodeReference apply_literal_typing(
+        Payload &payload, AST::ExprNode *literal, const AST::ValueType &destination);
 
     // parses a chain of `->member` accesses onto `base`, wrapping it in one
     // MemberAccessNode per level. returns `base` unchanged when there is no `->`.

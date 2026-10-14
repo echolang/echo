@@ -57,8 +57,11 @@ bool Parser::starts_const_expr(const Parser::Cursor &cursor)
 // this is the rule. apply_literal_typing_if_wanted is the operand-hint gate
 // (AST::can_type_a_literal); parse_expr_ref calls this directly so a bool destination
 // still types 0/1 and refuses everything else
-AST::NodeReference apply_literal_typing(
-    Parser::Payload &payload, AST::ExprNode *literal, const AST::ValueType &destination)
+AST::NodeReference Parser::apply_literal_typing(
+    Parser::Payload &payload,
+    AST::ExprNode *literal,
+    const AST::ValueType &destination
+)
 {
     const AST::LiteralTyping typing =
         AST::type_literal_at(literal, destination, payload.context.module.nodes);
@@ -86,7 +89,7 @@ AST::NodeReference apply_literal_typing_if_wanted(
         return AST::NodeReference(literal->get_node_type(), literal);
     }
 
-    return apply_literal_typing(payload, literal, expected_type->type);
+    return Parser::apply_literal_typing(payload, literal, expected_type->type);
 }
 
 // an interpolated string literal, cursor on its `t_string_interp_begin`. answers null having reported
@@ -224,41 +227,18 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
     return apply_literal_typing_if_wanted(payload, &node, expected_type);
 }
 
-/**
- * INTEGER LITERAL
- * ----------------------------------------------------------------------------
- *
- * Parse a integer literal and return a node reference to it.
- */
-const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
-{
-    auto &cursor = payload.cursor;
-    auto current_token = cursor.current();
-
-    // which width a bare integer defaults to is AST::LiteralIntExprNode's own question now - it used
-    // to be decided here and *stamped* as though a destination had chosen it, which is precisely what
-    // left every later rule unable to tell a default apart from an answer
-    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token);
-    cursor.skip();
-
-    return apply_literal_typing_if_wanted(payload, &node, expected_type);
-}
-
 // the decimal rendering of a `0x` or `0b` spelling, and the width its digit count defaults to.
 // **one function for the two**, because the only thing that differs is the base and the prefix - and
 // they had drifted already: the hex arm ignored its destination entirely, so `int32 $x = 0xFF;` was a
 // uint8 node and `uint8 $y = 0x1FF;` silently stored 255
-const AST::NodeReference parse_literal_radix(
+AST::LiteralIntExprNode *make_radix_literal(
     Parser::Payload &payload,
-    AST::TypeNode *expected_type,
+    const TokenReference &token,
     int base,
     size_t digits_per_byte
 )
 {
-    auto &cursor = payload.cursor;
-    auto current_token = cursor.current();
-
-    const std::string spelling = current_token.value();
+    const std::string spelling = token.value();
     const size_t digits = spelling.length() - 2;  // the `0x` / `0b` prefix
 
     // the width the *spelling* asks for, which is a default and not a choice: a destination still
@@ -274,7 +254,7 @@ const AST::NodeReference parse_literal_radix(
     }
 
     auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(
-        current_token, AST::LiteralIntExprNode::DefaultWidth { width });
+        token, AST::LiteralIntExprNode::DefaultWidth { width });
 
     // everything downstream reads a literal's value as decimal, so the radix spelling is carried in
     // the override the way an autocast's rewritten value is
@@ -284,40 +264,72 @@ const AST::NodeReference parse_literal_radix(
     }
     catch (const std::exception &) {
         payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
-            payload.context.code_ref(current_token),
+            payload.context.code_ref(token),
             fmt::format(
                 "The literal '{}' does not fit any integer type - the largest is 'uint64'.",
                 spelling));
 
-        cursor.skip();
+        return nullptr;
+    }
+
+    return &node;
+}
+
+AST::LiteralIntExprNode *Parser::make_integer_literal(Parser::Payload &payload, const TokenReference &token)
+{
+    if (token.type() == Token::Type::t_hex_literal) {
+        return make_radix_literal(payload, token, 16, 2);
+    }
+
+    if (token.type() == Token::Type::t_binary_literal) {
+        return make_radix_literal(payload, token, 2, 8);
+    }
+
+    // which width a bare integer defaults to is AST::LiteralIntExprNode's own question now - it used
+    // to be decided here and *stamped* as though a destination had chosen it, which is precisely what
+    // left every later rule unable to tell a default apart from an answer.
+    //
+    // a spelling no integer type holds is refused here rather than minted, because there is no width to
+    // mint it at and codegen would read it with a `stoull` that throws
+    if (!AST::LiteralIntExprNode::decimal_width(token.value()).has_value()) {
+        const bool negative = !token.value().empty() && token.value().front() == '-';
+
+        payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+            payload.context.code_ref(token),
+            negative
+                ? fmt::format(
+                    "The literal '{}' does not fit any integer type - the smallest is 'int64', whose minimum "
+                    "is '{}'.",
+                    token.value(),
+                    AST::get_integer_size(AST::ValueTypePrimitive::t_int64).get_max_negative_value())
+                : fmt::format(
+                    "The literal '{}' does not fit any integer type - the largest is 'uint64'.",
+                    token.value()));
+
+        return nullptr;
+    }
+
+    return &payload.context.emplace_node<AST::LiteralIntExprNode>(token);
+}
+
+/**
+ * INTEGER LITERAL
+ * ----------------------------------------------------------------------------
+ *
+ * Parse a integer literal and return a node reference to it.
+ */
+const AST::NodeReference parse_literal_integer(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto &cursor = payload.cursor;
+
+    AST::LiteralIntExprNode *node = Parser::make_integer_literal(payload, cursor.current());
+    cursor.skip();
+
+    if (node == nullptr) {
         return AST::make_void_ref();
     }
 
-    cursor.skip();
-
-    return apply_literal_typing_if_wanted(payload, &node, expected_type);
-}
-
-/**
- * HEX LITERAL
- * ----------------------------------------------------------------------------
- *
- * Parse a hex literal and return a node reference to it.
- */
-const AST::NodeReference parse_literal_hex(Parser::Payload &payload, AST::TypeNode *expected_type)
-{
-    return parse_literal_radix(payload, expected_type, 16, 2);
-}
-
-/**
- * BINARY LITERAL
- * ----------------------------------------------------------------------------
- *
- * Parse a binary literal and return a node reference to it.
- */
-const AST::NodeReference parse_literal_binary(Parser::Payload &payload, AST::TypeNode *expected_type)
-{
-    return parse_literal_radix(payload, expected_type, 2, 8);
+    return apply_literal_typing_if_wanted(payload, node, expected_type);
 }
 
 /**
@@ -1606,16 +1618,8 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return parse_literal_float(payload, expected_type);
     }
 
-    else if (cursor.is_type(Token::Type::t_integer_literal)) {
-        return parse_literal_int(payload, expected_type);
-    }
-
-    else if (cursor.is_type(Token::Type::t_hex_literal)) {
-        return parse_literal_hex(payload, expected_type);
-    }
-
-    else if (cursor.is_type(Token::Type::t_binary_literal)) {
-        return parse_literal_binary(payload, expected_type);
+    else if (AST::token_is_integer_literal(cursor.current().type())) {
+        return parse_literal_integer(payload, expected_type);
     }
 
     else if (cursor.is_type(Token::Type::t_bool_literal)) {
@@ -2539,8 +2543,7 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         if (expr_parts[0].opnode != nullptr) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(expr_parts[0].opnode->token_literal),
-                fmt::format("'{}' has no operand - an expression was expected after it.",
-                    expr_parts[0].opnode->op->spelling));
+                fmt::format("'{}' has no operand - an expression was expected after it.", expr_parts[0].opnode->op->spelling));
 
             return AST::make_void_ref();
         }

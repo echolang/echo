@@ -577,8 +577,7 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
         if (nested == nullptr) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(name_token),
-                fmt::format("'{}' has no nested type '{}'.",
-                    owner->namespaced_type_name(), name_token.value()));
+                fmt::format("'{}' has no nested type '{}'.", owner->namespaced_type_name(), name_token.value()));
 
             cursor.restore(start);
             return nullptr;
