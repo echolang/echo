@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "Compiler/CodegenTarget.h"
 #include "Compiler/ModuleCache.h"
 #include "subprocess.h"
 
@@ -12,9 +13,22 @@
 
 namespace
 {
+    std::filesystem::path runner_path(const EchoTests::ScopedProject &project)
+    {
+        return Compiler::CodegenTarget{}.output_path(
+            project.root() / "ecobuild" / "scratch" / "eco_run");
+    }
+
+    std::filesystem::path runner_link_record(const EchoTests::ScopedProject &project)
+    {
+        std::filesystem::path record = runner_path(project);
+        record += ".link";
+        return record;
+    }
+
     std::filesystem::file_time_type runner_time(const EchoTests::ScopedProject &project)
     {
-        return std::filesystem::last_write_time(project.root() / "ecobuild" / "scratch" / "eco_run");
+        return std::filesystem::last_write_time(runner_path(project));
     }
 }
 
@@ -27,6 +41,7 @@ TEST_CASE("an unchanged run keeps its runner, and an edit relinks it", "[cli][ca
     const EchoTests::ProcessResult first = project.echoc("run");
     REQUIRE(first.exit_code == 0);
     REQUIRE(first.output.find("one") != std::string::npos);
+    REQUIRE(std::filesystem::exists(runner_link_record(project)));
 
     const auto linked = runner_time(project);
 
@@ -50,7 +65,7 @@ TEST_CASE("a run under -g always relinks, its debug map naming objects by mtime"
     EchoTests::write_file(project.root() / "main.eco", "echo 'one';\n");
 
     REQUIRE(project.echoc("run -g").exit_code == 0);
-    REQUIRE_FALSE(std::filesystem::exists(project.root() / "ecobuild" / "scratch" / "eco_run.link"));
+    REQUIRE_FALSE(std::filesystem::exists(runner_link_record(project)));
 }
 
 TEST_CASE("a link digest keys on the object path, so a same-path rewrite agrees", "[cache][link]")

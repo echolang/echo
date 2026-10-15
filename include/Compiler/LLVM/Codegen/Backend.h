@@ -145,7 +145,8 @@ namespace Compiler::LLVM
         // drifts without anybody noticing until a platform needs it
         //
         // `reuse_record`: keep the binary if the link line did not move. not under `-g`, and only when every
-        // library is a dynamic `runtime: process` one. keyed on the link command plus object paths
+        // library is a dynamic `runtime: process` one. keyed on the command that would run (host `ld` /
+        // `lld-link`, or the clang driver Linux always takes) plus object paths
         // (`Compiler::link_inputs_digest`); filenames already carry the content hex
         bool link_program(
             const std::string &program_name,

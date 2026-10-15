@@ -571,6 +571,54 @@ static bool link_is_reusable(const std::vector<Compiler::LinkRequirement> &link)
     });
 }
 
+static std::optional<std::string> link_reuse_digest(
+    const std::filesystem::path *reuse_record,
+    const std::vector<Compiler::LinkRequirement> &link,
+    bool emitting_debug_info,
+    const std::vector<std::string> &command,
+    const std::vector<std::filesystem::path> &objects
+)
+{
+    if (reuse_record == nullptr || !link_is_reusable(link) || emitting_debug_info) {
+        return std::nullopt;
+    }
+
+    return Compiler::link_inputs_digest(command, objects);
+}
+
+static bool link_reuse_hit(
+    const std::optional<std::string> &digest,
+    const std::filesystem::path *reuse_record,
+    const std::string &executable_name
+)
+{
+    return digest.has_value()
+        && Compiler::cached_object_is_hit(executable_name)
+        && Compiler::read_whole_file(*reuse_record) == digest;
+}
+
+static void drop_link_reuse_record(const std::filesystem::path *reuse_record)
+{
+    if (reuse_record == nullptr) {
+        return;
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(*reuse_record, ec);
+}
+
+static void store_link_reuse_record(
+    const std::filesystem::path *reuse_record,
+    const std::optional<std::string> &digest
+)
+{
+    if (!digest.has_value()) {
+        return;
+    }
+
+    std::ofstream(*reuse_record, std::ios::binary | std::ios::trunc) << digest.value();
+}
+
 bool Backend::link_program(
     const std::string &executable_name,
     const std::vector<std::filesystem::path> &objects,
@@ -589,34 +637,39 @@ bool Backend::link_program(
     std::vector<std::string> link_words;
     Compiler::partition_link_requirements(link, link_objects, link_words);
 
+    const bool debug_info = _ctx.options.emitting_debug_info();
+
+    const auto digest_of = [&](const std::vector<std::string> &command) {
+        return link_reuse_digest(reuse_record, link, debug_info, command, objects);
+    };
+
+    // drop first: the tool is about to truncate the binary, and a sidecar naming the old one would keep
+    // a half-written file if the process died between the two
+    const auto run_and_record = [&](const std::vector<std::string> &command, const std::optional<std::string> &digest) {
+        drop_link_reuse_record(reuse_record);
+
+        if (!Compiler::run_tool(command)) {
+            return false;
+        }
+
+        gen_debug_symbols(executable_name);
+        store_link_reuse_record(reuse_record, digest);
+        return true;
+    };
+
     // a cross-compile is not a Darwin ld -syslibroot of the Mac SDK. the clang
     // driver below is the one that knows `-target` / `-isysroot` for the row.
     // a native library is the other skip: those flags produce a command, and
     // clang -shared is the loadable-object recipe CBuild already trusts
     if (!_ctx.options.codegen.is_cross() && !_ctx.options.codegen.is_native_library()) {
         if (const auto command = host_linker_command(executable_name, objects, link_objects, link_words, _ctx.target_triple)) {
-            const std::optional<std::string> digest =
-                reuse_record != nullptr && link_is_reusable(link) && !_ctx.options.emitting_debug_info()
-                    ? Compiler::link_inputs_digest(command.value(), objects)
-                    : std::nullopt;
+            const std::optional<std::string> digest = digest_of(command.value());
 
-            if (digest.has_value() && Compiler::cached_object_is_hit(executable_name)
-                && Compiler::read_whole_file(*reuse_record) == digest) {
+            if (link_reuse_hit(digest, reuse_record, executable_name)) {
                 return true;
             }
 
-            if (reuse_record != nullptr) {
-                std::error_code ec;
-                std::filesystem::remove(*reuse_record, ec);
-            }
-
-            if (Compiler::run_tool(command.value())) {
-                gen_debug_symbols(executable_name);
-
-                if (digest.has_value()) {
-                    std::ofstream(*reuse_record, std::ios::binary | std::ios::trunc) << digest.value();
-                }
-
+            if (run_and_record(command.value(), digest)) {
                 return true;
             }
 
@@ -650,16 +703,18 @@ bool Backend::link_program(
         fallback.push_back(word);
     }
 
+    // Linux has no host_linker_command, so this is the command a `run` records. asked of this argv,
+    // not the one above: a hit on a Darwin `ld` line must not keep a binary the clang driver built
+    const std::optional<std::string> digest = digest_of(fallback);
+
+    if (link_reuse_hit(digest, reuse_record, executable_name)) {
+        return true;
+    }
+
     // **no message of its own.** Whichever tool ran has already said what went wrong, on the stderr it
     // inherited; naming which module asked for each requirement is the driver's to render, because that
     // sentence needs the DiagnosticRenderer and this layer has neither it nor a reason to grow one
-    if (!Compiler::run_tool(fallback)) {
-        return false;
-    }
-
-    gen_debug_symbols(executable_name);
-
-    return true;
+    return run_and_record(fallback, digest);
 }
 
 void Backend::gen_debug_symbols(const std::string &executable_name)
