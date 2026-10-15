@@ -188,6 +188,11 @@ private function collect_files(const string& $root, const string& $rel, array<st
         return;
     }
 
+    // `ecobuild/` is not the package: hashing it made every build a tampered tree
+    if (!$rel->empty() && is_build_dir($here)) {
+        return;
+    }
+
     array<string> $kids = readdir($here);
     usize $i = 0;
 
@@ -208,6 +213,17 @@ private function collect_files(const string& $root, const string& $rel, array<st
         collect_files($root, $child, $into);
         $i = $i + 1;
     }
+}
+
+/**
+ * Whether a directory is one echoc made for its artifacts. Asked of the marker echoc writes into every
+ * build directory rather than of the name, because `#[build_dir:]` can call one anything.
+ */
+private function is_build_dir(const string& $directory) : bool
+{
+    string $tag = std::io::readfile(join($directory, 'CACHEDIR.TAG'))->or('');
+
+    return $tag->contains('# echoc-build-directory');
 }
 
 private function hex_of(const string& $raw) : string

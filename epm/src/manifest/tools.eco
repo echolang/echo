@@ -1,0 +1,141 @@
+/**
+ * What a module's dependencies offer, read off `echoc -p tools`.
+ * echoc spells the names into `refs`; epm matches by membership.
+ */
+
+namespace epm::manifest;
+
+use epm::sys;
+
+public struct OfferedTool
+{
+    array<string> $refs;
+    string $module;
+    string $target;
+    string $manifest;
+    string $binary;
+
+    // the `echoc build` that produces `binary`, run verbatim
+    array<string> $build;
+
+    constructor(
+        array<string> $refs,
+        string $module,
+        string $target,
+        string $manifest,
+        string $binary,
+        array<string> $build
+    )
+    {
+        $this->refs = $refs;
+        $this->module = $module;
+        $this->target = $target;
+        $this->manifest = $manifest;
+        $this->binary = $binary;
+        $this->build = $build;
+    }
+
+    /**
+     * The shortest name that still selects this tool.
+     */
+    const function name() : string
+    {
+        return $this->refs[0];
+    }
+
+    const function answers(const string& $ref) : bool
+    {
+        usize $i = 0;
+
+        while ($i < $this->refs->count()) {
+            if ($this->refs[$i] == $ref) {
+                return true;
+            }
+
+            $i = $i + 1;
+        }
+
+        return false;
+    }
+}
+
+public struct Offer
+{
+    string $package_dir;
+    array<OfferedTool> $tools;
+
+    constructor(string $package_dir)
+    {
+        $this->package_dir = $package_dir;
+        $this->tools = array<OfferedTool>();
+    }
+}
+
+// a JSON array's strings, skipping empties, in order
+function strings_of(const json::Value& $value) : array<string>
+{
+    array<string> $out = array<string>();
+    array<json::Value> $items = $value->asArray() ?? array<json::Value>();
+    usize $i = 0;
+
+    while ($i < $items->count()) {
+        string $item = $items[$i]->asStr() ?? '';
+
+        if (!$item->empty()) {
+            $out[] = $item;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+public function parse_offer(const string& $text) : result<Offer, string>
+{
+    json::Value $root = guard json::parse($text) else ($e) {
+        return .error("echoc -p tools was not JSON: {$e}");
+    }
+
+    Offer $offer = Offer($root['package_dir']->asStr() ?? '');
+    array<json::Value> $tools = $root['public_tools']->asArray() ?? array<json::Value>();
+    usize $i = 0;
+
+    while ($i < $tools->count()) {
+        json::Value $one = $tools[$i];
+
+        $offer->tools[] = OfferedTool(
+            strings_of($one['refs']),
+            $one['module']->asStr() ?? '',
+            $one['target']->asStr() ?? '',
+            $one['manifest']->asStr() ?? '',
+            $one['binary']->asStr() ?? '',
+            strings_of($one['build'])
+        );
+
+        $i = $i + 1;
+    }
+
+    return .ok($offer);
+}
+
+/**
+ * The tools the module at `path` may run, asked of echoc.
+ */
+public function offered_tools(const string& $path) : result<Offer, string>
+{
+    array<string> $argv = array<string>();
+    $argv[] = echoc_bin();
+    $argv[] = 'build';
+    $argv[] = '-p';
+    $argv[] = 'tools';
+    $argv[] = '-m';
+    $argv[] = $path;
+    sys::Run $ran = sys::run($argv);
+
+    if (!$ran->ok()) {
+        return .error("{$ran->err}{$ran->out}");
+    }
+
+    return parse_offer($ran->out);
+}

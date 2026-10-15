@@ -109,12 +109,8 @@ namespace AST
     // codegen never reads one. `attribute_admission` is the reserved half
     std::optional<std::pair<std::string, std::string>> tool_attribute_name(const std::string &name);
 
-    // what a manifest attribute may do with a `#[target: ...] { ... }` scope.
-    //
-    // **three answers and not a bool**, because "may be written inside one" and "may carry one" are two
-    // properties and exactly one attribute has the second. A `#[target:]` written *inside* a scope is the
-    // case a pair of booleans loses: it neither carries a brace of its own nor belongs to another target,
-    // and a reader asking only "is this scopable" accepts it and hangs a second module-level target off it
+    // what a `{ ... }` scope may do: a `#[target:]`'s or a `#[hook:]`'s. three answers, not a bool:
+    // "inside one" and "carries one" are two properties, and only the owners have the second
     enum class AttributeScoping
     {
         // describes the module, so a scope has nothing to do with it: module, version, build_dir
@@ -124,13 +120,31 @@ namespace AST
         // link, cc
         t_scopable,
 
-        // the one that opens a scope, and therefore may not be written inside one either
+        // target and hook: they open a scope, so they cannot sit inside one
         t_opens_a_scope
     };
 
     // a column of the manifest table above rather than name comparisons at the point of use, so a ninth
     // manifest attribute states this once instead of being silently absent from three tests in a reader
     AttributeScoping manifest_attribute_scoping(const std::string &name);
+
+    // who opened a `{ ... }` on a manifest. the parser's slot and the admission column are this
+    // enum, so a third owner is a new arm rather than a string the diagnostic happens to print
+    enum class ManifestScopeOwner
+    {
+        t_target,
+        t_hook
+    };
+
+    // "target" / "hook": the word a refusal names, and the one `#[target:]` / `#[hook:]` already is
+    const char *manifest_scope_owner_name(ManifestScopeOwner owner);
+
+    // whether `owner`'s scope may hold `name`. a target holds everything scopable; a hook holds
+    // only `depends` and `requires` (the tool's edges, never the program's)
+    bool manifest_scope_admits(ManifestScopeOwner owner, const std::string &name);
+
+    // what `owner`'s scope may hold, as the refusal names it
+    std::string manifest_scope_admits_list(ManifestScopeOwner owner);
 };
 
 #endif

@@ -69,6 +69,7 @@ namespace Compiler
         t_check_refcounts,
         t_no_stdlib,
         t_emit_stdlib_header,
+        t_no_hooks,
         t_target_os,
         t_target_arch,
         t_ios_device,
@@ -102,7 +103,8 @@ namespace Compiler
         t_symbols,
         t_instances,
         t_manifest,
-        t_decls
+        t_decls,
+        t_tools
     };
 
     // what `--explain <what>` names. **`t_prune` is legal on `run` alone**, because only the JIT prunes -

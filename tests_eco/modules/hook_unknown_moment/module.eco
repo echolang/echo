@@ -1,0 +1,4 @@
+// a hook says when it runs, from a closed list - a misspelled moment is refused at the word
+#[module: "hookmoment"]
+#[sources: "src/*.eco"]
+#[hook: after_lunch { run: "gen" }]

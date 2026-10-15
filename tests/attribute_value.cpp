@@ -176,6 +176,18 @@ TEST_CASE("a malformed value is reported and costs one message", "[attributes]")
     REQUIRE(bundle->collector.has_critical_issues());
 }
 
+TEST_CASE("a record key spelled like a keyword is still a name", "[attributes]")
+{
+    // `public` and `static` are keywords to the lexer and words to a record - inside `#[ ]` there is no
+    // declaration for the keyword's meaning to collide with, which is the rule the atom and the tag follow
+    ParsedAttribute parsed = attribute_of("web::shape: { name: \"gen\", public: true, static: false }");
+
+    REQUIRE_FALSE(parsed.bundle->collector.has_critical_issues());
+    REQUIRE(parsed.value().find_field("public") != nullptr);
+    REQUIRE(parsed.value().find_field("public")->value.boolean);
+    REQUIRE(parsed.value().find_field("static") != nullptr);
+}
+
 TEST_CASE("a duplicate record key is refused at the second one", "[attributes]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(

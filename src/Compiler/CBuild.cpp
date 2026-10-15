@@ -19,6 +19,8 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -128,17 +130,7 @@ bool c_spec_digest(
     digest = Compiler::fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), digest);
 
-    digest = Compiler::fnv1a64(Compiler::windows_sysroot().string(), digest);
-    // the SDK the compile actually uses: empty apple_sdk is the Mac SDK, the
-    // iOS rows are iphonesimulator / iphoneos. hashing darwin_sdk_root here
-    // while compiling against iPhoneOS is the unsound-cache case
-    digest = Compiler::fnv1a64(
-        Compiler::apple_sdk_root(options.codegen.apple_sdk()).string(), digest);
-
-    if (options.codegen.is_wasi()) {
-        digest = Compiler::fnv1a64(Compiler::wasi_sysroot().string(), digest);
-        digest = Compiler::fnv1a64(Compiler::wasi_resource_dir().string(), digest);
-    }
+    digest = Compiler::fold_toolchain_sysroots(options, digest);
 
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
@@ -390,6 +382,22 @@ bool Compiler::parse_cc_requirement(
     return settle_cc_value(out_scheme, value, base, out_value, out_error);
 }
 
+uint64_t Compiler::fold_toolchain_sysroots(const CompilerOptions &options, uint64_t digest)
+{
+    digest = fnv1a64(windows_sysroot().string(), digest);
+
+    // the SDK the compile actually uses: empty apple_sdk is the Mac SDK, the iOS rows are iphonesimulator /
+    // iphoneos. hashing darwin_sdk_root here while compiling against iPhoneOS is the unsound-cache case
+    digest = fnv1a64(apple_sdk_root(options.codegen.apple_sdk()).string(), digest);
+
+    if (options.codegen.is_wasi()) {
+        digest = fnv1a64(wasi_sysroot().string(), digest);
+        digest = fnv1a64(wasi_resource_dir().string(), digest);
+    }
+
+    return digest;
+}
+
 bool Compiler::apply_cc_attribute(
     const AST::AttributeValue &value,
     const std::filesystem::path &base,
@@ -457,6 +465,113 @@ bool Compiler::apply_cc_attribute(
     return applied_all;
 }
 
+namespace
+{
+
+// one source of a module's C build, located and keyed. The plan fills everything that can be known
+// without compiling; miss and argv are what the compile pass adds
+struct PlannedSource
+{
+    std::filesystem::path source;
+    std::filesystem::path object;
+    std::filesystem::path depfile;
+    std::filesystem::path sidecar;
+    uint64_t source_digest = 0;
+    std::string key;
+    bool miss = false;
+    std::vector<std::string> argv;
+};
+
+// **where each source's object goes and what it is keyed by**, and the module's content digest folded from
+// those keys. One walk with two readers that must agree to the bit: build_c_sources, which then compiles the
+// misses, and probe_c_content_digest, which compiles nothing - a program stamp keyed on a digest computed
+// any other way would be a build that relinks every time or, worse, one that never does
+bool plan_c_sources(
+    const Compiler::CBuildSpec &spec,
+    const Compiler::CompilerOptions &options,
+    const std::filesystem::path &directory,
+    std::vector<PlannedSource> &out,
+    uint64_t &out_content_digest,
+    std::string &out_error
+)
+{
+    // everything the whole spec shares, folded once rather than once per source
+    uint64_t settings = 0;
+
+    if (!c_spec_digest(spec, options, settings, out_error)) {
+        return false;
+    }
+
+    const uint64_t module_digest = Compiler::fnv1a64(spec.module_name, Compiler::k_fnv_offset_basis);
+
+    out_content_digest = module_digest;
+
+    // one per module, so the header set every source in it shares is read once
+    HeaderDigests seen;
+
+    out.reserve(spec.sources.size());
+
+    for (const std::filesystem::path &source : spec.sources) {
+        const uint64_t source_settings = Compiler::fnv1a64(source.string(), settings);
+        const std::string stem =
+            fmt::format("{}.{}", artifact_stem(module_digest, source), Compiler::to_hex(source_settings));
+
+        PlannedSource planned;
+        planned.source = source;
+        planned.object = directory / (stem + ".o");
+        planned.depfile = directory / (stem + ".d");
+        planned.sidecar = directory / (stem + ".key");
+
+        // **read once**, and folded into the settings half here so the key can be recomputed against the
+        // depfile a compile is about to write without touching the file again
+        const std::optional<std::string> source_bytes = Compiler::read_whole_file(source);
+
+        if (!source_bytes.has_value()) {
+            out_error = fmt::format("{}: cannot be read.", source.string());
+            return false;
+        }
+
+        planned.source_digest = Compiler::fnv1a64(source_bytes.value(), source_settings);
+        planned.key = c_content_key(source, planned.source_digest, planned.depfile, seen);
+
+        out_content_digest = Compiler::fnv1a64(planned.key, out_content_digest);
+        out.push_back(std::move(planned));
+    }
+
+    return true;
+}
+
+};
+
+bool Compiler::probe_c_content_digest(
+    const CBuildSpec &spec,
+    const CompilerOptions &options,
+    const std::filesystem::path &cache_dir,
+    const std::filesystem::path &scratch_dir,
+    uint64_t &out_digest,
+    std::string &out_error
+)
+{
+    out_digest = 0;
+
+    if (spec.empty()) {
+        return true;
+    }
+
+    // the directory build_c_sources would have chosen, asked without creating it: the store when it is one
+    // of ours, the scratch otherwise. Reading the wrong one only finds no depfile, which moves the key - a
+    // rebuild that did not need to happen, never a stale program
+    std::error_code ec;
+    const std::filesystem::path directory =
+        std::filesystem::is_directory(cache_dir, ec) && is_echo_build_directory(cache_dir)
+            ? cache_dir
+            : scratch_dir;
+
+    std::vector<PlannedSource> planned;
+
+    return plan_c_sources(spec, options, directory, planned, out_digest, out_error);
+}
+
 bool Compiler::build_c_sources(
     const CBuildSpec &spec,
     const CompilerOptions &options,
@@ -485,58 +600,19 @@ bool Compiler::build_c_sources(
         return false;
     }
 
-    // everything the whole spec shares, folded once rather than once per source
-    uint64_t settings = 0;
+    std::vector<PlannedSource> planned;
 
-    if (!c_spec_digest(spec, options, settings, out_error)) {
+    if (!plan_c_sources(spec, options, directory, planned, out.content_digest, out_error)) {
         return false;
     }
 
-    const uint64_t module_digest = fnv1a64(spec.module_name, Compiler::k_fnv_offset_basis);
-
-    out.content_digest = module_digest;
-
-    // one per module, so the header set every source in it shares is read once
+    // one per module, so the header set every source in it shares is read once - the same walk the plan
+    // above made, read again only to write the sidecar a miss owes
     HeaderDigests seen;
 
-    struct Planned
-    {
-        std::filesystem::path source;
-        std::filesystem::path object;
-        std::filesystem::path depfile;
-        std::filesystem::path sidecar;
-        uint64_t source_digest = 0;
-        bool miss = false;
-        std::vector<std::string> argv;
-    };
-
-    std::vector<Planned> planned;
-    planned.reserve(spec.sources.size());
-
-    for (const std::filesystem::path &source : spec.sources) {
-        const uint64_t source_settings = fnv1a64(source.string(), settings);
-        const std::string stem =
-            fmt::format("{}.{}", artifact_stem(module_digest, source), to_hex(source_settings));
-
-        Planned job;
-        job.source = source;
-        job.object = directory / (stem + ".o");
-        job.depfile = directory / (stem + ".d");
-        job.sidecar = directory / (stem + ".key");
-
-        // **read once**, and folded into the settings half here so the key can be recomputed against the
-        // depfile this build is about to write without touching the file again
-        const std::optional<std::string> source_bytes = read_whole_file(source);
-
-        if (!source_bytes.has_value()) {
-            out_error = fmt::format("{}: cannot be read.", source.string());
-            return false;
-        }
-
-        job.source_digest = fnv1a64(source_bytes.value(), source_settings);
-        const std::string key = c_content_key(source, job.source_digest, job.depfile, seen);
-
-        out.content_digest = fnv1a64(key, out.content_digest);
+    for (PlannedSource &job : planned) {
+        const std::filesystem::path &source = job.source;
+        const std::string &key = job.key;
 
         // a hit is the object being there *and* the sidecar agreeing about what it was built from. Either
         // one alone is not enough: an object with no sidecar is one an interrupted build left behind
@@ -544,7 +620,6 @@ bool Compiler::build_c_sources(
             && std::filesystem::is_regular_file(job.object, ec)
             && read_whole_file(job.sidecar).value_or(std::string()) == key) {
             out_explain.push_back(fmt::format("  {}  {}  hit", source.filename().string(), key));
-            planned.push_back(std::move(job));
             continue;
         }
 
@@ -589,12 +664,11 @@ bool Compiler::build_c_sources(
         job.argv.push_back(job.depfile.string());
 
         append_common_arguments(spec, options, job.argv);
-        planned.push_back(std::move(job));
     }
 
-    std::vector<Planned *> misses;
+    std::vector<PlannedSource *> misses;
 
-    for (Planned &job : planned) {
+    for (PlannedSource &job : planned) {
         if (job.miss) {
             misses.push_back(&job);
         }
@@ -625,7 +699,7 @@ bool Compiler::build_c_sources(
         }
     }
 
-    for (Planned &job : planned) {
+    for (PlannedSource &job : planned) {
         if (job.miss && keeping) {
             // **recomputed against the depfile this compile just wrote**, which is the whole point of the
             // sidecar: the key stored is the one the *next* build will compute, so a fresh store settles after

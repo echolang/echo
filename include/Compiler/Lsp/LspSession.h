@@ -208,9 +208,6 @@ namespace Compiler
             void resolve_project();
             Parser::ActiveTargets workspace_targets() const;
             std::vector<std::filesystem::path> loose_sources_from(const CompileInputs &inputs) const;
-            std::vector<const Parser::ModuleManifest *> compiled_manifests(
-                const std::vector<Parser::ModuleManifest> &manifests
-            ) const;
             bool launch(const std::string &reason);
             void wait_worker();
             CompileInputs capture_inputs(const std::string &reason) const;

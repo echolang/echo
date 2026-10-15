@@ -1,0 +1,83 @@
+use epm::cmd;
+use epm::manifest;
+
+function offer_of_two() : manifest::Offer
+{
+    string $json = '{ "module": "app", "package_dir": "/p/app/vendor", "public_tools": [';
+    $json->append('{ "refs": ["restgen", "resttransformer:restgen"], "module": "resttransformer", "target": "restgen", ');
+    $json->append('"manifest": "/p/app/vendor/resttransformer/module.eco", "binary": "/p/app/vendor/resttransformer/ecobuild/restgen", ');
+    $json->append('"build": ["echoc", "build", "-m", "/p/app/vendor/resttransformer/module.eco", "--target", "restgen", "--no-hooks"] }, ');
+    $json->append('{ "refs": ["other:gen"], "module": "other", "target": "gen", ');
+    $json->append('"manifest": "/p/app/vendor/other/module.eco", "binary": "/p/app/vendor/other/ecobuild/gen" }');
+    $json->append('] }');
+
+    manifest::Offer $offer = guard manifest::parse_offer($json) else ($e) {
+        die($e);
+    }
+
+    return $offer;
+}
+
+test the_offer_is_read_as_echoc_wrote_it
+{
+    manifest::Offer $offer = offer_of_two();
+    assert($offer->package_dir == '/p/app/vendor');
+    assert($offer->tools->count() == 2);
+    assert($offer->tools[0]->module == 'resttransformer');
+    assert($offer->tools[0]->target == 'restgen');
+    assert($offer->tools[0]->refs->count() == 2);
+    assert($offer->tools[1]->binary == '/p/app/vendor/other/ecobuild/gen');
+}
+
+test a_tool_is_selected_by_any_ref_echoc_gave_it
+{
+    manifest::Offer $offer = offer_of_two();
+    manifest::OfferedTool $bare = guard cmd::select_tool($offer, 'restgen') else {
+        die('the bare name did not select the tool');
+    }
+    assert($bare->target == 'restgen');
+
+    manifest::OfferedTool $qualified = guard cmd::select_tool($offer, 'resttransformer:restgen') else {
+        die('the qualified name did not select the tool');
+    }
+    assert($qualified->module == 'resttransformer');
+}
+
+test a_name_echoc_did_not_give_selects_nothing
+{
+    // `gen` is not one of other's refs: echoc withholds a bare name it cannot make unique, and epm
+    // matches what it was given rather than re-deriving the rule
+    manifest::Offer $offer = offer_of_two();
+    assert(cmd::select_tool($offer, 'gen') == null);
+    assert(cmd::select_tool($offer, 'nope') == null);
+}
+
+test a_tool_is_named_by_its_shortest_ref
+{
+    manifest::Offer $offer = offer_of_two();
+    assert($offer->tools[0]->name() == 'restgen');
+    assert($offer->tools[1]->name() == 'other:gen');
+}
+
+test the_build_is_the_one_echoc_spelled
+{
+    manifest::Offer $offer = offer_of_two();
+    array<string> $argv = $offer->tools[0]->build;
+    assert($argv->count() == 7);
+    assert($argv[0] == 'echoc');
+    assert($argv[3] == '/p/app/vendor/resttransformer/module.eco');
+    assert($argv[6] == '--no-hooks');
+    assert($offer->tools[1]->build->count() == 0);
+}
+
+test the_tool_gets_what_came_after_the_separator
+{
+    manifest::Offer $offer = offer_of_two();
+    array<string> $args = array<string>();
+    $args[] = 'api/petstore.yaml';
+    $args[] = 'src/api';
+    array<string> $argv = cmd::tool_run_argv($offer->tools[0], $args);
+    assert($argv->count() == 3);
+    assert($argv[0] == '/p/app/vendor/resttransformer/ecobuild/restgen');
+    assert($argv[2] == 'src/api');
+}

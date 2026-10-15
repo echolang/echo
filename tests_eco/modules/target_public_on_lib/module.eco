@@ -1,0 +1,4 @@
+// only an exe can be offered to the modules that depend on this one: a lib has no entry to run
+#[module: "publiclib"]
+#[sources: "src/*.eco"]
+#[target: lib { name: "greeter", public: true }]

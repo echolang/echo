@@ -63,6 +63,24 @@ namespace Compiler
         const std::filesystem::path &directory
     );
 
+    // where a project is discovered when no `-m` named one. empty discovers nothing
+    std::filesystem::path discovery_directory();
+
+    // the `-m`s, or the project in `discovery_dir`. never the stdlib. one owner: graph resolve,
+    // hook runner, and `-p tools` all ask
+    std::vector<std::filesystem::path> resolve_user_roots(
+        const std::vector<std::string> &named_roots,
+        bool allow_project_discovery,
+        const std::filesystem::path &discovery_dir
+    );
+
+    // package dir and program dir onto `scratch`, from the first user root, once per invocation
+    void settle_package_dir(
+        const std::vector<std::filesystem::path> &user_roots,
+        const std::filesystem::path &package_dir_override,
+        Parser::ManifestScratch &scratch
+    );
+
     // the manifests this invocation builds, in the order the modules have to be parsed.
     // refusals sit on `scratch.bundle.collector`; the caller renders them. `scratch` is
     // taken rather than built here so the tokens a refusal names still exist when they
@@ -75,7 +93,8 @@ namespace Compiler
         const std::filesystem::path &package_dir_override,
         Parser::ManifestScratch &scratch,
         std::vector<Parser::ModuleManifest> &out,
-        std::vector<std::filesystem::path> &out_roots
+        std::vector<std::filesystem::path> &out_roots,
+        Parser::ManifestRead read = Parser::ManifestRead::t_full
     );
 
     // parse the stdlib (when embedded), the manifest modules, then the loose sources as
@@ -112,6 +131,13 @@ namespace Compiler
     // contribute; `all_targets_active` is the graph loader's copy of the same map
     Parser::ActiveTargets workspace_analysis_targets(
         const std::vector<Parser::ModuleManifest> &manifests
+    );
+
+    // modules this program compiles, in resolve order. a scope-only dependency is absent otherwise.
+    // driver and language server both ask; the server opens every scope
+    std::vector<const Parser::ModuleManifest *> program_manifests(
+        const std::vector<Parser::ModuleManifest> &manifests,
+        const Parser::ActiveTargets &active
     );
 };
 

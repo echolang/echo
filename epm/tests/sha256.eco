@@ -61,6 +61,29 @@ test tree_hash_ignores_dot_git
     scratch::gone($root);
 }
 
+test tree_hash_ignores_an_echoc_build_directory
+{
+    string $root = scratch::dir('tree-ecobuild');
+    scratch::file($root, 'module.eco', '#[module: "x"]');
+    string $before = sys::tree_sha256($root);
+    scratch::file($root, 'ecobuild/CACHEDIR.TAG', "Signature: 8a477f597d28d172789f06886806bc55\n# echoc-build-directory\n");
+    scratch::file($root, 'ecobuild/x-0123.o', 'object bytes');
+    string $after = sys::tree_sha256($root);
+    assert($before == $after);
+    scratch::gone($root);
+}
+
+test tree_hash_keeps_a_directory_that_is_only_named_like_one
+{
+    string $root = scratch::dir('tree-not-ecobuild');
+    scratch::file($root, 'module.eco', '#[module: "x"]');
+    string $before = sys::tree_sha256($root);
+    scratch::file($root, 'ecobuild/notes.txt', 'source, not output');
+    string $after = sys::tree_sha256($root);
+    assert($before != $after);
+    scratch::gone($root);
+}
+
 test tree_hash_includes_the_relative_path
 {
     string $left = scratch::dir('tree-path-l');

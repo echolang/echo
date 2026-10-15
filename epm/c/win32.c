@@ -567,6 +567,20 @@ static int read_available(HANDLE pipe, char **buf, size_t *cap, size_t *len)
     return 1;
 }
 
+/*
+ * The application name CreateProcessW is handed: argv[0] itself when it
+ * names a path, NULL when it is a bare name for the search to find.
+ */
+static wchar_t *explicit_app(const char *argv0)
+{
+    if (strchr(argv0, '/') != NULL || strchr(argv0, '\\') != NULL
+        || (argv0[0] != '\0' && argv0[1] == ':')) {
+        return wide_ntpath(argv0);
+    }
+
+    return NULL;
+}
+
 static void close_pipes(HANDLE out_r, HANDLE out_w, HANDLE err_r, HANDLE err_w)
 {
     if (out_r) CloseHandle(out_r);
@@ -622,10 +636,7 @@ int32_t epm_run(
         return -1;
     }
 
-    if (strchr(a->v[0], '/') != NULL || strchr(a->v[0], '\\') != NULL
-        || (a->v[0][0] != '\0' && a->v[0][1] == ':')) {
-        app = wide_ntpath(a->v[0]);
-    }
+    app = explicit_app(a->v[0]);
 
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
@@ -696,5 +707,53 @@ int32_t epm_run(
     *out_n = (int32_t)out_len;
     *err_s = err_buf;
     *err_n = (int32_t)err_len;
+    return 0;
+}
+
+/*
+ * Run argv with this process's own console handles, and wait. The child's
+ * exit code lands in *code. See the POSIX twin.
+ */
+int32_t epm_spawn_wait(void *handle, int32_t *code)
+{
+    epm_argv *a = handle;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    wchar_t *cmdline;
+    wchar_t *app = NULL;
+    DWORD exit_code = 1;
+
+    if (a == NULL || a->n == 0 || a->v == NULL || a->v[0] == NULL) {
+        return -1;
+    }
+
+    cmdline = windows_command_line(a);
+    if (cmdline == NULL) {
+        return -1;
+    }
+
+    app = explicit_app(a->v[0]);
+
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+
+    fflush(NULL);
+
+    if (!CreateProcessW(app, cmdline, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        free(app);
+        free(cmdline);
+        return -1;
+    }
+
+    free(app);
+    free(cmdline);
+    CloseHandle(pi.hThread);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+
+    *code = (int32_t)exit_code;
     return 0;
 }

@@ -19,6 +19,7 @@ public struct App
     command::Subcommand $update;
     command::Subcommand $verify;
     command::Subcommand $tree;
+    command::Subcommand $run;
     command::Arg $module;
     command::Arg $git;
     command::Arg $path;
@@ -112,6 +113,23 @@ public struct App
             'Print the locked graph, roots first, each package with the rev that was vendored.'
         );
 
+        command::Subcommand $run = $cmd->command(
+            'run',
+            'run a tool a dependency offers',
+            'Run a program one of this module\'s dependencies offers: an exe target it marked public: true:\n  epm run restgen api/petstore.yaml src/api\nIt is built first when it has to be, exactly as `echoc build` would build it, so a dependency that changed is a tool that rebuilds. Everything after the tool\'s name goes to the tool as written, flags included, and it runs in the working directory with this terminal. epm\'s own flags go before the name.\nWith no name, lists what is on offer.'
+        );
+        $cmd->positional(
+            $run,
+            '[<tool>]',
+            'the tool, by name or as <module>:<name>',
+            'The bare name works when only one dependency offers a tool by that name; otherwise name the module too. Omitted, the tools on offer are listed.',
+            0,
+            1,
+            'What it works on'
+        );
+        // every word after the tool's name is the tool's. `epm run restgen --help` is restgen's help
+        $cmd->passthrough($run);
+
         command::Arg $module = $cmd->arg(
             'module',
             'm',
@@ -125,6 +143,7 @@ public struct App
         $cmd->accept($module, $update);
         $cmd->accept($module, $verify);
         $cmd->accept($module, $tree);
+        $cmd->accept($module, $run);
         $cmd->describe(
             $module,
             'The module.eco this command is about, or the directory that holds one:\n  epm install -m ../app\n  epm add lib --git https://example.com/lib.git -m app/module.eco\nOmitted, epm walks up from the working directory until it finds a module.eco. Stated, that walk does not happen: the path must name the file or a directory that already holds one.'
@@ -191,6 +210,7 @@ public struct App
         $this->update = $update;
         $this->verify = $verify;
         $this->tree = $tree;
+        $this->run = $run;
         $this->module = $module;
         $this->git = $git;
         $this->path = $path;

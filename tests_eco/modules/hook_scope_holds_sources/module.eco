@@ -1,0 +1,7 @@
+// a hook scope holds the dependencies of the hook's tool and nothing else: the program's sources
+// are the module's to declare
+#[module: "hooksources"]
+#[sources: "src/*.eco"]
+#[hook: before_build { run: "gen" }] {
+    #[sources: "src/*.eco"]
+}

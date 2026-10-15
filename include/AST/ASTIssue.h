@@ -427,6 +427,15 @@ namespace AST
         MAKE_ISSUE_DEF1(NoSuchManifest, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnusableTargetName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(TargetEntryNotASource, IssueSeverity::Error, const std::string, _message);
+
+        // `run:` names no tool this module may run. select_public_tool's sentence, on the hook
+        MAKE_ISSUE_DEF1(UnresolvableHookTool, IssueSeverity::Error, const std::string, _message);
+
+        // the child `echoc build` of a hook's tool failed. output is a note, so json stays one stream
+        MAKE_ISSUE_DEF2(HookToolBuildFailed, IssueSeverity::Error, const std::string, _message, const std::string, output, std::vector<IssueNote> notes() const override;);
+
+        // the hook's tool exited non-zero. json: output as a note. otherwise already streamed
+        MAKE_ISSUE_DEF2(HookFailed, IssueSeverity::Error, const std::string, _message, const std::string, output, std::vector<IssueNote> notes() const override;);
         // TokenException from a module.eco. a source file's twin is FrontEndFailure; a manifest reports
         // through the collector
         MAKE_ISSUE_DEF1(UntokenizableManifest, IssueSeverity::Error, const std::string, _message);

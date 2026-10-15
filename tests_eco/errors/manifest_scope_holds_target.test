@@ -4,7 +4,7 @@ expect: fail
 --- OUT --->
 [error] InvalidManifestScope  module.eco:7:7
 
-  'target' cannot be written inside a '{ ... }' scope - a scope is one target speaking for itself, so it holds no targets of its own.
+  'target' cannot be written inside a '{ ... }' scope - scopes do not nest, so a target or a hook is declared at file scope.
 
   6 | #[target: test] {
   7 |     #[target: exe { name: "sneaky", entry: "src/main.eco" }]

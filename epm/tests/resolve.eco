@@ -319,3 +319,54 @@ test a_failed_sibling_does_not_stick_a_range_on_an_earlier_pick
     array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
     assert($plan->count() == 3);
 }
+
+test a_direct_package_brings_what_its_tools_need
+{
+    resolve::World $world = resolve::World();
+
+    resolve::Package $gen = resolve::Package('restgen', manifest::Origin::git('https://example.com/restgen'));
+    resolve::Release $g10 = scratch::release('1.0.0');
+    $g10->tool_requires[] = manifest::Requirement('libcommand', '^0.2', manifest::Origin::git('https://example.com/libcommand'), '');
+    $gen->releases[] = $g10;
+    $world->catalog[] = $gen;
+
+    resolve::Package $cmd = resolve::Package('libcommand', manifest::Origin::git('https://example.com/libcommand'));
+    $cmd->releases[] = scratch::release('0.2.1');
+    $world->catalog[] = $cmd;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('restgen', '^1', manifest::Origin::git('https://example.com/restgen'), '');
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 2);
+    assert($plan[0]->name == 'restgen');
+    assert($plan[0]->requires->count() == 1);
+    assert($plan[0]->requires[0] == 'libcommand');
+    assert($plan[1]->name == 'libcommand');
+}
+
+test a_transitive_package_brings_nothing_for_its_tools
+{
+    // its tools are reachable by nobody, so a conflict in what they need must not fail this solve
+    resolve::World $world = resolve::World();
+
+    resolve::Package $app_lib = resolve::Package('applib', manifest::Origin::git('https://example.com/applib'));
+    resolve::Release $a10 = scratch::release('1.0.0');
+    $a10->requires[] = manifest::Requirement('restgen', '^1', manifest::Origin::git('https://example.com/restgen'), '');
+    $app_lib->releases[] = $a10;
+    $world->catalog[] = $app_lib;
+
+    resolve::Package $gen = resolve::Package('restgen', manifest::Origin::git('https://example.com/restgen'));
+    resolve::Release $g10 = scratch::release('1.0.0');
+    $g10->tool_requires[] = manifest::Requirement('nowhere', '^9', manifest::Origin::git('https://example.com/nowhere'), '');
+    $gen->releases[] = $g10;
+    $world->catalog[] = $gen;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('applib', '^1', manifest::Origin::git('https://example.com/applib'), '');
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 2);
+    assert($plan[1]->name == 'restgen');
+    assert($plan[1]->requires->count() == 0);
+}

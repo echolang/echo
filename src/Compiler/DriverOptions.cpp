@@ -1,7 +1,10 @@
 #include "Compiler/DriverOptions.h"
 
+#include <fmt/core.h>
+
 #include <cstddef>
 #include <string>
+#include <utility>
 
 namespace
 {
@@ -50,6 +53,7 @@ bool Compiler::resolve_driver_options(
     out.install_dir = cli.value(Opt::t_dir);
 
     out.no_stdlib = cli.flag(Opt::t_no_stdlib);
+    out.no_hooks = cli.flag(Opt::t_no_hooks);
     out.emit_stdlib_header = cli.flag(Opt::t_emit_stdlib_header);
     out.silent = cli.flag(Opt::t_silent);
     out.verbose = cli.flag(Opt::t_verbose);
@@ -128,14 +132,22 @@ bool Compiler::resolve_driver_options(
         || out.optimize_is_whole_program()
         || out.prints(PrintKind::t_ir);
 
-    // `--print manifest` is an answer, not a dump. combining it with another `-p` value would
-    // then try to compile a graph whose packages may not be on disk
-    if (out.prints(PrintKind::t_manifest)) {
-        unsigned int others = out._prints & ~bit_for(static_cast<unsigned int>(PrintKind::t_manifest));
+    // `--print manifest` and `--print tools` are answers, not dumps. combining one with another `-p`
+    // value would then try to compile a graph whose packages may not be on disk - and two answers are
+    // two documents on one stdout, which nothing reading either could parse
+    for (const auto &[answer, spelled] : {
+            std::pair{ PrintKind::t_manifest, "manifest" },
+            std::pair{ PrintKind::t_tools, "tools" } }) {
+        if (!out.prints(answer)) {
+            continue;
+        }
+
+        unsigned int others = out._prints & ~bit_for(static_cast<unsigned int>(answer));
 
         if (others != 0) {
-            out_error = "'--print manifest' is an answer, not a dump, and cannot be combined "
-                "with other --print values.";
+            out_error = fmt::format(
+                "'--print {}' is an answer, not a dump, and cannot be combined with other --print values.",
+                spelled);
             return false;
         }
     }

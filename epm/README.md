@@ -34,6 +34,8 @@ epm update
 epm update other
 epm verify
 epm tree
+epm run
+epm run restgen api/petstore.yaml src/api
 ```
 
 `epm --help` and `epm <command> --help` are the page; `epm add --help git`

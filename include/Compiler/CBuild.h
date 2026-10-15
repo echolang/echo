@@ -144,6 +144,21 @@ namespace Compiler
         std::string &out_error
     );
 
+    // sysroots and SDK this row reads, folded into `digest`. one fold for a C object's key and a
+    // program stamp, so they cannot disagree about the SDK
+    uint64_t fold_toolchain_sysroots(const CompilerOptions &options, uint64_t digest);
+
+    // `content_digest` of this spec, compiling nothing. a stamp folds it so an edited header rebuilds.
+    // only settled after depfiles exist: probe after the link, not before
+    bool probe_c_content_digest(
+        const CBuildSpec &spec,
+        const CompilerOptions &options,
+        const std::filesystem::path &cache_dir,
+        const std::filesystem::path &scratch_dir,
+        uint64_t &out_digest,
+        std::string &out_error
+    );
+
     // links a module's C objects into something dlopen can take, for `echoc run`.
     //
     // `link_words` is the module's own link line as Compiler::partition_link_requirements rendered it: a

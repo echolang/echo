@@ -276,6 +276,60 @@ std::optional<std::filesystem::path> Compiler::discover_project_manifest(
     return Parser::manifest_at(directory);
 }
 
+std::filesystem::path Compiler::discovery_directory()
+{
+    std::error_code ec;
+    const std::filesystem::path here = std::filesystem::current_path(ec);
+
+    return ec ? std::filesystem::path{} : here;
+}
+
+std::vector<std::filesystem::path> Compiler::resolve_user_roots(
+    const std::vector<std::string> &named_roots,
+    bool allow_project_discovery,
+    const std::filesystem::path &discovery_dir
+)
+{
+    std::vector<std::filesystem::path> named;
+
+    for (const std::string &root : named_roots) {
+        named.push_back(std::filesystem::path(root));
+    }
+
+    if (named.empty() && allow_project_discovery) {
+        if (const std::optional<std::filesystem::path> discovered =
+                discover_project_manifest(discovery_dir)) {
+            named.push_back(discovered.value());
+        }
+    }
+
+    std::vector<std::filesystem::path> out;
+
+    for (const std::filesystem::path &root : named) {
+        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(root);
+
+        out.push_back(resolved.has_value() ? Compiler::canonical_or_absolute(resolved.value()) : root);
+    }
+
+    return out;
+}
+
+void Compiler::settle_package_dir(
+    const std::vector<std::filesystem::path> &user_roots,
+    const std::filesystem::path &package_dir_override,
+    Parser::ManifestScratch &scratch
+)
+{
+    if (!user_roots.empty()) {
+        scratch.entry_directory = Compiler::canonical_or_absolute(user_roots.front().parent_path());
+        scratch.package_dir = Parser::resolve_package_dir(
+            user_roots.front().parent_path(), package_dir_override);
+    }
+    else if (!package_dir_override.empty()) {
+        scratch.package_dir = Parser::resolve_package_dir({}, package_dir_override);
+    }
+}
+
 bool Compiler::resolve_front_end_manifests(
     const std::vector<std::string> &named_roots,
     bool with_stdlib,
@@ -284,7 +338,8 @@ bool Compiler::resolve_front_end_manifests(
     const std::filesystem::path &package_dir_override,
     Parser::ManifestScratch &scratch,
     std::vector<Parser::ModuleManifest> &out,
-    std::vector<std::filesystem::path> &out_roots
+    std::vector<std::filesystem::path> &out_roots,
+    Parser::ManifestRead read
 )
 {
     std::vector<std::filesystem::path> roots;
@@ -295,40 +350,14 @@ bool Compiler::resolve_front_end_manifests(
     }
 #endif
 
-    const size_t implicit_roots = roots.size();
+    out_roots = resolve_user_roots(named_roots, allow_project_discovery, discovery_dir);
+    roots.insert(roots.end(), out_roots.begin(), out_roots.end());
 
-    for (const std::string &named : named_roots) {
-        roots.push_back(std::filesystem::path(named));
-    }
-
-    if (roots.size() == implicit_roots && allow_project_discovery) {
-        if (const std::optional<std::filesystem::path> discovered =
-                discover_project_manifest(discovery_dir)) {
-            roots.push_back(discovered.value());
-        }
-    }
-
-    out_roots.clear();
-
-    for (auto named = roots.begin() + implicit_roots; named != roots.end(); ++named) {
-        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(*named);
-
-        out_roots.push_back(
-            resolved.has_value() ? Compiler::canonical_or_absolute(resolved.value()) : *named);
-    }
-
-    if (!out_roots.empty()) {
-        scratch.entry_directory = Compiler::canonical_or_absolute(out_roots.front().parent_path());
-        scratch.package_dir = Parser::resolve_package_dir(
-            out_roots.front().parent_path(), package_dir_override);
-    }
-    else if (!package_dir_override.empty()) {
-        scratch.package_dir = Parser::resolve_package_dir({}, package_dir_override);
-    }
+    settle_package_dir(out_roots, package_dir_override, scratch);
 
     bool ok = true;
     if (!roots.empty()) {
-        ok = Parser::resolve_module_graph(roots, scratch, out);
+        ok = Parser::resolve_module_graph(roots, scratch, out, read);
     }
 
 #if ECO_USE_EMBEDDED_STDLIB
@@ -458,4 +487,81 @@ Parser::ActiveTargets Compiler::workspace_analysis_targets(
     }
 
     return active;
+}
+
+// which of the project's modules this program is made of, in the order they were resolved.
+//
+// **a module the walk cannot reach is not compiled at all**, which is the whole of what a scoped
+// `#[depends:]` buys: a test-only dependency is parsed, keyed and linked by `echoc test` and is absent
+// from `echoc build` entirely. Reachability is asked of Parser::module_contribution_for, so what a scope
+// contributes is one answer here as it is everywhere else.
+//
+// **a reachability walk, and the deny-list is only what seeds it.**
+//
+// Seeding on the roots alone would be wrong: the standard library is added to every build and is
+// deliberately *not* one of the user's roots, and neither is a module a `-m` named. So the seed is asked
+// the other way round - a module no target's scope anywhere declares is part of every program this project
+// produces, exactly as it always was, and is in from the start.
+//
+// From there it has to be a **closure**, not one step. A module a scope names may be needed by another
+// module a scope names: dropping it because no *unconditional* manifest reaches it drops something the
+// build genuinely compiles, and the failure is an unresolved symbol in a module whose own manifest looks
+// fine. The list is dependency-first, so walking it backwards settles the closure in one pass - everything
+// that could name a module is decided before the module is
+std::vector<const Parser::ModuleManifest *> Compiler::program_manifests(
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const Parser::ActiveTargets &active
+)
+{
+    std::set<std::filesystem::path> reached;
+
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        for (const Parser::ModuleTarget &target : manifest.targets) {
+            reached.insert(target.depends.begin(), target.depends.end());
+        }
+
+        // a hook's dependencies are its tool's. seeded as conditional, never activated: loaded, not compiled
+        for (const Parser::ModuleHook &hook : manifest.hooks) {
+            reached.insert(hook.depends.begin(), hook.depends.end());
+        }
+    }
+
+    std::vector<const Parser::ModuleManifest *> out;
+
+    // `reached` holds the conditional ones until here, where it becomes its complement plus whatever the
+    // walk adds - which is the set this function is actually computing.
+    //
+    // no fast path for "nothing is conditional", deliberately: an empty `conditional` makes the
+    // complement the whole list and the walk can only add what is already in it, so the general path
+    // already answers that case with the same set in the same order - and a second path a reader has to
+    // prove equivalent is the one that eventually stops being
+    std::set<std::filesystem::path> conditional;
+    conditional.swap(reached);
+
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        if (conditional.find(manifest.path) == conditional.end()) {
+            reached.insert(manifest.path);
+        }
+    }
+
+    std::vector<std::filesystem::path> depends;
+
+    for (auto manifest = manifests.rbegin();
+            manifest != manifests.rend(); ++manifest) {
+        if (reached.find(manifest->path) == reached.end()) {
+            continue;
+        }
+
+        depends.clear();
+        Parser::append_active_depends(*manifest, active, depends);
+        reached.insert(depends.begin(), depends.end());
+    }
+
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        if (reached.find(manifest.path) != reached.end()) {
+            out.push_back(&manifest);
+        }
+    }
+
+    return out;
 }

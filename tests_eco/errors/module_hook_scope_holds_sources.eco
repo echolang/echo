@@ -1,0 +1,2 @@
+// the manifest named by this case writes sources inside a hook scope
+echo 1;

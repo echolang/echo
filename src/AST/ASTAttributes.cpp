@@ -64,11 +64,12 @@ namespace
         { AST::compiler_attribute::intrinsic, k_on_function },
     };
 
-    // and the manifest's nine, which reach this parser too: a `module.eco` is **Echo**, read by the real
+    // and the manifest's ten, which reach this parser too: a `module.eco` is **Echo**, read by the real
     // lexer and the real attribute parser into a scratch bundle.
     //
     //   module / version / depends / sources    Parser::read_manifest_attributes
     //   target                                  -> Parser::read_manifest_targets
+    //   hook                                    -> Parser::read_manifest_hooks
     //   link                                    -> Compiler::parse_link_requirement
     //   cc                                      -> Compiler::parse_cc_requirement
     //   build_dir                               -> Compiler::BuildLayout
@@ -77,7 +78,7 @@ namespace
     // a build may need linked - or produce - can grow without this list growing with it, which is also why
     // neither name says what it is for beyond the tool it reaches
     constexpr std::string_view k_manifest_attributes[] = {
-        "module", "version", "depends", "sources", "target", "link", "cc", "build_dir", "requires" };
+        "module", "version", "depends", "sources", "target", "link", "cc", "build_dir", "requires", "hook" };
 
     // and what each of them may do with a `{ ... }` scope. **A column of the table above rather than name
     // comparisons at the point of use**: a ninth manifest attribute has to state this or it does not
@@ -88,12 +89,16 @@ namespace
         { "version",   AST::AttributeScoping::t_module_only },
         { "build_dir", AST::AttributeScoping::t_module_only },
         { "target",    AST::AttributeScoping::t_opens_a_scope },
+        { "hook",      AST::AttributeScoping::t_opens_a_scope },
         { "depends",   AST::AttributeScoping::t_scopable },
         { "sources",   AST::AttributeScoping::t_scopable },
         { "link",      AST::AttributeScoping::t_scopable },
         { "cc",        AST::AttributeScoping::t_scopable },
         { "requires",  AST::AttributeScoping::t_scopable },
     };
+
+    // what a `#[hook: ...] { ... }` scope may hold - see AST::manifest_scope_admits
+    constexpr std::string_view k_hook_scope[] = { "depends", "requires" };
 
     template <size_t N>
     bool contains(const std::string_view (&names)[N], std::string_view name)
@@ -294,4 +299,39 @@ AST::AttributeScoping AST::manifest_attribute_scoping(const std::string &name)
     // and not to this table
     return found == std::end(k_manifest_scoping)
         ? AST::AttributeScoping::t_module_only : found->second;
+}
+
+const char *AST::manifest_scope_owner_name(AST::ManifestScopeOwner owner)
+{
+    switch (owner) {
+    case AST::ManifestScopeOwner::t_target:
+        return "target";
+    case AST::ManifestScopeOwner::t_hook:
+        return "hook";
+    }
+
+    return "";
+}
+
+bool AST::manifest_scope_admits(AST::ManifestScopeOwner owner, const std::string &name)
+{
+    if (owner == AST::ManifestScopeOwner::t_hook) {
+        return contains(k_hook_scope, name);
+    }
+
+    return owner == AST::ManifestScopeOwner::t_target
+        && manifest_attribute_scoping(name) == AST::AttributeScoping::t_scopable;
+}
+
+std::string AST::manifest_scope_admits_list(AST::ManifestScopeOwner owner)
+{
+    std::vector<std::string_view> admitted;
+
+    for (const auto &[name, scoping] : k_manifest_scoping) {
+        if (manifest_scope_admits(owner, std::string(name))) {
+            admitted.push_back(name);
+        }
+    }
+
+    return fmt::format("{}", fmt::join(admitted, ", "));
 }

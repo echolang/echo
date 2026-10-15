@@ -1,0 +1,2 @@
+// the manifest named by this case declares a hook inside a target scope
+echo 1;

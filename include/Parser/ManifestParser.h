@@ -95,6 +95,16 @@ namespace Parser
         TokenSpan span;
     };
 
+    // a scoped `#[requires:]` nobody vendored. recorded, not refused: a scope nobody opens is
+    // somebody else's business. refused when a program opens it. a line, not a span: the tokens
+    // are gone by then
+    struct UnresolvedRequirement
+    {
+        std::string name;
+        uint32_t line = 0;
+        bool on_path_dependency = false;
+    };
+
     // an attribute whose name carries a namespace echoc does not own - `#[epm::license:]`.
     // carried so a tool can read it back off `-p manifest` without a compiler edit per field
     struct ToolAttribute
@@ -134,11 +144,20 @@ namespace Parser
         // that marks none of them installs all of them
         bool install = false;
 
+        // `public: true` on an exe: a consumer may `epm run` it or name it in a `#[hook:]`.
+        // exe only. default false
+        bool is_public = false;
+
         // a `test` target's selection: the groups and the files whose tests it runs, empty meaning all of
         // them. Read by Compiler::select_tests, which is the same function `--filter` goes through - a
         // declared target is a saved filter and deliberately not a second selection engine
         std::vector<std::string> groups;
         std::vector<std::filesystem::path> files;
+
+        // as written, so source expansion after a hook can resolve the entry without re-lexing
+        std::string entry_as_written;
+        std::vector<std::string> files_as_written;
+        uint32_t line = 0;
 
         // what this target's `{ ... }` scope contributed - the four things a manifest also says at file
         // scope, said for one target instead of for the module:
@@ -162,6 +181,45 @@ namespace Parser
         std::vector<std::string> sources_as_written;
         std::vector<std::string> depends_as_written;
         std::vector<ModuleRequirement> requirements;
+
+        // the subset of `requirements` that is not on disk, and so absent from `depends`. Refused only
+        // when a program opens this scope: see UnresolvedRequirement
+        std::vector<UnresolvedRequirement> unresolved;
+    };
+
+    // when a hook runs. closed, tagged like a target's kind: later moments are rows, not new syntax
+    enum class HookMoment
+    {
+        // before `#[sources:]` expand, so a hook can write the files a pattern has to match
+        t_before_build
+    };
+
+    // its spelling in the manifest, and in `-p manifest`
+    const char *hook_moment_name(HookMoment moment);
+
+    // `#[hook: before_build { run: "restgen", args: [...] }]`: run a dependency's program before the
+    // build. the hook does not know what the tool does: no outputs, no staleness. only the root's
+    // hooks run; a dependency's are its author's
+    struct ModuleHook
+    {
+        HookMoment moment = HookMoment::t_before_build;
+
+        // the hook's state directory, unique in a manifest. defaults to the tool's target name
+        std::string name;
+
+        // the tool as written. Compiler::select_public_tool owns what it names
+        std::string run;
+
+        // argv after the tool's name. no shell
+        std::vector<std::string> args;
+
+        // the tool's dependencies, never the program's. loaded, not compiled into any program
+        std::vector<std::filesystem::path> depends;
+        std::vector<std::string> depends_as_written;
+        std::vector<ModuleRequirement> requirements;
+        std::vector<UnresolvedRequirement> unresolved;
+
+        uint32_t line = 0;
     };
 
     struct ModuleManifest
@@ -206,6 +264,9 @@ namespace Parser
         // and for a stronger reason: which target is being built changes nothing about this module's
         // sources at all, so no key varies between two targets of one module
         std::vector<ModuleTarget> targets;
+
+        // `#[hook:]`s. not a cache-key input and not a contribution: a hook changes no object
+        std::vector<ModuleHook> hooks;
 
         // what this module needs linked, in the order it was written. **not an input to the module's cache
         // key**, and that is a statement rather than an omission: a link requirement changes no object, only
@@ -276,6 +337,9 @@ namespace Parser
         std::vector<std::filesystem::path> &into
     );
 
+    // hook-scope dependencies, appended without duplicating. the graph loads them; no program compiles them
+    void append_hook_depends(const ModuleManifest &manifest, std::vector<std::filesystem::path> &into);
+
     // an `ActiveTargets` opening every scope this manifest declares, for the questions that are about the
     // project rather than about one program: the graph has to load and order a module a scope names whether
     // or not this invocation would compile it, or a cycle would be a cycle only on some targets
@@ -313,11 +377,38 @@ namespace Parser
             return bundle.modules.get_module(handle);
         }
 
-        // a graph-level refusal that has no attribute token: mint a pin on a throwaway
-        // file named `path` so the collector can still draw a location
-        template <typename Issue>
-        void report(const std::filesystem::path &path, uint32_t line, std::string message);
+        // a refusal with no attribute token: mint a pin on a throwaway file named `path`
+        template <typename Issue, typename... Args>
+        void report(const std::filesystem::path &path, uint32_t line, Args... args)
+        {
+            bundle.collector.collect_issue<Issue>(pin(path, line, false), args...);
+        }
+
+        // same, for a refusal whose line is the one that wrote it: a hook, a scoped requirement
+        template <typename Issue, typename... Args>
+        void report_at_line(const std::filesystem::path &path, uint32_t line, Args... args)
+        {
+            bundle.collector.collect_issue<Issue>(pin(path, line, true), args...);
+        }
+
+        // a minted token on a throwaway file named `path`, read back in from disk when `read_source` says so
+        AST::CodeRef pin(const std::filesystem::path &path, uint32_t line, bool read_source);
     };
+
+    // scoped requires this program opens and nobody vendored. true when there was nothing to refuse
+    bool refuse_unresolved_scope_requirements(
+        const ModuleManifest &manifest,
+        const ActiveTargets &active,
+        ManifestScratch &scratch
+    );
+
+    // same refusal for one scope. `owner` is "target 'tests'" or "hook 'api'"
+    bool refuse_unresolved_requirements(
+        const ModuleManifest &manifest,
+        const std::vector<UnresolvedRequirement> &unresolved,
+        const std::string &owner,
+        ManifestScratch &scratch
+    );
 
     // the paths one source pattern names, in no particular order and unfiltered - a directory can come back,
     // exactly as it can from a glob. **one owner for "what files does this pattern name"**, asked by the
@@ -348,11 +439,15 @@ namespace Parser
     // platform while the files in it are filtered for another is silent
     // how far to settle a manifest. `t_written` is the `-p manifest` path: attributes and
     // shape, no source expansion and no dependency resolution, so epm can read a module
-    // whose `#[requires:]` are not on disk yet
+    // whose `#[requires:]` are not on disk yet.
+    //
+    // `t_dependencies` is that plus where its dependencies are. asked before a build: tools and
+    // hooks are about the edges, and a hook may write the files `#[sources:]` has to match
     enum class ManifestRead
     {
         t_full,
-        t_written
+        t_written,
+        t_dependencies
     };
 
     bool read_module_manifest(
@@ -361,6 +456,11 @@ namespace Parser
         ModuleManifest &out,
         ManifestRead read = ManifestRead::t_full,
         const std::optional<std::string> &content = std::nullopt);
+
+    // the source-expansion half of a `t_full` read, on a manifest whose edges are already settled.
+    // a hook runs between those two, so the glob sees files the hook just wrote. already-expanded
+    // manifests (the embedded stdlib) are left alone
+    bool complete_manifest_sources(ModuleManifest &manifest, ManifestScratch &scratch);
 
     // the directory `#[requires:]` names are resolved against. `--package-dir` wins; otherwise
     // `vendor/` beside the entry, or the ancestor named `vendor` when the entry itself sits
@@ -374,6 +474,13 @@ namespace Parser
     // the written form, as JSON. no absolute paths - goldens and lockfiles have to be
     // machine-independent. several manifests become a JSON array
     std::string manifest_as_json(const ModuleManifest &manifest);
+
+    // one string as a JSON string literal, quotes included - the escaping `-p manifest` uses, for the
+    // answers that sit beside it (`-p tools`) so two dumps a tool reads cannot quote a path differently
+    std::string json_quoted(const std::string &text);
+
+    // the same, for a list: `["a", "b"]`
+    std::string json_quoted_list(const std::vector<std::string> &items);
     std::string manifests_as_json(const std::vector<ModuleManifest> &manifests);
 
     // `-p manifest`: read each named path as written and return the JSON. a path that is not a
@@ -393,10 +500,14 @@ namespace Parser
     // from a later one - the graph *has* to be a DAG, and a cycle is reported rather than broken
     // arbitrarily. Duplicates collapse on the canonical manifest path, so a diamond is fine and a module
     // depended on twice is parsed once.
+    //
+    // `read` is how far each manifest is settled. `t_full` is a build's. `t_dependencies` is the graph with
+    // no files expanded: what `echoc clean` reads. a hook-filled `#[sources:]` must not stop a clean
     bool resolve_module_graph(
         const std::vector<std::filesystem::path> &roots,
         ManifestScratch &scratch,
-        std::vector<ModuleManifest> &out);
+        std::vector<ModuleManifest> &out,
+        ManifestRead read = ManifestRead::t_full);
 };
 
 #endif

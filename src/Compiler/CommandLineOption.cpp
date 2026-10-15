@@ -521,6 +521,20 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_no_hooks, "no-hooks", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "run none of the manifest's hooks",
+            "Build without running any of the root manifest's '#[hook: before_build { ... }]' tools:\n"
+            "  echoc build --no-hooks\n"
+            "Whatever the hooks would have written is compiled as it is on disk, stale or not. For a "
+            "build that must not run anything of somebody else's, and it is what echoc passes itself "
+            "when it builds a dependency's tool, since that dependency's hooks are its author's "
+            "business and never its consumer's.",
+            {}, nullptr
+        },
+        {
             Opt::t_target_os, "target-os", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
             // not install: what it installs runs on this machine, so another OS's binary has nowhere to go
@@ -693,6 +707,16 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
                     "unless --decls-all is also given. Types are structured trees (prim, string, array, "
                     "map, optional, named, ptr, function). Tool attributes and "
                     "declaration docblocks are included."
+                },
+                {
+                    "tools", accepts::compiling, code_of(PrintKind::t_tools),
+                    "dependencies' public tools, as JSON",
+                    "List the programs this module's direct dependencies offer - every '#[target: exe]' they "
+                    "marked 'public: true' - as JSON, and stop. Each comes with the names that select it, the "
+                    "manifest a build of it starts from, and the path that build writes the binary to.\n"
+                    "Like 'manifest' this is an answer rather than a dump, and it is what 'epm run' reads: the "
+                    "rule for which name means which tool lives here and nowhere else. It reads the edges of "
+                    "the graph and no source, so it works before a hook has generated anything."
                 }
             },
             nullptr

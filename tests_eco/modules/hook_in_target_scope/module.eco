@@ -1,0 +1,6 @@
+// scopes do not nest, so a hook is declared at file scope - it belongs to the module, not to one target
+#[module: "hookintarget"]
+#[sources: "src/*.eco"]
+#[target: exe { name: "app", entry: "src/lib.eco" }] {
+    #[hook: before_build { run: "gen" }]
+}

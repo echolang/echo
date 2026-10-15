@@ -43,6 +43,10 @@ namespace Compiler
     // on PATH (llvm-mingw) cannot link the MSVC objects we emit. empty if none
     std::string host_clang();
 
+    // this process's executable. a hook's tool is a child `echoc build`: progress and pointer width
+    // are process-wide. empty when the platform would not say
+    std::filesystem::path process_executable();
+
     // directory containing this process's executable. A released Windows
     // echoc looks here (and one level up) for the bundled clang, lld-link
     // and sysroot; a local `build/echoc` has none of those and falls through
@@ -195,6 +199,14 @@ namespace Compiler
         const std::filesystem::path &working_directory = {},
         const std::vector<std::pair<std::string, std::string>> &extra_env = {},
         const std::string &stdin_content = {}
+    );
+
+    // same spawn, streamed: child's stdout joined to this stderr. for a program that runs *before*
+    // the one being built, so `echoc run > out.txt` is still the program's. 127 if it would not start
+    int run_streamed(
+        const std::vector<std::string> &argv,
+        const std::filesystem::path &working_directory,
+        const std::vector<std::pair<std::string, std::string>> &extra_env
     );
 
     // a shell command, for tests that already spelled `2>&1` / `2>nul`. Windows is `cmd /c`

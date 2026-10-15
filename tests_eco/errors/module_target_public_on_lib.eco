@@ -1,0 +1,2 @@
+// the manifest named by this case offers a lib target as a tool
+echo 1;

@@ -280,7 +280,7 @@ TEST_CASE("every row carries a short summary and a full description", "[cli]")
 TEST_CASE("a value's code is its enumerator", "[cli]")
 {
     const std::vector<Compiler::OptionValue> &prints = Compiler::option_for(Opt::t_print).values;
-    REQUIRE(prints.size() == 8);
+    REQUIRE(prints.size() == 9);
 
     REQUIRE(prints[0].code == static_cast<unsigned int>(PrintKind::t_ast));
     REQUIRE(prints[1].code == static_cast<unsigned int>(PrintKind::t_ast_resolved));
@@ -290,6 +290,7 @@ TEST_CASE("a value's code is its enumerator", "[cli]")
     REQUIRE(prints[5].code == static_cast<unsigned int>(PrintKind::t_instances));
     REQUIRE(prints[6].code == static_cast<unsigned int>(PrintKind::t_manifest));
     REQUIRE(prints[7].code == static_cast<unsigned int>(PrintKind::t_decls));
+    REQUIRE(prints[8].code == static_cast<unsigned int>(PrintKind::t_tools));
 
     const std::vector<Compiler::OptionValue> &explains = Compiler::option_for(Opt::t_explain).values;
     REQUIRE(explains.size() == 4);
@@ -656,6 +657,23 @@ TEST_CASE("a repeated dump request is every dump rather than the last", "[cli]")
     REQUIRE_FALSE(driver.explains(ExplainKind::t_cache));
 }
 
+TEST_CASE("tools is an answer and cannot be combined with another dump", "[cli]")
+{
+    CommandLine cli;
+    std::string error;
+    REQUIRE(parse({ "build", "-p", "tools", "-p", "ast" }, cli, error));
+
+    DriverOptions driver;
+    REQUIRE_FALSE(resolve_driver_options(cli, driver, error));
+    REQUIRE(error.find("'--print tools' is an answer") != std::string::npos);
+
+    // and two answers are two documents on one stdout
+    CommandLine both;
+    REQUIRE(parse({ "build", "-p", "tools", "-p", "manifest" }, both, error));
+    REQUIRE_FALSE(resolve_driver_options(both, driver, error));
+    REQUIRE(error.find("cannot be combined") != std::string::npos);
+}
+
 TEST_CASE("manifest is an answer and cannot be combined with another dump", "[cli]")
 {
     CommandLine cli;
@@ -772,12 +790,14 @@ TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
     REQUIRE(contains(unicode, "\u251c\u2500 ast"));
     REQUIRE(contains(unicode, "\u251c\u2500 instances"));
     REQUIRE(contains(unicode, "\u251c\u2500 manifest"));
-    REQUIRE(contains(unicode, "\u2514\u2500 decls"));
+    REQUIRE(contains(unicode, "\u251c\u2500 decls"));
+    REQUIRE(contains(unicode, "\u2514\u2500 tools"));
 
     REQUIRE(contains(ascii, "|- ast"));
     REQUIRE(contains(ascii, "|- instances"));
     REQUIRE(contains(ascii, "|- manifest"));
-    REQUIRE(contains(ascii, "`- decls"));
+    REQUIRE(contains(ascii, "|- decls"));
+    REQUIRE(contains(ascii, "`- tools"));
 
     // the plain page is ascii to the byte, so a golden or a CI log never carries a glyph
     for (const unsigned char byte : ascii) {

@@ -535,6 +535,15 @@ namespace
 
         return { AST::IssueNote { AST::NoteKind::t_help, remedy } };
     }
+
+    std::vector<AST::IssueNote> note_if(const std::string &text)
+    {
+        if (text.empty()) {
+            return {};
+        }
+
+        return { AST::IssueNote { AST::NoteKind::t_note, text } };
+    }
 };
 
 ISSUE_MESSAGE_FNC(AddressOfTemporary) { return _message; }
@@ -610,4 +619,12 @@ ISSUE_MESSAGE_FNC(ModuleDependencyCycle) { return _message; }
 ISSUE_MESSAGE_FNC(NoSuchManifest) { return _message; }
 ISSUE_MESSAGE_FNC(UnusableTargetName) { return _message; }
 ISSUE_MESSAGE_FNC(TargetEntryNotASource) { return _message; }
+ISSUE_MESSAGE_FNC(UnresolvableHookTool) { return _message; }
+
+ISSUE_MESSAGE_FNC(HookToolBuildFailed) { return _message; }
+std::vector<AST::IssueNote> AST::Issue::HookToolBuildFailed::notes() const { return note_if(output); }
+
+ISSUE_MESSAGE_FNC(HookFailed) { return _message; }
+std::vector<AST::IssueNote> AST::Issue::HookFailed::notes() const { return note_if(output); }
+
 ISSUE_MESSAGE_FNC(UntokenizableManifest) { return _message; }

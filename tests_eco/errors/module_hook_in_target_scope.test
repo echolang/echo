@@ -1,0 +1,13 @@
+modules: modules/hook_in_target_scope
+expect: fail
+
+--- OUT --->
+[error] InvalidManifestScope  module.eco:5:7
+
+  'hook' cannot be written inside a '{ ... }' scope - scopes do not nest, so a target or a hook is declared at file scope.
+
+  4 | #[target: exe { name: "app", entry: "src/lib.eco" }] {
+  5 |     #[hook: before_build { run: "gen" }]
+    :       ^^^^
+  6 | }
+

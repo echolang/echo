@@ -6,7 +6,10 @@
 #include "Compiler/SettledPath.h"
 
 #include "Parser/AttributeParser.h"
+#include "Parser/ManifestHooks.h"
 #include "Parser/ManifestPackage.h"
+#include "Parser/ManifestScope.h"
+#include "Parser/ManifestTargets.h"
 #include "Parser/ModuleParser.h"
 #include "Parser/SymbolParser.h"
 
@@ -29,6 +32,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_map>
 
 namespace
 {
@@ -37,27 +41,6 @@ namespace
 // AttributeMedium::t_manifest. Anything else is an error rather than an ignored line,
 // which is the one rule the whole format rests on: `#[sources: ...]` misspelled `#[source: ...]` would
 // otherwise produce a module with no files and no complaint
-
-// a pin on a manifest file, so a refusal that has no attribute token still has a CodeRef.
-// minted: nothing in the source spells this token
-TokenReference pin_manifest(AST::Module &module, AST::File *file, uint32_t line)
-{
-    return module.tokens[module.tokens.push_minted("", Token::Type::t_unknown, line, 1, file)];
-}
-
-template <typename Issue, typename... Args>
-void report_manifest(
-    AST::Collector &collector,
-    AST::Module &module,
-    AST::File *file,
-    uint32_t line,
-    Args... args
-)
-{
-    collector.collect_issue<Issue>(
-        AST::CodeRef{ &module, pin_manifest(module, file, line).make_slice() },
-        args...);
-}
 
 // true when a path component carries a glob metacharacter
 bool has_wildcard(std::string_view text)
@@ -169,18 +152,16 @@ std::vector<std::filesystem::path> Parser::expand_source_pattern(const std::file
 namespace
 {
 
-struct ManifestReport
-{
-    AST::Collector &collector;
-    AST::Module &module;
-    AST::File *file;
-};
-
-template <typename Issue, typename... Args>
-void report_at(const ManifestReport &into, uint32_t line, Args... args)
-{
-    report_manifest<Issue>(into.collector, into.module, into.file, line == 0 ? 1 : line, args...);
-}
+using Parser::ManifestReport;
+using Parser::WrittenHook;
+using Parser::WrittenScope;
+using Parser::WrittenTarget;
+using Parser::read_manifest_hooks;
+using Parser::read_manifest_targets;
+using Parser::report_at;
+using Parser::resolve_scope_edges;
+using Parser::settle_manifest_hooks;
+using Parser::is_usable_artifact_name;
 
 template <typename Issue, typename... Args>
 void report_span(const ManifestReport &into, const TokenSpan &span, Args... args)
@@ -247,242 +228,7 @@ void read_manifest_depends(
     }
 }
 
-// what one kind's *record* is read against, so the shape rules are stated once per kind rather than
-// re-derived at each field. `exe` owes an entry file and a `test` is refused for writing one
-struct TargetKindShape
-{
-    // the fields this kind understands, in the order a refusal lists them
-    std::vector<std::string> fields;
 
-    // the fields it cannot do without
-    std::vector<std::string> required;
-
-    // what a record-less `#[target: <kind>]` means, or nothing when the kind needs one written
-    std::optional<std::string> default_name;
-};
-
-// the kinds a target may produce. **one row per spelling**, read through AttributeReader::tag, so a
-// misspelled kind refuses in the same words a misspelled `#[link:]` scheme does.
-//
-// the table is what keeps a second kind from costing a grammar: neither needs the common case to grow a
-// word, which is the whole reason the kind is the tag rather than a `kind:` inside the record
-const std::vector<std::pair<std::string, Parser::TargetKind>> &target_kind_table()
-{
-    static const std::vector<std::pair<std::string, Parser::TargetKind>> table = {
-        { "exe", Parser::TargetKind::t_executable },
-        { "test", Parser::TargetKind::t_test },
-        { "lib", Parser::TargetKind::t_library },
-    };
-
-    return table;
-}
-
-// what each kind's record may say. **one row per kind**, because "which fields are these" is a question
-// per kind and answering it inside the field loop is how one kind's rule ends up applied to another's
-const TargetKindShape &target_kind_shape(Parser::TargetKind kind)
-{
-    static const TargetKindShape executable = {
-        { "name", "entry", "install" },
-        { "name", "entry" },
-        std::nullopt
-    };
-
-    // **a test target needs no record at all**, and `#[target: test]` is the shape that says so: it runs
-    // every test the module has. `groups` and `files` narrow it, and are the same selection `--filter`
-    // states - one selection engine, two spellings, the call `#[link:]` and `--link` already make
-    static const TargetKindShape test = {
-        { "name", "groups", "files" },
-        {},
-        std::string("tests")
-    };
-
-    static const TargetKindShape library = {
-        { "name" },
-        { "name" },
-        std::nullopt
-    };
-
-    switch (kind) {
-    case Parser::TargetKind::t_executable:
-        return executable;
-    case Parser::TargetKind::t_test:
-        return test;
-    case Parser::TargetKind::t_library:
-        return library;
-    }
-
-    return executable;
-}
-
-// a target as written, before `#[sources:]` has been expanded to check its entry against
-struct WrittenTarget
-{
-    std::string name;
-    std::string entry;
-    Parser::TargetKind kind = Parser::TargetKind::t_executable;
-    bool install = false;
-    std::vector<std::string> groups;
-    std::vector<std::string> files;
-    uint32_t line = 0;
-
-    // what this target's `{ ... }` said, in the same as-written shape the four fields above are in. The
-    // patterns go through the one expander after the module's own, for the same reason the module's do
-    bool has_scope = false;
-    std::vector<std::string> scoped_sources;
-    std::vector<std::string> scoped_depends;
-    std::vector<Parser::ModuleRequirement> scoped_requirements;
-    std::vector<Compiler::LinkRequirement> scoped_link;
-    Compiler::CBuildSpec scoped_cc;
-};
-
-// `#[target: ...]`, in every shape it takes.
-//
-//     #[target: { name: "clock", entry: "src/main.eco" }]       untagged, which is an executable
-//     #[target: exe { name: "clock", entry: "src/main.eco" }]   the same, said out loud
-//     #[target: [ { ... }, { ... } ]]                           several
-//     #[target: test]                                           a kind with nothing to configure
-//     #[target: test { name: "fast", groups: ["unit"] }]         and one narrowed
-//
-// **the tag is the kind and the record is the fields**, which is the shape `#[link: lib { ... }]` already
-// has. It is also why a target's *name* is a string in a field rather than the tag: a bare name means
-// itself, and the names that may be spelled bare are the closed vocabularies the compiler knows - which a
-// program's name is not.
-//
-// refuses through `reader` rather than answering, exactly as read_manifest_depends does
-void read_manifest_targets(
-    const AST::AttributeValue &written,
-    AST::AttributeReader &reader,
-    uint32_t line,
-    std::vector<WrittenTarget> &out_targets)
-{
-    for (const AST::AttributeValue *entry : AST::AttributeReader::each(written)) {
-        Parser::TargetKind kind = Parser::TargetKind::t_executable;
-
-        // **an untagged target is an executable**, so the tag is what a second kind will cost rather than
-        // what the first one already does - the rule `#[depends:]`'s bare path follows
-        if (entry->has_tag()
-            && !reader.tag(*entry, target_kind_table(), "target kind", Compiler::scheme_list_of(target_kind_table()), kind)) {
-            continue;
-        }
-
-        // **a bare name that is a kind is that kind with nothing configured.** `#[target: test]` has no
-        // record to hang a tag on, so the name has to be the kind - and reading it here rather than as an
-        // untagged value is what keeps it from being taken for a nameless executable. A bare name that is
-        // *not* a kind falls through to the record arm, where it is refused as not being one
-        if (!entry->has_tag() && entry->is(AST::AttributeValueKind::t_name)) {
-            const auto found = std::find_if(
-                target_kind_table().begin(), target_kind_table().end(),
-                [entry](const auto &row) { return row.first == entry->text; });
-
-            if (found != target_kind_table().end()) {
-                const TargetKindShape &shape = target_kind_shape(found->second);
-
-                if (!shape.default_name.has_value()) {
-                    reader.refuse(entry->span, fmt::format(
-                        "a '{}' target has nothing it can default - write its fields: {}.",
-                        entry->text, fmt::join(shape.fields, ", ")));
-                    continue;
-                }
-
-                WrittenTarget bare;
-                bare.name = shape.default_name.value();
-                bare.kind = found->second;
-                bare.line = entry->span.is_valid() ? entry->span.line() : line;
-
-                out_targets.push_back(std::move(bare));
-                continue;
-            }
-        }
-
-        const TargetKindShape &shape = target_kind_shape(kind);
-
-        for (const AST::AttributeValue *record : AST::AttributeReader::payload(*entry)) {
-            if (!reader.record(*record)) {
-                continue;
-            }
-
-            // a **fixed** record: the keys are ours, so one that is not is refused at the key rather than
-            // ignored - the format's "understood or an error, never a no-op" rule, per field. Which keys
-            // those are is the *kind's* answer, so a `test` is refused for writing an `entry:` at the word
-            // rather than being handed one it has no use for
-            bool complete = true;
-
-            for (const std::string &required : shape.required) {
-                if (reader.require_field(*record, required) == nullptr) {
-                    complete = false;
-                }
-            }
-
-            reader.reject_unknown_fields(*record, shape.fields);
-
-            if (!complete) {
-                continue;
-            }
-
-            WrittenTarget target;
-            target.kind = kind;
-            target.line = record->span.is_valid() ? record->span.line() : line;
-
-            if (const AST::AttributeValue *name = reader.field(*record, "name")) {
-                std::optional<std::string> spelled = reader.string(*name);
-
-                if (!spelled.has_value()) {
-                    continue;
-                }
-
-                target.name = spelled.value();
-            }
-            else {
-                // only a kind with a default can get here - `required` held "name" otherwise
-                target.name = shape.default_name.value_or("");
-            }
-
-            if (const AST::AttributeValue *entry_file = reader.field(*record, "entry")) {
-                std::optional<std::string> spelled = reader.string(*entry_file);
-
-                if (!spelled.has_value()) {
-                    continue;
-                }
-
-                target.entry = spelled.value();
-            }
-
-            if (const AST::AttributeValue *install = reader.field(*record, "install")) {
-                std::optional<bool> spelled = reader.boolean(*install);
-
-                if (!spelled.has_value()) {
-                    continue;
-                }
-
-                target.install = spelled.value();
-            }
-
-            // both selections read through AttributeReader::each, so one value and a list of them are the
-            // same thing written two ways - the rule every other list-valued field here follows
-            const auto read_strings = [&reader, record](
-                const std::string &key, std::vector<std::string> &into) {
-                const AST::AttributeValue *field = reader.field(*record, key);
-
-                if (field == nullptr) {
-                    return;
-                }
-
-                for (const AST::AttributeValue *item : AST::AttributeReader::each(*field)) {
-                    if (std::optional<std::string> spelled = reader.string(*item)) {
-                        into.push_back(spelled.value());
-                    }
-                }
-            };
-
-            read_strings("groups", target.groups);
-            read_strings("files", target.files);
-
-            out_targets.push_back(std::move(target));
-        }
-    }
-}
-
-//
 // takes the payload rather than the module alone: it reports through the collector, so the values have
 // to be read while it is alive
 bool read_manifest_attributes(
@@ -492,12 +238,54 @@ bool read_manifest_attributes(
     Parser::ModuleManifest &out,
     std::vector<std::string> &out_sources,
     std::vector<std::string> &out_depends,
-    std::vector<WrittenTarget> &out_targets)
+    std::vector<WrittenTarget> &out_targets,
+    std::vector<WrittenHook> &out_hooks)
 {
-    // which `WrittenTarget` an attribute's `{ ... }` fills. **The arena order is what makes one pass
+    // which written target or hook an attribute's `{ ... }` fills. **The arena order is what makes one pass
     // enough**: an owner is parsed before anything written inside it, so its slot is always registered by
     // the time a child asks for it
-    std::unordered_map<const AST::AttributeNode *, size_t> scope_of;
+    struct ScopeSlot
+    {
+        AST::ManifestScopeOwner kind = AST::ManifestScopeOwner::t_target;
+        size_t index = 0;
+    };
+
+    const auto written_scope_of = [&out_targets, &out_hooks](const ScopeSlot &slot) -> WrittenScope & {
+        if (slot.kind == AST::ManifestScopeOwner::t_hook) {
+            return out_hooks[slot.index].scope;
+        }
+
+        return out_targets[slot.index].scope;
+    };
+
+    std::unordered_map<const AST::AttributeNode *, ScopeSlot> scope_of;
+
+    // a `{ }` belongs to one owner. the two arms that open a scope share this rather than copying the
+    // count check; `has_scope` is a target's field and is set by the target arm after a successful claim
+    const auto claim_opened_scope = [&](
+        AST::AttributeNode *attribute,
+        const AST::AttributeReader &reader,
+        AST::ManifestScopeOwner owner,
+        size_t added,
+        size_t index
+    ) {
+        if (!attribute->opens_scope || reader.has_refusals()) {
+            return true;
+        }
+
+        if (added != 1) {
+            payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
+                payload.context.code_ref(attribute->attribute_id),
+                fmt::format(
+                    "a '{{ ... }}' scope belongs to one {}, and this '#[{}: ...]' declares "
+                    "{} - write each of them its own.",
+                    AST::manifest_scope_owner_name(owner), AST::manifest_scope_owner_name(owner), added));
+            return false;
+        }
+
+        scope_of[attribute] = ScopeSlot{ owner, index };
+        return true;
+    };
 
     // read from the arena rather than from the file root: the root is only built by the body pass, and the
     // arena preserves the order the attributes were written in
@@ -541,32 +329,47 @@ bool read_manifest_attributes(
             payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
                 payload.context.code_ref(attribute->attribute_id),
                 fmt::format(
-                    "'{}' cannot carry a '{{ ... }}' scope - only a '#[target: ...]' can, a scope being "
-                    "what one target says for itself.", name));
+                    "'{}' cannot carry a '{{ ... }}' scope - only a '#[target: ...]' or a '#[hook: ...]' "
+                    "can, a scope being what one of them says for itself.", name));
             return false;
         }
 
-        // where this attribute's value goes: the module, or the target whose scope it was written in
-        std::optional<size_t> scope;
+        // where this attribute's value goes: the module when null, or the target or hook whose scope it was
+        // written in. Resolved here and used at once - a later push_back may move the vector it points into
+        WrittenScope *scope = nullptr;
 
         if (attribute->scope_owner != nullptr) {
-            if (scoping != AST::AttributeScoping::t_scopable) {
+            if (scoping == AST::AttributeScoping::t_opens_a_scope) {
                 payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
                     payload.context.code_ref(attribute->attribute_id),
-                    scoping == AST::AttributeScoping::t_opens_a_scope
-                        ? fmt::format(
-                            "'{}' cannot be written inside a '{{ ... }}' scope - a scope is one target "
-                            "speaking for itself, so it holds no targets of its own.", name)
-                        : fmt::format(
-                            "'{}' describes the module, not one of its targets - write it at file scope.",
-                            name));
+                    fmt::format(
+                        "'{}' cannot be written inside a '{{ ... }}' scope - scopes do not nest, so a "
+                        "target or a hook is declared at file scope.", name));
                 return false;
             }
 
             // `.at()` rather than a lookup with a refusal behind it: the owner opened a scope, and an
             // attribute that opens one either registers a slot below or returns. That is an invariant of
             // this walk, so it fails as one rather than as a sentence about somebody's manifest
-            scope = scope_of.at(attribute->scope_owner);
+            const ScopeSlot &slot = scope_of.at(attribute->scope_owner);
+
+            // **a second column of the table, asked rather than branched on**: what a scope may hold is a
+            // question about its owner as well as about the attribute
+            if (!AST::manifest_scope_admits(slot.kind, name)) {
+                payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
+                    payload.context.code_ref(attribute->attribute_id),
+                    scoping == AST::AttributeScoping::t_module_only
+                        ? fmt::format(
+                            "'{}' describes the module, not one of its targets - write it at file scope.",
+                            name)
+                        : fmt::format(
+                            "'{}' cannot be written inside a '#[{}: ...]' scope - it holds only {}.",
+                            name, AST::manifest_scope_owner_name(slot.kind),
+                            AST::manifest_scope_admits_list(slot.kind)));
+                return false;
+            }
+
+            scope = &written_scope_of(slot);
         }
 
         if (!attribute->value.has_value()) {
@@ -605,20 +408,14 @@ bool read_manifest_attributes(
             }
         }
         else if (name == "depends") {
-            read_manifest_depends(
-                written, reader,
-                scope.has_value() ? out_targets[scope.value()].scoped_depends : out_depends);
+            read_manifest_depends(written, reader, scope != nullptr ? scope->scoped_depends : out_depends);
         }
         else if (name == "requires") {
             Parser::read_manifest_requires(
-                written, reader,
-                scope.has_value()
-                    ? out_targets[scope.value()].scoped_requirements
-                    : out.requirements);
+                written, reader, scope != nullptr ? scope->scoped_requirements : out.requirements);
         }
         else if (name == "sources") {
-            std::vector<std::string> &into =
-                scope.has_value() ? out_targets[scope.value()].scoped_sources : out_sources;
+            std::vector<std::string> &into = scope != nullptr ? scope->scoped_sources : out_sources;
 
             for (const AST::AttributeValue *pattern : AST::AttributeReader::each(written)) {
                 if (std::optional<std::string> value = reader.string(*pattern)) {
@@ -633,25 +430,24 @@ bool read_manifest_attributes(
 
             read_manifest_targets(written, reader, line, out_targets);
 
-            // **a scope belongs to one target.** `#[target: [ {...}, {...} ]]` is a legal spelling and a
-            // scope on it would have to be copied into each, which is a rule about what two targets share
-            // that nobody wrote down - so it is refused where the alternative is one line of typing.
-            //
-            // guarded on the reader having nothing to say, because a target it turned down produced no
-            // entry either - and answering that with a sentence about scopes would bury the refusal that
-            // is already waiting to be drained
-            if (attribute->opens_scope && !reader.has_refusals()) {
-                if (out_targets.size() != before + 1) {
-                    payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
-                        payload.context.code_ref(attribute->attribute_id),
-                        fmt::format(
-                            "a '{{ ... }}' scope belongs to one target, and this '#[target: ...]' declares "
-                            "{} - write each of them its own.", out_targets.size() - before));
-                    return false;
-                }
+            if (!claim_opened_scope(
+                    attribute, reader, AST::ManifestScopeOwner::t_target, out_targets.size() - before,
+                    before)) {
+                return false;
+            }
 
+            if (attribute->opens_scope && !reader.has_refusals()) {
                 out_targets[before].has_scope = true;
-                scope_of[attribute] = before;
+            }
+        }
+        else if (name == "hook") {
+            const size_t before = out_hooks.size();
+
+            read_manifest_hooks(written, reader, line, out_hooks);
+
+            if (!claim_opened_scope(
+                    attribute, reader, AST::ManifestScopeOwner::t_hook, out_hooks.size() - before, before)) {
+                return false;
             }
         }
         else if (name == "link") {
@@ -660,7 +456,7 @@ bool read_manifest_attributes(
             // and nothing downstream does - by link time there is only a word left
             Compiler::parse_link_attribute(
                 written, out.directory, facts, out.name, reader,
-                scope.has_value() ? out_targets[scope.value()].scoped_link : out.link);
+                scope != nullptr ? scope->scoped_link : out.link);
         }
         else if (name == "build_dir") {
             if (!out.build_dir.empty()) {
@@ -688,8 +484,7 @@ bool read_manifest_attributes(
             // **which member of the spec a scheme fills is CBuild's question**, not this reader's - so a
             // scheme added there does not need a second arm here
             Compiler::apply_cc_attribute(
-                written, out.directory, reader,
-                scope.has_value() ? out_targets[scope.value()].scoped_cc : out.cc);
+                written, out.directory, reader, scope != nullptr ? scope->scoped_cc : out.cc);
         }
         else if (const auto tool_name = AST::tool_attribute_name(name)) {
             // a namespace echoc does not own. shape of the value is the tool's job
@@ -956,6 +751,35 @@ bool resolve_manifest_require_paths(
     return true;
 }
 
+// the same lookup for a requirement written inside a scope, which **records** a missing package rather than
+// refusing it - see Parser::UnresolvedRequirement. What is on disk joins `depends` exactly as above, so the
+// graph follows a vendored one and never learns that an absent one was written at all
+void resolve_scoped_require_paths(
+    const std::vector<Parser::ModuleRequirement> &requirements,
+    const std::filesystem::path &package_dir,
+    const std::filesystem::path &module_dir,
+    const std::filesystem::path &entry_directory,
+    std::vector<std::filesystem::path> &into,
+    std::vector<Parser::UnresolvedRequirement> &unresolved
+)
+{
+    for (const Parser::ModuleRequirement &requirement : requirements) {
+        const std::optional<std::filesystem::path> resolved =
+            Parser::manifest_for_requirement(requirement, package_dir);
+
+        if (resolved.has_value()) {
+            into.push_back(Compiler::canonical_or_absolute(resolved.value()));
+            continue;
+        }
+
+        unresolved.push_back(Parser::UnresolvedRequirement{
+            requirement.name,
+            requirement.span.is_valid() ? requirement.span.line() : 1,
+            requirement_is_on_path_dep(module_dir, package_dir, entry_directory)
+        });
+    }
+}
+
 // out.sources, from the patterns as written.
 //
 // **a manifest is never one of its own sources.** It is an Echo file living in the directory it describes,
@@ -1018,40 +842,23 @@ bool expand_cc_sources(
 // the module, and only its root becomes the program. An entry the module is not made of would be a program
 // the rest of the module cannot see, so it is refused where the line number still is
 bool resolve_manifest_targets(
-    const std::vector<WrittenTarget> &written,
     Parser::ModuleManifest &out,
-    const std::filesystem::path &package_dir,
-    const std::filesystem::path &entry_directory,
     const ManifestReport &into,
     const std::vector<std::string> *virtual_rel
 )
 {
     // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
-    // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
-    const auto expand_scope = [&out, &into, &package_dir, &entry_directory, virtual_rel](
-        const WrittenTarget &target, Parser::ModuleTarget &settled) {
-        if (!target.scoped_sources.empty()
+    // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way.
+    // **edges and scoped link/cc are already on `settled`**: record_written_targets copied them, and
+    // settle_manifest_edges is the one walk, shared with a `t_dependencies` read
+    const auto expand_scope = [&out, &into, virtual_rel](Parser::ModuleTarget &settled) {
+        if (!settled.sources_as_written.empty()
             && !expand_manifest_patterns(
-                target.scoped_sources, out, "sources", out.path, settled.sources, into,
+                settled.sources_as_written, out, "sources", out.path, settled.sources, into,
                 virtual_rel)) {
             return false;
         }
 
-        if (!resolve_manifest_depend_paths(target.scoped_depends, out, settled.depends, into)) {
-            return false;
-        }
-
-        if (!resolve_manifest_require_paths(
-                target.scoped_requirements, package_dir, out.directory, entry_directory,
-                settled.depends, into)) {
-            return false;
-        }
-
-        settled.link = target.scoped_link;
-        settled.cc = target.scoped_cc;
-
-        // credited exactly as the module's own are, and here rather than in the reader for the same
-        // reason: `#[module:]` is only conventionally the first line
         for (Compiler::LinkRequirement &requirement : settled.link) {
             requirement.declared_by = out.name;
         }
@@ -1059,66 +866,48 @@ bool resolve_manifest_targets(
         settled.cc.module_name = out.name;
 
         return expand_cc_sources(
-            settled.cc, out, fmt::format("target '{}'", target.name), into);
+            settled.cc, out, fmt::format("target '{}'", settled.name), into);
     };
 
-    for (const WrittenTarget &target : written) {
-        // **the name becomes a file name**, unlike a module's, which only has to be spellable - a target
-        // is written into the build directory under exactly this word, and BuildLayout::target_binary
-        // joins it there on the strength of this refusal.
-        //
-        // **an allow-list, because the deny-list a binary name needs is not writable**: `..` holds no
-        // character worth forbidding and still climbs out of the build directory, and `.`, `*` and a
-        // newline are each a name some shell or some filesystem reads as something other than a word
-        if (target.name.empty() || !std::all_of(target.name.begin(), target.name.end(), [](unsigned char c) {
-            return std::isalnum(c) != 0 || c == '_' || c == '-';
-        })) {
-            report_at<AST::Issue::UnusableTargetName>(into, target.line, fmt::format(
+    for (size_t i = 0; i < out.targets.size(); i++) {
+        Parser::ModuleTarget &settled = out.targets[i];
+
+        if (!is_usable_artifact_name(settled.name)) {
+            report_at<AST::Issue::UnusableTargetName>(into, settled.line, fmt::format(
                 "'{}' is not a usable target name - it becomes the name of a binary, so it may hold "
-                "only letters, digits, '_' and '-'.", target.name));
+                "only letters, digits, '_' and '-'.", settled.name));
             return false;
         }
 
-        for (const Parser::ModuleTarget &earlier : out.targets) {
-            if (earlier.name != target.name) {
+        for (size_t earlier = 0; earlier < i; earlier++) {
+            if (out.targets[earlier].name != settled.name) {
                 continue;
             }
 
-            report_at<AST::Issue::RepeatedManifestAttribute>(into, target.line, fmt::format(
+            report_at<AST::Issue::RepeatedManifestAttribute>(into, settled.line, fmt::format(
                 "'{}' is declared twice - two targets of one module cannot share a name, because the "
-                "name is the binary.", target.name));
+                "name is the binary.", settled.name));
             return false;
         }
 
-        Parser::ModuleTarget settled;
-        settled.name = target.name;
-        settled.kind = target.kind;
-        settled.install = target.install;
-        settled.groups = target.groups;
-        settled.has_scope = target.has_scope;
-        settled.sources_as_written = target.scoped_sources;
-        settled.depends_as_written = target.scoped_depends;
-        settled.requirements = target.scoped_requirements;
-
-        if (!expand_scope(target, settled)) {
+        if (!expand_scope(settled)) {
             return false;
         }
 
         // **a test target names no file**, so every path it does name is a *selection* - resolved against
         // the manifest like any other, and deliberately not checked against `sources`: a file: filter that
         // matches nothing is a refusal the runner makes, where it can say what there was to choose from
-        if (!Parser::target_has_entry(target.kind)) {
-            for (const std::string &file : target.files) {
+        if (!Parser::target_has_entry(settled.kind)) {
+            for (const std::string &file : settled.files_as_written) {
                 settled.files.push_back(Compiler::settled_path(out.directory, file));
             }
 
-            out.targets.push_back(std::move(settled));
             continue;
         }
 
         // through the one owner of "a path written relative to something", as `#[link: object]` and
         // `#[cc: include]` are - a manifest's own directory is the base for everything it declares
-        const std::filesystem::path resolved = Compiler::settled_path(out.directory, target.entry);
+        const std::filesystem::path resolved = Compiler::settled_path(out.directory, settled.entry_as_written);
 
         // one sentence for both "no such file" and "not in `sources`", because the remedy is the same
         // one either way: the pattern has to match the file, or the file has to move under one that does.
@@ -1129,15 +918,13 @@ bool resolve_manifest_targets(
         if (std::find(out.sources.begin(), out.sources.end(), resolved) == out.sources.end()
             && std::find(settled.sources.begin(), settled.sources.end(), resolved)
                 == settled.sources.end()) {
-            report_at<AST::Issue::TargetEntryNotASource>(into, target.line, fmt::format(
+            report_at<AST::Issue::TargetEntryNotASource>(into, settled.line, fmt::format(
                 "'{}' is target '{}'s entry but is not one of this module's sources - a target's entry "
-                "has to be a file the module is made of.", target.entry, target.name));
+                "has to be a file the module is made of.", settled.entry_as_written, settled.name));
             return false;
         }
 
         settled.entry = resolved;
-
-        out.targets.push_back(std::move(settled));
     }
 
     return true;
@@ -1156,6 +943,9 @@ std::vector<std::filesystem::path> every_dependency(const Parser::ModuleManifest
     std::vector<std::filesystem::path> all;
     Parser::append_active_depends(manifest, Parser::all_targets_active(manifest), all);
 
+    // and every hook's tool's - loaded and ordered like any other module, and compiled into no program
+    Parser::append_hook_depends(manifest, all);
+
     return all;
 }
 
@@ -1169,13 +959,60 @@ void record_written_targets(
         settled.name = target.name;
         settled.kind = target.kind;
         settled.install = target.install;
+        settled.is_public = target.is_public;
         settled.groups = target.groups;
         settled.has_scope = target.has_scope;
-        settled.sources_as_written = target.scoped_sources;
-        settled.depends_as_written = target.scoped_depends;
-        settled.requirements = target.scoped_requirements;
+        settled.line = target.line;
+        settled.entry_as_written = target.entry;
+        settled.files_as_written = target.files;
+        settled.sources_as_written = target.scope.scoped_sources;
+        settled.depends_as_written = target.scope.scoped_depends;
+        settled.requirements = target.scope.scoped_requirements;
+        settled.link = target.scope.scoped_link;
+        settled.cc = target.scope.scoped_cc;
         out.targets.push_back(std::move(settled));
     }
+}
+
+// a scope's edges, the file-scope depends/requires, and the hooks' edges - **one spelling**, so a
+// `t_dependencies` read and a full one cannot disagree about the graph. Source expansion and entry
+// checks stay on the full path: they need files a hook may still be about to create
+bool settle_manifest_edges(
+    const std::vector<WrittenTarget> &targets_written,
+    const std::vector<WrittenHook> &hooks_written,
+    const std::vector<std::string> &depends_written,
+    Parser::ModuleManifest &out,
+    const std::filesystem::path &package_dir,
+    const std::filesystem::path &entry_directory,
+    const ManifestReport &into
+)
+{
+    for (size_t i = 0; i < targets_written.size(); i++) {
+        if (!resolve_scope_edges(
+                targets_written[i].scope, out, package_dir, entry_directory,
+                out.targets[i].depends, out.targets[i].unresolved, into)) {
+            return false;
+        }
+    }
+
+    return resolve_manifest_depend_paths(depends_written, out, out.depends, into)
+        && resolve_manifest_require_paths(
+            out.requirements, package_dir, out.directory, entry_directory, out.depends, into)
+        && settle_manifest_hooks(
+            hooks_written, out, /*resolve=*/true, package_dir, entry_directory, into);
+}
+
+bool expand_settled_manifest(
+    Parser::ModuleManifest &out,
+    const ManifestReport &into,
+    Parser::ManifestScratch &scratch)
+{
+    const std::vector<std::string> *virtual_rel =
+        scratch.virtual_source_pool ? &*scratch.virtual_source_pool : nullptr;
+
+    return expand_manifest_sources(out.sources_as_written, out, into, virtual_rel)
+        && resolve_manifest_targets(out, into, virtual_rel)
+        && expand_cc_sources(out.cc, out, "this module", into);
 }
 
 bool read_manifest_with(
@@ -1252,6 +1089,7 @@ bool read_manifest_with(
     std::vector<std::string> sources_written;
     std::vector<std::string> depends_written;
     std::vector<WrittenTarget> targets_written;
+    std::vector<WrittenHook> hooks_written;
 
     {
         Parser::Payload payload =
@@ -1267,7 +1105,7 @@ bool read_manifest_with(
 
         if (!read_manifest_attributes(
                 payload, module, scratch.parser.target_facts, out, sources_written, depends_written,
-                targets_written)) {
+                targets_written, hooks_written)) {
             return false;
         }
     }
@@ -1275,30 +1113,73 @@ bool read_manifest_with(
     out.sources_as_written = sources_written;
     out.depends_as_written = depends_written;
 
+    record_written_targets(targets_written, out);
+
     // `-p manifest` stops here: epm reads a module whose packages are not on disk yet, so
     // expanding sources or resolving a `#[depends:]` / `#[requires:]` would be a fatal error
     // about a path the author has not fetched
     if (read == Parser::ManifestRead::t_written) {
-        record_written_targets(targets_written, out);
+        return settle_manifest_hooks(
+            hooks_written, out, /*resolve=*/false, scratch.package_dir, scratch.entry_directory, into);
+    }
+
+    // the edges and nothing else - see ManifestRead. A missing package is still refused, since the
+    // question being asked is precisely where it is. The full read continues from here with source
+    // expansion, so a later field on a target scope cannot land in two walks
+    if (!settle_manifest_edges(
+            targets_written, hooks_written, depends_written, out, scratch.package_dir,
+            scratch.entry_directory, into)) {
+        return false;
+    }
+
+    if (read == Parser::ManifestRead::t_dependencies) {
         return true;
     }
 
-    // targets after the sources they name, and before everything else - an entry has to be checked
-    // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
-    const std::vector<std::string> *virtual_rel =
-        scratch.virtual_source_pool ? &*scratch.virtual_source_pool : nullptr;
-
-    return expand_manifest_sources(sources_written, out, into, virtual_rel)
-        && resolve_manifest_targets(
-            targets_written, out, scratch.package_dir, scratch.entry_directory, into, virtual_rel)
-        && expand_cc_sources(out.cc, out, "this module", into)
-        && resolve_manifest_depend_paths(depends_written, out, out.depends, into)
-        && resolve_manifest_require_paths(
-            out.requirements, scratch.package_dir, out.directory, scratch.entry_directory,
-            out.depends, into);
+    return expand_settled_manifest(out, into, scratch);
 }
 
 };
+
+AST::CodeRef Parser::ManifestScratch::pin(const std::filesystem::path &path, uint32_t line, bool read_source)
+{
+    AST::Module &module = fresh_module();
+    AST::File &file = module.add_file(path);
+
+    if (read_source) {
+        std::string unreadable;
+        file.read_from_disk(unreadable);
+    }
+
+    return AST::CodeRef{ &module, pin_manifest(module, &file, line == 0 ? 1 : line).make_slice() };
+}
+
+bool Parser::is_usable_artifact_name(const std::string &name)
+{
+    return !name.empty() && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+        return std::isalnum(c) != 0 || c == '_' || c == '-';
+    });
+}
+
+bool Parser::resolve_scope_edges(
+    const Parser::WrittenScope &written,
+    const Parser::ModuleManifest &out,
+    const std::filesystem::path &package_dir,
+    const std::filesystem::path &entry_directory,
+    std::vector<std::filesystem::path> &into_depends,
+    std::vector<Parser::UnresolvedRequirement> &into_unresolved,
+    const Parser::ManifestReport &into
+)
+{
+    if (!resolve_manifest_depend_paths(written.scoped_depends, out, into_depends, into)) {
+        return false;
+    }
+
+    resolve_scoped_require_paths(
+        written.scoped_requirements, package_dir, out.directory, entry_directory, into_depends, into_unresolved);
+
+    return true;
+}
 
 Parser::ModuleContribution Parser::module_contribution_for(
     const Parser::ModuleManifest &manifest,
@@ -1369,6 +1250,20 @@ Parser::ModuleContribution Parser::module_contribution_for(
     return out;
 }
 
+void Parser::append_hook_depends(
+    const Parser::ModuleManifest &manifest,
+    std::vector<std::filesystem::path> &into
+)
+{
+    for (const Parser::ModuleHook &hook : manifest.hooks) {
+        for (const std::filesystem::path &dependency : hook.depends) {
+            if (std::find(into.begin(), into.end(), dependency) == into.end()) {
+                into.push_back(dependency);
+            }
+        }
+    }
+}
+
 void Parser::append_active_depends(
     const Parser::ModuleManifest &manifest,
     const Parser::ActiveTargets &active,
@@ -1415,23 +1310,51 @@ Parser::ActiveTargets Parser::all_targets_active(const Parser::ModuleManifest &m
     return active;
 }
 
-template <typename Issue>
-void Parser::ManifestScratch::report(
-    const std::filesystem::path &path, uint32_t line, std::string message)
+bool Parser::refuse_unresolved_scope_requirements(
+    const Parser::ModuleManifest &manifest,
+    const Parser::ActiveTargets &active,
+    Parser::ManifestScratch &scratch
+)
 {
-    AST::Module &module = fresh_module();
-    AST::File &file = module.add_file(path);
-    report_manifest<Issue>(bundle.collector, module, &file, line == 0 ? 1 : line, std::move(message));
+    const auto opened = active.find(manifest.name);
+
+    if (opened == active.end()) {
+        return true;
+    }
+
+    bool clean = true;
+
+    for (const Parser::ModuleTarget &target : manifest.targets) {
+        if (opened->second.find(target.name) == opened->second.end()) {
+            continue;
+        }
+
+        if (!refuse_unresolved_requirements(
+                manifest, target.unresolved, fmt::format("target '{}'", target.name), scratch)) {
+            clean = false;
+        }
+    }
+
+    return clean;
 }
 
-// ParsePipeline instantiates NoSuchManifest for a missing embedded module.eco.
-// the definition lives in this TU, so the instantiations have to be here too
-template void Parser::ManifestScratch::report<AST::Issue::NoSuchManifest>(
-    const std::filesystem::path &, uint32_t, std::string);
-template void Parser::ManifestScratch::report<AST::Issue::DuplicateModuleName>(
-    const std::filesystem::path &, uint32_t, std::string);
-template void Parser::ManifestScratch::report<AST::Issue::ModuleDependencyCycle>(
-    const std::filesystem::path &, uint32_t, std::string);
+bool Parser::refuse_unresolved_requirements(
+    const Parser::ModuleManifest &manifest,
+    const std::vector<Parser::UnresolvedRequirement> &unresolved,
+    const std::string &owner,
+    Parser::ManifestScratch &scratch
+)
+{
+    for (const Parser::UnresolvedRequirement &requirement : unresolved) {
+        scratch.report_at_line<AST::Issue::PackageNotVendored>(
+            manifest.path, requirement.line,
+            fmt::format(
+                "the package \"{}\" is not in 'vendor/', and {} requires it.", requirement.name, owner),
+            requirement.on_path_dependency);
+    }
+
+    return unresolved.empty();
+}
 
 bool Parser::read_module_manifest(
     const std::filesystem::path &path,
@@ -1444,10 +1367,26 @@ bool Parser::read_module_manifest(
     return read_manifest_with(scratch, path, out, read, content);
 }
 
+bool Parser::complete_manifest_sources(Parser::ModuleManifest &manifest, Parser::ManifestScratch &scratch)
+{
+    if (!manifest.sources.empty()) {
+        return true;
+    }
+
+    AST::Module &module = scratch.fresh_module();
+    AST::File &file = module.add_file(manifest.path);
+    std::string unreadable;
+    file.read_from_disk(unreadable);
+    const Parser::ManifestReport into{ scratch.bundle.collector, module, &file };
+
+    return expand_settled_manifest(manifest, into, scratch);
+}
+
 bool Parser::resolve_module_graph(
     const std::vector<std::filesystem::path> &roots,
     Parser::ManifestScratch &scratch,
-    std::vector<Parser::ModuleManifest> &out
+    std::vector<Parser::ModuleManifest> &out,
+    Parser::ManifestRead read
 )
 {
     out.clear();
@@ -1489,7 +1428,7 @@ bool Parser::resolve_module_graph(
                 scratch,
                 next,
                 manifest,
-                Parser::ManifestRead::t_full,
+                read,
                 std::nullopt
             )) {
             return false;

@@ -90,7 +90,11 @@ TEST_CASE("the build after a clean reuses nothing", "[clean]")
 
     REQUIRE(project.echoc("build -o out", app_dir).exit_code == 0);
 
-    // warm first, so the assertion below is about the clean rather than about a store that was never filled
+    // warm first, so the assertion below is about the clean rather than about a store that was never filled.
+    // **the program is edited in between**, or its stamp answers for this build before the cache plan does
+    // and nothing is said about the library at all
+    write_file(app_dir / "app.eco", "echo cleanlib::twice(22);\n");
+
     const ProcessResult warm = project.echoc("build -o out --explain cache", app_dir);
     REQUIRE(warm.output.find("cleanlib") != std::string::npos);
 

@@ -364,3 +364,28 @@ test version_text
     cli::App $app = cli::App();
     assert(command::renderVersion($app->cmd) == '0.1.0');
 }
+
+test run_hands_everything_after_the_tool_to_it
+{
+    array<string> $w = words2('run', 'restgen');
+    $w[] = '--spec';
+    $w[] = 'api.yaml';
+    $w[] = '--help';
+    Got $got = parse_ok($w);
+    assert($got->parsed->positionals->count() == 1);
+    assert(!$got->parsed->wantsHelp);
+    assert($got->parsed->tail->count() == 3);
+    assert($got->parsed->tail[0] == '--spec');
+    assert($got->parsed->tail[2] == '--help');
+}
+
+test run_still_reads_its_own_flags_before_the_tool
+{
+    array<string> $w = words2('run', '-m');
+    $w[] = '../app';
+    $w[] = 'restgen';
+    $w[] = 'x';
+    Got $got = parse_ok($w);
+    assert($got->parsed->positionals[0] == 'restgen');
+    assert($got->parsed->tail->count() == 1);
+}

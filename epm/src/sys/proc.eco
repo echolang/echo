@@ -24,16 +24,20 @@ public struct Run
     }
 }
 
-public function run(const array<string>& $args) : Run
+/**
+ * The argv as the C side holds it, or null when it could not be built.
+ * The caller frees it with epm_argv_free.
+ */
+function argv_of(const array<string>& $args) : ptr<uint8>
 {
     if ($args->count() == 0) {
-        return Run(1, '', 'failed to spawn');
+        return null;
     }
 
     ptr<uint8> $h = epm_argv_new();
 
     if ($h:$ == null) {
-        return Run(1, '', 'failed to spawn');
+        return null;
     }
 
     usize $i = 0;
@@ -43,10 +47,43 @@ public function run(const array<string>& $args) : Run
 
         if (epm_argv_push($h, $arg->cstr()) != 0) {
             epm_argv_free($h);
-            return Run(1, '', 'failed to spawn');
+            return null;
         }
 
         $i = $i + 1;
+    }
+
+    return $h;
+}
+
+/**
+ * Run a command on epm's own terminal. 127 if it could not start.
+ */
+public function spawn(const array<string>& $args) : int32
+{
+    ptr<uint8> $h = argv_of($args);
+
+    if ($h:$ == null) {
+        return 127;
+    }
+
+    int32 $code = 127;
+    int32 $rc = epm_spawn_wait($h, &$code);
+    epm_argv_free($h);
+
+    if ($rc != 0) {
+        return 127;
+    }
+
+    return $code;
+}
+
+public function run(const array<string>& $args) : Run
+{
+    ptr<uint8> $h = argv_of($args);
+
+    if ($h:$ == null) {
+        return Run(1, '', 'failed to spawn');
     }
 
     ptr<uint8> $out_s = null;

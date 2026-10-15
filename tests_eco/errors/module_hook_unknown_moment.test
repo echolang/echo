@@ -1,0 +1,13 @@
+modules: modules/hook_unknown_moment
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  module.eco:4:9
+
+  'after_lunch' is not a hook moment, expected one of: before_build.
+
+  3 | #[sources: "src/*.eco"]
+  4 | #[hook: after_lunch { run: "gen" }]
+    :         ^^^^^^^^^^^
+  5 | 
+

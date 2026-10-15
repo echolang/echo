@@ -296,19 +296,6 @@ std::vector<std::filesystem::path> Compiler::Lsp::Session::loose_sources_from(
     return sources;
 }
 
-std::vector<const Parser::ModuleManifest *> Compiler::Lsp::Session::compiled_manifests(
-    const std::vector<Parser::ModuleManifest> &manifests
-) const
-{
-    std::vector<const Parser::ModuleManifest *> out;
-    out.reserve(manifests.size());
-    for (const Parser::ModuleManifest &manifest : manifests) {
-        out.push_back(&manifest);
-    }
-
-    return out;
-}
-
 Compiler::Lsp::Session::CompileInputs Compiler::Lsp::Session::capture_inputs(
     const std::string &reason
 ) const
@@ -343,7 +330,10 @@ Compiler::Lsp::Session::RebuildProduct Compiler::Lsp::Session::produce_snapshot(
     AST::PointerSizeScope pointer_size(inputs.options.codegen.pointer_size());
     Parser::ModuleParser parser(inputs.facts, {});
 
-    const std::vector<const Parser::ModuleManifest *> compiled = compiled_manifests(inputs.manifests);
+    // the driver's answer over every scope the workspace opens, so a module only a hook's tool needs is
+    // absent here exactly as it is from every program the project builds
+    const std::vector<const Parser::ModuleManifest *> compiled =
+        Compiler::program_manifests(inputs.manifests, inputs.active_targets);
     const std::vector<std::filesystem::path> loose = loose_sources_from(inputs);
 
     ParseRequest request{

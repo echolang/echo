@@ -37,6 +37,10 @@ namespace Compiler
         t_optimize,
         t_emit,
 
+        // a hook's tool, built then run. two rows: a current tool is a build that did nothing
+        t_tool,
+        t_hook,
+
         // running a test, which is the one phase that is not a step of a compile - what `echoc test` does
         // *after* every other row has been committed. It shares this vocabulary rather than having one of
         // its own because it shares the line: Compiler::ProgressReporter is the only thing allowed to move

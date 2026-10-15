@@ -1,9 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 #include "subprocess.h"
 #include "Compiler/HostTool.h"
@@ -118,3 +125,70 @@ TEST_CASE("process_directory is the running executable's folder", "[subprocess]"
     REQUIRE_FALSE(dir.empty());
     REQUIRE(std::filesystem::is_directory(dir));
 }
+
+TEST_CASE("process_executable is the running executable", "[subprocess]")
+{
+    const std::filesystem::path exe = Compiler::process_executable();
+    REQUIRE_FALSE(exe.empty());
+    REQUIRE(std::filesystem::is_regular_file(exe));
+    REQUIRE(exe.parent_path() == Compiler::process_directory());
+}
+
+#if !defined(_WIN32)
+TEST_CASE("run_streamed joins the child's stdout to stderr, in its own directory and environment", "[subprocess]")
+{
+    // the redirect is only observable from outside this process, so both streams are pointed at files for
+    // the length of the call and put back after
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / ("echoc-run-streamed-" + std::to_string(getpid()));
+    std::filesystem::create_directories(dir / "cwd");
+
+    const std::filesystem::path out_path = dir / "stdout.txt";
+    const std::filesystem::path err_path = dir / "stderr.txt";
+
+    std::fflush(nullptr);
+
+    const int saved_out = dup(STDOUT_FILENO);
+    const int saved_err = dup(STDERR_FILENO);
+
+    FILE *out_file = std::fopen(out_path.c_str(), "w");
+    FILE *err_file = std::fopen(err_path.c_str(), "w");
+    REQUIRE(out_file != nullptr);
+    REQUIRE(err_file != nullptr);
+
+    dup2(fileno(out_file), STDOUT_FILENO);
+    dup2(fileno(err_file), STDERR_FILENO);
+
+    const int status = Compiler::run_streamed(
+        { "/bin/sh", "-c", "echo WRITTEN_TO_STDOUT; echo WRITTEN_TO_STDERR >&2; pwd; echo \"$ECHO_SENTINEL\"; exit 3" },
+        dir / "cwd",
+        { { "ECHO_SENTINEL", "the-sentinel-value" } });
+
+    std::fflush(nullptr);
+    dup2(saved_out, STDOUT_FILENO);
+    dup2(saved_err, STDERR_FILENO);
+    close(saved_out);
+    close(saved_err);
+    std::fclose(out_file);
+    std::fclose(err_file);
+
+    const auto read = [](const std::filesystem::path &path) {
+        std::ifstream in(path);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+
+    const std::string written_out = read(out_path);
+    const std::string written_err = read(err_path);
+    std::filesystem::remove_all(dir);
+
+    INFO("stdout: " << written_out);
+    INFO("stderr: " << written_err);
+
+    REQUIRE(status == 3);
+    REQUIRE(written_out.empty());
+    REQUIRE(written_err.find("WRITTEN_TO_STDOUT") != std::string::npos);
+    REQUIRE(written_err.find("WRITTEN_TO_STDERR") != std::string::npos);
+    REQUIRE(written_err.find("cwd") != std::string::npos);
+    REQUIRE(written_err.find("the-sentinel-value") != std::string::npos);
+}
+#endif

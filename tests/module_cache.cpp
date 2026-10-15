@@ -247,6 +247,17 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
             != line_starting_with(generic.output, "cachelib"));
     }
 
+    SECTION("stripping the type tags is a different build of the same source")
+    {
+        // `--no-tbaa` drops every `!tbaa` codegen would have planted, so a tagged object served to an
+        // untagged build is the one differential the flag exists for coming back with the wrong answer
+        const ProcessResult untagged = project.echoc(args + " --no-tbaa", app_dir);
+
+        REQUIRE(untagged.exit_code == 0);
+        REQUIRE(cache_key(line_starting_with(untagged.output, "cachelib")) != cache_key(lib_before));
+        REQUIRE(cache_key(line_starting_with(untagged.output, "stdlib")) != cache_key(stdlib_before));
+    }
+
     SECTION("a miss names the file that changed rather than reporting a digest")
     {
         // the record is written by a build, so there is nothing to compare against on the very first run -
@@ -552,6 +563,10 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
             "build -o out --build-dir " + quoted(inner.build_dir()) + " --explain cache";
 
         inner.echoc(inner_args, inner.root());
+
+        // an edit, so the program stamp has nothing to answer for and the cache plan is what speaks
+        write_file(inner.root() / "app.eco", "echo 2;\n");
+
         const ProcessResult second = inner.echoc(inner_args, inner.root());
 
         const std::string line = line_starting_with(second.output, "selfprog");

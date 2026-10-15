@@ -198,6 +198,7 @@ std::string Parser::manifest_as_json(const Parser::ModuleManifest &manifest)
         // only an exe can carry it, so a test or lib target says nothing it could not have written
         if (target.kind == Parser::TargetKind::t_executable) {
             out << ", \"install\": " << (target.install ? "true" : "false");
+            out << ", \"public\": " << (target.is_public ? "true" : "false");
         }
 
         out << ", \"requires\": ";
@@ -206,6 +207,29 @@ std::string Parser::manifest_as_json(const Parser::ModuleManifest &manifest)
         json_string_array(out, target.depends_as_written);
         out << ", \"sources\": ";
         json_string_array(out, target.sources_as_written);
+        out << " }";
+    }
+
+    out << "],\n  \"hooks\": [";
+
+    for (size_t i = 0; i < manifest.hooks.size(); i++) {
+        if (i > 0) {
+            out << ", ";
+        }
+
+        const Parser::ModuleHook &hook = manifest.hooks[i];
+        out << "{ \"moment\": ";
+        json_escape(out, Parser::hook_moment_name(hook.moment));
+        out << ", \"name\": ";
+        json_escape(out, hook.name);
+        out << ", \"run\": ";
+        json_escape(out, hook.run);
+        out << ", \"args\": ";
+        json_string_array(out, hook.args);
+        out << ", \"requires\": ";
+        json_requirements(out, hook.requirements);
+        out << ", \"depends\": ";
+        json_string_array(out, hook.depends_as_written);
         out << " }";
     }
 
@@ -285,4 +309,18 @@ std::optional<std::string> Parser::written_manifests_json(
     }
 
     return Parser::manifests_as_json(manifests);
+}
+
+std::string Parser::json_quoted(const std::string &text)
+{
+    std::ostringstream out;
+    json_escape(out, text);
+    return out.str();
+}
+
+std::string Parser::json_quoted_list(const std::vector<std::string> &items)
+{
+    std::ostringstream out;
+    json_string_array(out, items);
+    return out.str();
 }

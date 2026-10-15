@@ -1,0 +1,119 @@
+namespace epm::cmd;
+
+use command;
+use epm::cli::{App, start_from_cli, work_context};
+use epm::manifest;
+use epm::sys;
+
+/**
+ * `epm run [<tool> [<args>...]]`: a program a dependency offers, built if
+ * it has to be. epm compiles nothing; `echoc build` does.
+ */
+public function run(const App& $app, const command::Parsed& $cli) : int32
+{
+    command::CLIContext $ctx = work_context($app, $cli);
+    string $start = guard start_from_cli($app, $cli) else ($e) {
+        $ctx->printError($e);
+        return 1;
+    }
+
+    // the path is all echoc needs
+    string $mod = guard manifest::find_module($start) else {
+        $ctx->printError('no module.eco here or above');
+        return 1;
+    }
+
+    manifest::Offer $offer = guard manifest::offered_tools($mod) else ($e) {
+        $ctx->printError($e);
+        return 1;
+    }
+
+    // the list is an answer, so stdout
+    if ($cli->positionals->count() == 0) {
+        return list_tools($offer, .from($cli, $app->cmd, .stdout));
+    }
+
+    string $ref = $cli->positionals[0];
+    manifest::OfferedTool $tool = guard select_tool($offer, $ref) else {
+        $ctx->printError(unknown_tool($offer, $ref));
+        return 1;
+    }
+
+    // the build's own terminal: a tool built here and one a hook builds are the same command
+    if (sys::spawn($tool->build) != 0) {
+        $ctx->printError("'{$tool->name()}' did not build.");
+        return 1;
+    }
+
+    return sys::spawn(tool_run_argv($tool, $cli->tail));
+}
+
+public function select_tool(const manifest::Offer& $offer, const string& $ref) : manifest::OfferedTool?
+{
+    usize $i = 0;
+
+    while ($i < $offer->tools->count()) {
+        if ($offer->tools[$i]->answers($ref)) {
+            return $offer->tools[$i];
+        }
+
+        $i = $i + 1;
+    }
+
+    return null;
+}
+
+public function tool_run_argv(const manifest::OfferedTool& $tool, const array<string>& $args) : array<string>
+{
+    array<string> $argv = array<string>();
+    $argv[] = $tool->binary;
+    $argv->extend($args);
+
+    return $argv;
+}
+
+function list_tools(const manifest::Offer& $offer, command::CLIContext $ctx) : int32
+{
+    if ($offer->tools->count() == 0) {
+        $ctx->line('No dependency of this module offers a tool. A dependency offers one with');
+        $ctx->line("'#[target: exe { ..., public: true }]'.");
+        return 0;
+    }
+
+    usize $i = 0;
+
+    while ($i < $offer->tools->count()) {
+        manifest::OfferedTool $tool = $offer->tools[$i];
+        string $qualified = "{$tool->module}:{$tool->target}";
+
+        if ($tool->name() == $qualified) {
+            $ctx->line($qualified);
+        }
+        else {
+            $ctx->line("{$tool->name()}  ({$qualified})");
+        }
+
+        $i = $i + 1;
+    }
+
+    return 0;
+}
+
+function unknown_tool(const manifest::Offer& $offer, const string& $ref) : string
+{
+    if ($offer->tools->count() == 0) {
+        return "no dependency offers a tool called '{$ref}' - none offers any. A dependency offers one with '#[target: exe { ..., public: true }]'.";
+    }
+
+    array<string> $names = array<string>();
+    usize $i = 0;
+
+    while ($i < $offer->tools->count()) {
+        $names[] = $offer->tools[$i]->name();
+        $i = $i + 1;
+    }
+
+    string $listed = str::join($names, ', ');
+
+    return "no dependency offers a tool called '{$ref}'. On offer: {$listed}.";
+}

@@ -172,6 +172,10 @@ const char *Compiler::progress_phase_label(ProgressPhase phase)
         return "optimize";
     case ProgressPhase::t_emit:
         return "emit + link";
+    case ProgressPhase::t_tool:
+        return "tool";
+    case ProgressPhase::t_hook:
+        return "hook";
     case ProgressPhase::t_test:
         return "test";
     }

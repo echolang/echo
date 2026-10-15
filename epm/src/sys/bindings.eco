@@ -29,6 +29,8 @@ internal extern {
         ptr<int32> $code
     ) : int32;
 
+    function epm_spawn_wait(ptr<uint8> $h, ptr<int32> $code) : int32;
+
     function epm_free(ptr<uint8> $p) : void;
 
     function epm_sha256_new() : ptr<uint8>;

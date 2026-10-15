@@ -4,7 +4,7 @@ expect: fail
 --- OUT --->
 [error] InvalidManifestScope  module.eco:5:3
 
-  'sources' cannot carry a '{ ... }' scope - only a '#[target: ...]' can, a scope being what one target says for itself.
+  'sources' cannot carry a '{ ... }' scope - only a '#[target: ...]' or a '#[hook: ...]' can, a scope being what one of them says for itself.
 
   4 | #[sources: "src/*.eco"]
   5 | #[sources: "src/*.eco"] {

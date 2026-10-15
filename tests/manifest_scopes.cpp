@@ -381,3 +381,78 @@ TEST_CASE("a scoped #[requires:] is present for test and absent for build", "[ma
     REQUIRE(built.exit_code == 0);
     REQUIRE(built.output.find("libhello") == std::string::npos);
 }
+
+TEST_CASE("a dependency's unvendored test requirement does not stop its consumer", "[manifest_scopes][packages]")
+{
+    // the library's tests need a mock package, and epm vendors the requirements of the scopes a consumer
+    // can open and no others - so this is the state every consumer of such a library is in. Refusing it
+    // at read time made the library unusable as a dependency
+    ScopedProject project("dependency_test_requirement");
+
+    write_file(project.root() / "app/module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[requires: \"kit\" { version: \"^1.0\", source: git \"https://example.com/kit\" }]\n");
+
+    write_file(project.root() / "app/src/main.eco", "echo kit::answer();\n");
+
+    write_file(project.root() / "app/vendor/kit/module.eco",
+        "#[module: \"kit\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[sources: \"tests/*.eco\"]\n"
+        "    #[requires: \"mocklib\" { version: \"^1.0\", source: git \"https://example.com/mocklib\" }]\n"
+        "}\n");
+
+    write_file(project.root() / "app/vendor/kit/src/kit.eco",
+        "namespace kit;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    write_file(project.root() / "app/vendor/kit/tests/kit_test.eco",
+        "test the_mock_agrees\n"
+        "{\n"
+        "    assert(kit::answer() == mocklib::answer());\n"
+        "}\n");
+
+    const ProcessResult ran = project.echoc("run", project.root() / "app");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("42") != std::string::npos);
+}
+
+TEST_CASE("an unvendored scoped requirement is refused when its scope opens", "[manifest_scopes][packages]")
+{
+    ScopedProject project("unvendored_scope");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"app\", entry: \"src/main.eco\" }]\n"
+        "#[target: test] {\n"
+        "    #[requires: \"mocklib\" { version: \"^1.0\", source: git \"https://example.com/mocklib\" }]\n"
+        "}\n");
+
+    write_file(project.root() / "src/main.eco", "echo 'THE PROGRAM RAN';\n");
+
+    SECTION("a build that never opens it is not refused")
+    {
+        const ProcessResult ran = project.echoc("run");
+        INFO(ran.output);
+
+        REQUIRE(ran.exit_code == 0);
+        REQUIRE(ran.output.find("THE PROGRAM RAN") != std::string::npos);
+    }
+
+    SECTION("the test run that opens it is refused, at the line that wrote it")
+    {
+        const ProcessResult tested = project.echoc("test");
+        INFO(tested.output);
+
+        REQUIRE(tested.exit_code == 1);
+        REQUIRE(tested.output.find("the package \"mocklib\" is not in 'vendor/'") != std::string::npos);
+        REQUIRE(tested.output.find("target 'tests' requires it") != std::string::npos);
+        REQUIRE(tested.output.find("module.eco:5") != std::string::npos);
+        REQUIRE(tested.output.find("epm install") != std::string::npos);
+    }
+}

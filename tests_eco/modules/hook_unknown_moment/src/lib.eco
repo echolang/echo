@@ -1,0 +1,1 @@
+public function lib_value() : int32 { return 1; }

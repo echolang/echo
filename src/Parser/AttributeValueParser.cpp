@@ -25,10 +25,11 @@ namespace
 
     // is the token `offset` ahead a bare word - an identifier, or a keyword spelled like one.
     //
-    // **the three places this grammar reads a name all go through it**: whether a value starts here, whether
-    // a name is a *tag* on the value behind it, and the bare-name atom itself. They have to agree, or
-    // `#[target: test { ... }]` reads its tag as an atom and then meets a '{' it has no arm for - which is
-    // exactly what a keyword being added to the lexer did to it
+    // **the four places this grammar reads a name all go through it**: whether a value starts here, whether
+    // a name is a *tag* on the value behind it, the bare-name atom itself, and a record's key. They have to
+    // agree, or `#[target: test { ... }]` reads its tag as an atom and then meets a '{' it has no arm for -
+    // which is exactly what a keyword being added to the lexer did to it. The key was the one that missed
+    // it, and `{ public: true }` was refused as not being a name
     bool at_a_word(const Parser::Cursor &cursor, size_t offset = 0)
     {
         if (!cursor.is_valid_offset(offset)) {
@@ -92,7 +93,7 @@ namespace
         cursor.skip(); // `{`
 
         while (!cursor.is_type(Token::Type::t_close_brace)) {
-            if (!cursor.is_type(Token::Type::t_identifier)) {
+            if (!at_a_word(cursor)) {
                 refuse(payload, here(cursor), "a record key has to be a name, written 'key: value'.");
                 return false;
             }

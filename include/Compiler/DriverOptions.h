@@ -106,6 +106,9 @@ namespace Compiler
         std::filesystem::path output;
 
         bool no_stdlib = false;
+
+        // skip the root's `#[hook:]`s. stated, never implied
+        bool no_hooks = false;
         bool emit_stdlib_header = false;
         bool silent = false;
 
@@ -137,6 +140,11 @@ namespace Compiler
         // `get<bool>("--print-ir")` did, and cannot be spelled wrong
         bool prints(PrintKind what) const;
         bool explains(ExplainKind what) const;
+
+        // any dump: a skipped build prints nothing, so asking for one always runs
+        bool prints_anything() const {
+            return _prints != 0;
+        }
 
     private:
 

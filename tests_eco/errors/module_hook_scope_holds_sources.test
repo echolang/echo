@@ -1,0 +1,13 @@
+modules: modules/hook_scope_holds_sources
+expect: fail
+
+--- OUT --->
+[error] InvalidManifestScope  module.eco:6:7
+
+  'sources' cannot be written inside a '#[hook: ...]' scope - it holds only depends, requires.
+
+  5 | #[hook: before_build { run: "gen" }] {
+  6 |     #[sources: "src/*.eco"]
+    :       ^^^^^^^
+  7 | }
+

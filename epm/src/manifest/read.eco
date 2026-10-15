@@ -57,6 +57,15 @@ public struct Manifest
     array<string> $depends;
     array<ScopedDepend> $scoped_depends;
 
+    // exe targets this module offers: `public: true`
+    array<string> $public_targets;
+
+    // a hook's `#[requires:]`: vendored like the module's, never compiled into it
+    array<Requirement> $hook_requires;
+
+    // a hook's `#[depends:]`, as written. walked from the root only
+    array<string> $hook_depends;
+
     constructor(string $name, string $version, string $path)
     {
         $this->name = $name;
@@ -66,10 +75,49 @@ public struct Manifest
         $this->scoped = array<ScopedRequirement>();
         $this->depends = array<string>();
         $this->scoped_depends = array<ScopedDepend>();
+        $this->public_targets = array<string>();
+        $this->hook_requires = array<Requirement>();
+        $this->hook_depends = array<string>();
+    }
+
+    const function offers(const string& $target) : bool
+    {
+        usize $i = 0;
+
+        while ($i < $this->public_targets->count()) {
+            if ($this->public_targets[$i] == $target) {
+                return true;
+            }
+
+            $i = $i + 1;
+        }
+
+        return false;
     }
 }
 
-public function all_requires(const Manifest& $m) : array<Requirement>
+/**
+ * Requires inside an offered target's scope. vendored only for a package
+ * the project requires directly: a transitive package's tools are unreachable.
+ */
+public function tool_requires(const Manifest& $m) : array<Requirement>
+{
+    array<Requirement> $out = array<Requirement>();
+    usize $i = 0;
+
+    while ($i < $m->scoped->count()) {
+        if ($m->offers($m->scoped[$i]->target)) {
+            $out[] = $m->scoped[$i]->req;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+// file-scope plus target-scope. a walked path module's hooks are its author's
+function program_requires(const Manifest& $m) : array<Requirement>
 {
     array<Requirement> $out = array<Requirement>();
     usize $i = 0;
@@ -83,6 +131,19 @@ public function all_requires(const Manifest& $m) : array<Requirement>
 
     while ($i < $m->scoped->count()) {
         $out[] = $m->scoped[$i]->req;
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+public function all_requires(const Manifest& $m) : array<Requirement>
+{
+    array<Requirement> $out = program_requires($m);
+    usize $i = 0;
+
+    while ($i < $m->hook_requires->count()) {
+        $out[] = $m->hook_requires[$i];
         $i = $i + 1;
     }
 
@@ -131,7 +192,7 @@ public function name_seen(const array<string>& $seen, const string& $name) : boo
 
 function append_requires(const Manifest& $m, array<Requirement>& $into) : void
 {
-    array<Requirement> $more = all_requires($m);
+    array<Requirement> $more = program_requires($m);
     usize $i = 0;
 
     while ($i < $more->count()) {
@@ -205,6 +266,26 @@ function walk_depends(
     return .ok(true);
 }
 
+function walk_hook_depends(
+    const Manifest& $man,
+    array<string>& $seen,
+    array<Requirement>& $into,
+    int32 $depth
+) : result<bool, string>
+{
+    usize $i = 0;
+
+    while ($i < $man->hook_depends->count()) {
+        bool $ok = guard walk_depend_path($man, $man->hook_depends[$i], $seen, $into, $depth) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
+    }
+
+    return .ok(true);
+}
+
 /**
  * Root requires, plus every `#[requires:]` on a reachable `#[depends:]` module.
  * Path modules stay out of vendor/; only their git requires are solve roots.
@@ -215,6 +296,11 @@ public function reachable_requires(const Manifest& $root) : result<array<Require
     array<string> $seen = array<string>();
     $seen[] = $root->name;
     bool $ok = guard walk_depends($root, $seen, $out, 0) else ($e) {
+        return .error($e);
+    }
+
+    // the root's hooks only: a path module's hooks never run for this program
+    bool $hooks = guard walk_hook_depends($root, $seen, $out, 0) else ($e) {
         return .error($e);
     }
 
@@ -315,6 +401,10 @@ public function load(const string& $path) : result<Manifest, string>
 
     while ($ti < $targets->count()) {
         string $tname = $targets[$ti]['name']->asStr() ?? '';
+
+        if ($targets[$ti]['public']->asBool() ?? false) {
+            $m->public_targets[] = $tname;
+        }
         array<Requirement> $scoped = array<Requirement>();
         take_requires($targets[$ti]['requires'], $scoped);
         usize $si = 0;
@@ -338,6 +428,28 @@ public function load(const string& $path) : result<Manifest, string>
         }
 
         $ti = $ti + 1;
+    }
+
+    array<json::Value> $hooks = $root['hooks']->asArray() ?? array<json::Value>();
+    usize $hi = 0;
+
+    while ($hi < $hooks->count()) {
+        take_requires($hooks[$hi]['requires'], $m->hook_requires);
+
+        array<json::Value> $hdeps = $hooks[$hi]['depends']->asArray() ?? array<json::Value>();
+        usize $hdi = 0;
+
+        while ($hdi < $hdeps->count()) {
+            string $hd = $hdeps[$hdi]->asStr() ?? '';
+
+            if (!$hd->empty()) {
+                $m->hook_depends[] = $hd;
+            }
+
+            $hdi = $hdi + 1;
+        }
+
+        $hi = $hi + 1;
     }
 
     return .ok($m);

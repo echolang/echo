@@ -11,6 +11,10 @@ use std::env;
 
 public function dispatch(const cli::App& $app, const command::Parsed& $cli) : int32
 {
+    if ($cli->command->id == $app->run->id) {
+        return run($app, $cli);
+    }
+
     if ($cli->command->id == $app->init->id) {
         return init($app, $cli);
     }

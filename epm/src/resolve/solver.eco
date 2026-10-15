@@ -23,6 +23,10 @@ public struct Release
     string $tag;
     string $rev;
     array<Requirement> $requires;
+
+    // what this release's public tools need. part of the solve
+    // only when the project requires this package directly
+    array<Requirement> $tool_requires;
     bool $hydrated;
 
     constructor(Version $version, string $tag, string $rev)
@@ -31,6 +35,7 @@ public struct Release
         $this->tag = $tag;
         $this->rev = $rev;
         $this->requires = array<Requirement>();
+        $this->tool_requires = array<Requirement>();
         $this->hydrated = false;
     }
 }
@@ -123,10 +128,14 @@ struct Need
     Requirement $req;
     string $who;
 
-    constructor(Requirement $req, string $who)
+    // the project asked for it itself, which is what makes the package's public tools reachable
+    bool $direct;
+
+    constructor(Requirement $req, string $who, bool $direct = false)
     {
         $this->req = $req;
         $this->who = $who;
+        $this->direct = $direct;
     }
 }
 
@@ -139,7 +148,7 @@ public function solve(
     usize $i = 0;
 
     while ($i < $roots->count()) {
-        $pending[] = Need($roots[$i], 'the project');
+        $pending[] = Need($roots[$i], 'the project', true);
         $i = $i + 1;
     }
 
@@ -218,11 +227,15 @@ private function assign(
     }
 
     array<Need> $rest = array<Need>();
+    bool $direct = false;
     $i = 0;
 
     while ($i < $pending->count()) {
         if ($pending[$i]->req->name != $name) {
             $rest[] = $pending[$i];
+        }
+        else if ($pending[$i]->direct) {
+            $direct = true;
         }
 
         $i = $i + 1;
@@ -264,10 +277,28 @@ private function assign(
             $why
         );
 
+        // a direct package's public tools are runnable by the project, so what they need is part of
+        // recorded on the choice like any other requirement, so the lock says why it is there
+        array<Requirement> $needs = $rel->requires;
+
+        if ($direct) {
+            usize $t = 0;
+
+            while ($t < $rel->tool_requires->count()) {
+                bool $listed = guard ensure_listed($rel->tool_requires[$t], $world) else ($e) {
+                    $err = $e;
+                    return false;
+                }
+
+                $needs[] = $rel->tool_requires[$t];
+                $t = $t + 1;
+            }
+        }
+
         usize $k = 0;
 
-        while ($k < $rel->requires->count()) {
-            $choice->requires[] = $rel->requires[$k]->name;
+        while ($k < $needs->count()) {
+            $choice->requires[] = $needs[$k]->name;
             $k = $k + 1;
         }
 
@@ -283,8 +314,8 @@ private function assign(
 
         $k = 0;
 
-        while ($k < $rel->requires->count()) {
-            $next[] = Need($rel->requires[$k], $name);
+        while ($k < $needs->count()) {
+            $next[] = Need($needs[$k], $name);
             $k = $k + 1;
         }
 
@@ -344,7 +375,9 @@ private function hydrate(
         $r = $r + 1;
     }
 
+    // recorded, not listed: listing fetches tags, and a transitive package's tools are never in the solve
     $world->catalog[$pkg]->releases[$rel_i]->requires = $reqs;
+    $world->catalog[$pkg]->releases[$rel_i]->tool_requires = epm::manifest::tool_requires($man);
     $world->catalog[$pkg]->releases[$rel_i]->hydrated = true;
     return true;
 }

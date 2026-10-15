@@ -182,6 +182,11 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
 
+    // **and whether a typed access carries its `!tbaa` tag.** `--no-tbaa` strips every tag codegen would
+    // have planted, which is a different object for every module that loads or stores - and the one
+    // that could be served from the other's store is exactly the differential `--no-tbaa` exists to run
+    environment = fnv1a64(options.no_tbaa ? std::string("notbaa") : std::string("tbaa"), environment);
+
     // **and what kind of program this is.** no two kinds share an object
     environment = fnv1a64(
         std::string(Compiler::exec_model_environment(options)), environment);

@@ -1,6 +1,7 @@
 #include "Compiler/BuildLayout.h"
 
 #include "eco.h"
+#include "Compiler/ModuleCache.h"
 
 #include <fmt/core.h>
 
@@ -356,9 +357,31 @@ std::filesystem::path Compiler::BuildLayout::target_binary(
     return module_dir(manifest) / target_name;
 }
 
-std::filesystem::path Compiler::BuildLayout::scratch_cc_dir() const
+std::filesystem::path Compiler::BuildLayout::scratch_cc_dir(const Parser::ModuleManifest &manifest) const
 {
-    return _scratch / "cc";
+    return _scratch / "cc" / manifest.name;
+}
+
+std::filesystem::path Compiler::BuildLayout::hook_state_dir(
+    const Parser::ModuleManifest &manifest,
+    const std::string &hook
+) const
+{
+    return module_dir(manifest) / "hooks" / hook;
+}
+
+std::filesystem::path Compiler::BuildLayout::program_stamp(
+    const Parser::ModuleManifest &entry,
+    const std::string &program_name,
+    const std::filesystem::path &output
+) const
+{
+    // a target name is `[A-Za-z0-9_-]` - see resolve_manifest_targets - so neither half can climb out of the
+    // directory or collide with a binary, which never carries a `.stamp`
+    const std::string name = program_name.empty() ? entry.name : program_name;
+    const uint64_t where = fnv1a64(output.string(), k_fnv_offset_basis);
+
+    return module_dir(entry) / fmt::format("{}-{}.stamp", name, to_hex(where));
 }
 
 std::filesystem::path Compiler::BuildLayout::scratch_object(const std::string &module_name) const
@@ -386,6 +409,23 @@ Compiler::BuildDirState Compiler::BuildLayout::prepare_module_dir(
 ) const
 {
     return prepare_build_directory(module_dir(manifest), trust_of(manifest));
+}
+
+Compiler::BuildDirState Compiler::BuildLayout::prepare_hook_state_dir(
+    const Parser::ModuleManifest &manifest,
+    const std::string &hook
+) const
+{
+    const BuildDirState state = prepare_module_dir(manifest);
+
+    if (state != BuildDirState::t_ready) {
+        return state;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(hook_state_dir(manifest, hook), ec);
+
+    return ec ? BuildDirState::t_unusable : BuildDirState::t_ready;
 }
 
 std::string Compiler::BuildLayout::first_foreign_directory(

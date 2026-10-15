@@ -155,9 +155,19 @@ namespace Compiler
             return _scratch_is_temporary;
         }
 
-        // where a C object goes when its module's own store could not be written. The `cc` join lives
+        // where a module's C objects go when its own store could not be written. the `cc` join lives
         // here beside module_cc_dir's: a caller spelling it is the fourth answer this class replaced
-        std::filesystem::path scratch_cc_dir() const;
+        std::filesystem::path scratch_cc_dir(const Parser::ModuleManifest &manifest) const;
+
+        // a root's `#[hook:]` state dir, inside the module's build directory so `clean` empties it
+        std::filesystem::path hook_state_dir(const Parser::ModuleManifest &manifest, const std::string &hook) const;
+
+        // last-build record of `output`, named after the program and the path, so two `-o`s keep two
+        std::filesystem::path program_stamp(
+            const Parser::ModuleManifest &entry,
+            const std::string &program_name,
+            const std::filesystem::path &output
+        ) const;
 
         std::filesystem::path scratch_object(const std::string &module_name) const;
 
@@ -172,6 +182,7 @@ namespace Compiler
         // prepares a directory this layout named. **the trust rule is applied here and nowhere else**, so a
         // caller never has to know whether the path it was handed came from a person or from the default
         BuildDirState prepare_module_dir(const Parser::ModuleManifest &manifest) const;
+        BuildDirState prepare_hook_state_dir(const Parser::ModuleManifest &manifest, const std::string &hook) const;
         BuildDirState prepare_scratch_dir() const;
 
         // the same rule on the way out - see remove_build_directory

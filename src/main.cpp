@@ -14,6 +14,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "Parser/ManifestParser.h"
 #include "Parser/ModuleParser.h"
+#include "Compiler/BuildHooks.h"
 #include "Compiler/BuildLayout.h"
 #include "Compiler/CBuild.h"
 #include "Compiler/CodegenTarget.h"
@@ -31,7 +32,9 @@
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
+#include "Compiler/ProgramStamp.h"
 #include "Compiler/ProgressReporter.h"
+#include "Compiler/PublicTools.h"
 #include "Compiler/SettledPath.h"
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
@@ -141,23 +144,22 @@ static bool resolve_manifests(
     const Compiler::TargetFacts &facts,
     const std::filesystem::path &package_dir_override,
     std::vector<Parser::ModuleManifest> &out,
-    std::vector<std::filesystem::path> &out_roots
+    std::vector<std::filesystem::path> &out_roots,
+    Parser::ManifestRead read = Parser::ManifestRead::t_full
 )
 {
-    std::error_code ec;
-    const std::filesystem::path here = std::filesystem::current_path(ec);
-
     Parser::ManifestScratch scratch(facts);
 
     if (!Compiler::resolve_front_end_manifests(
             named_roots,
             with_stdlib,
             allow_project_discovery,
-            ec ? std::filesystem::path{} : here,
+            Compiler::discovery_directory(),
             package_dir_override,
             scratch,
             out,
-            out_roots)) {
+            out_roots,
+            read)) {
         scratch.bundle.collector.print_issues(diagnostics);
         return false;
     }
@@ -769,78 +771,6 @@ struct FrontEnd
     }
 };
 
-// which of the project's modules this program is made of, in the order they were resolved.
-//
-// **a module the walk cannot reach is not compiled at all**, which is the whole of what a scoped
-// `#[depends:]` buys: a test-only dependency is parsed, keyed and linked by `echoc test` and is absent
-// from `echoc build` entirely. Reachability is asked of Parser::module_contribution_for, so what a scope
-// contributes is one answer here as it is everywhere else.
-//
-// **a reachability walk, and the deny-list is only what seeds it.**
-//
-// Seeding on the roots alone would be wrong: the standard library is added to every build and is
-// deliberately *not* one of the user's roots, and neither is a module a `-m` named. So the seed is asked
-// the other way round - a module no target's scope anywhere declares is part of every program this project
-// produces, exactly as it always was, and is in from the start.
-//
-// From there it has to be a **closure**, not one step. A module a scope names may be needed by another
-// module a scope names: dropping it because no *unconditional* manifest reaches it drops something the
-// build genuinely compiles, and the failure is an unresolved symbol in a module whose own manifest looks
-// fine. The list is dependency-first, so walking it backwards settles the closure in one pass - everything
-// that could name a module is decided before the module is
-static std::vector<const Parser::ModuleManifest *> compiled_manifests(
-    const Invocation &invocation,
-    const Program &program
-)
-{
-    std::set<std::filesystem::path> reached;
-
-    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        for (const Parser::ModuleTarget &target : manifest.targets) {
-            reached.insert(target.depends.begin(), target.depends.end());
-        }
-    }
-
-    std::vector<const Parser::ModuleManifest *> out;
-
-    // `reached` holds the conditional ones until here, where it becomes its complement plus whatever the
-    // walk adds - which is the set this function is actually computing.
-    //
-    // no fast path for "nothing is conditional", deliberately: an empty `conditional` makes the
-    // complement the whole list and the walk can only add what is already in it, so the general path
-    // already answers that case with the same set in the same order - and a second path a reader has to
-    // prove equivalent is the one that eventually stops being
-    std::set<std::filesystem::path> conditional;
-    conditional.swap(reached);
-
-    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        if (conditional.find(manifest.path) == conditional.end()) {
-            reached.insert(manifest.path);
-        }
-    }
-
-    std::vector<std::filesystem::path> depends;
-
-    for (auto manifest = invocation.manifests.rbegin();
-            manifest != invocation.manifests.rend(); ++manifest) {
-        if (reached.find(manifest->path) == reached.end()) {
-            continue;
-        }
-
-        depends.clear();
-        Parser::append_active_depends(*manifest, program.active_targets, depends);
-        reached.insert(depends.begin(), depends.end());
-    }
-
-    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-        if (reached.find(manifest.path) != reached.end()) {
-            out.push_back(&manifest);
-        }
-    }
-
-    return out;
-}
-
 // where an artifact goes when the program is a loose .eco file rather than a project: there is no manifest
 // to put one beside, so nothing here is worth keeping and nothing should be left behind. Per process, so
 // two builds running at once do not share a directory one of them is going to remove
@@ -1289,6 +1219,41 @@ static bool resolve_programs(
     return true;
 }
 
+// a scoped `#[requires:]` nobody vendored, refused now that a program opened its scope
+static bool refuse_unvendored_scopes(
+    const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation,
+    const Program &program
+)
+{
+    // the usual answer, and one that needs no scratch to give
+    const bool any_unresolved = std::any_of(
+        invocation.manifests.begin(), invocation.manifests.end(), [](const Parser::ModuleManifest &manifest) {
+            return std::any_of(manifest.targets.begin(), manifest.targets.end(), [](const Parser::ModuleTarget &target) {
+                return !target.unresolved.empty();
+            });
+        });
+
+    if (!any_unresolved) {
+        return true;
+    }
+
+    Parser::ManifestScratch scratch(invocation.target_facts);
+    bool clean = true;
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        if (!Parser::refuse_unresolved_scope_requirements(manifest, program.active_targets, scratch)) {
+            clean = false;
+        }
+    }
+
+    if (!clean) {
+        scratch.bundle.collector.print_issues(diagnostics);
+    }
+
+    return clean;
+}
+
 // everything settled before the first program is compiled: the platform, the module graph, where artifacts
 // go, and which programs there are to build
 static bool resolve_invocation(
@@ -1343,13 +1308,36 @@ static bool resolve_invocation(
     {
         Compiler::ScopedPhase phase("resolve manifests");
 
-        // the invocation's facts, not a second resolution: a manifest may gate its `#[sources:]`, so the
-        // list of files and the conditions inside those files have to be decided by the same answer
+        // edges first: a hook may write the files `#[sources:]` has to match, so the glob waits
         if (!resolve_manifests(
                 driver.modules,
                 !driver.no_stdlib,
                 driver.sources.empty(),
-                diagnostics, out.target_facts, driver.package_dir, out.manifests, out.roots)) {
+                diagnostics, out.target_facts, driver.package_dir, out.manifests, out.roots,
+                Parser::ManifestRead::t_dependencies)) {
+            return false;
+        }
+    }
+
+    if (!Compiler::run_before_build_hooks(
+            driver, diagnostics, out.target_facts, out.manifests, out.roots)) {
+        return false;
+    }
+
+    {
+        Compiler::ScopedPhase phase("expand sources");
+
+        Parser::ManifestScratch scratch(out.target_facts);
+        bool ok = true;
+
+        for (Parser::ModuleManifest &manifest : out.manifests) {
+            if (!Parser::complete_manifest_sources(manifest, scratch)) {
+                ok = false;
+            }
+        }
+
+        if (!ok) {
+            scratch.bundle.collector.print_issues(diagnostics);
             return false;
         }
     }
@@ -1371,6 +1359,12 @@ static bool resolve_invocation(
         return false;
     }
 
+    for (const Program &program : out.programs) {
+        if (!refuse_unvendored_scopes(diagnostics, out, program)) {
+            return false;
+        }
+    }
+
     if (driver.options.track_allocations || driver.options.report_allocations) {
         for (const Program &program : out.programs) {
             if (program.codegen.is_library()) {
@@ -1383,6 +1377,46 @@ static bool resolve_invocation(
     }
 
     return true;
+}
+
+// the options one program is compiled with: the driver's, with the program's row and the invocation's facts
+// seated. **one spelling**, because the front end and the program stamp both need them before anything is
+// parsed, and a stamp keyed on options the build did not use is a stamp describing a different build. the
+// row is the Program's: resolve_programs already set exec_model on it
+static Compiler::CompilerOptions program_options(
+    const Compiler::DriverOptions &driver,
+    const Invocation &invocation,
+    const Program &program
+)
+{
+    Compiler::CompilerOptions options = driver.options;
+    options.codegen = program.codegen;
+    options.facts = invocation.target_facts;
+    return options;
+}
+
+static Compiler::ProgramStampRequest program_stamp_request(
+    const Compiler::DriverOptions &driver,
+    const Invocation &invocation,
+    const Program &program
+)
+{
+    return Compiler::ProgramStampRequest{
+        invocation.manifests,
+        program.entry_module,
+        program.active_targets,
+        program_options(driver, invocation, program),
+        invocation.test_modules,
+        driver.optimize_is_whole_program(),
+        program.name,
+        program.entry_file,
+        program.output,
+        invocation.layout,
+        driver.link,
+        invocation.target_facts,
+        !invocation.sources.empty(),
+        driver.prints_anything() || driver.emit_stdlib_header
+    };
 }
 
 // the front end for **one program**: parse the whole bundle, then run the semantic passes over it.
@@ -1398,19 +1432,18 @@ static bool run_front_end(
     const Invocation &invocation,
     const Program &program,
     AST::Bundle &bundle,
-    FrontEnd &out
+    FrontEnd &out,
+    const std::map<std::string, Compiler::ModuleCacheKey> *module_keys = nullptr
 )
 {
     out.invocation = &invocation;
     out.program = &program;
-    out.compiled = compiled_manifests(invocation, program);
+    out.compiled = Compiler::program_manifests(invocation.manifests, program.active_targets);
 
     // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
     // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
-    // passes. the row is the Program's: resolve_programs already set exec_model on it
-    out.options = driver.options;
-    out.options.codegen = program.codegen;
-    out.options.facts = invocation.target_facts;
+    // passes
+    out.options = program_options(driver, invocation, program);
 
     out.pointer_size.emplace(out.options.codegen.pointer_size());
 
@@ -1436,14 +1469,19 @@ static bool run_front_end(
     // the link flag, read off the checked bundle
     out.options.export_memory = AST::wasm_exports_memory(bundle);
 
-    if (needs_cache_keys(driver)
-        && !compute_cache_keys(
-            driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.test_modules(),
-            program.active_targets, out.cache_keys)) {
-        return false;
+    if (!needs_cache_keys(driver)) {
+        return true;
     }
 
-    return true;
+    // the stamp already hashed every source from these manifests. `export_memory` is the one field set since
+    if (module_keys != nullptr) {
+        out.cache_keys = *module_keys;
+        return true;
+    }
+
+    return compute_cache_keys(
+        driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.test_modules(),
+        program.active_targets, out.cache_keys);
 }
 
 // one library `run` has to open, and who to blame if it will not
@@ -1461,66 +1499,19 @@ struct NativeLibrary
     std::string asked_for;
 };
 
-// everything this build needs linked, in the order the linker will be given it.
-//
-// **the manifests in reverse dependency order.** Parser::resolve_module_graph answers dependency-first,
-// which is the order the *objects* want; a `-l` is the other way round, because a static archive only
-// contributes the members that resolve symbols the linker has already seen. Free to honour and silently
-// wrong to skip, since it only shows up against an archive rather than a shared library.
-//
-// the command line merges **last**, so a manifest's requirement wins the dedup and a `--link search:` has
-// the lowest priority of any search path. The valve is for reaching a library nothing declared, and a
-// *conflicting* install is better answered by naming the file with `object:`
+// the driver's reading of Compiler::collect_program_link: the sentence goes through the renderer
 static bool collect_link_requirements(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
-    const FrontEnd &front,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
+    const Parser::ActiveTargets &active_targets,
+    const Compiler::TargetFacts &facts,
     std::vector<Compiler::LinkRequirement> &out
 )
 {
-    for (auto manifest = front.manifests().rbegin(); manifest != front.manifests().rend(); ++manifest) {
-        std::string error;
-        const Parser::ModuleContribution contribution = front.contribution(**manifest, &error);
-
-        if (!error.empty()) {
-            diagnostics.render_untyped("Invalid Link Requirement", error);
-            return false;
-        }
-
-        if (!Compiler::merge_link_requirements(contribution.link, out, error)) {
-            diagnostics.render_untyped("Invalid Link Requirement", error);
-            return false;
-        }
-    }
-
-    const std::vector<std::string> &spelled_on_command_line = driver.link;
-
-    if (spelled_on_command_line.empty()) {
-        return true;
-    }
-
-    // resolved against the working directory, unlike a manifest's: a command line legitimately means
-    // "here", where a manifest has to mean the same thing wherever echoc was run from
-    const std::filesystem::path here = std::filesystem::current_path();
-
-    std::vector<Compiler::LinkRequirement> from_command_line;
-
-    for (const std::string &spelled : spelled_on_command_line) {
-        Compiler::LinkRequirement requirement;
-        std::string error;
-
-        if (!Compiler::parse_link_requirement(
-                spelled, here, front.target_facts(), /*declared_by=*/"", requirement, error)) {
-            diagnostics.render_untyped("Invalid Link Requirement", error);
-            return false;
-        }
-
-        from_command_line.push_back(requirement);
-    }
-
     std::string error;
 
-    if (!Compiler::merge_link_requirements(from_command_line, out, error)) {
+    if (!Compiler::collect_program_link(manifests, active_targets, driver.link, facts, out, error)) {
         diagnostics.render_untyped("Invalid Link Requirement", error);
         return false;
     }
@@ -1619,8 +1610,6 @@ static bool build_c_modules(
 {
     const bool explaining = driver.explains(Compiler::ExplainKind::t_cache);
 
-    const std::filesystem::path scratch_dir = front.layout().scratch_cc_dir();
-
     std::vector<std::string> explain;
 
     for (const Parser::ModuleManifest *entry : front.manifests()) {
@@ -1643,7 +1632,7 @@ static bool build_c_modules(
         std::string error;
 
         if (!Compiler::build_c_sources(
-                contribution.cc, front.options, cache_dir, scratch_dir / manifest.name,
+                contribution.cc, front.options, cache_dir, front.layout().scratch_cc_dir(manifest),
                 explain, result, error)) {
             diagnostics.render_untyped("C Build Failed", error);
             return false;
@@ -1672,7 +1661,7 @@ static bool build_c_modules(
         std::filesystem::path library;
 
         if (!Compiler::build_c_shared_library(
-                contribution.cc, result, link_words, cache_dir, scratch_dir / manifest.name,
+                contribution.cc, result, link_words, cache_dir, front.layout().scratch_cc_dir(manifest),
                 library, error)) {
             diagnostics.render_untyped("C Build Failed", error);
             return false;
@@ -1830,7 +1819,8 @@ static std::optional<int> compile_and_link_program(
 {
     std::vector<Compiler::LinkRequirement> link;
 
-    if (!collect_link_requirements(driver, diagnostics, front, link)) {
+    if (!collect_link_requirements(
+            driver, diagnostics, front.manifests(), front.program->active_targets, front.target_facts(), link)) {
         return 1;
     }
 
@@ -1938,7 +1928,8 @@ static std::optional<int> prepare_jit(
     std::vector<Compiler::LinkRequirement> link;
     CModuleBuilds c_builds;
 
-    if (!collect_link_requirements(driver, diagnostics, front, link)) {
+    if (!collect_link_requirements(
+            driver, diagnostics, front.manifests(), front.program->active_targets, front.target_facts(), link)) {
         return 1;
     }
 
@@ -2376,7 +2367,8 @@ static int build_one_program(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     const Invocation &invocation,
-    const Program &program
+    const Program &program,
+    const std::map<std::string, Compiler::ModuleCacheKey> *module_keys
 )
 {
     AST::Bundle bundle;
@@ -2384,7 +2376,7 @@ static int build_one_program(
     const bool whole_program = driver.whole_program;
 
     FrontEnd front;
-    if (!run_front_end(driver, diagnostics, invocation, program, bundle, front)) {
+    if (!run_front_end(driver, diagnostics, invocation, program, bundle, front, module_keys)) {
         return 1;
     }
 
@@ -2456,12 +2448,41 @@ static bool build_programs(
             std::cout << "[target " << program.name << "]" << std::endl;
         }
 
-        if (build_one_program(driver, diagnostics, invocation, program) != 0) {
+        std::optional<Compiler::ProgramStampPlan> stamp;
+        std::string stamp_error;
+
+        if (!Compiler::plan_program_stamp(
+                program_stamp_request(driver, invocation, program), stamp, stamp_error)) {
+            diagnostics.render_untyped("Invalid Link Requirement", stamp_error);
+            return false;
+        }
+
+        // nothing it is built from moved, so nothing is built. what a hook and `epm run` lean on
+        if (stamp.has_value() && Compiler::program_stamp_is_current(stamp.value(), invocation.layout)) {
+            const std::string &shown = program.name.empty() ? program.entry_module : program.name;
+
+            Compiler::ProgressReporter::instance().row(
+                Compiler::ProgressPhase::t_cached, shown, "up to date", Compiler::ProgressState::t_skipped);
+
+            if (driver.explains(Compiler::ExplainKind::t_cache)) {
+                std::cout << "[cache]" << std::endl
+                          << "  " << shown << "  up to date  (nothing it is built from changed)" << std::endl;
+            }
+
+            continue;
+        }
+
+        if (build_one_program(
+                driver, diagnostics, invocation, program, stamp ? &stamp->module_keys : nullptr) != 0) {
             // **the first failure stops the build.** run_semantic_passes renders one summary per program
             // and `--diagnostics json` promises diagnostics then *one* of them - and an error in code the
             // targets share would otherwise be reported once per target, which is the same mistake said
             // several times rather than more help
             return false;
+        }
+
+        if (stamp.has_value()) {
+            Compiler::write_built_program_stamp(stamp.value(), invocation.layout);
         }
     }
 
@@ -2617,11 +2638,13 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
 
     // the standard library is resolved whether or not it is being removed: `--with-stdlib` needs its directory
     // to name it, and leaving it out would make the line saying it was kept impossible to write
+    // the edges, never the files: a `#[sources:]` pattern that matches nothing yet still cleans
     if (!resolve_manifests(
             driver.modules,
             /*with_stdlib=*/true,
             /*allow_project_discovery=*/true,
-            diagnostics, facts, driver.package_dir, manifests, roots)) {
+            diagnostics, facts, driver.package_dir, manifests, roots,
+            Parser::ManifestRead::t_dependencies)) {
         return 1;
     }
 
@@ -2719,11 +2742,43 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
     return refused ? 1 : 0;
 }
 
-// `envp` is taken rather than reached for, and that is the whole reason `std::env` needs no platform
-// conditionals: the environment block arrives as a parameter on every platform we target, whereas the
-// `environ` symbol it would otherwise have to read is spelled `_NSGetEnviron()` on Darwin and is not
-// portably addressable from IR anywhere. `run` forwards this to the JIT'd program; a `build`'s binary
-// gets its own from the OS
+// `--print tools`: programs this project's direct dependencies offer. ToolConsumer is the read
+// a hook makes, so `epm run` and `#[hook:]` cannot disagree about a name
+static int main_print_tools(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics
+)
+{
+    Compiler::TargetFacts facts;
+
+    if (!resolve_target_facts(driver, diagnostics, facts)) {
+        return 1;
+    }
+
+    const std::vector<std::filesystem::path> roots =
+        Compiler::resolve_user_roots(driver.modules, true, Compiler::discovery_directory());
+
+    if (roots.size() != 1) {
+        diagnostics.render_untyped(
+            "No Manifest",
+            roots.empty()
+                ? "'--print tools' needs a '-m' or a module.eco in the working directory."
+                : "'--print tools' answers for one module - name one '-m'.");
+        return 1;
+    }
+
+    Compiler::ToolConsumer consumer(facts);
+    Compiler::PublicToolSet tools;
+
+    if (!consumer.read(roots.front(), driver.package_dir) || !consumer.resolve_tools(driver.build_dir, tools)) {
+        consumer.print_issues(diagnostics);
+        return 1;
+    }
+
+    std::cout << Compiler::public_tools_as_json(tools, consumer.root_scratch.package_dir);
+    return 0;
+}
+
 // `--print manifest` is an answer: read the named manifests and stop, without resolving the
 // graph. epm uses this to parse a module.eco whose packages are not on disk yet
 static int main_print_manifest(
@@ -2794,6 +2849,11 @@ static int main_lsp(const Compiler::DriverOptions &driver)
     return server.run();
 }
 
+// `envp` is taken rather than reached for, and that is the whole reason `std::env` needs no platform
+// conditionals: the environment block arrives as a parameter on every platform we target, whereas the
+// `environ` symbol it would otherwise have to read is spelled `_NSGetEnviron()` on Darwin and is not
+// portably addressable from IR anywhere. `run` forwards this to the JIT'd program; a `build`'s binary
+// gets its own from the OS
 int main(int argc, char *argv[], char *envp[])
 {
     // ahead of everything, so an exception escaping anything below says what it was
@@ -2896,6 +2956,10 @@ int main(int argc, char *argv[], char *envp[])
 
     if (driver.prints(Compiler::PrintKind::t_manifest)) {
         return main_print_manifest(driver, diagnostics);
+    }
+
+    if (driver.prints(Compiler::PrintKind::t_tools)) {
+        return main_print_tools(driver, diagnostics);
     }
 
     switch (driver.subcommand) {

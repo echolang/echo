@@ -91,6 +91,20 @@ int32_t epm_rename(const char *from, const char *to)
     return rename(from, to) == 0 ? 0 : -1;
 }
 
+/* waitpid as one exit code: the child's own, or 128 + signal */
+static int32_t exit_code_of(int status)
+{
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+
+    return 1;
+}
+
 static void drain_fail(int out_r, int err_r, pid_t pid, char *out_buf, char *err_buf)
 {
     close(out_r);
@@ -237,20 +251,48 @@ int32_t epm_run(
 
     int status = 0;
     waitpid(pid, &status, 0);
-
-    if (WIFEXITED(status)) {
-        *code = WEXITSTATUS(status);
-    }
-    else if (WIFSIGNALED(status)) {
-        *code = 128 + WTERMSIG(status);
-    }
-    else {
-        *code = 1;
-    }
+    *code = exit_code_of(status);
 
     *out_s = out_buf;
     *out_n = (int32_t)out_len;
     *err_s = err_buf;
     *err_n = (int32_t)err_len;
+    return 0;
+}
+
+/*
+ * Run argv on this process's stdin/stdout/stderr and wait. *code is the
+ * child's exit (128 + signal). nothing is captured: the output is the user's.
+ */
+int32_t epm_spawn_wait(void *handle, int32_t *code)
+{
+    epm_argv *a = handle;
+
+    if (a == NULL || a->n == 0 || a->v == NULL || a->v[0] == NULL) {
+        return -1;
+    }
+
+    fflush(NULL);
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        return -1;
+    }
+
+    if (pid == 0) {
+        execvp(a->v[0], a->v);
+        _exit(127);
+    }
+
+    int status = 0;
+
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) {
+            return -1;
+        }
+    }
+
+    *code = exit_code_of(status);
     return 0;
 }
