@@ -116,6 +116,21 @@ namespace EchoTests
         return path.generic_string();
     }
 
+    // true when `output` names `path`, with `/` and `\` treated as the same separator.
+    // CMAKE_BINARY_DIR on Windows is `D:/a/...` and a diagnostic's path.string() is
+    // `D:\a\...`; those are one directory
+    inline bool output_contains_path(const std::string &output, const std::filesystem::path &path)
+    {
+        std::string generic = output;
+        for (char &c : generic) {
+            if (c == '\\') {
+                c = '/';
+            }
+        }
+
+        return generic.find(path.generic_string()) != std::string::npos;
+    }
+
     // the one line of a report whose first whitespace-separated field is `first_field`, or "".
     //
     // both `--explain-cache` and `[clean]` print one whitespace-aligned row per module and both suites ask

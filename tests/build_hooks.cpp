@@ -146,7 +146,7 @@ TEST_CASE("a hook writes what the build then compiles", "[hooks]")
         REQUIRE(seen.find("command=run") != std::string::npos);
         REQUIRE(seen.find("os=") != std::string::npos);
         REQUIRE(seen.find("module_dir=") != std::string::npos);
-        REQUIRE(seen.find((app / "ecobuild" / "hooks" / "gen").string()) != std::string::npos);
+        REQUIRE(EchoTests::output_contains_path(seen, app / "ecobuild" / "hooks" / "gen"));
     }
 
     SECTION("--no-hooks compiles what is on disk, stale or not")
@@ -375,7 +375,7 @@ TEST_CASE("an unusable hook state directory refuses the build", "[hooks]")
 
     REQUIRE(refused.exit_code == 1);
     REQUIRE(refused.output.find("Cannot Build Here") != std::string::npos);
-    REQUIRE(refused.output.find(blocked.string()) != std::string::npos);
+    REQUIRE(EchoTests::output_contains_path(refused.output, blocked));
     REQUIRE(refused.output.find("42") == std::string::npos);
 }
 
