@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <string>
 
+#include "Compiler/SettledPath.h"
+#include "Parser/ManifestParser.h"
 #include "subprocess.h"
 
 // `public: true` on a dependency's exe: a consumer may ask for it by name. ordinary builds ignore it.
@@ -49,13 +51,6 @@ void write_consumer(const std::filesystem::path &dir, const std::string &depends
         "#[sources: \"src/*.eco\"]\n" + depends);
 
     write_file(dir / "src/main.eco", "echo 'APP RAN';\n");
-}
-
-std::string settled_spelling(const std::filesystem::path &path)
-{
-    std::error_code ec;
-    const std::filesystem::path settled = std::filesystem::weakly_canonical(path, ec);
-    return (ec ? path : settled).string();
 }
 
 };
@@ -179,7 +174,9 @@ TEST_CASE("a vendored package's tool is found through the package directory", "[
 
     REQUIRE(listed.exit_code == 0);
     REQUIRE(listed.output.find(
-        "\"package_dir\": \"" + settled_spelling(project.root() / "app/vendor") + "\"") != std::string::npos);
+        "\"package_dir\": " + Parser::json_quoted(
+            Compiler::canonical_or_absolute(project.root() / "app" / "vendor").string()))
+        != std::string::npos);
     REQUIRE(listed.output.find("\"refs\": [\"gen\", \"restgen:gen\"]") != std::string::npos);
 }
 

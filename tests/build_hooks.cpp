@@ -146,7 +146,7 @@ TEST_CASE("a hook writes what the build then compiles", "[hooks]")
         REQUIRE(seen.find("command=run") != std::string::npos);
         REQUIRE(seen.find("os=") != std::string::npos);
         REQUIRE(seen.find("module_dir=") != std::string::npos);
-        REQUIRE(seen.find("hooks/gen") != std::string::npos);
+        REQUIRE(seen.find((app / "ecobuild" / "hooks" / "gen").string()) != std::string::npos);
     }
 
     SECTION("--no-hooks compiles what is on disk, stale or not")
@@ -178,9 +178,15 @@ TEST_CASE("a hook's output is never the program's stdout", "[hooks]")
     write_generator(project.root() / "restgen");
     write_app(project.root() / "app", " {\n    #[depends: \"../restgen\"]\n}");
 
+#if defined(_WIN32)
+    const char *quiet_stderr = " 2>nul";
+#else
+    const char *quiet_stderr = " 2>/dev/null";
+#endif
+
     const ProcessResult stdout_only = EchoTests::run_capturing(
         "cd " + EchoTests::quoted(project.root() / "app") + " && "
-        + EchoTests::quoted(EchoTests::echoc_binary()) + " run 2>/dev/null");
+        + EchoTests::quoted(EchoTests::echoc_binary()) + " run" + quiet_stderr);
     INFO(stdout_only.output);
 
     REQUIRE(stdout_only.exit_code == 0);
@@ -369,7 +375,7 @@ TEST_CASE("an unusable hook state directory refuses the build", "[hooks]")
 
     REQUIRE(refused.exit_code == 1);
     REQUIRE(refused.output.find("Cannot Build Here") != std::string::npos);
-    REQUIRE(refused.output.find("hooks/gen") != std::string::npos);
+    REQUIRE(refused.output.find(blocked.string()) != std::string::npos);
     REQUIRE(refused.output.find("42") == std::string::npos);
 }
 
