@@ -300,7 +300,8 @@ jobs:
           echo "Resolved ${version}${suffix} (previous patch in series: ${highest})"
 
   build_release:
-    runs-on: ubuntu-24.04
+    # oldest supported glibc, so the binary runs on 22.04 and newer
+    runs-on: ubuntu-22.04
     needs: resolve_version
     env:
       BUILD_TYPE: Release
@@ -469,7 +470,7 @@ jobs:
           path: ${{github.workspace}}/${{env.EPM_BIN_NAME}}.tar.gz
 
   build_release_linux_arm64:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-22.04-arm
     needs: resolve_version
     env:
       BUILD_TYPE: Release
