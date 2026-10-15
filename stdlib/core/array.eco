@@ -242,6 +242,21 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     }
 
     /**
+     * Grows as `$n` appends from here would, without writing slots.
+     *
+     * `$a[] =` and `arr::extend_from` share this so a bulk fill ends up at the same
+     * capacity the equivalent appends would.
+     */
+    internal function grow_by(usize $n) : void
+    {
+        usize $needed = $this->len + $n;
+
+        while ($this->storage->capacity() < $needed) {
+            $this->reserve($this->storage->capacity() + 1);
+        }
+    }
+
+    /**
      * Makes room for exactly `$count` elements - no doubling, no floor.
      *
      * For the array you will fill once and keep: `reserve()` may hand back more than you asked for, and
@@ -863,7 +878,7 @@ operator<T> (const array<T>& $a)[usize $index] : const T&
  */
 operator<T> (array<T>& $a)[] : T&
 {
-    $a->reserve($a->len + 1);
+    $a->grow_by(1);
     $a->len = $a->len + 1;
 
     return $a->storage->at($a->len - 1);

@@ -89,6 +89,7 @@ namespace AST
                    parent_type == NodeType::n_expr_const_ref ||
                    parent_type == NodeType::n_expr_generic_value ||
                    parent_type == NodeType::n_expr_const ||
+                   parent_type == NodeType::n_expr_constant_data ||
                    parent_type == NodeType::n_member_access ||
                    parent_type == NodeType::n_literal_float ||
                    parent_type == NodeType::n_literal_int ||

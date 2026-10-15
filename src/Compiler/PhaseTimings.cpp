@@ -6,35 +6,6 @@
 #include <map>
 #include <string_view>
 
-std::string Compiler::display_function_name(std::string_view mangled)
-{
-    std::string_view name = mangled;
-    const size_t z = name.find('Z');
-
-    if (z != std::string_view::npos) {
-        name = name.substr(0, z);
-    }
-
-    if (!name.empty() && name.front() == '_') {
-        name.remove_prefix(1);
-    }
-
-    const size_t owner = name.find('M');
-
-    if (owner == std::string_view::npos) {
-        return std::string(name);
-    }
-
-    const std::string_view rest = name.substr(owner + 1);
-    const size_t split = rest.rfind('_');
-
-    if (split == std::string_view::npos) {
-        return std::string(rest);
-    }
-
-    return std::string(rest.substr(0, split)) + "::" + std::string(rest.substr(split + 1));
-}
-
 Compiler::PhaseTimings &Compiler::PhaseTimings::instance()
 {
     static PhaseTimings timings;
@@ -88,22 +59,41 @@ void Compiler::PhaseTimings::record(std::string_view phase, size_t depth, double
 
 void Compiler::PhaseTimings::record_slowest(
     std::string_view kind,
-    std::string_view name,
+    std::string_view symbol,
     double milliseconds
 )
 {
-    if (!_enabled || name.empty()) {
+    if (!_enabled || symbol.empty()) {
         return;
     }
 
     for (Slowest &entry : _slowest) {
-        if (entry.kind == kind && entry.name == name) {
+        if (entry.kind == kind && entry.name == symbol) {
             entry.milliseconds += milliseconds;
             return;
         }
     }
 
-    _slowest.push_back(Slowest{ std::string(kind), std::string(name), milliseconds });
+    _slowest.push_back(Slowest{ std::string(kind), std::string(symbol), milliseconds });
+}
+
+void Compiler::PhaseTimings::record_slowest(
+    std::string_view kind,
+    const std::vector<std::pair<std::string, double>> &times
+)
+{
+    for (const auto &[symbol, milliseconds] : times) {
+        record_slowest(kind, symbol, milliseconds);
+    }
+}
+
+void Compiler::PhaseTimings::name_symbol(std::string symbol, std::string display)
+{
+    if (!_enabled) {
+        return;
+    }
+
+    _symbol_names.insert_or_assign(std::move(symbol), std::move(display));
 }
 
 namespace
@@ -184,9 +174,17 @@ std::string Compiler::PhaseTimings::report() const
         width = std::max(width, phase.name.size() + phase.depth * 2);
     }
 
+    std::vector<std::pair<const Slowest *, std::string>> rendered;
+    rendered.reserve(_slowest.size());
+
     for (const Slowest &entry : _slowest) {
-        width = std::max(width, std::string("slowest (").size() + entry.kind.size() + 1);
-        width = std::max(width, entry.name.size() + 2);
+        const auto named = _symbol_names.find(entry.name);
+        rendered.emplace_back(&entry, named != _symbol_names.end() ? named->second : entry.name);
+    }
+
+    for (const auto &[entry, name] : rendered) {
+        width = std::max(width, std::string("slowest (").size() + entry->kind.size() + 1);
+        width = std::max(width, name.size() + 2);
     }
 
     std::string out = "[timings]\n";
@@ -201,8 +199,8 @@ std::string Compiler::PhaseTimings::report() const
 
     std::map<std::string, std::vector<SlowestRow>> by_kind;
 
-    for (const Slowest &entry : _slowest) {
-        by_kind[entry.kind].push_back(SlowestRow{ entry.name, entry.milliseconds });
+    for (const auto &[entry, name] : rendered) {
+        by_kind[entry->kind].push_back(SlowestRow{ name, entry->milliseconds });
     }
 
     for (auto &[kind, entries] : by_kind) {

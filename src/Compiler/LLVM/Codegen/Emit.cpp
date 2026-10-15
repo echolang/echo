@@ -22,6 +22,10 @@
 namespace Compiler::LLVM
 {
 
+// ISel workers for a library unit. packing files around `__shared` does not shrink
+// the shared object if that is what actually takes the time; 8 is a cap on machines
+static constexpr size_t k_library_partitions = 8;
+
 static bool host_bitcode_round_trip_works()
 {
     // a Windows-hosted LLVM fails the same-process bitcode round-trip,
@@ -81,9 +85,8 @@ static bool run_isolated_emits(std::vector<IsolatedEmitRequest> &requests, unsig
         clock.record("optimize", results[i].optimize_ms);
         clock.record("machine code", results[i].isel_ms);
 
-        for (const auto &[name, milliseconds] : results[i].slowest_isel) {
-            clock.record_slowest("machine code", name, milliseconds);
-        }
+        clock.record_slowest("optimize", results[i].slowest_optimize);
+        clock.record_slowest("machine code", results[i].slowest_isel);
     }
 
     return true;
@@ -136,15 +139,22 @@ bool emit_unit_objects(
         Output output;
         output.dest = object_for(cmp_unit->ast_module->name);
 
-        const bool try_split = can_join_relocatable(env)
+        const bool can_split = can_join_relocatable(env)
             && cmp_unit->ast_module != nullptr
-            && cmp_unit->ast_module->name == ctx.entry_module_name
             && !cmp_unit->optimized
             && !ctx.options.debug_info;
 
+        // a library is optimized whole, then only ISel fans out: split earlier and you lose inlining
+        const bool split_optimized = can_split && cmp_unit->ast_module->name != ctx.entry_module_name;
+
         std::vector<UnitPartition> parts;
-        if (try_split) {
-            parts = partition_unit(*cmp_unit, ctx, env);
+        if (can_split) {
+            if (split_optimized) {
+                Compiler::ScopedPhase optimize("optimize");
+                backend.prepare_unit_for_emission(*cmp_unit);
+            }
+
+            parts = partition_unit(*cmp_unit, ctx, env, split_optimized ? k_library_partitions : 0);
         }
 
         if (parts.size() >= 2) {
@@ -165,7 +175,7 @@ bool emit_unit_objects(
 
                 isolated.push_back(make_isolated_request(
                     materialize_partition(*cmp_unit, part, ctx),
-                    piece, ctx, sub, false, timings));
+                    piece, ctx, sub, split_optimized, timings));
             }
 
             cmp_unit->llvm_module.reset();

@@ -32,6 +32,7 @@
 #include "AST/IfStatementNode.h"
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
@@ -454,6 +455,11 @@ void RecursiveVisitor::visit_indirect_call_expr(IndirectCallExprNode &node)
 void RecursiveVisitor::visit_function_ref_expr(FunctionRefExprNode &)
 {
     // a name, not an operand. the declaration it resolves to is a cross-reference
+}
+
+void RecursiveVisitor::visit_constant_data_expr(ConstantDataExprNode &)
+{
+    // bits, no children
 }
 
 void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)

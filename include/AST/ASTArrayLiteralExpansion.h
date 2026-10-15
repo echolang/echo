@@ -13,6 +13,8 @@ namespace AST
 {
     class ArrayLiteralExprNode;
     class Collector;
+    class ComplexType;
+    class DetachBatch;
     class ExprNode;
     class File;
     class FunctionCallExprNode;
@@ -22,6 +24,8 @@ namespace AST
     class VarDeclNode;
 
     // **turns `[1, 2, 3]` into a constructor plus one append per element.**
+    //
+    // a long integer table is one `arr::extend_from` of a constant global: fill_from_constant_data.
     //
     // AST::OperatorRewriter is the walk and the placement. this is the rewrite: which statement owns
     // the literal, whether that storage can be filled in place, and how to mint a hoist when it cannot.
@@ -40,7 +44,8 @@ namespace AST
             Collector &collector,
             File *file,
             bool finalizing,
-            size_t &hoist_count
+            size_t &hoist_count,
+            DetachBatch &detached
         );
 
         // the two statement shapes an array literal may sit in, resolved to the storage being filled
@@ -88,6 +93,14 @@ namespace AST
             std::vector<NodeReference> &appends
         );
 
+        // the memcpy path: one `arr::extend_from`. false: walk the appends
+        bool fill_from_constant_data(
+            ArrayLiteralExprNode &literal,
+            VarDeclNode &into,
+            const ComplexType &collection,
+            std::vector<NodeReference> &appends
+        );
+
         // answers the temp's name, having appended the declaration and its appends to `hoisted`.
         // null when the literal is not ready, or when a hoist would move construction above a branch
         ExprNode *hoist(
@@ -96,7 +109,7 @@ namespace AST
             size_t hoist_barrier
         );
 
-        FunctionCallExprNode &build_constructor_call(
+        FunctionCallExprNode &build_named_call(
             const std::string &name,
             const TokenReference &at,
             const Namespace *lookup
@@ -109,6 +122,7 @@ namespace AST
         File *_file;
         bool _finalizing;
         size_t &_hoist_count;
+        DetachBatch &_detached;
     };
 
     // places `hoisted` ahead of `scope.children[index]`. a declaration is spliced as a sibling so

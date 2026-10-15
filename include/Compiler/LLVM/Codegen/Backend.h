@@ -143,10 +143,15 @@ namespace Compiler::LLVM
         // the driver. **Both spellings render it through Compiler::partition_link_requirements** - the
         // fallback is the path exercised least, so a second hand-written rendering there is one that
         // drifts without anybody noticing until a platform needs it
+        //
+        // `reuse_record`: keep the binary if the link line did not move. not under `-g`, and only when every
+        // library is a dynamic `runtime: process` one. keyed on the link command plus object paths
+        // (`Compiler::link_inputs_digest`); filenames already carry the content hex
         bool link_program(
             const std::string &program_name,
             const std::vector<std::filesystem::path> &objects,
-            const std::vector<Compiler::LinkRequirement> &link
+            const std::vector<Compiler::LinkRequirement> &link,
+            const std::filesystem::path *reuse_record
         );
 
     private:

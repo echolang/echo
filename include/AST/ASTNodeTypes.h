@@ -56,6 +56,7 @@ namespace AST
         n_expr_const_ref,
         n_expr_generic_value,
         n_expr_const,
+        n_expr_constant_data,
         n_release,
         n_func_decl,
         n_func_return,

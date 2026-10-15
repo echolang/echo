@@ -1,0 +1,47 @@
+// a long integer literal is one copy out of read-only data. nothing observable may change, capacity
+// included. `$appended` holds a variable, so it stays on the append path for comparison
+
+array<uint32> $table = [
+    0x00C0, 0x00C1, 0x00C2, 0x00C3, 0x00C4, 0x00C5, 0x00C6, 0x00C7, 0x00C8, 0x00C9,
+    0x00CA, 0x00CB, 0x00CC, 0x00CD, 0x00CE, 0x00CF, 0x00D0, 0x00D1, 0x00D2, 0x00D3
+];
+
+echo $table->count();
+echo $table[0];
+echo $table[19];
+echo $table->capacity();
+
+uint32 $c4 = 0x00C4;
+
+array<uint32> $appended = [
+    0x00C0, 0x00C1, 0x00C2, 0x00C3, $c4, 0x00C5, 0x00C6, 0x00C7, 0x00C8, 0x00C9,
+    0x00CA, 0x00CB, 0x00CC, 0x00CD, 0x00CE, 0x00CF, 0x00D0, 0x00D1, 0x00D2, 0x00D3
+];
+
+echo $appended->capacity();
+
+array<int16> $signed = [
+    -1, -32768, 32767, 0, 1, 2, 3, 4,
+    5, 6, 7, 8, 9, 10, 11, -12
+];
+
+echo $signed[0];
+echo $signed[1];
+echo $signed[2];
+echo $signed[15];
+
+array<uint64> $wide = [
+    18446744073709551615, 1, 2, 3, 4, 5, 6, 7,
+    8, 9, 10, 11, 12, 13, 14, 9223372036854775808
+];
+
+echo $wide[0];
+echo $wide[15];
+
+// an argument is hoisted into a temporary
+function last(const array<int32>& $a) : int32
+{
+    return $a[$a->count() - 1];
+}
+
+echo last([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);

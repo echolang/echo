@@ -140,7 +140,7 @@ public struct App
         $cmd->accept($git, $add);
         $cmd->describe(
             $git,
-            'The git remote to fetch. Writes source: git "..." on the #[requires:] line.\nepm lists tags, picks a version in range, and vendors the tree:\n  epm add lib --git https://github.com/echolang/libcurl --range ^0.1\nA GitHub remote lists tags and reads module.eco over HTTP; every other host uses git. Checkout is always git.'
+            'The git remote to fetch. Writes source: git "..." on the #[requires:] line.\nepm lists tags, picks a version in range, and vendors the tree:\n  epm add lib --git https://github.com/echolang/libcurl --range ^1\nA GitHub remote lists tags and reads module.eco over HTTP; every other host uses git. Checkout is always git.'
         );
 
         command::Arg $path = $cmd->arg(
@@ -169,7 +169,7 @@ public struct App
         $cmd->fallback($range, '*');
         $cmd->describe(
             $range,
-            'A semver range. Defaults to *, every release:\n  epm add lib --git https://example.com/lib.git --range ^0.2\nv1 understands 1.2.3, ^1.2.3, ~1.2.3, >=1.2.3 and *.\n--version is epm\'s own version, the way echoc --version is. This is the package range.'
+            'A semver range. Defaults to *, every release:\n  epm add lib --git https://example.com/lib.git --range ^0.2\nv1 understands 1.2.3, ^1, ^1.2.3, ~1.2.3, >=1.2.3 and *.\n--version is epm\'s own version, the way echoc --version is. This is the package range.'
         );
 
         command::Flag $yes = $cmd->flag(

@@ -58,6 +58,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <unordered_set>
@@ -625,7 +626,9 @@ static bool emit_and_link_modules(
     const Compiler::BuildLayout &layout,
     const std::string &output,
     const ModulePlan &plan,
-    const std::vector<Compiler::LinkRequirement> &link
+    const std::vector<Compiler::LinkRequirement> &link,
+    const std::map<std::string, Compiler::ModuleCacheKey> &keys,
+    const std::filesystem::path *reuse_record
 )
 {
     std::vector<std::filesystem::path> objects = plan.reused;
@@ -634,10 +637,18 @@ static bool emit_and_link_modules(
     // scratch object. **inside the build directory and not beside the executable**: an
     // `out.main.o` nobody asked for, that no command removes, and that every project's
     // .gitignore would have to know about
+    //
+    // the cache key hex is in the filename, same identity a stored object carries, so a link
+    // reuse record can key on paths instead of hashing object bytes
     const auto object_for = [&](const std::string &module_name) -> std::filesystem::path {
         auto found = plan.emit_to.find(module_name);
         if (found != plan.emit_to.end()) {
             return found->second.object;
+        }
+
+        auto key = keys.find(module_name);
+        if (key != keys.end()) {
+            return layout.scratch_object(module_name + "-" + key->second.hex);
         }
 
         return layout.scratch_object(module_name);
@@ -647,7 +658,7 @@ static bool emit_and_link_modules(
         return false;
     }
 
-    return compiler.link_program(output, objects, link);
+    return compiler.link_program(output, objects, link, reuse_record);
 }
 
 // the inputs each freshly emitted module was built from, so the next miss can name what changed.
@@ -1813,7 +1824,8 @@ static std::optional<int> compile_and_link_program(
     LLVMCompiler &compiler,
     const std::string &output,
     const ModulePlan &plan,
-    bool whole_program
+    bool whole_program,
+    const std::filesystem::path *reuse_record = nullptr
 )
 {
     std::vector<Compiler::LinkRequirement> link;
@@ -1882,7 +1894,8 @@ static std::optional<int> compile_and_link_program(
             Compiler::ProgressPhase::t_emit,
             std::filesystem::path(output).filename().string());
 
-        const bool linked = emit_and_link_modules(compiler, front.layout(), output, plan, link);
+        const bool linked = emit_and_link_modules(
+            compiler, front.layout(), output, plan, link, front.cache_keys, reuse_record);
         step.finish(linked);
 
         if (!linked) {
@@ -1978,6 +1991,24 @@ static std::optional<int> prepare_jit(
     return std::nullopt;
 }
 
+// skip tearing the AST down on the way out of `run`/`test`: that was ~8% of a warm run.
+// a sanitizer still frees it. `build` owns one bundle per target and always destroys it
+static void abandon_bundle_at_exit(std::unique_ptr<AST::Bundle> &bundle)
+{
+    bool keep = false;
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    keep = true;
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+    keep = true;
+#endif
+    if (!keep) {
+        bundle.release();
+    }
+}
+
 int main_run(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
@@ -1987,7 +2018,8 @@ int main_run(
     // Deliberately not Compiler::PhaseTimings, which measures nothing unless `-t` asked it to
     const auto started = std::chrono::steady_clock::now();
 
-    auto bundle = AST::Bundle();
+    auto owned_bundle = std::make_unique<AST::Bundle>();
+    AST::Bundle &bundle = *owned_bundle;
 
     Invocation invocation;
     if (!resolve_invocation(driver, diagnostics, invocation)) {
@@ -2030,8 +2062,12 @@ int main_run(
         const std::filesystem::path runner = Compiler::CodegenTarget{}.output_path(
             front.layout().scratch_dir() / "eco_run");
 
+        std::filesystem::path link_record = runner;
+        link_record += ".link";
+
         if (const std::optional<int> failed = compile_and_link_program(
-                driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program)) {
+                driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program,
+                front.layout().scratch_is_temporary() ? nullptr : &link_record)) {
             return failed.value();
         }
 
@@ -2087,6 +2123,8 @@ int main_run(
 
     // after the program, because a C module's loadable library lives there and was open for the whole of it
     front.layout().discard_temporary_scratch();
+
+    abandon_bundle_at_exit(owned_bundle);
 
     // the program's own status, so `echoc run` exits the way it did. a module-scope `die` on the
     // JIT path never comes back here (libc `exit` from inside the engine); a spawned runner
@@ -2172,7 +2210,8 @@ int main_test(
 {
     const auto started = std::chrono::steady_clock::now();
 
-    auto bundle = AST::Bundle();
+    auto owned_bundle = std::make_unique<AST::Bundle>();
+    AST::Bundle &bundle = *owned_bundle;
 
     Invocation invocation;
     if (!resolve_invocation(driver, diagnostics, invocation)) {
@@ -2208,6 +2247,7 @@ int main_test(
 
             std::cout << Compiler::PhaseTimings::instance().report();
             front.layout().discard_temporary_scratch();
+            abandon_bundle_at_exit(owned_bundle);
 
             return 0;
         }
@@ -2321,6 +2361,7 @@ int main_test(
     std::cout << Compiler::PhaseTimings::instance().report();
 
     front.layout().discard_temporary_scratch();
+    abandon_bundle_at_exit(owned_bundle);
 
     return passed ? 0 : 1;
 }
@@ -2338,7 +2379,7 @@ static int build_one_program(
     const Program &program
 )
 {
-    auto bundle = AST::Bundle();
+    AST::Bundle bundle;
 
     const bool whole_program = driver.whole_program;
 

@@ -2,6 +2,8 @@
 
 #include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/StandardInstrumentations.h>
+#include <llvm/Support/TimeProfiler.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/GlobalDCE.h>
 
@@ -11,7 +13,16 @@ void Compiler::LLVM::run_module_passes(
     const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build
 )
 {
-    llvm::PassBuilder passBuilder(target_machine);
+    // pass events for FunctionTimeTrace, only while the profiler is live
+    llvm::PassInstrumentationCallbacks instrumentation;
+    llvm::TimeProfilingPassesHandler time_profiling;
+
+    if (llvm::timeTraceProfilerEnabled()) {
+        time_profiling.registerCallbacks(instrumentation);
+    }
+
+    llvm::PassBuilder passBuilder(
+        target_machine, llvm::PipelineTuningOptions(), std::nullopt, &instrumentation);
     llvm::LoopAnalysisManager loopAM;
     llvm::FunctionAnalysisManager functionAM;
     llvm::CGSCCAnalysisManager cgsccAM;

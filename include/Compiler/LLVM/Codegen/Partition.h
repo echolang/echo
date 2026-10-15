@@ -40,7 +40,7 @@ namespace Compiler::LLVM
         std::string label;
         std::string hex;
         bool shared = false;
-        AST::File *file = nullptr;
+        std::vector<AST::File *> files;
         // names of the group's roots in the still-live unit module. `materialize_partition`
         // looks them up; empty after the module is dropped
         std::vector<std::string> root_names;
@@ -57,8 +57,12 @@ namespace Compiler::LLVM
     // cloned into each partition that calls it, the C++ TU model. a call into a
     // large ODR body is an external from the file object and a definition in
     // `__shared`, so ISel of a huge deinit runs once
+    //
+    // `max_groups` > 0 packs the file/`__shared` groups into that many bins after the split.
+    // a cap on ISel machines, not a load-balance: packing files around `__shared` does not
+    // shrink the shared object if that is what actually takes the time
     std::vector<UnitPartition> partition_unit(
-        CmpUnit &unit, const CodegenContext &ctx, const PartitionEnv &env);
+        CmpUnit &unit, const CodegenContext &ctx, const PartitionEnv &env, size_t max_groups = 0);
 
     // extract only the globals this partition defines or references and serialize
     // them. called on a cache miss, while `unit.llvm_module` still lives

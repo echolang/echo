@@ -21,7 +21,6 @@
 #include "AST/ReturnNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/VarDeclNode.h"
-#include "External/infint.h"
 
 #include <fmt/core.h>
 
@@ -92,6 +91,52 @@ namespace AST
         return value;
     }
 
+    // what a decimal spelling names. every integer type fits in __int128; anything longer is out of range
+    class DecimalLiteral
+    {
+    public:
+        explicit DecimalLiteral(const std::string &spelling)
+        {
+            size_t at = 0;
+
+            if (at < spelling.size() && (spelling[at] == '-' || spelling[at] == '+')) {
+                _negative = spelling[at] == '-';
+                at++;
+            }
+
+            while (at < spelling.size() && spelling[at] == '0') {
+                at++;
+            }
+
+            unsigned __int128 magnitude = 0;
+            size_t digits = 0;
+
+            for (; at < spelling.size(); at++) {
+                if (spelling[at] < '0' || spelling[at] > '9') {
+                    continue;
+                }
+
+                if (++digits > 38) {
+                    _beyond_any_width = true;
+                    break;
+                }
+
+                magnitude = magnitude * 10 + static_cast<unsigned>(spelling[at] - '0');
+            }
+
+            _value = _negative ? -static_cast<__int128>(magnitude) : static_cast<__int128>(magnitude);
+        }
+
+        bool above(uint64_t bound) const { return !_negative && (_beyond_any_width || _value > bound); }
+        bool below(int64_t bound) const { return _negative && (_beyond_any_width || _value < bound); }
+        bool equals(int64_t value) const { return !_beyond_any_width && _value == value; }
+
+    private:
+        bool _negative = false;
+        bool _beyond_any_width = false;
+        __int128 _value = 0;
+    };
+
     static std::string f64_literal(double value)
     {
         return trimmed_float_literal(std::to_string(value));
@@ -107,13 +152,13 @@ namespace AST
     // that codegen truncated to 1294967296
     std::optional<ValueTypePrimitive> LiteralIntExprNode::decimal_width(const std::string &spelling)
     {
-        const InfInt value(spelling);
+        const DecimalLiteral value(spelling);
 
         for (const ValueTypePrimitive width : {
                 ValueTypePrimitive::t_int32, ValueTypePrimitive::t_int64, ValueTypePrimitive::t_uint64 }) {
             const IntegerSize size = get_integer_size(width);
 
-            if (value >= InfInt(size.get_max_negative_value()) && value <= InfInt(size.get_max_positive_value())) {
+            if (!value.below(size.get_max_negative_value()) && !value.above(size.get_max_positive_value())) {
                 return width;
             }
         }
@@ -233,10 +278,10 @@ namespace AST
         const std::string &written
     )
     {
-        const InfInt value(digits);
+        const DecimalLiteral value(digits);
         const auto size = get_integer_size(type.get_primitive_type());
 
-        if (value > size.get_max_positive_value()) {
+        if (value.above(size.get_max_positive_value())) {
             return refused(node, LiteralRefusal::t_overflow, fmt::format(
                 "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.",
                 written,
@@ -244,7 +289,7 @@ namespace AST
                 size.get_max_positive_value()));
         }
 
-        if (value < size.get_max_negative_value()) {
+        if (value.below(size.get_max_negative_value())) {
             return refused(node, LiteralRefusal::t_underflow, fmt::format(
                 "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.",
                 written,
@@ -282,9 +327,9 @@ namespace AST
         }
 
         if (destination.is_integer_type()) {
-            const InfInt value(node.effective_token_literal_value());
+            const DecimalLiteral value(node.effective_token_literal_value());
 
-            if (destination.is_unsigned_integer() && value < 0) {
+            if (destination.is_unsigned_integer() && value.below(0)) {
                 return refused(&node, LiteralRefusal::t_invalid_conversion, fmt::format(
                     "The integer literal '{}' cannot be implicitly converted to an unsigned integer "
                     "because it is negative.",
@@ -303,11 +348,11 @@ namespace AST
         }
 
         if (destination.is_boolean_type()) {
-            const InfInt value(node.effective_token_literal_value());
+            const DecimalLiteral value(node.effective_token_literal_value());
 
-            if (value == 0 || value == 1) {
+            if (value.equals(0) || value.equals(1)) {
                 auto &casted = nodes.emplace_back<LiteralBoolExprNode>(token);
-                casted.override_literal_value.emplace(value == 1 ? "true" : "false");
+                casted.override_literal_value.emplace(value.equals(1) ? "true" : "false");
                 casted.expected_primitive_type = ValueTypePrimitive::t_bool;
 
                 return typed(&casted);

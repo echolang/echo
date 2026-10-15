@@ -1,7 +1,7 @@
 /**
  * Semver parse, compare, ranges, and intersection.
  *
- * v1 understands: `1.2.3`, `v1.2.3`, `^1.2.3`, `~1.2.3`, `>=1.2.3`, `*`.
+ * v1 understands: `1.2.3`, `v1.2.3`, `1`, `^1`, `^1.2.3`, `~1.2.3`, `>=1.2.3`, `*`.
  * A leading `v` on a version is ignored. Pre-release is kept but a version
  * with one is less than the same numbers without.
  */
@@ -146,10 +146,6 @@ public function parse_version(const string& $text) : Version?
     }
     else if ($part == 2) {
         $patch = $acc;
-    }
-
-    if ($part < 1) {
-        return null;
     }
 
     return Version($major, $minor, $patch, $pre);

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -75,9 +76,9 @@ namespace
     // cases run in irrelevant, which is what lets Catch2 shuffle them. It is also what lets the cleanup
     // be a single `remove_all` instead of a guess about how echoc names what it emits.
     //
-    // `--build-dir` is also where the stdlib object goes, so a cold case compiles it from scratch.
-    // `k_default_timeout_ms` is sized for that, and Windows CI pins `ECO_E2E_JOBS=2` so a two-core
-    // runner is running two of those compiles
+    // `--build-dir` is also where the stdlib object goes. the first case per flag signature compiles it
+    // cold; later ones plant that object (see publish_seed). `k_default_timeout_ms` is sized for the
+    // cold one, and Windows CI pins `ECO_E2E_JOBS=2` so a two-core runner is running two of those
     //
     // absolute because the tests binary's working directory is not fixed - CI runs `./tests` from inside
     // `build/`, a developer runs `./build/tests` from the repo root - so any relative path is wrong in one
@@ -383,6 +384,48 @@ namespace
         std::vector<fs::path> orphans;   // a `.test` with no `.eco` beside it
     };
 
+    fs::path stdlib_cache_of(const fs::path &scratch)
+    {
+        return scratch / "cache" / "stdlib";
+    }
+
+    // stdlib objects are keyed on flags, so a hit from earlier in this run is this case's
+    bool publish_seed(const fs::path &scratch, const fs::path &seed)
+    {
+        const fs::path built = stdlib_cache_of(scratch);
+        std::error_code ec;
+        bool has_object = false;
+
+        for (const auto &file : fs::directory_iterator(built, ec)) {
+            has_object = has_object || file.path().extension() == ".o";
+        }
+
+        if (!has_object) {
+            return false;
+        }
+
+        fs::path staging = seed;
+        staging += ".staging";
+
+        fs::remove_all(staging, ec);
+        fs::create_directories(staging.parent_path(), ec);
+        fs::copy(built, staging, fs::copy_options::recursive, ec);
+
+        if (ec) {
+            return false;
+        }
+
+        fs::rename(staging, seed, ec);
+        return !ec;
+    }
+
+    struct SeedPlan
+    {
+        fs::path plant;
+        fs::path publish;
+        bool published = false;
+    };
+
     // every spawn one case owes, start to finish, with no assertion anywhere in it.
     //
     // the build chain lives here rather than being split across the judge, because the second spawn is
@@ -393,11 +436,18 @@ namespace
     CaseOutcome run_case(
         const DiscoveredCase &entry,
         const std::vector<std::string> &command,
-        const std::vector<std::vector<std::string>> &dump_commands
+        const std::vector<std::vector<std::string>> &dump_commands,
+        SeedPlan &seed
     )
     {
         CaseOutcome outcome;
         ScopedScratch scratch(entry.scratch);
+
+        if (!seed.plant.empty()) {
+            std::error_code ec;
+            fs::create_directories(stdlib_cache_of(entry.scratch).parent_path(), ec);
+            fs::copy(seed.plant, stdlib_cache_of(entry.scratch), fs::copy_options::recursive, ec);
+        }
 
         const unsigned deadline = entry.test.timeout_ms;
         const auto env = extra_env_from(entry.test);
@@ -406,6 +456,10 @@ namespace
         // stdin belongs to the program, not to `echoc build` or a dump invocation
         outcome.primary = EchoTests::run_process(
             command, deadline, {}, env, entry.binary.empty() ? input : std::string());
+
+        if (!seed.publish.empty() && outcome.primary.exit_code == 0) {
+            seed.published = publish_seed(entry.scratch, seed.publish);
+        }
 
         if (!entry.binary.empty()) {
             std::error_code ec;
@@ -449,6 +503,9 @@ namespace
             // the pool was eager or a sliding window
             (void)Compiler::process_directory();
             (void)Compiler::host_clang();
+
+            std::error_code ec;
+            fs::remove_all(_seed_root, ec);
 
             const unsigned workers = EchoTests::e2e_worker_count();
 
@@ -516,6 +573,7 @@ namespace
             State state = State::t_idle;
             std::vector<std::string> command;
             std::vector<std::vector<std::string>> dump_commands;
+            std::string seed_signature;
             CaseOutcome outcome;
         };
 
@@ -527,6 +585,10 @@ namespace
 
             _slots[index].command
                 = echoc_argv(entry.test, entry.eco, binary, "", _root, entry.scratch);
+
+            _slots[index].seed_signature = std::string(binary != nullptr ? "build" : "run")
+                + (entry.test.mode == EchoTests::RunMode::t_test ? " test" : "")
+                + "\n" + entry.test.environment_prefix() + entry.test.compiler_flags(_root);
 
             if (EchoTests::is_dev_lane()) {
                 return;
@@ -545,6 +607,8 @@ namespace
                 size_t index = 0;
                 std::vector<std::string> command;
                 std::vector<std::vector<std::string>> dump_commands;
+                std::string signature;
+                SeedPlan seed;
 
                 {
                     std::unique_lock<std::mutex> lock(_mutex);
@@ -563,12 +627,33 @@ namespace
                     // the whole run alongside the outcome
                     command = std::move(_slots[index].command);
                     dump_commands = std::move(_slots[index].dump_commands);
+                    signature = std::move(_slots[index].seed_signature);
+
+                    // empty path: still compiling
+                    auto found = _seeds.find(signature);
+
+                    if (found == _seeds.end()) {
+                        seed.publish = _seed_root / std::to_string(_seeds.size());
+                        _seeds.emplace(signature, fs::path());
+                    }
+                    else {
+                        seed.plant = found->second;
+                    }
                 }
 
-                CaseOutcome outcome = run_case(_cases[index], command, dump_commands);
+                CaseOutcome outcome = run_case(_cases[index], command, dump_commands, seed);
 
                 {
                     std::lock_guard<std::mutex> lock(_mutex);
+
+                    if (!seed.publish.empty()) {
+                        if (seed.published) {
+                            _seeds[signature] = seed.publish;
+                        }
+                        else {
+                            _seeds.erase(signature);
+                        }
+                    }
 
                     _slots[index].outcome = std::move(outcome);
                     _slots[index].state = Slot::State::t_done;
@@ -580,6 +665,8 @@ namespace
 
         const std::vector<DiscoveredCase> &_cases;
         const fs::path _root;
+        const fs::path _seed_root = fs::path(EchoTests::e2e_tmp_dir()) / "_stdlib_seed";
+        std::map<std::string, fs::path> _seeds;
         std::vector<Slot> _slots;
         std::deque<size_t> _queue;
         std::vector<std::thread> _workers;

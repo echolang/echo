@@ -106,6 +106,13 @@ namespace Compiler
 
     bool cached_object_is_hit(const std::filesystem::path &object);
 
+    // what this link was: the argv plus each object's path, once it is on disk.
+    // filenames already carry the content hex (module cache key, partition hash).
+    // a missing object is a miss
+    std::optional<std::string> link_inputs_digest(
+        const std::vector<std::string> &command,
+        const std::vector<std::filesystem::path> &objects);
+
     // the record of what the last build of this module was made of, for explaining a miss. One per module
     // rather than one per key, because the interesting comparison is against whatever was there before
     std::filesystem::path module_inputs_path(

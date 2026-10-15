@@ -34,6 +34,7 @@ namespace AST
     class ClosureExprNode;
     class IndirectCallExprNode;
     class FunctionRefExprNode;
+    class ConstantDataExprNode;
     class InstanceOfExprNode;
     class TemporaryBindExprNode;
     class MatchExprNode;
@@ -96,6 +97,7 @@ namespace AST
         virtual void visit_closure_expr(ClosureExprNode &node) = 0;
         virtual void visit_indirect_call_expr(IndirectCallExprNode &node) = 0;
         virtual void visit_function_ref_expr(FunctionRefExprNode &node) = 0;
+        virtual void visit_constant_data_expr(ConstantDataExprNode &node) = 0;
         virtual void visit_instanceof_expr(InstanceOfExprNode &node) = 0;
         virtual void visit_temporary_bind(TemporaryBindExprNode &node) = 0;
         virtual void visit_match(MatchExprNode &node) = 0;

@@ -4,6 +4,7 @@
 #include "AST/AttributeNode.h"
 #include "AST/ConstDeclNode.h"
 #include "AST/ConstExprNode.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/ConstIfNode.h"
 #include "AST/ConstRefExprNode.h"
 #include "AST/GenericValueExprNode.h"
@@ -288,6 +289,9 @@ const TokenReference *source_token_of(const Node &node)
 
         case NodeType::n_expr_const:
             return &static_cast<const ConstExprNode &>(node).token_const;
+
+        case NodeType::n_expr_constant_data:
+            return &static_cast<const ConstantDataExprNode &>(node).token_bracket;
 
         // the empty expression a parser hands back where a value was optional. It stands for nothing
         // the author wrote, which is exactly what it means

@@ -402,7 +402,7 @@ namespace
                 return;
             }
 
-            if (node.region_state == RegionState::t_owned && !node.live_calls_pending) {
+            if (function_is_settled(node)) {
                 return;
             }
 
@@ -453,6 +453,11 @@ bool function_is_fixpoint_open(const FunctionDeclNode &fn)
 bool function_needs_typing(const FunctionDeclNode &fn)
 {
     return !fn.is_generic();
+}
+
+bool function_is_settled(const FunctionDeclNode &fn)
+{
+    return fn.region_state == RegionState::t_owned && !fn.live_calls_pending;
 }
 
 bool body_is_pending(ScopeNode &scope)

@@ -39,6 +39,7 @@ namespace Compiler::LLVM
         std::string error;
         double optimize_ms = 0.0;
         double isel_ms = 0.0;
+        std::vector<std::pair<std::string, double>> slowest_optimize;
         std::vector<std::pair<std::string, double>> slowest_isel;
     };
 

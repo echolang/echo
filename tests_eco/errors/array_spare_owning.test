@@ -5,4 +5,4 @@ expect: fail
 
 --- OUT --->
 fatal error: spare() needs elements that are just bytes - C cannot construct an owning T
-  at array.eco:346
+  at array.eco:361

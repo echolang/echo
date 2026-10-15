@@ -522,7 +522,7 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
 
     if (auto *literal = array_literal_of(expr)) {
         ArrayLiteralExpansion expansion(
-            *_current_module, _collector, _current_file, _finalizing, _hoist_count);
+            *_current_module, _collector, _current_file, _finalizing, _hoist_count, _detached);
 
         if (ExprNode *place = expansion.expand_expression(*literal, _hoisted, _hoist_barrier)) {
             _changed = true;
@@ -593,7 +593,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
     // child is rewritten - so the constructor and the appends it produces are walked by this same
     // pass rather than waiting a round. that ordering is this pass's, so the loop is too
     ArrayLiteralExpansion expansion(
-        *_current_module, _collector, _current_file, _finalizing, _hoist_count);
+        *_current_module, _collector, _current_file, _finalizing, _hoist_count, _detached);
 
     for (size_t i = 0; i < node.children.size(); i++) {
         // **ahead of both the literal expansion and the descent**, and see resolve_index_write for why
@@ -636,10 +636,25 @@ void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
         return;
     }
 
+    const bool settled = function_is_settled(node);
+
+    if (settled && node.operators_quiet) {
+        return;
+    }
+
+    const bool changed_before = _changed;
+    _changed = false;
+
     FunctionDeclNode *enclosing = _current_function;
     _current_function = &node;
     RecursiveVisitor::visitFunctionDecl(node);
     _current_function = enclosing;
+
+    if (settled) {
+        node.operators_quiet = !_changed;
+    }
+
+    _changed = _changed || changed_before;
 }
 
 void OperatorRewriter::visitVarDecl(VarDeclNode &node)

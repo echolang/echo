@@ -83,6 +83,8 @@ namespace AST
     // retypes `== 0` / widens a binary beside it. mutation lowerings use function_is_fixpoint_open
     bool function_needs_typing(const FunctionDeclNode &fn);
 
+    bool function_is_settled(const FunctionDeclNode &fn);
+
     // **what a semantic pipeline round walks.** every live file root. one iterator so TypeChecker,
     // PointerAdjuster, AccessPass, FixpointLowering, OwnershipPass, OperatorRewriter, ConstFolding,
     // ConstantExpander and live_calls cannot disagree. a lowering's visitFunctionDecl skips

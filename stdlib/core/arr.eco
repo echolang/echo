@@ -5,10 +5,11 @@
  * What lives here is what is built *on* it: things that could be methods but should not be, because they
  * answer a question about arrays rather than about one array.
  *
- * A function goes here rather than on the type when it does not need the type's internals. Neither
- * function below touches a property of either argument - `merge` is two `extend` calls and
- * `room` is a constructor and a `reserve` - so putting them in the struct would grow the
- * surface every reader of `array<T>` has to walk past for no gain in what they can do.
+ * A function goes here rather than on the type when it does not need the type's internals. None of
+ * the functions below touches a property of its arguments - `merge` is two `extend` calls, `room` is
+ * a constructor and a `reserve`, `extend_from` is `grow_by`, `spare` and `commit` - so putting them in
+ * the struct would grow the surface every reader of `array<T>` has to walk past for no gain in what
+ * they can do.
  */
 
 namespace arr;
@@ -56,4 +57,35 @@ public function room<T>(usize $count) : array<T>
     $out->reserve($count);
 
     return $out;
+}
+
+/**
+ * Appends `$count` elements read from `$src`, exactly as `$count` appends would, `capacity()` included.
+ *
+ * The long integer-literal path. `$src` must hold `$count` elements and must not point into `$into`.
+ */
+public function extend_from<T>(array<T>& $into, ptr<const T> $src, usize $count) : void
+{
+    if ($count == 0) {
+        return;
+    }
+
+    $into->grow_by($count);
+
+    const if (mem::is_trivially_copyable<T>()) {
+        mem::copy<T>($into->spare(), ptr<T>($src:$), $count);
+        $into->commit($count);
+    }
+    else {
+        usize $i = 0;
+
+        while ($i < $count) {
+            // you promised `$src` holds `$count` elements
+            unsafe {
+                $into[] = $src:$[$i];
+            }
+
+            $i = $i + 1;
+        }
+    }
 }

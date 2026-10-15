@@ -94,6 +94,8 @@ namespace AST
             // a function's address is already a value. giving it a slot would hand
             // MaterializationScope storage it does not need
             case NodeType::n_expr_function_ref:
+            // a constant table already is an address, same reason
+            case NodeType::n_expr_constant_data:
             // already carries its own request outward through the pending queue
             case NodeType::n_expr_temp_bind:
                 return StorageClass::t_addressless;

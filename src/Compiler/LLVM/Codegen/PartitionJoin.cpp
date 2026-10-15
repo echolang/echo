@@ -57,6 +57,9 @@ bool Compiler::LLVM::join_relocatable(
 
     argv.push_back("-arch");
     argv.push_back(arch);
+
+    // ld -r would make hidden symbols local; a native lib's other objects still need them
+    argv.push_back("-keep_private_externs");
 #endif
 
     argv.push_back("-o");

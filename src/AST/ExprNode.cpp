@@ -2,6 +2,7 @@
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TemporaryBindExprNode.h"
 #include "AST/VarRefNode.h"
@@ -452,6 +453,11 @@ const std::string AST::FunctionRefExprNode::node_description()
 {
     return "function_ref &" + token_name.value()
         + (decl != nullptr ? " -> " + result_type().get_type_desciption() : "");
+}
+
+const std::string AST::ConstantDataExprNode::node_description()
+{
+    return fmt::format("constant_data<{}>[{}]", element_type.get_type_desciption(), bits.size());
 }
 
 const std::string AST::IndirectCallExprNode::node_description()

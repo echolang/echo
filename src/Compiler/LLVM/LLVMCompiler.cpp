@@ -7,6 +7,7 @@
 
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTValueType.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
@@ -716,6 +717,7 @@ void LLVMCompiler::visitLiteralStringExpr(AST::LiteralStringExprNode &node) { _e
 void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node) { _expr.gen_function_call(node); }
 void LLVMCompiler::visit_addr_of_expr(AST::AddrOfExprNode &node) { _expr.gen_addr_of(node); }
 void LLVMCompiler::visit_function_ref_expr(AST::FunctionRefExprNode &node) { _expr.gen_function_ref(node); }
+void LLVMCompiler::visit_constant_data_expr(AST::ConstantDataExprNode &node) { _expr.gen_constant_data(node); }
 void LLVMCompiler::visit_deref_expr(AST::DerefExprNode &node) { _expr.gen_deref(node); }
 void LLVMCompiler::visit_index_expr(AST::IndexExprNode &node) { _expr.gen_index(node); }
 
@@ -799,11 +801,12 @@ bool LLVMCompiler::emit_objects(
 bool LLVMCompiler::link_program(
     const std::string &program_name,
     const std::vector<std::filesystem::path> &objects,
-    const std::vector<Compiler::LinkRequirement> &link
+    const std::vector<Compiler::LinkRequirement> &link,
+    const std::filesystem::path *reuse_record
 )
 {
     Compiler::ScopedPhase phase("link");
-    return _backend.link_program(program_name, objects, link);
+    return _backend.link_program(program_name, objects, link, reuse_record);
 }
 
 void LLVMCompiler::optimize() { _backend.optimize(); }

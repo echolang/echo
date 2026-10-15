@@ -392,6 +392,9 @@ namespace AST
         // with region_state
         bool live_calls_pending = true;
 
+        // settled, and the rewriter changed nothing last round: later rounds skip it
+        bool operators_quiet = false;
+
         // the list of attributes that are attached to this function
         AttributeList attributes;
 

@@ -1,8 +1,8 @@
 #include "Compiler/LLVM/Codegen/IsolatedEmit.h"
 
+#include "Compiler/LLVM/Codegen/FunctionTimeTrace.h"
 #include "Compiler/LLVM/Codegen/ModulePasses.h"
 #include "Compiler/LLVM/Codegen/TargetMachine.h"
-#include "Compiler/PhaseTimings.h"
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Comdat.h>
@@ -11,7 +11,6 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -22,52 +21,6 @@
 
 namespace Compiler::LLVM
 {
-
-class ISelTimePass : public llvm::FunctionPass
-{
-public:
-    static char ID;
-
-    explicit ISelTimePass(std::vector<std::pair<std::string, double>> *out) :
-        FunctionPass(ID), _out(out)
-    {};
-
-    bool runOnFunction(llvm::Function &function) override
-    {
-        const auto now = std::chrono::steady_clock::now();
-
-        record_previous(now);
-        _started = now;
-        _have_previous = true;
-        _previous = function.getName().str();
-
-        return false;
-    }
-
-    ~ISelTimePass() override
-    {
-        record_previous(std::chrono::steady_clock::now());
-    }
-
-private:
-    void record_previous(std::chrono::steady_clock::time_point now)
-    {
-        if (!_have_previous || _out == nullptr) {
-            return;
-        }
-
-        const double milliseconds
-            = std::chrono::duration<double, std::milli>(now - _started).count();
-        _out->push_back({ Compiler::display_function_name(_previous), milliseconds });
-    }
-
-    std::vector<std::pair<std::string, double>> *_out = nullptr;
-    bool _have_previous = false;
-    std::chrono::steady_clock::time_point _started;
-    std::string _previous;
-};
-
-char ISelTimePass::ID = 0;
 
 static void assign_odr_comdats(llvm::Module &module)
 {
@@ -112,14 +65,11 @@ bool emit_module_object(
         llvm::legacy::PassManager pass;
         auto FileType = llvm::CodeGenFileType::ObjectFile;
 
-        if (isel_times != nullptr) {
-            pass.add(new ISelTimePass(isel_times));
-        }
-
         if (target_machine.addPassesToEmitFile(pass, dest, nullptr, FileType)) {
             error = "TargetMachine can't emit a file of this type";
         }
         else {
+            FunctionTimeTrace trace(isel_times);
             pass.run(module);
             dest.flush();
 
@@ -184,6 +134,7 @@ IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
     llvm::Module &module = *parsed.get();
 
     if (!request.already_optimized) {
+        FunctionTimeTrace trace(request.timings ? &result.slowest_optimize : nullptr);
         prepare_module(module, machine.get(), !request.no_optimize);
     }
 

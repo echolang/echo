@@ -5,4 +5,4 @@ expect: fail
 
 --- OUT --->
 assertion failed: commit past the end of the spare
-  at array.eco:361
+  at array.eco:376

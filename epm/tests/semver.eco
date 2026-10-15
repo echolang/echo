@@ -46,9 +46,13 @@ test a_release_spells_without_a_hyphen
     assert($v->spelling() == '0.1.0');
 }
 
-test a_lone_major_is_not_a_version
+test a_lone_major_is_patch_zero
 {
-    assert(util::parse_version('1') == null);
+    util::Version $v = guard util::parse_version('1');
+    assert($v->major == 1);
+    assert($v->minor == 0);
+    assert($v->patch == 0);
+    assert($v->spelling() == '1.0.0');
 }
 
 test an_empty_string_is_not_a_version
@@ -114,6 +118,17 @@ test caret_on_one_is_the_next_major
     util::Range $r = guard util::parse_range('^1.2.3');
     util::Version $ok = guard util::parse_version('1.9.0');
     util::Version $no = guard util::parse_version('2.0.0');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test caret_on_major_only_is_the_next_major
+{
+    util::Range $r = guard util::parse_range('^1');
+    util::Version $floor = guard util::parse_version('1.0.0');
+    util::Version $ok = guard util::parse_version('1.9.0');
+    util::Version $no = guard util::parse_version('2.0.0');
+    assert(util::satisfies($floor, $r));
     assert(util::satisfies($ok, $r));
     assert(!util::satisfies($no, $r));
 }

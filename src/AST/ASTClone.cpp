@@ -39,6 +39,7 @@
 #include "AST/IfStatementNode.h"
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
@@ -605,6 +606,15 @@ Node *ConstExprNode::clone(CloneContext &cc) const
     return c;
 }
 
+Node *ConstantDataExprNode::clone(CloneContext &cc) const
+{
+    ConstantDataExprNode *c = cc.shallow(this);
+
+    c->element_type = cc.substitute(c->element_type);
+
+    return c;
+}
+
 Node *GuardNode::clone(CloneContext &cc) const
 {
     GuardNode *c = cc.shallow(this);
@@ -748,6 +758,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // live_calls_pending would hide the body's calls from bind
     c->region_state = RegionState::t_open;
     c->live_calls_pending = true;
+    c->operators_quiet = false;
 
     // parameters first, so the map is populated before the body rebinds its VarNodes to them. the same
     // rule ScopeNode::clone follows for a scope's declarations - and this loop is the only thing that can

@@ -1,0 +1,30 @@
+--- OUT --->
+20
+192
+211
+32
+32
+-1
+-32768
+32767
+-12
+18446744073709551615
+9223372036854775808
+17
+--- IR --->
+# one private constant per table. a uint64 past INT64_MAX prints as a negative i64, that's the bits
+CHECK: @eco.data = private unnamed_addr constant [20 x i32] [i32 192, i32 193,
+CHECK: @eco.data.1 = private unnamed_addr constant [16 x i16] [i16 -1, i16 -32768, i16 32767,
+CHECK: @eco.data.2 = private unnamed_addr constant [16 x i64] [i64 -1, i64 1,
+CHECK: @eco.data.3 = private unnamed_addr constant [17 x i32] [i32 1, i32 2,
+
+# one call per fill. `$appended` is not among them, on purpose
+CHECK: define i32 @main(
+CHECK: call void @_arr_extend_from
+CHECK: (ptr %table, ptr @eco.data, i64 20)
+CHECK: call void @_arr_extend_from
+CHECK: (ptr %signed, ptr @eco.data.1, i64 16)
+CHECK: call void @_arr_extend_from
+CHECK: (ptr %wide, ptr @eco.data.2, i64 16)
+CHECK: call void @_arr_extend_from
+CHECK: (ptr %__lit1, ptr @eco.data.3, i64 17)

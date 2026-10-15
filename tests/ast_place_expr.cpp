@@ -205,6 +205,8 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         { NodeType::n_expr_const, StorageClass::t_addressless },
         { NodeType::n_expr_function_ref, StorageClass::t_addressless },
 
+        { NodeType::n_expr_constant_data, StorageClass::t_addressless },
+
         // and everything else is a value the program computed and did not name. the last five are the
         // ones the allow-list had lost: `f($a ?? $b)` against a `T&` parameter could not resolve, with
         // no diagnostic pointing at the reason

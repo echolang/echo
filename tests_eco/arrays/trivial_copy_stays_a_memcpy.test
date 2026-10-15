@@ -35,8 +35,9 @@ CHECK-NOT: br i1 false
 # unreachable now - it is absent, and so is the `operator []` instantiation the arm used to create
 CHECK-NOT: @_operatorx20x5b
 
-# and the arm it selected is the one call this whole fast path is about
-CHECK: call void @_mem_copy
+# and the arm it selected is the one call this whole fast path is about.
+# `storage->copy` mangles through `mem::buffer`, not `mem::copy`
+CHECK: call void @_mem_MN3mem6bufferE_copy
 
 # **the mirror, in truncate().** the same source branches on `mem::needs_destruction<T>()`, and for an
 # int32 that arm is what allocated `%doomed` and called `mem::take`. the whole body is now the one store

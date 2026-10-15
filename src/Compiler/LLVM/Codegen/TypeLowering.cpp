@@ -9,6 +9,7 @@
 #include "Compiler/LLVM/Codegen/StructureLayout.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/PhaseTimings.h"
 
 #include "eco.h"
 
@@ -595,6 +596,10 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
 {
     auto func_name = AST::mangle_function_name(node);
     auto func_type = node->get_return_type();
+
+    if (Compiler::PhaseTimings::instance().enabled()) {
+        Compiler::PhaseTimings::instance().name_symbol(func_name, node->signature_description());
+    }
 
     // **the C variadic tail is a parameter here and no parameter at all in LLVM.** a declaration
     // ending in `#[echoc::core: variadic_args]` lowers to a function type over the parameters *before* it,

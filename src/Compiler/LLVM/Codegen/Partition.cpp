@@ -24,6 +24,7 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 
+#include <algorithm>
 #include <optional>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
@@ -368,7 +369,7 @@ bool should_define(
     const llvm::GlobalValue *global,
     const std::unordered_set<const llvm::GlobalValue *> &needed,
     const std::unordered_map<const llvm::Function *, AST::File *> &home_of,
-    AST::File *group_file,
+    const std::vector<AST::File *> &group_files,
     bool group_shared
 )
 {
@@ -390,7 +391,11 @@ bool should_define(
         }
     }
 
-    if (home == group_file) {
+    const bool home_is_here = home == nullptr
+        ? group_shared
+        : std::find(group_files.begin(), group_files.end(), home) != group_files.end();
+
+    if (home_is_here) {
         return true;
     }
 
@@ -426,12 +431,74 @@ std::vector<llvm::GlobalValue *> roots_from_names(
     return roots;
 }
 
+struct Group
+{
+    std::string label;
+    std::vector<AST::File *> files;
+    std::vector<llvm::GlobalValue *> roots;
+    bool shared = false;
+};
+
+size_t group_weight(const Group &group)
+{
+    size_t instructions = 0;
+
+    for (const llvm::GlobalValue *root : group.roots) {
+        if (const auto *function = llvm::dyn_cast<llvm::Function>(root)) {
+            instructions += function->getInstructionCount();
+        }
+    }
+
+    return instructions;
+}
+
+// merge file/`__shared` groups into at most `max_groups` bins. packing files around
+// `__shared` does not shrink the shared object if that is what actually takes the time
+void pack_groups(std::vector<Group> &groups, size_t max_groups)
+{
+    if (max_groups == 0 || groups.size() <= max_groups) {
+        return;
+    }
+
+    std::vector<std::pair<size_t, size_t>> order;
+    for (size_t i = 0; i < groups.size(); i++) {
+        order.emplace_back(group_weight(groups[i]), i);
+    }
+
+    std::stable_sort(order.begin(), order.end(), [](const auto &a, const auto &b) {
+        return a.first > b.first;
+    });
+
+    std::vector<Group> bins(max_groups);
+    std::vector<size_t> load(max_groups, 0);
+
+    for (const auto &[weight, index] : order) {
+        const size_t bin = static_cast<size_t>(
+            std::min_element(load.begin(), load.end()) - load.begin());
+        Group &into = bins[bin];
+        Group &from = groups[index];
+
+        into.label += (into.label.empty() ? "" : "+") + from.label;
+        into.files.insert(into.files.end(), from.files.begin(), from.files.end());
+        into.roots.insert(into.roots.end(), from.roots.begin(), from.roots.end());
+        into.shared = into.shared || from.shared;
+        load[bin] += weight;
+    }
+
+    bins.erase(
+        std::remove_if(bins.begin(), bins.end(), [](const Group &bin) { return bin.roots.empty(); }),
+        bins.end());
+
+    groups = std::move(bins);
+}
+
 };
 
 std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
     CmpUnit &unit,
     const CodegenContext &ctx,
-    const PartitionEnv &env
+    const PartitionEnv &env,
+    size_t max_groups
 )
 {
     if (unit.llvm_module == nullptr || unit.ast_module == nullptr) {
@@ -484,14 +551,6 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
         shared_roots.push_back(&alias);
     }
 
-    struct Group
-    {
-        std::string label;
-        AST::File *file = nullptr;
-        std::vector<llvm::GlobalValue *> roots;
-        bool shared = false;
-    };
-
     std::vector<Group> groups;
 
     for (AST::File &file : unit.ast_module->files()) {
@@ -502,15 +561,17 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
 
         groups.push_back(Group{
             file.get_path().filename().string(),
-            &file,
+            { &file },
             found->second,
             false,
         });
     }
 
     if (!shared_roots.empty()) {
-        groups.push_back(Group{ "__shared", nullptr, shared_roots, true });
+        groups.push_back(Group{ "__shared", {}, shared_roots, true });
     }
+
+    pack_groups(groups, max_groups);
 
     if (groups.size() < 2) {
         return {};
@@ -522,13 +583,13 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
     for (Group &group : groups) {
         const std::unordered_set<const llvm::GlobalValue *> needed = reachable_from(group.roots);
         auto define = [&](const llvm::GlobalValue *global) -> bool {
-            return should_define(global, needed, home_of, group.file, group.shared);
+            return should_define(global, needed, home_of, group.files, group.shared);
         };
 
         UnitPartition partition;
         partition.label = group.label;
         partition.shared = group.shared;
-        partition.file = group.file;
+        partition.files = group.files;
         partition.hex = partition_hex(module, needed, define, env);
 
         for (llvm::GlobalValue *root : group.roots) {
@@ -559,7 +620,7 @@ std::string Compiler::LLVM::materialize_partition(
     llvm::ValueToValueMapTy vmap;
     std::unique_ptr<llvm::Module> clone = llvm::CloneModule(
         module, vmap, [&](const llvm::GlobalValue *global) {
-            return should_define(global, needed, home_of, part.file, part.shared);
+            return should_define(global, needed, home_of, part.files, part.shared);
         });
 
     keep_odr_from_dce(*clone);

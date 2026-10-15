@@ -6,6 +6,8 @@
 #include <chrono>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace Compiler
@@ -55,10 +57,12 @@ namespace Compiler
         // the phases in the order they were first entered, so the report reads as the pipeline does
         std::string report() const;
 
-        // a function that dominated `kind` (`optimize` or `machine code`). accumulated by name, so two
-        // units that both spent time in one `linkonce_odr` body report as one row. printed after the
-        // tree, never mixed into it: a mangled symbol is not a phase
-        void record_slowest(std::string_view kind, std::string_view name, double milliseconds);
+        // a function that ate `kind`, accumulated by symbol. printed after the tree
+        void record_slowest(std::string_view kind, std::string_view symbol, double milliseconds);
+        void record_slowest(std::string_view kind, const std::vector<std::pair<std::string, double>> &times);
+
+        // how a symbol is printed. mangled names cannot be read back; unnamed ones print raw
+        void name_symbol(std::string symbol, std::string display);
 
     private:
         struct Phase
@@ -79,11 +83,8 @@ namespace Compiler
         size_t _depth = 0;
         std::vector<Phase> _phases;
         std::vector<Slowest> _slowest;
+        std::unordered_map<std::string, std::string> _symbol_names;
     };
-
-    // a mangled Echo symbol as `--explain time` prints it: strip the `_` prefix and the `Z...`
-    // suffix, and turn `TypeMmethod` into `Type::method`
-    std::string display_function_name(std::string_view mangled);
 
     // times a phase for as long as it is in scope, so an early return cannot lose it
     class ScopedPhase

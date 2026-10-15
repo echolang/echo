@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <optional>
+#include <vector>
 
 namespace
 {
@@ -307,6 +308,30 @@ bool Compiler::cached_object_is_hit(const std::filesystem::path &object)
 {
     std::error_code ec;
     return std::filesystem::is_regular_file(object, ec) && std::filesystem::file_size(object, ec) > 0 && !ec;
+}
+
+std::optional<std::string> Compiler::link_inputs_digest(
+    const std::vector<std::string> &command,
+    const std::vector<std::filesystem::path> &objects
+)
+{
+    uint64_t digest = k_fnv_offset_basis;
+
+    for (const std::string &word : command) {
+        digest = fnv1a64(word, digest);
+        digest = fnv1a64("\0", 1, digest);
+    }
+
+    for (const std::filesystem::path &object : objects) {
+        if (!cached_object_is_hit(object)) {
+            return std::nullopt;
+        }
+
+        digest = fnv1a64(object.string(), digest);
+        digest = fnv1a64("\0", 1, digest);
+    }
+
+    return to_hex(digest);
 }
 
 std::filesystem::path Compiler::module_inputs_path(

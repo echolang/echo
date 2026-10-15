@@ -3,12 +3,16 @@
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstFold.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTDetach.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/ExprNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ScopeNode.h"
@@ -29,13 +33,15 @@ ArrayLiteralExpansion::ArrayLiteralExpansion(
     Collector &collector,
     File *file,
     bool finalizing,
-    size_t &hoist_count
+    size_t &hoist_count,
+    DetachBatch &detached
 )
     : _module(module)
     , _collector(collector)
     , _file(file)
     , _finalizing(finalizing)
     , _hoist_count(hoist_count)
+    , _detached(detached)
 {
 }
 
@@ -231,7 +237,7 @@ bool ArrayLiteralExpansion::build_expansion(
             type_args.push_back(&_module.nodes.emplace_back<TypeNode>(arg));
         }
 
-        auto &ctor = build_constructor_call(
+        auto &ctor = build_named_call(
             tmpl->name.value_or(std::string()),
             literal.token_bracket,
             tmpl->ast_namespace != nullptr ? tmpl->ast_namespace : &_collector.namespaces.root());
@@ -265,6 +271,10 @@ bool ArrayLiteralExpansion::build_expansion(
                     literal.elements.size(), type.get_type_desciption(), *length));
             return false;
         }
+    }
+
+    if (!fills_by_index && fill_from_constant_data(literal, into, *ct, appends)) {
+        return true;
     }
 
     // one write per element. each gets its **own** place naming the destination - one
@@ -305,7 +315,84 @@ bool ArrayLiteralExpansion::build_expansion(
     return true;
 }
 
-FunctionCallExprNode &ArrayLiteralExpansion::build_constructor_call(
+// below this, appends are a few stores in registers. above it, they are calls to settle and, inlined,
+// one block the scheduler is quadratic in: the Unicode case tables were 80% of a cold stdlib compile
+static constexpr size_t k_constant_data_min_elements = 16;
+
+bool ArrayLiteralExpansion::fill_from_constant_data(
+    ArrayLiteralExprNode &literal,
+    VarDeclNode &into,
+    const ComplexType &collection,
+    std::vector<NodeReference> &appends
+)
+{
+    const ComplexType *array_template = _collector.core_types.declared_template(CoreTypeKind::t_array);
+    Namespace *arr = _collector.namespaces.get("arr");
+
+    if (literal.elements.size() < k_constant_data_min_elements
+        || array_template == nullptr
+        || arr == nullptr
+        || collection.template_or_self() != array_template
+        || collection.instantiation_args.size() != 1) {
+        return false;
+    }
+
+    const ValueType &element = collection.instantiation_args[0];
+
+    if (!element.is_integer_type() || element.is_const()) {
+        return false;
+    }
+
+    std::vector<uint64_t> bits;
+    bits.reserve(literal.elements.size());
+
+    for (ExprNode *&written : literal.elements) {
+        // a refusal belongs to the appends, at this same literal
+        const LiteralTyping typing = type_literal_at(written, element, _module.nodes);
+
+        if (typing.result == LiteralTyping::Result::t_refused) {
+            return false;
+        }
+
+        if (typing.result == LiteralTyping::Result::t_typed) {
+            written = typing.node;
+        }
+
+        const ConstFoldResult folded = const_fold(written);
+
+        if (!folded.is_folded() || ValueType::make_mutable(folded.type) != element) {
+            return false;
+        }
+
+        bits.push_back(folded.bits);
+    }
+
+    for (ExprNode *written : literal.elements) {
+        _detached.collect(*written);
+    }
+
+    literal.elements.clear();
+
+    const size_t count = bits.size();
+
+    auto &data = _module.nodes.emplace_back<ConstantDataExprNode>(
+        literal.token_bracket, element, std::move(bits));
+
+    auto &length = _module.nodes.emplace_back<LiteralIntExprNode>(
+        _module.make_virtual_token(
+            std::to_string(count), Token::Type::t_integer_literal, literal.token_bracket),
+        ValueTypePrimitive::t_usize);
+
+    // named, not resolved: InterpolationLowering's trick
+    auto &fill = build_named_call("extend_from", literal.token_bracket, arr);
+
+    fill.arguments = { &local_place(_module, into), &data, &length };
+
+    appends.push_back(make_ref(fill));
+    return true;
+}
+
+FunctionCallExprNode &ArrayLiteralExpansion::build_named_call(
     const std::string &name,
     const TokenReference &at,
     const Namespace *lookup

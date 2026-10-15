@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 
+#include "AST/ConstantDataExprNode.h"
 #include "AST/MatchExprNode.h"
 
 #include "AST/StaticPropertyExprNode.h"
@@ -1593,6 +1594,53 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
         1,
         "ref.env");
     _ctx.push_scalar(value);
+}
+
+void ExprCodegen::gen_constant_data(AST::ConstantDataExprNode &node)
+{
+    llvm::Type *element = _ctx.types->get_llvm_type(node.element_type, *_ctx.current_cmp_unit);
+
+    auto narrowed = [&](auto width) -> llvm::Constant * {
+        const std::vector<decltype(width)> values(node.bits.begin(), node.bits.end());
+        return llvm::ConstantDataArray::get(element->getContext(), values);
+    };
+
+    llvm::Constant *initializer = nullptr;
+
+    switch (element->isIntegerTy() ? element->getIntegerBitWidth() : 0) {
+        case 8:
+            initializer = narrowed(uint8_t{});
+            break;
+        case 16:
+            initializer = narrowed(uint16_t{});
+            break;
+        case 32:
+            initializer = narrowed(uint32_t{});
+            break;
+        case 64:
+            initializer = narrowed(uint64_t{});
+            break;
+        default:
+            throw _ctx.error(fmt::format(
+                "constant data of '{}' reached codegen, and only an integer element is ever minted {}",
+                node.element_type.get_type_desciption(), _ctx.function_context()));
+    }
+
+    // private and unnamed, so the ODR check compares it by initializer
+    const bool is_constant = true;
+
+    auto *table = new llvm::GlobalVariable(
+        *_ctx.current_module(),
+        initializer->getType(),
+        is_constant,
+        llvm::GlobalValue::PrivateLinkage,
+        initializer,
+        "eco.data");
+
+    table->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+    table->setAlignment(_ctx.layout().getABITypeAlign(element));
+
+    _ctx.push_scalar(table);
 }
 
 void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)

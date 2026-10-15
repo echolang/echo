@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
+#include "Compiler/LLVM/Codegen/FunctionTimeTrace.h"
 #include "Compiler/LLVM/Codegen/IsolatedEmit.h"
 #include "Compiler/LLVM/Codegen/ModulePasses.h"
 #include "Compiler/LLVM/Codegen/TargetMachine.h"
@@ -6,11 +7,11 @@
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/CodegenTarget.h"
 #include "Compiler/HostTool.h"
+#include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
 
-#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
@@ -30,8 +31,6 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/Error.h>
-#include <llvm/Support/JSON.h>
-#include <llvm/Support/TimeProfiler.h>
 #include <llvm/Transforms/IPO/GlobalDCE.h>
 #include <llvm/Transforms/IPO/Internalize.h>
 
@@ -57,6 +56,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <cassert>
 #include <optional>
 #include <string>
@@ -267,6 +267,7 @@ bool Backend::prepare_execution()
     {
         // MCJIT instruction-selects here, on one core, from whatever IR the engine was handed
         Compiler::ScopedPhase machine_code("machine code");
+        Compiler::LLVM::FunctionTimeTrace trace("machine code");
         _engine->finalizeObject();
     }
 
@@ -530,16 +531,6 @@ std::optional<std::vector<std::string>> host_linker_command(
 
 };
 
-static void record_slowest(
-    std::string_view kind,
-    const std::vector<std::pair<std::string, double>> &times
-)
-{
-    for (const auto &[name, milliseconds] : times) {
-        Compiler::PhaseTimings::instance().record_slowest(kind, name, milliseconds);
-    }
-}
-
 bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesystem::path &object_path)
 {
     // the same TargetMachine codegen took its data layout from (Backend::init_target), so the
@@ -566,14 +557,25 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
         return false;
     }
 
-    record_slowest("machine code", isel_times);
+    Compiler::PhaseTimings::instance().record_slowest("machine code", isel_times);
     return true;
+}
+
+// a library that could change under a kept binary: the link is then unreusable
+static bool link_is_reusable(const std::vector<Compiler::LinkRequirement> &link)
+{
+    return std::all_of(link.begin(), link.end(), [](const Compiler::LinkRequirement &requirement) {
+        return requirement.scheme == Compiler::LinkScheme::t_library
+            && requirement.runtime == Compiler::LinkRuntime::t_process
+            && requirement.linkage == Compiler::LinkLinkage::t_dynamic;
+    });
 }
 
 bool Backend::link_program(
     const std::string &executable_name,
     const std::vector<std::filesystem::path> &objects,
-    const std::vector<Compiler::LinkRequirement> &link
+    const std::vector<Compiler::LinkRequirement> &link,
+    const std::filesystem::path *reuse_record
 )
 {
     if (objects.empty()) {
@@ -593,8 +595,28 @@ bool Backend::link_program(
     // clang -shared is the loadable-object recipe CBuild already trusts
     if (!_ctx.options.codegen.is_cross() && !_ctx.options.codegen.is_native_library()) {
         if (const auto command = host_linker_command(executable_name, objects, link_objects, link_words, _ctx.target_triple)) {
+            const std::optional<std::string> digest =
+                reuse_record != nullptr && link_is_reusable(link) && !_ctx.options.emitting_debug_info()
+                    ? Compiler::link_inputs_digest(command.value(), objects)
+                    : std::nullopt;
+
+            if (digest.has_value() && Compiler::cached_object_is_hit(executable_name)
+                && Compiler::read_whole_file(*reuse_record) == digest) {
+                return true;
+            }
+
+            if (reuse_record != nullptr) {
+                std::error_code ec;
+                std::filesystem::remove(*reuse_record, ec);
+            }
+
             if (Compiler::run_tool(command.value())) {
                 gen_debug_symbols(executable_name);
+
+                if (digest.has_value()) {
+                    std::ofstream(*reuse_record, std::ios::binary | std::ios::trunc) << digest.value();
+                }
+
                 return true;
             }
 
@@ -672,97 +694,6 @@ void Backend::gen_debug_symbols(const std::string &executable_name)
 }
 
 
-// Chrome-trace JSON from llvm::timeTraceProfilerWrite. NewPM names a function's whole pipeline
-// `OptFunction`; the pass names (`InstCombinePass`) sit inside that and must not be summed again
-static void ingest_opt_function_times(std::vector<std::pair<std::string, double>> &out)
-{
-    if (!llvm::timeTraceProfilerEnabled()) {
-        return;
-    }
-
-    llvm::SmallString<0> json;
-    llvm::raw_svector_ostream stream(json);
-    llvm::timeTraceProfilerWrite(stream);
-
-    llvm::Expected<llvm::json::Value> parsed = llvm::json::parse(json.str());
-
-    if (!parsed) {
-        llvm::consumeError(parsed.takeError());
-        return;
-    }
-
-    const llvm::json::Object *root = parsed->getAsObject();
-
-    if (root == nullptr) {
-        return;
-    }
-
-    const llvm::json::Array *events = root->getArray("traceEvents");
-
-    if (events == nullptr) {
-        return;
-    }
-
-    for (const llvm::json::Value &event : *events) {
-        const llvm::json::Object *row = event.getAsObject();
-
-        if (row == nullptr) {
-            continue;
-        }
-
-        const std::optional<llvm::StringRef> name = row->getString("name");
-
-        if (!name.has_value() || name.value() != "OptFunction") {
-            continue;
-        }
-
-        const std::optional<double> microseconds = row->getNumber("dur");
-
-        if (!microseconds.has_value()) {
-            continue;
-        }
-
-        const llvm::json::Object *args = row->getObject("args");
-        const std::optional<llvm::StringRef> detail
-            = args != nullptr ? args->getString("detail") : std::nullopt;
-
-        if (!detail.has_value() || detail->empty()) {
-            continue;
-        }
-
-        out.push_back({ Compiler::display_function_name(detail->str()), microseconds.value() / 1000.0 });
-    }
-}
-
-// NewPM already emits time-trace events when the profiler is live. initialized around one pipeline
-// so a unit's functions land in `--explain time` without changing what the pipeline does.
-// `_out` is where a worker collects; the driver records them after the pool joins
-struct OptimizeTrace
-{
-    explicit OptimizeTrace(std::vector<std::pair<std::string, double>> *out) : _out(out)
-    {
-        if (_out == nullptr || llvm::timeTraceProfilerEnabled()) {
-            return;
-        }
-
-        llvm::timeTraceProfilerInitialize(500, "echoc");
-        _live = true;
-    }
-
-    ~OptimizeTrace()
-    {
-        if (!_live) {
-            return;
-        }
-
-        ingest_opt_function_times(*_out);
-        llvm::timeTraceProfilerCleanup();
-    }
-
-    std::vector<std::pair<std::string, double>> *_out = nullptr;
-    bool _live = false;
-};
-
 void Backend::optimize()
 {
     if (!_ctx.current_module()) {
@@ -777,9 +708,7 @@ void Backend::optimize()
         main_unit->optimized = true;
     }
 
-    std::vector<std::pair<std::string, double>> opt_times;
-    const bool timings = Compiler::PhaseTimings::instance().enabled();
-    OptimizeTrace trace(timings ? &opt_times : nullptr);
+    Compiler::LLVM::FunctionTimeTrace trace("optimize");
     Compiler::LLVM::run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
         // **the O3 pipeline and nothing after it.** this used to append a second ModuleInlinerPass once
         // the pipeline had already finished, which is a shape worth naming so it is not added back:
@@ -793,7 +722,6 @@ void Backend::optimize()
         // not buying them
         modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
     });
-    record_slowest("optimize", opt_times);
 }
 
 void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
@@ -846,6 +774,7 @@ void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
     // pins byte for byte. Whole-program `-O` is still merge-then-O3 and still bypasses the cache; the two
     // are no longer all or nothing, which is the actual change here
     const bool optimize = !_ctx.options.no_optimize;
+    Compiler::LLVM::FunctionTimeTrace trace("optimize");
     Compiler::LLVM::prepare_module(
         *cmp_unit.llvm_module, _target_machine.get(), optimize);
 }
