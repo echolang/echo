@@ -1,0 +1,132 @@
+/*
+ * One pixel: march a ray into the bulb and light what it hits.
+ *
+ * The ray first clips against a bounding sphere, so a background pixel costs a
+ * dot product and nothing else. Inside it, each step moves the distance the
+ * estimator promised is empty. A hit is "closer than this pixel is wide", so the
+ * detail follows the zoom.
+ */
+
+use std::math;
+
+struct Rgb
+{
+    uint8 $r;
+    uint8 $g;
+    uint8 $b;
+}
+
+function clamp_byte(float64 $v) : uint8
+{
+    if ($v < 0.0) {
+        return 0 as uint8;
+    }
+
+    if ($v > 255.0) {
+        return 255 as uint8;
+    }
+
+    return $v as uint8;
+}
+
+function background(Vec3 $dir) : Rgb
+{
+    float64 $t = 0.5 + 0.5 * $dir->y;
+    return Rgb(
+        clamp_byte(10.0 + 30.0 * $t),
+        clamp_byte(12.0 + 38.0 * $t),
+        clamp_byte(22.0 + 58.0 * $t)
+    );
+}
+
+function surface_normal(Vec3 $p, float64 $e, float64 $power, int32 $max_iter) : Vec3
+{
+    // four samples on a tetrahedron instead of six on the axes
+    Vec3 $k0 = Vec3(1.0, -1.0, -1.0);
+    Vec3 $k1 = Vec3(-1.0, -1.0, 1.0);
+    Vec3 $k2 = Vec3(-1.0, 1.0, -1.0);
+    Vec3 $k3 = Vec3(1.0, 1.0, 1.0);
+
+    float64 $d0 = bulb_distance($p + $k0 * $e, $power, $max_iter)->distance;
+    float64 $d1 = bulb_distance($p + $k1 * $e, $power, $max_iter)->distance;
+    float64 $d2 = bulb_distance($p + $k2 * $e, $power, $max_iter)->distance;
+    float64 $d3 = bulb_distance($p + $k3 * $e, $power, $max_iter)->distance;
+
+    return normalize($k0 * $d0 + $k1 * $d1 + $k2 * $d2 + $k3 * $d3);
+}
+
+function shade_pixel(
+    const Camera& $cam,
+    int32 $x,
+    int32 $y,
+    int32 $width,
+    int32 $height,
+    float64 $power,
+    int32 $max_iter
+) : Rgb
+{
+    Vec3 $dir = ray_direction($cam, $x, $y, $width, $height);
+
+    // |eye + t * dir| = 1.25, solved for t
+    float64 $b = dot($cam->eye, $dir);
+    float64 $c = dot($cam->eye, $cam->eye) - 1.5625;
+    float64 $disc = $b * $b - $c;
+
+    if ($disc <= 0.0) {
+        return background($dir);
+    }
+
+    float64 $root = math::sqrt($disc);
+    float64 $t = math::max(0.0 - $b - $root, 0.0);
+    float64 $t_far = 0.0 - $b + $root;
+
+    if ($t_far <= 0.0) {
+        return background($dir);
+    }
+
+    float64 $pixel = 2.0 * $cam->tan_half_fov / ($height as float64);
+    int32 $max_steps = 128;
+    int32 $steps = 0;
+    float64 $eps = 0.0001;
+    float64 $trap = 0.0;
+    bool $hit = false;
+
+    while ($steps < $max_steps && $t < $t_far) {
+        BulbSample $s = bulb_distance($cam->eye + $dir * $t, $power, $max_iter);
+        $eps = math::max($t * $pixel * 0.5, 0.0001);
+
+        if ($s->distance < $eps) {
+            $hit = true;
+            $trap = $s->trap;
+            break;
+        }
+
+        $t = $t + $s->distance;
+        $steps = $steps + 1;
+    }
+
+    if (!$hit) {
+        return background($dir);
+    }
+
+    Vec3 $p = $cam->eye + $dir * $t;
+    Vec3 $n = surface_normal($p, $eps, $power, $max_iter);
+    Vec3 $light = normalize(Vec3(0.6, 0.8, 0.5));
+
+    float64 $diffuse = math::max(dot($n, $light), 0.0);
+    Vec3 $half = normalize($light - $dir);
+    float64 $specular = math::pow(math::max(dot($n, $half), 0.0), 32.0) * 0.35;
+    // a ray that needed many steps grazed a lot of surface on the way: a cheap occlusion
+    float64 $occlusion = 1.0 - ($steps as float64) / ($max_steps as float64);
+    float64 $lit = (0.12 + 0.88 * $diffuse) * $occlusion;
+
+    // warm in the core, cool at the tips. surface orbits mostly bottom out between
+    // 0.8 and 1.1, so that band is stretched over the whole ramp
+    float64 $tone = math::min(math::max((math::sqrt($trap) - 0.75) * 2.8, 0.0), 1.0);
+
+    return Rgb(
+        clamp_byte(((0.95 - 0.55 * $tone) * $lit + $specular) * 255.0),
+        clamp_byte(((0.55 + 0.25 * $tone) * $lit + $specular) * 255.0),
+        clamp_byte(((0.30 + 0.60 * $tone) * $lit + $specular) * 255.0)
+    );
+}

@@ -188,6 +188,7 @@ namespace AST
         MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token, std::vector<IssueLabel> labels() const override;);
         MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
         MAKE_ISSUE_DEF1(UnknownFunction, IssueSeverity::Error, const std::string, function_name);
+        MAKE_ISSUE_DEF1(CannotEmbed, IssueSeverity::Error, const std::string, _message);
         // a bare identifier in an operand position that names no constant. its own kind rather than a
         // GenericError because it is one of the two things a reader could have meant, and the message has to
         // offer the other: a value carries a `$`, so a missing one lands here rather than at UnknownVariable

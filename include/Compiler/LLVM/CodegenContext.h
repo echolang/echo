@@ -134,8 +134,11 @@ namespace Compiler::LLVM
             const char *prefix
         );
 
-        // a `string` constant of these bytes, the same lowering a literal uses.
-        // abi::symbol / slot_symbol share it so a table name is one spelling
+        // `{ ptr, size }` over static bytes. `std::embed::bytes`, and the window inside a string literal
+        llvm::Constant *string_view_constant(const std::string &bytes, const AST::ValueType &type);
+
+        // a `string` constant of these bytes: the view above plus a null owner. the same lowering
+        // a literal uses. abi::symbol / slot_symbol share it so a table name is one spelling
         llvm::Constant *string_constant(const std::string &bytes, const AST::ValueType &type);
 
         // **the caller's half of the return ABI, and the only place a call to an Echo function is

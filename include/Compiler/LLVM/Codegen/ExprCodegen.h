@@ -86,6 +86,7 @@ namespace Compiler::LLVM
         // answers a `#[echoc::builtin: ...]` call in the compiler instead of emitting a call - a builtin
         // has no symbol at all. dispatches on AST::BuiltinKind to one of the three below
         void gen_builtin_call(AST::FunctionCallExprNode &node);
+        void gen_embed_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind);
         void gen_addr_of(AST::AddrOfExprNode &node);
         void gen_function_ref(AST::FunctionRefExprNode &node);
         void gen_constant_data(AST::ConstantDataExprNode &node);

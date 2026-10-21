@@ -1,0 +1,47 @@
+/*
+ * The Mandelbulb's distance estimator.
+ *
+ * Same idea as z = z^2 + c, in three dimensions: write z in spherical coordinates,
+ * raise the radius to the power and multiply both angles by it. `dr` tracks the
+ * running derivative, which is what turns "did it escape" into "how far away is
+ * the surface", and that is what lets a ray take big steps through empty space.
+ */
+
+use std::math;
+
+struct BulbSample
+{
+    float64 $distance;
+    // smallest |z|^2 the orbit reached, used for colour
+    float64 $trap;
+}
+
+function bulb_distance(Vec3 $p, float64 $power, int32 $max_iter) : BulbSample
+{
+    Vec3 $z = $p;
+    float64 $dr = 1.0;
+    float64 $r = length($z);
+    float64 $trap = $r * $r;
+    int32 $i = 0;
+
+    while ($i < $max_iter && $r <= 2.0) {
+        float64 $theta = math::acos($z->z / $r) * $power;
+        float64 $phi = math::atan2($z->y, $z->x) * $power;
+        float64 $rn = math::pow($r, $power - 1.0);
+        $dr = $rn * $power * $dr + 1.0;
+        $rn = $rn * $r;
+
+        float64 $sin_theta = math::sin($theta);
+        $z = Vec3(
+            $sin_theta * math::cos($phi),
+            math::sin($phi) * $sin_theta,
+            math::cos($theta)
+        ) * $rn + $p;
+
+        $r = length($z);
+        $trap = math::min($trap, $r * $r);
+        $i = $i + 1;
+    }
+
+    return BulbSample(0.5 * math::log($r) * $r / $dr, $trap);
+}

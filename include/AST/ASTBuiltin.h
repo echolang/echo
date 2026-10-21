@@ -273,6 +273,11 @@ namespace AST
         t_abi_symbol,
         t_abi_slot_symbol,
         t_abi_bind_unchecked,
+
+        // `std::embed::text` / `std::embed::bytes`. the path is a string literal, the bytes
+        // land in the binary as a `string` or a `string::view`. AST::embed_plan_for is the owner
+        t_embed_text,
+        t_embed_bytes,
     };
 
     // **can this builtin be answered before codegen, and if not, why not?**

@@ -1,0 +1,2 @@
+echo std::embed::text("utf8.txt");
+echo std::embed::text("utf8.txt")->size();

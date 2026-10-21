@@ -12,9 +12,10 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
-#include <memory>
 
 class Lexer;
 
@@ -23,6 +24,14 @@ namespace AST
     typedef size_t module_handle_t;
 
     class FunctionDeclNode;
+
+    // interned bytes for one `std::embed` path. lives on the module that wrote the path, so
+    // TypeChecker and codegen share one copy and the cache sidecar has one list
+    struct EmbeddedResource
+    {
+        std::filesystem::path resolved;
+        std::string bytes;
+    };
 
     class Module
     {
@@ -54,6 +63,25 @@ namespace AST
         // loudly rather than admitting silently. set true for a compiler-supplied module, or for
         // any module of a `--no-stdlib` build
         bool writes_compiler_attributes = false;
+
+        // the directory a relative `std::embed` path may not leave. a manifest module's own
+        // directory; empty for a loose `main` module, where the jail is the calling file's parent
+        std::filesystem::path directory;
+
+        // files this module's object actually embedded, in first-seen order. the cache sidecar
+        // is this list. interned bytes live in `embed_bytes`, keyed by the canonical path
+        std::vector<std::filesystem::path> embedded_paths;
+        std::unordered_map<std::string, std::unique_ptr<EmbeddedResource>> embed_bytes;
+
+        void note_embedded_path(const std::filesystem::path &path) {
+            for (const std::filesystem::path &seen : embedded_paths) {
+                if (seen == path) {
+                    return;
+                }
+            }
+
+            embedded_paths.push_back(path);
+        }
 
         Module(const std::string &name, module_handle_t handle) :
             name(name), handle(handle)

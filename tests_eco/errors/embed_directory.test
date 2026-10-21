@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] CannotEmbed  embed_directory.eco:1:23
+
+  'a_dir' is a directory, and 'std::embed::text' reads one file
+
+  1 | echo std::embed::text("a_dir");
+    :                       ^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

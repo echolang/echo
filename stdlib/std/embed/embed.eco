@@ -1,0 +1,27 @@
+/**
+ * Compile-time file embedding.
+ *
+ * `std::io` reads a file when the program runs. This reads it when the program is compiled, and
+ * the bytes live in the binary: a help page, a shader, a license, a font. The path is a string
+ * literal, relative to the source file that wrote the call, and it cannot leave this module.
+ *
+ * `text` is UTF-8 and answers a `string`, the same lowering a string literal uses. `bytes` is
+ * any file and answers a `string::view` over the static bytes, interior NULs included.
+ */
+
+namespace std::embed;
+
+/**
+ * The UTF-8 contents of `$path`, as a `string`. The bytes live in the binary: static storage,
+ * a length, a null owner. Invalid UTF-8 is a compile error; `bytes` is the spelling that
+ * does not ask.
+ */
+#[echoc::builtin: embed_text]
+public function text(string $path) : string;
+
+/**
+ * The contents of `$path`, as a window over static bytes. Interior NULs are fine. The window
+ * is valid for the life of the program.
+ */
+#[echoc::builtin: embed_bytes]
+public function bytes(string $path) : string::view;

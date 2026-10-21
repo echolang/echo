@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] CannotEmbed  embed_invalid_utf8.eco:1:23
+
+  'invalid.bin' is not valid UTF-8, so it cannot be a 'string' - use 'std::embed::bytes'
+
+  1 | echo std::embed::text("invalid.bin");
+    :                       ^^^^^^^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

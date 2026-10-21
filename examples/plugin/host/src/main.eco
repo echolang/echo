@@ -1,0 +1,13 @@
+use std::dynlib;
+use std::env;
+
+if (env::argc() < 2) {
+    die('usage: host <plugin-dir>');
+}
+
+greeter $g = guard dynlib::load<greeter>(string(env::arg(1)), 'english') else ($e) {
+    die($e->message());
+};
+
+echo $g->add(2, 3);
+echo $g->answer();

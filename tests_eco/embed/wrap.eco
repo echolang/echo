@@ -1,0 +1,6 @@
+function banner() : string
+{
+    return std::embed::text("hello.txt");
+}
+
+echo banner();

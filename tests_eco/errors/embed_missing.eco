@@ -1,0 +1,1 @@
+echo std::embed::text("no_such_file.txt");

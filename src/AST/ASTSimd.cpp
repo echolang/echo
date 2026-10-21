@@ -301,6 +301,8 @@ namespace AST
             case BuiltinKind::t_abi_symbol:
             case BuiltinKind::t_abi_slot_symbol:
             case BuiltinKind::t_abi_bind_unchecked:
+            case BuiltinKind::t_embed_text:
+            case BuiltinKind::t_embed_bytes:
                 return false;
         }
 

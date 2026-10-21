@@ -1,0 +1,2 @@
+string $p = "hello.txt";
+echo std::embed::text($p);

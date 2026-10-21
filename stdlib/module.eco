@@ -31,6 +31,7 @@
 #[if: dynlib]
 #[sources: "std/dynlib/*.eco"]
 #[end]
+#[sources: "std/embed/*.eco"]
 #[sources: "std/time/*.eco"]
 
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.

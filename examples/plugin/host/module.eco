@@ -1,0 +1,4 @@
+#[module: "host"]
+#[sources: "src/*.eco"]
+#[depends: "../greeter_api"]
+#[target: exe { name: "host", entry: "src/main.eco" }]

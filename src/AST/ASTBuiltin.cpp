@@ -65,6 +65,8 @@ namespace
             { "abi_symbol", AST::BuiltinKind::t_abi_symbol },
             { "abi_slot_symbol", AST::BuiltinKind::t_abi_slot_symbol },
             { "abi_bind_unchecked", AST::BuiltinKind::t_abi_bind_unchecked },
+            { "embed_text", AST::BuiltinKind::t_embed_text },
+            { "embed_bytes", AST::BuiltinKind::t_embed_bytes },
         };
         return table;
     }
@@ -151,6 +153,8 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_symbol:
         case AST::BuiltinKind::t_abi_slot_symbol:
         case AST::BuiltinKind::t_abi_bind_unchecked:
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
             return AST::BuiltinFoldability::t_not_a_query;
     }
 
@@ -215,6 +219,8 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_symbol:
         case AST::BuiltinKind::t_abi_slot_symbol:
         case AST::BuiltinKind::t_abi_bind_unchecked:
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
             return false;
     }
 
@@ -282,6 +288,8 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_symbol:
         case AST::BuiltinKind::t_abi_slot_symbol:
         case AST::BuiltinKind::t_abi_bind_unchecked:
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
             return false;
     }
 
@@ -357,6 +365,8 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_symbol:
         case AST::BuiltinKind::t_abi_slot_symbol:
         case AST::BuiltinKind::t_abi_bind_unchecked:
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
             return std::nullopt;
     }
 
@@ -421,6 +431,8 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_symbol:
         case AST::BuiltinKind::t_abi_slot_symbol:
         case AST::BuiltinKind::t_abi_bind_unchecked:
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
             return false;
     }
 

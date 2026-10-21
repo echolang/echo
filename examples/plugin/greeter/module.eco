@@ -1,0 +1,4 @@
+#[module: "english"]
+#[sources: "src/*.eco"]
+#[depends: "../greeter_api"]
+#[target: lib { name: "english" }]

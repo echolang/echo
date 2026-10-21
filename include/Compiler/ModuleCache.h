@@ -63,6 +63,9 @@ namespace Compiler
     struct ModuleCacheKey
     {
         std::string hex;
+        // this module's source+config digest *before* embed file contents. the sidecar is named
+        // with it, so two facts (debug/release, `--define`, tests) keep separate lists
+        std::string embed_identity;
         std::vector<std::pair<std::filesystem::path, uint64_t>> inputs;
     };
 
@@ -94,6 +97,7 @@ namespace Compiler
         const std::set<std::string> &modules_with_tests,
         const Parser::ActiveTargets &active_targets,
         bool optimize,
+        const BuildLayout &layout,
         std::map<std::string, ModuleCacheKey> &out_keys,
         std::string &out_error);
 
@@ -120,6 +124,19 @@ namespace Compiler
 
     // writes the sidecar beside a freshly emitted object
     bool write_inputs_record(const std::filesystem::path &path, const ModuleCacheKey &key);
+
+    // files a previous compile of this module, under this source+config identity, embedded.
+    // missing is "none", which is what keeps every key that never embedded byte for byte
+    // what it was. **named with `embed_identity`**, not the module name alone: a later compile
+    // that embedded nothing must not truncate the list another configuration still needs
+    std::filesystem::path module_embed_inputs_path(
+        const std::filesystem::path &module_dir,
+        const std::string &module_name,
+        const std::string &embed_identity);
+
+    bool write_embed_inputs_record(
+        const std::filesystem::path &path,
+        const std::vector<std::filesystem::path> &files);
 
     // the first input whose hash differs from the recorded one, as a sentence, or "" when the record is
     // missing or agrees. Best-effort: this is a diagnostic, and being unable to explain a miss is not itself

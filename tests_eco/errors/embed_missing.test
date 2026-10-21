@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] CannotEmbed  embed_missing.eco:1:23
+
+  'no_such_file.txt' is not a file
+
+  1 | echo std::embed::text("no_such_file.txt");
+    :                       ^^^^^^^^^^^^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

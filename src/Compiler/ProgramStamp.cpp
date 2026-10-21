@@ -97,6 +97,7 @@ std::string stamp_contents(uint64_t echo_key, uint64_t c_key, const OutputIdenti
 
 bool compute_program_echo_key(
     const Compiler::ProgramStampPlan &plan,
+    const Compiler::BuildLayout &layout,
     uint64_t &out_key,
     std::map<std::string, Compiler::ModuleCacheKey> &out_module_keys,
     std::string &out_error
@@ -106,7 +107,7 @@ bool compute_program_echo_key(
 
     if (!Compiler::compute_module_keys(
             plan.manifests, plan.options, plan.options.facts, plan.test_modules, plan.active_targets,
-            plan.optimize_whole, keys, out_error)) {
+            plan.optimize_whole, layout, keys, out_error)) {
         return false;
     }
 
@@ -333,7 +334,7 @@ bool Compiler::plan_program_stamp(
         return false;
     }
 
-    if (!compute_program_echo_key(plan, plan.echo_key, plan.module_keys, out_error)) {
+    if (!compute_program_echo_key(plan, request.layout, plan.echo_key, plan.module_keys, out_error)) {
         // an unreadable source is a build that is about to say so; no stamp rather than a second refusal
         out_error.clear();
         return true;

@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] CannotEmbed  embed_escape.eco:1:23
+
+  '../embed/hello.txt' is outside this module
+
+  1 | echo std::embed::text("../embed/hello.txt");
+    :                       ^^^^^^^^^^^^^^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

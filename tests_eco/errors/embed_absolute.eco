@@ -1,0 +1,1 @@
+echo std::embed::text("/etc/passwd");

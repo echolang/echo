@@ -304,6 +304,7 @@ namespace AST
         // `die` accepts any `string` - its location is still folded, the text is not. a no-op for
         // every other call
         void check_abort_message(FunctionCallExprNode &node);
+        void check_embed_argument(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_unsafe_builtin(FunctionCallExprNode &node);
         void check_abi_slot_symbol(FunctionCallExprNode &node);

@@ -1,0 +1,3 @@
+string::view $v = std::embed::bytes("nuls.bin");
+echo $v->size;
+echo $v->byte(1);

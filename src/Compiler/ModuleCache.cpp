@@ -118,6 +118,7 @@ bool Compiler::compute_module_keys(
     const std::set<std::string> &modules_with_tests,
     const Parser::ActiveTargets &active_targets,
     bool optimize,
+    const BuildLayout &layout,
     std::map<std::string, ModuleCacheKey> &out_keys,
     std::string &out_error
 )
@@ -263,6 +264,40 @@ bool Compiler::compute_module_keys(
             hash = fnv1a64(&digest, sizeof(digest), hash);
         }
 
+        // identity of this module's source and configuration, before embed file *contents*.
+        // the sidecar is named with this so two facts keep separate lists: a shared
+        // `{name}.embed-inputs` is the unsound case (a later compile that embedded nothing
+        // truncated the list, and the next compile of the first configuration hit a
+        // sources-only object with stale bytes)
+        key.embed_identity = to_hex(hash);
+
+        const std::filesystem::path sidecar = module_embed_inputs_path(
+            layout.module_dir(manifest),
+            manifest.name,
+            key.embed_identity
+        );
+        std::ifstream embed_in(sidecar, std::ios::binary);
+
+        if (embed_in) {
+            std::string line;
+
+            while (std::getline(embed_in, line)) {
+                if (line.empty()) {
+                    continue;
+                }
+
+                const std::filesystem::path embedded(line);
+                const std::optional<std::string> bytes = read_whole_file(embedded);
+                const uint64_t digest = bytes.has_value()
+                    ? fnv1a64(bytes.value(), k_fnv_offset_basis)
+                    : 0;
+
+                key.inputs.emplace_back(embedded, digest);
+                hash = fnv1a64(embedded.filename().string(), hash);
+                hash = fnv1a64(&digest, sizeof(digest), hash);
+            }
+        }
+
         // and every dependency's key. The topological order guarantees they are already computed - if one is
         // missing the graph was not ordered, which is a resolver bug rather than a user error
         for (const std::filesystem::path &dependency : contribution.depends) {
@@ -345,6 +380,31 @@ std::filesystem::path Compiler::module_inputs_path(
 )
 {
     return layout.module_dir(manifest) / fmt::format("{}.inputs", manifest.name);
+}
+
+std::filesystem::path Compiler::module_embed_inputs_path(
+    const std::filesystem::path &module_dir,
+    const std::string &module_name,
+    const std::string &embed_identity
+)
+{
+    return module_dir / fmt::format("{}-{}.embed-inputs", module_name, embed_identity);
+}
+
+bool Compiler::write_embed_inputs_record(
+    const std::filesystem::path &path,
+    const std::vector<std::filesystem::path> &files)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return false;
+    }
+
+    for (const std::filesystem::path &file : files) {
+        out << file.generic_string() << "\n";
+    }
+
+    return out.good();
 }
 
 bool Compiler::write_inputs_record(const std::filesystem::path &path, const ModuleCacheKey &key)

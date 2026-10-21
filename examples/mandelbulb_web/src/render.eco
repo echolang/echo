@@ -1,0 +1,132 @@
+/*
+ * The wasm surface. JS paints the pixels this fills; Echo never sees the canvas.
+ *
+ * A frame is `configure` once, then `render_rows` over bands of rows. The page
+ * hands out bands across animation frames so it stays responsive while a slow
+ * frame is still coming in, and a newer `configure` simply starts over.
+ */
+
+#[wasm: export "memory"]
+
+#[wasm: import "env"]
+extern {
+    function host_log(ptr<const uint8> $text, usize $len) : void;
+    function host_now_ms() : float64;
+}
+
+struct PixelBuffer
+{
+    static array<uint8> $bytes = array<uint8>();
+    static usize $count = 0;
+}
+
+struct Scene
+{
+    static Camera $camera = orbit_camera(0.0, 0.0, 2.6);
+    static int32 $width = 1;
+    static int32 $height = 1;
+    static float64 $power = 8.0;
+    static int32 $max_iter = 8;
+    // compute time summed over this frame's bands
+    static float64 $compute_ms = 0.0;
+}
+
+function grow_pixels(usize $needed) : void
+{
+    if (PixelBuffer::$bytes->count() >= $needed) {
+        return;
+    }
+
+    array<uint8>& $buf = PixelBuffer::$bytes;
+    $buf->reserve($needed);
+
+    while ($buf->count() < $needed) {
+        uint8 $zero = 0 as uint8;
+        $buf[] = $zero;
+    }
+}
+
+#[export]
+public function pixel_count() : usize
+{
+    return PixelBuffer::$count;
+}
+
+#[export]
+public function configure(
+    int32 $width,
+    int32 $height,
+    float64 $yaw,
+    float64 $pitch,
+    float64 $distance,
+    float64 $power,
+    int32 $max_iter
+) : ptr<uint8>
+{
+    if ($width < 1) {
+        $width = 1;
+    }
+
+    if ($height < 1) {
+        $height = 1;
+    }
+
+    if ($max_iter < 1) {
+        $max_iter = 1;
+    }
+
+    Scene::$camera = orbit_camera($yaw, $pitch, $distance);
+    Scene::$width = $width;
+    Scene::$height = $height;
+    Scene::$power = $power;
+    Scene::$max_iter = $max_iter;
+    Scene::$compute_ms = 0.0;
+
+    usize $needed = ($width as usize) * ($height as usize) * 4;
+    grow_pixels($needed);
+    PixelBuffer::$count = $needed;
+
+    return PixelBuffer::$bytes->data();
+}
+
+#[export]
+public function render_rows(int32 $y_begin, int32 $y_end) : void
+{
+    float64 $started = host_now_ms();
+
+    Camera $cam = Scene::$camera;
+    int32 $width = Scene::$width;
+    int32 $height = Scene::$height;
+    float64 $power = Scene::$power;
+    int32 $max_iter = Scene::$max_iter;
+
+    if ($y_end > $height) {
+        $y_end = $height;
+    }
+
+    int32 $y = $y_begin;
+
+    while ($y < $y_end) {
+        int32 $x = 0;
+
+        while ($x < $width) {
+            Rgb $c = shade_pixel($cam, $x, $y, $width, $height, $power, $max_iter);
+            usize $i = (($y as usize) * ($width as usize) + ($x as usize)) * 4;
+            PixelBuffer::$bytes[$i] = $c->r;
+            PixelBuffer::$bytes[$i + 1] = $c->g;
+            PixelBuffer::$bytes[$i + 2] = $c->b;
+            PixelBuffer::$bytes[$i + 3] = 255 as uint8;
+            $x = $x + 1;
+        }
+
+        $y = $y + 1;
+    }
+
+    Scene::$compute_ms = Scene::$compute_ms + (host_now_ms() - $started);
+
+    if ($y_end == $height) {
+        float64 $ms = Scene::$compute_ms;
+        string $msg = "rendered {$width}x{$height}, power {$power}, {$max_iter} iterations in {$ms} ms";
+        host_log($msg->data(), $msg->size());
+    }
+}

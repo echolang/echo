@@ -7,6 +7,7 @@
 #include "AST/FunctionDeclNode.h"
 
 #include <fmt/core.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -131,21 +132,58 @@ namespace Compiler::LLVM
         return pop_scalar();
     }
 
+    llvm::Constant *static_bytes_pointer(CodegenContext &ctx, const std::string &bytes)
+    {
+        // StringRef keeps interior NULs; the trailing NUL is what `->c_str()` reads
+        return llvm::cast<llvm::Constant>(
+            ctx.builder->CreateGlobalStringPtr(llvm::StringRef(bytes.data(), bytes.size()), "str"));
+    }
+
+    llvm::Constant *string_view_from_bytes(
+        CodegenContext &ctx,
+        const std::string &bytes,
+        llvm::StructType *view_struct
+    )
+    {
+        llvm::Constant *byte_pointer = static_bytes_pointer(ctx, bytes);
+        const AST::CoreStringLayout &layout = ctx.core_string_layout();
+
+        std::vector<llvm::Constant *> view_fields(view_struct->getNumElements(), nullptr);
+
+        for (unsigned i = 0; i < view_struct->getNumElements(); i++) {
+            view_fields[i] = llvm::Constant::getNullValue(view_struct->getElementType(i));
+        }
+
+        view_fields[layout.bytes_index] = byte_pointer;
+        view_fields[layout.size_index] =
+            llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
+
+        return llvm::ConstantStruct::get(view_struct, view_fields);
+    }
+
+    llvm::Constant *CodegenContext::string_view_constant(
+        const std::string &bytes,
+        const AST::ValueType &type
+    )
+    {
+        if (!type.has_property_layout()) {
+            return static_bytes_pointer(*this, bytes);
+        }
+
+        auto *view_struct = llvm::cast<llvm::StructType>(types->get_llvm_type(type, *current_cmp_unit));
+        return string_view_from_bytes(*this, bytes, view_struct);
+    }
+
     llvm::Constant *CodegenContext::string_constant(
         const std::string &bytes,
         const AST::ValueType &type
     )
     {
-        // the bytes themselves, always: a private NUL-terminated global. the NUL costs one byte and buys
-        // `->c_str()` for free on a literal, which is the whole C-interop story for one
-        llvm::Constant *byte_pointer = llvm::cast<llvm::Constant>(
-            builder->CreateGlobalStringPtr(bytes, "str"));
-
         // no stdlib, no `string` type - the literal stays the bare address it has always been. this is the
         // path that compiles `stdlib/core/string.eco` itself. asks for a *layout*, since what follows
         // GEPs the window out of it
         if (!type.has_property_layout()) {
-            return byte_pointer;
+            return static_bytes_pointer(*this, bytes);
         }
 
         // resolved once by compile_bundle, which is also where a malformed stdlib string is reported
@@ -157,11 +195,6 @@ namespace Compiler::LLVM
         // a literal is a *constant* of the string type, not a call to one of its constructors: the bytes
         // are already in the binary, the size is known here, and the owner is null - so nothing is
         // allocated and nothing is retained
-        std::vector<llvm::Constant *> view_fields(2);
-        view_fields[layout.bytes_index] = byte_pointer;
-        view_fields[layout.size_index] =
-            llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
-
         const unsigned field_count = string_struct->getNumElements();
         std::vector<llvm::Constant *> string_fields(field_count);
 
@@ -169,7 +202,7 @@ namespace Compiler::LLVM
             string_fields[i] = llvm::Constant::getNullValue(string_struct->getElementType(i));
         }
 
-        string_fields[layout.window_index] = llvm::ConstantStruct::get(view_struct, view_fields);
+        string_fields[layout.window_index] = string_view_from_bytes(*this, bytes, view_struct);
         string_fields[layout.owner_index] =
             llvm::ConstantPointerNull::get(
                 llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));

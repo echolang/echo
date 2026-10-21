@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotEmbed  embed_not_literal.eco:2:23
+
+  'std::embed::text' needs a string literal as its path, not a runtime value
+
+  1 | string $p = "hello.txt";
+  2 | echo std::embed::text($p);
+    :                       ^^^^
+  3 | 
+
+1 error, nothing was compiled.

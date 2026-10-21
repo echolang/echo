@@ -532,6 +532,7 @@ static bool compute_cache_keys(
     const Compiler::TargetFacts &facts,
     const std::set<std::string> &test_modules,
     const Parser::ActiveTargets &active_targets,
+    const Compiler::BuildLayout &layout,
     std::map<std::string, Compiler::ModuleCacheKey> &out_keys
 )
 {
@@ -540,7 +541,7 @@ static bool compute_cache_keys(
     std::string error;
     if (!Compiler::compute_module_keys(
             manifests, options, facts, test_modules, active_targets,
-            driver.optimize_is_whole_program(), out_keys, error)) {
+            driver.optimize_is_whole_program(), layout, out_keys, error)) {
         diagnostics.render_untyped("Module Cache Error", error);
         return false;
     }
@@ -669,7 +670,8 @@ static bool emit_and_link_modules(
 // wrong. Refusing the build over it would make an unwritable directory fatal to compiling
 static void store_module_records(
     const ModulePlan &plan,
-    const std::map<std::string, Compiler::ModuleCacheKey> &keys
+    const std::map<std::string, Compiler::ModuleCacheKey> &keys,
+    AST::Bundle &bundle
 )
 {
     for (const auto &[module_name, artifact] : plan.emit_to) {
@@ -679,6 +681,20 @@ static void store_module_records(
         }
 
         Compiler::write_inputs_record(artifact.record, found->second);
+
+        AST::Module *module = bundle.modules.find_module_ptr(module_name);
+
+        if (module == nullptr) {
+            continue;
+        }
+
+        Compiler::write_embed_inputs_record(
+            Compiler::module_embed_inputs_path(
+                artifact.record.parent_path(),
+                module_name,
+                found->second.embed_identity
+            ),
+            module->embedded_paths);
     }
 }
 
@@ -1481,7 +1497,7 @@ static bool run_front_end(
 
     return compute_cache_keys(
         driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.test_modules(),
-        program.active_targets, out.cache_keys);
+        program.active_targets, out.layout(), out.cache_keys);
 }
 
 // one library `run` has to open, and who to blame if it will not
@@ -2063,7 +2079,7 @@ int main_run(
         }
 
         if (!whole_program) {
-            store_module_records(plan, front.cache_keys);
+            store_module_records(plan, front.cache_keys, bundle);
         }
 
         std::vector<std::string> argv = { program_name(driver, program) };
@@ -2416,7 +2432,7 @@ static int build_one_program(
     // only now, and only for what was actually emitted: a record written before the object exists would
     // describe a build that may still have failed
     if (!whole_program) {
-        store_module_records(plan, front.cache_keys);
+        store_module_records(plan, front.cache_keys, bundle);
     }
 
     // **after the link succeeded, and only then.** A failed build is one somebody is about to look at, and

@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 
+#include "AST/ASTEmbed.h"
 #include "AST/ConstantDataExprNode.h"
 #include "AST/MatchExprNode.h"
 
@@ -1107,7 +1108,31 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_abi_bind_unchecked:
             _ctx.abi->gen_builtin(node, kind);
             return;
+
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
+            gen_embed_builtin(node, kind);
+            return;
     }
+}
+
+void ExprCodegen::gen_embed_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
+{
+    const AST::EmbedPlan plan = AST::embed_plan_for(node);
+
+    if (plan.status != AST::EmbedStatus::t_ready || plan.resource == nullptr) {
+        throw _ctx.error(fmt::format(
+            "compiler bug: '{}' reached codegen without a ready embed plan {}",
+            node.decl != nullptr ? node.decl->builtin.value() : "embed",
+            _ctx.function_context()));
+    }
+
+    if (kind == AST::BuiltinKind::t_embed_text) {
+        _ctx.push_scalar(_ctx.string_constant(plan.resource->bytes, node.result_type()));
+        return;
+    }
+
+    _ctx.push_scalar(_ctx.string_view_constant(plan.resource->bytes, node.result_type()));
 }
 
 void ExprCodegen::gen_dprint_builtin(AST::FunctionCallExprNode &node)
@@ -1357,6 +1382,8 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_abi_symbol:
         case AST::BuiltinKind::t_abi_slot_symbol:
         case AST::BuiltinKind::t_abi_bind_unchecked:
+        case AST::BuiltinKind::t_embed_text:
+        case AST::BuiltinKind::t_embed_bytes:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }

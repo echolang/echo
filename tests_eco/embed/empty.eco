@@ -1,0 +1,3 @@
+string $s = std::embed::text("empty.txt");
+echo $s->size();
+echo $s->empty();

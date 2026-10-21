@@ -38,6 +38,7 @@
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTEmbed.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTDestruction.h"
@@ -1688,6 +1689,38 @@ void TypeChecker::check_abort_message(FunctionCallExprNode &node)
     }
 }
 
+void TypeChecker::check_embed_argument(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()) {
+        return;
+    }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (!is_embed_builtin(kind)) {
+        return;
+    }
+
+    const EmbedPlan plan = embed_plan_for(node, &_collector);
+
+    if (plan.status == EmbedStatus::t_pending) {
+        return;
+    }
+
+    if (plan.status == EmbedStatus::t_refused) {
+        const TokenReference &at = (node.arguments.empty() || node.arguments[0] == nullptr)
+            ? node.token_function_name
+            : location_of_expression(node.arguments[0]);
+
+        _collector.collect_issue<Issue::CannotEmbed>(code_ref_for(at), plan.refusal);
+        return;
+    }
+
+    if (plan.resource != nullptr && _current_module != nullptr) {
+        _current_module->note_embedded_path(plan.resource->resolved);
+    }
+}
+
 // a `const` value may only be handed to a method that promised to read it. the promise is the
 // receiver's own type - `const Foo&` at args[0] - so the *fit* already refuses this, and what is
 // left is which of the two diagnostics the reader gets: the conversion's, which names a pointee they
@@ -1888,6 +1921,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         }
 
         check_abort_message(node);
+        check_embed_argument(node);
         check_ref_count_argument(node);
         check_raw_storage_argument(node);
         check_atomic_operand(node);

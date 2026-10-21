@@ -858,3 +858,114 @@ TEST_CASE("`--package-dir` overrides the vendor search", "[cache][packages]")
     REQUIRE(found.exit_code == 0);
     REQUIRE(found.output.find("42") != std::string::npos);
 }
+
+TEST_CASE("changing an embedded file moves the module key", "[cache][embed]")
+{
+    ScopedProject project("embed_asset");
+
+    write_file(project.root() / "lib" / "module.eco",
+        "#[module: \"embedlib\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "lib" / "src" / "lib.eco",
+        "namespace embedlib;\n"
+        "\n"
+        "public function banner() : string\n"
+        "{\n"
+        "    return std::embed::text(\"n.txt\");\n"
+        "}\n");
+    write_file(project.root() / "lib" / "src" / "n.txt", "one\n");
+
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco", "echo embedlib::banner();\n");
+
+    const std::string args = "run --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult first = project.echoc(args, app_dir);
+    REQUIRE(first.exit_code == 0);
+    INFO(first.output);
+
+    // the first compile discovers the embed and writes the sidecar; the next key then
+    // folds n.txt, so it is a different hex from the sources-only first key
+    const ProcessResult warmed = project.echoc(args, app_dir);
+    REQUIRE(warmed.exit_code == 0);
+    INFO(warmed.output);
+
+    const std::string lib_before = line_starting_with(warmed.output, "embedlib");
+    REQUIRE_FALSE(lib_before.empty());
+
+    const ProcessResult hit = project.echoc(args, app_dir);
+    REQUIRE(hit.exit_code == 0);
+    REQUIRE(cache_key(line_starting_with(hit.output, "embedlib")) == cache_key(lib_before));
+    REQUIRE(line_starting_with(hit.output, "embedlib").find("hit") != std::string::npos);
+
+    write_file(project.root() / "lib" / "src" / "n.txt", "two\n");
+
+    const ProcessResult after = project.echoc(args, app_dir);
+    REQUIRE(after.exit_code == 0);
+    INFO(after.output);
+    REQUIRE(cache_key(line_starting_with(after.output, "embedlib")) != cache_key(lib_before));
+    REQUIRE(after.output.find("n.txt") != std::string::npos);
+}
+
+TEST_CASE("an embed sidecar is per configuration, so a later compile cannot clobber another", "[cache][embed]")
+{
+    ScopedProject project("embed_sidecar_identity");
+
+    write_file(project.root() / "lib" / "module.eco",
+        "#[module: \"embedlib\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "lib" / "src" / "lib.eco",
+        "namespace embedlib;\n"
+        "\n"
+        "public function banner() : string\n"
+        "{\n"
+        "    #[if: extra]\n"
+        "    return std::embed::text(\"n.txt\");\n"
+        "    #[else]\n"
+        "    return \"none\";\n"
+        "    #[end]\n"
+        "}\n");
+    write_file(project.root() / "lib" / "src" / "n.txt", "one\n");
+
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco", "echo embedlib::banner();\n");
+
+    const std::string extra = "run --define extra --explain cache --build-dir " + quoted(project.build_dir());
+    const std::string plain = "run --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult first = project.echoc(extra, app_dir);
+    REQUIRE(first.exit_code == 0);
+    INFO(first.output);
+
+    const ProcessResult warmed = project.echoc(extra, app_dir);
+    REQUIRE(warmed.exit_code == 0);
+    INFO(warmed.output);
+    REQUIRE(warmed.output.find("one") != std::string::npos);
+
+    const std::string extra_before = line_starting_with(warmed.output, "embedlib");
+    REQUIRE_FALSE(extra_before.empty());
+
+    // a compile that embeds nothing used to truncate `{name}.embed-inputs`; changing n.txt
+    // then hit the sources-only extra object with the old bytes
+    const ProcessResult without = project.echoc(plain, app_dir);
+    REQUIRE(without.exit_code == 0);
+    INFO(without.output);
+    REQUIRE(without.output.find("none") != std::string::npos);
+
+    write_file(project.root() / "lib" / "src" / "n.txt", "two\n");
+
+    const ProcessResult after = project.echoc(extra, app_dir);
+    REQUIRE(after.exit_code == 0);
+    INFO(after.output);
+    REQUIRE(cache_key(line_starting_with(after.output, "embedlib")) != cache_key(extra_before));
+    REQUIRE(after.output.find("two") != std::string::npos);
+    REQUIRE(after.output.find("n.txt") != std::string::npos);
+}

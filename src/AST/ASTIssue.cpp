@@ -89,6 +89,11 @@ ISSUE_MESSAGE_FNC(UnknownVariable)
     return fmt::format("The variable '{}' is not declared in the current scope", variable_name);
 }
 
+ISSUE_MESSAGE_FNC(CannotEmbed)
+{
+    return _message;
+}
+
 ISSUE_MESSAGE_FNC(UnknownFunction)
 {
     return fmt::format("The function '{}' could not be found", function_name);
