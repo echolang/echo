@@ -210,6 +210,17 @@ namespace AST
             return token_shorthand_dot.has_value();
         }
 
+        // **is argument 0 a receiver?** CallResolver::candidates_for and
+        // unbound_shorthand_call_of share this so a type-parameter static cannot drift
+        bool is_member_lookup() const {
+            return constructed_type.is_unknown()
+                && static_owner.is_unknown()
+                && !is_shorthand_static_call()
+                && lookup_namespace == nullptr
+                && !arguments.empty()
+                && arguments[0] != nullptr;
+        }
+
         FunctionCallExprNode(TokenReference token_function_name, std::vector<ExprNode*> arguments) :
             token_function_name(token_function_name), arguments(arguments)
         {};

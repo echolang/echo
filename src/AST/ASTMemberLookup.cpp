@@ -7,6 +7,7 @@
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/MemberAccessNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
@@ -149,17 +150,49 @@ AST::ValueType AST::static_owner_of_destination(const AST::ValueType &destinatio
 
 AST::FunctionCallExprNode *AST::unbound_shorthand_call_of(AST::ExprNode *expr)
 {
-    if (expr == nullptr || expr->get_node_type() != AST::NodeType::n_expr_call) {
+    while (expr != nullptr) {
+        if (expr->get_node_type() == AST::NodeType::n_expr_call) {
+            auto *call = static_cast<AST::FunctionCallExprNode *>(expr);
+
+            if (call->is_shorthand_static_call() && call->static_owner.is_unknown()) {
+                return call;
+            }
+
+            // member call: receiver is argument 0. a constructor or static stops
+            // here, so Box(.origin()) / T::from(.origin()) bind from the parameter
+            if (!call->is_member_lookup()) {
+                return nullptr;
+            }
+
+            expr = call->arguments[0];
+            continue;
+        }
+
+        if (expr->get_node_type() == AST::NodeType::n_expr_optional_chain) {
+            expr = static_cast<AST::OptionalChainExprNode *>(expr)->base;
+            continue;
+        }
+
+        // parse_member_call plants AddrOf(receiver), and may wrap pointer receivers in Deref
+        if (expr->get_node_type() == AST::NodeType::n_expr_addrof) {
+            expr = static_cast<AST::AddrOfExprNode *>(expr)->operand;
+            continue;
+        }
+
+        if (expr->get_node_type() == AST::NodeType::n_expr_deref) {
+            expr = static_cast<AST::DerefExprNode *>(expr)->operand;
+            continue;
+        }
+
+        if (expr->get_node_type() == AST::NodeType::n_member_access) {
+            expr = static_cast<AST::MemberAccessNode *>(expr)->get_base_node().unsafe_ptr<AST::ExprNode>();
+            continue;
+        }
+
         return nullptr;
     }
 
-    auto *call = static_cast<AST::FunctionCallExprNode *>(expr);
-
-    if (!call->is_shorthand_static_call() || call->static_owner.has_complex_type()) {
-        return nullptr;
-    }
-
-    return call;
+    return nullptr;
 }
 
 bool AST::bind_shorthand_to(AST::ExprNode *expr, const AST::ValueType &destination)

@@ -18,19 +18,13 @@ namespace AST
 {
     namespace
     {
-        // the member-call arm of CallResolver::candidates_for, as a filter: unresolved, no
-        // namespace, no static owner, a receiver in arguments[0]. one predicate so the rewriter
-        // cannot drift from what settle_calls would have looked up as a method
+        // unresolved member lookup, and not echo. is_member_lookup is the shape
+        // CallResolver::candidates_for uses
         bool is_unresolved_member_call(const FunctionCallExprNode &call)
         {
-            return call.lookup_namespace == nullptr
-                && call.decl == nullptr
-                && call.static_owner.is_unknown()
-                && call.constructed_type.is_unknown()
-                && !call.is_shorthand_static_call()
-                && !is_print_call(call)
-                && !call.arguments.empty()
-                && call.arguments[0] != nullptr;
+            return call.decl == nullptr
+                && call.is_member_lookup()
+                && !is_print_call(call);
         }
 
         class CallablePropertyRewriter : public RecursiveVisitor

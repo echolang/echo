@@ -1,0 +1,61 @@
+// array elements take the destination's element type: shorthand, inbound #[implicit],
+// and a type that declares both fills picks from the literal's shape
+
+struct Value
+{
+    int32 $tag;
+    string $text;
+    int32 $n;
+
+    #[implicit]
+    static function from(string $s) : Value
+    {
+        return Value(1, $s, 0);
+    }
+
+    #[implicit]
+    static function from(int32 $n) : Value
+    {
+        return Value(2, '', $n);
+    }
+
+    static function decimal(string $s) : Value
+    {
+        return Value(3, $s, 0);
+    }
+}
+
+array<Value> $row = ['Desk', .decimal('10.00'), 3];
+echo $row->count();
+echo $row[0]->tag;
+echo $row[1]->tag;
+echo $row[2]->tag;
+
+struct Params
+{
+    array<Value> $pos = array<Value>();
+    map<string, Value> $named = map<string, Value>();
+}
+
+operator (Params& $p)[] = (Value $v) : void
+{
+    $p->pos[] = $v;
+}
+
+operator (Params& $p)[const string& $name] = (Value $v) : void
+{
+    $p->named[$name] = $v;
+}
+
+function take(Params $p) : void
+{
+    echo $p->pos->count();
+    echo $p->named->count();
+}
+
+take(['Desk', .decimal('10.00'), 3]);
+take(['name' => 'Lamp', 'stock' => 12]);
+
+Params $empty = [];
+echo $empty->pos->count();
+echo $empty->named->count();

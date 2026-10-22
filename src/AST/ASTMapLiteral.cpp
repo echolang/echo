@@ -51,7 +51,7 @@ bool AST::bind_map_literal_to(
         literal->bound_type = wanted;
     }
 
-    const CollectionFill fill = collection_fill_of(wanted, collector);
+    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
 
     if (fill.kind == CollectionFill::Kind::t_keyed) {
         for (MapLiteralExprNode::Entry &entry : literal->entries) {

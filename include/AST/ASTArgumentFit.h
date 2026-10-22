@@ -129,11 +129,11 @@ namespace AST
         // and make erasing a static type look as free as `T&` -> `ptr<T>`
         t_interface_widening,
 
-        // the argument's own type declared how to convert itself, `#[implicit]`. **the last real
-        // rank**, below every reading, widening and converting form above it, because that is what
-        // makes an overload taking the owning type always beat one taking the window: this is the
-        // fallback that lets a caller take the cheap view without writing anything, never a way to
-        // hide a better-matching overload. see AST::find_implicit_conversion
+        // the argument's own type declared how to convert itself, `#[implicit]`. **below every
+        // reading, widening and converting form above it**, because that is what makes an overload
+        // taking the owning type always beat one taking the window: this is the fallback that lets
+        // a caller take the cheap view without writing anything, never a way to hide a
+        // better-matching overload. see AST::find_implicit_conversion
         //
         // the two still **compose** on one argument - `f('hello')` against a view parameter converts
         // first and then borrows the conversion's result - and CallResolver::coerce_arguments re-asks
@@ -433,6 +433,9 @@ namespace AST
         // parameter widens twice - to the interface, then into the absence - and every arm below asks about
         // one step. asked here, once, so the answer cannot differ per arm: the rank is the payload's,
         // because the wrapping is a coerce_value AST::CallResolver inserts and costs the caller nothing.
+        // wrapping vs not wrapping at the same payload rank is match_function's second key, so
+        // `g(string)` beats `g(string?)` for `'a'` without a rank that would also make wrap-of-promotion
+        // beat a plain promotion
         //
         // an argument that is *already* nullable is left to the arms below, where the equality above has
         // already accepted the one shape that fits - which is AST::arrival_wraps_optional's second half,

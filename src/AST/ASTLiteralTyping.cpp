@@ -1,7 +1,10 @@
 #include "AST/ASTLiteralTyping.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTBundle.h"
+#include "AST/ASTCast.h"
 #include "AST/ASTCollectionLiteral.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
@@ -25,6 +28,7 @@
 
 #include <fmt/core.h>
 
+#include <cassert>
 #include <cerrno>
 #include <cstdlib>
 #include <string>
@@ -877,6 +881,11 @@ namespace AST
                 return;
             }
 
+            // a shorthand chain has no type of its own; the destination names `.of()`'s owner
+            if (bind_shorthand_to(slot, destination)) {
+                changed = true;
+            }
+
             // collection literals have no type of their own. a return, a match arm, a `??` fallback
             // and a written `as` are destinations the declaration walk never sees, so this is the
             // round that tells `['a' => [1, 2]]` it fills a `map<string, array<int32>>`
@@ -885,6 +894,19 @@ namespace AST
                     && bind_collection_literal_to(slot, destination, _collector)) {
                     changed = true;
                 }
+            }
+
+            // `$row[] = 'Desk'` is a write through a place, not a call, so CallResolver never
+            // sees it. emit_declared_conversion is the one mint; the rank is retrieval
+            const ValueType from = slot->result_type();
+
+            if (!is_undetermined_type(from)
+                && argument_fit(from, slot, destination) == ArgumentFit::t_declared_conversion) {
+                FunctionDeclNode *conversion = implicit_conversion_for(from, slot, destination);
+                assert(conversion != nullptr && "the fit rank promised a declared conversion");
+                slot = emit_declared_conversion(_module.nodes, slot, conversion, destination, at);
+                changed = true;
+                return;
             }
 
             if (!is_untyped_literal(slot)) {

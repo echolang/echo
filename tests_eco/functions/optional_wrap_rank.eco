@@ -1,0 +1,37 @@
+// wrapping a present value into T? is a matcher second key on the payload rank: T beats T?,
+// T? still wins for a T? argument, wrap-of-exact beats wrap-of-promotion, and a plain
+// promotion beats wrap of the same promotion
+
+function g(string $s) : int32 { return 1; }
+function g(string? $s) : int32 { return 2; }
+
+echo g('a');
+
+string? $opt = 'b';
+echo g($opt);
+
+struct Value
+{
+    int32 $kind;
+
+    static function from(string $s) : Value { return Value(10); }
+    static function from(string? $s) : Value { return Value(20); }
+    static function from(int32 $n) : Value { return Value(30); }
+    static function from(int32? $n) : Value { return Value(40); }
+}
+
+string $s = 'x';
+echo Value::from($s)->kind;
+
+string? $maybe = 'y';
+echo Value::from($maybe)->kind;
+
+function p(int32? $n) : int32 { return 1; }
+function p(int64? $n) : int32 { return 2; }
+
+function q(int64 $n) : int32 { return 1; }
+function q(int64? $n) : int32 { return 2; }
+
+int32 $n = 3;
+echo p($n);
+echo q($n);

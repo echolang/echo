@@ -262,7 +262,7 @@ bool CollectionLiteralExpansion::build_expansion(
 {
     ArrayLiteralExprNode *array = array_literal_of(&literal);
     MapLiteralExprNode *map = map_literal_of(&literal);
-    const CollectionFill fill = collection_fill_of(type, _collector);
+    const CollectionFill fill = collection_fill_of(type, _collector, literal);
 
     // nested dest-typing lives on bind_*, which reads the fill contract. expansion asks once
     bind_collection_literal_to(&literal, type, _collector);
@@ -284,6 +284,7 @@ bool CollectionLiteralExpansion::build_expansion(
         }
 
         if (fill.kind == CollectionFill::Kind::t_none) {
+            array->expansion_decided = true;
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(array->token_bracket),
                 fmt::format(

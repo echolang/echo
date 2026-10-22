@@ -1,0 +1,15 @@
+// a leading-dot chain still needs a destination for the first call
+struct Point {
+    public float64 $x;
+
+    static function origin() : Point {
+        return Point(0.0);
+    }
+
+    function shifted() : Point {
+        return Point($this->x + 1.0);
+    }
+}
+
+$x = .origin()->shifted();
+echo $x->x;

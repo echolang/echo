@@ -417,8 +417,9 @@ namespace AST
 
         // a member call. the receiver is argument 0, already addressed by the parser as
         // `AddrOf(Deref^n(recv))`, so the type to look on is what `->` reaches through - every
-        // pointer level, which is AST::target_type_of
-        if (call.arguments.empty() || call.arguments[0] == nullptr) {
+        // pointer level, which is AST::target_type_of. is_member_lookup is that shape, shared
+        // with unbound_shorthand_call_of so a type-parameter static cannot drift
+        if (!call.is_member_lookup()) {
             return {};
         }
 

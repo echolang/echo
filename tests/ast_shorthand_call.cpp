@@ -25,6 +25,123 @@ namespace
         "function draw(Point $p) : float64 { return $p->x; }\n";
 }
 
+TEST_CASE("a leading-dot shorthand may start a member chain", "[shorthand]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    static function origin() : Point { return Point(0.0); }\n"
+        "    function shifted() : Point { return Point($this->x + 1.0); }\n"
+        "}\n"
+        "function draw(Point $p) : float64 { return $p->x; }\n"
+        "$r = draw(.origin()->shifted());\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "origin");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->is_shorthand_static_call());
+    REQUIRE(calls[0]->static_owner.has_complex_type());
+    REQUIRE(calls[0]->decl != nullptr);
+}
+
+TEST_CASE("a constructor argument's shorthand binds from the parameter", "[shorthand]")
+{
+    // walking into Box(...) would name Box as .origin()'s owner, and Box has none
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    static function origin() : Point { return Point(0.0); }\n"
+        "}\n"
+        "struct Box {\n"
+        "    Point $p;\n"
+        "}\n"
+        "function take(Box $b) : float64 { return $b->p->x; }\n"
+        "$r = take(Box(.origin()));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "origin");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->static_owner.get_type_desciption() == "Point");
+}
+
+TEST_CASE("a static call's argument shorthand binds from the parameter", "[shorthand]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    static function origin() : Point { return Point(0.0); }\n"
+        "}\n"
+        "struct Box {\n"
+        "    Point $p;\n"
+        "    static function from(Point $p) : Box { return Box($p); }\n"
+        "}\n"
+        "function take(Box $b) : float64 { return $b->p->x; }\n"
+        "$r = take(Box::from(.origin()));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "origin");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->static_owner.get_type_desciption() == "Point");
+}
+
+TEST_CASE("a type-parameter static's argument shorthand binds from the parameter", "[shorthand]")
+{
+    // T::from has a static owner that is not unknown and has no complex type. walking
+    // into it would name take's Box as .origin()'s owner
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    static function origin() : Point { return Point(0.0); }\n"
+        "}\n"
+        "struct Box {\n"
+        "    Point $p;\n"
+        "    static function from(Point $p) : Box { return Box($p); }\n"
+        "}\n"
+        "function take(Box $b) : float64 { return $b->p->x; }\n"
+        "function wrap<T>(T $seed) : float64 {\n"
+        "    return take(T::from(.origin()));\n"
+        "}\n"
+        "$r = wrap(Box(Point(0.0)));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "origin");
+    REQUIRE_FALSE(calls.empty());
+
+    for (auto *call : calls) {
+        REQUIRE(call->static_owner.get_type_desciption() != "Box");
+    }
+}
+
+TEST_CASE("a leading-dot shorthand may start an optional member chain", "[shorthand]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    static function of(float64 $v) : Point? { return Point($v); }\n"
+        "    function shifted() : Point { return Point($this->x + 1.0); }\n"
+        "}\n"
+        "Point? $p = .of(1.0)?->shifted();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "of");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->is_shorthand_static_call());
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->static_owner.get_type_desciption() == "Point");
+}
+
 TEST_CASE("a shorthand takes its owner from an argument's parameter", "[shorthand]")
 {
     // the one destination the parser cannot reach: a parameter's type sits on a declaration nobody
@@ -162,5 +279,28 @@ TEST_CASE("a shorthand never picks between overloads", "[shorthand]")
 
     // and exactly once: the enclosing call speaks first and marks the shorthand terminal, so the
     // finalizing sweep does not go on to report that nothing named its owner
+    REQUIRE(bundle->collector.issues.size() == 1);
+}
+
+TEST_CASE("a shorthand chain never picks between overloads", "[shorthand]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    static function origin() : Point { return Point(0.0); }\n"
+        "    function shifted() : Point { return Point($this->x + 1.0); }\n"
+        "}\n"
+        "struct Circle {\n"
+        "    float64 $r;\n"
+        "    static function origin() : Circle { return Circle(0.0); }\n"
+        "    function shifted() : Circle { return Circle($this->r + 1.0); }\n"
+        "}\n"
+        "function draw(Point $p) : float64 { return $p->x; }\n"
+        "function draw(Circle $c) : float64 { return $c->r; }\n"
+        "$r = draw(.origin()->shifted());\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(EchoTests::has_issue_containing(
+        *bundle, "The overload of 'draw' cannot be chosen: '.origin(...)' has no type of its own"));
     REQUIRE(bundle->collector.issues.size() == 1);
 }

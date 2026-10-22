@@ -3,6 +3,9 @@
 #include <AST/ASTArgumentFit.h>
 #include <AST/ASTFunctionMatcher.h>
 #include <AST/ASTValueType.h>
+#include <AST/FunctionDeclNode.h>
+
+#include "helpers.h"
 
 using AST::ArgumentFit;
 using AST::FunctionCandidate;
@@ -112,6 +115,48 @@ TEST_CASE("argument_fit ranks conversions best to worst", "[fnmatch]")
     // visitTypeCast correct: a cast is not an address-of, so it offers no expression and must not be
     // told that a value reaches a borrow parameter
     REQUIRE( AST::argument_fit(t_int32, nullptr, ValueType::make_pointer(t_int32, false)) == ArgumentFit::t_none );
+}
+
+TEST_CASE("wrapping into T? is worse than T", "[fnmatch]")
+{
+    // a tagged optional is an interned layout, so the rank has to be asked of a real registry
+    auto bundle = EchoTests::tests_make_parsed_bundle("int32 $n = 1;\n");
+    const ValueType i32_opt = bundle->collector.type_registry.get_or_create_optional(t_int32);
+    const ValueType i64_opt = bundle->collector.type_registry.get_or_create_optional(t_int64);
+
+    REQUIRE( AST::argument_fit(t_int32, nullptr, t_int32) == ArgumentFit::t_exact );
+    REQUIRE( AST::argument_fit(t_int32, nullptr, i32_opt) == ArgumentFit::t_exact );
+    REQUIRE( AST::argument_fit(t_int32, nullptr, i64_opt) == ArgumentFit::t_promotion );
+    REQUIRE( AST::argument_fit(i32_opt, nullptr, i32_opt) == ArgumentFit::t_exact );
+
+    // a present value cannot unwrap, so T? at T is a mismatch
+    REQUIRE( AST::argument_fit(i32_opt, nullptr, t_int32) == ArgumentFit::t_none );
+
+    AST::FunctionDeclNode exact;
+    AST::FunctionDeclNode wrap;
+    std::vector<FunctionCandidate> candidates = {
+        { &exact, { t_int32 }, false, { t_int32 }, {} },
+        { &wrap, { i32_opt }, false, { t_int32 }, {} },
+    };
+
+    const FunctionMatch picked = AST::match_function(candidates);
+
+    REQUIRE( picked.outcome == FunctionMatch::Outcome::t_resolved );
+    REQUIRE( picked.decl == &exact );
+
+    // wrap-of-exact beats wrap-of-promotion: flattening both to one rank would make this a tie
+    const std::vector<FunctionCandidate> wrap_exact_or_promote = {
+        candidate({ i32_opt }),
+        candidate({ i64_opt }),
+    };
+    REQUIRE( match(wrap_exact_or_promote, { t_int32 }).decl == wrap_exact_or_promote[0].decl );
+
+    // same payload rank: the candidate that does not wrap wins
+    const std::vector<FunctionCandidate> promote_or_wrap = {
+        candidate({ t_int64 }),
+        candidate({ i64_opt }),
+    };
+    REQUIRE( match(promote_or_wrap, { t_int32 }).decl == promote_or_wrap[0].decl );
 }
 
 TEST_CASE("a borrow parameter is answered by a conversion to what it borrows", "[fnmatch]")

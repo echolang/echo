@@ -102,10 +102,10 @@ namespace AST
     // new arm here and a reader that switches on it
     CastLookup cast_plan_for(const ExprNode &from, const ValueType &to);
 
-    // **the one mint for an #[implicit] conversion call.** CallResolver::convert_if_wanted and
-    // AST::CastResolution both retrieve a declaration and then ask this - inbound static vs
-    // outbound method, receiver_for_member_call, static_owner, t_settled. a second copy of that
-    // mint is the recurring bug
+    // **the one mint for an #[implicit] conversion call.** CallResolver::convert_if_wanted,
+    // write_at, and AST::CastResolution retrieve a declaration and then ask this - inbound
+    // static vs outbound method, receiver_for_member_call, static_owner, t_settled. a second
+    // copy of that mint is the recurring bug
     ExprNode *emit_declared_conversion(
         NodeCollection &nodes,
         ExprNode *arg,

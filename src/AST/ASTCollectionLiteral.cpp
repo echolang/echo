@@ -6,7 +6,6 @@
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTMapLiteral.h"
 #include "AST/ASTOperatorSemantics.h"
-#include "AST/ASTPlaceExpr.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -43,10 +42,28 @@ AST::CollectionLiteralExprNode *AST::collection_literal_of(AST::ExprNode *expr)
     return map_literal_of(expr);
 }
 
-AST::CollectionFill AST::collection_fill_of(const AST::ValueType &destination, AST::Collector &collector)
+AST::CollectionFill AST::collection_fill_of(
+    const AST::ValueType &destination,
+    AST::Collector &collector,
+    const AST::CollectionLiteralExprNode &shape
+)
 {
     CollectionFill fill;
     const ValueType wanted = implicit_conversion_target(destination);
+    const bool keyed_shape = shape.get_node_type() == NodeType::n_expr_map_literal;
+
+    const auto try_keyed = [&] {
+        if (const FunctionDeclNode *write = find_index_write(collector, wanted, 1)) {
+            fill.kind = CollectionFill::Kind::t_keyed;
+            fill.key = peel_substituted(*write, write->parameter_type(1), wanted, collector);
+            fill.value = peel_substituted(*write, write->parameter_type(2), wanted, collector);
+        }
+    };
+
+    if (keyed_shape) {
+        try_keyed();
+        return fill;
+    }
 
     if (wanted.is_inline_array()) {
         fill.kind = CollectionFill::Kind::t_inline;
@@ -61,14 +78,6 @@ AST::CollectionFill AST::collection_fill_of(const AST::ValueType &destination, A
 
     ComplexType *ct = wanted.get_complex_type();
     const ComplexType *tmpl = ct->template_or_self();
-
-    if (const FunctionDeclNode *write = find_index_write(collector, wanted, 1)) {
-        fill.kind = CollectionFill::Kind::t_keyed;
-        fill.key = peel_substituted(*write, write->parameter_type(1), wanted, collector);
-        fill.value = peel_substituted(*write, write->parameter_type(2), wanted, collector);
-        return fill;
-    }
-
     const ComplexType *fixed_tmpl = collector.core_types.declared_template(CoreTypeKind::t_fixed_array);
 
     if (fixed_tmpl != nullptr && tmpl == fixed_tmpl) {
@@ -86,14 +95,20 @@ AST::CollectionFill AST::collection_fill_of(const AST::ValueType &destination, A
         return fill;
     }
 
-    fill.kind = CollectionFill::Kind::t_append;
-
     if (const FunctionDeclNode *write = find_index_write(collector, wanted, 0)) {
+        fill.kind = CollectionFill::Kind::t_append;
         fill.element = peel_substituted(*write, write->parameter_type(1), wanted, collector);
-    } else if (const FunctionDeclNode *read = find_index(collector, wanted, 0)) {
-        fill.element = peel_substituted(*read, read->get_return_type(), wanted, collector);
+        return fill;
     }
 
+    if (const FunctionDeclNode *read = find_index(collector, wanted, 0)) {
+        fill.kind = CollectionFill::Kind::t_append;
+        fill.element = peel_substituted(*read, read->get_return_type(), wanted, collector);
+        return fill;
+    }
+
+    // keyed is the array-shape fallback: a dest that also appends returned above
+    try_keyed();
     return fill;
 }
 

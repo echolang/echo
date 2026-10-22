@@ -75,7 +75,14 @@ namespace AST
         std::optional<uint64_t> length;
     };
 
-    CollectionFill collection_fill_of(const ValueType &destination, Collector &collector);
+    // **how this destination fills this literal's shape.** an array node asks append / inline /
+    // index, then the keyed write; a map node asks the keyed write only. a type that declares both
+    // operators is therefore filled from the brackets the author wrote, and empty `[]` at a map
+    // is t_keyed so expansion can mint the constructor without asking again
+    CollectionFill collection_fill_of(
+        const ValueType &destination,
+        Collector &collector,
+        const CollectionLiteralExprNode &shape);
 
     // **the dest-typed bind, array first.** answers whether `expr` is a collection literal this
     // call typed. a pack at `variadic_args` is bind_array_literal_to's and this answers false.

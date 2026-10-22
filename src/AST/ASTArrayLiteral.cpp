@@ -65,7 +65,7 @@ bool AST::bind_array_literal_to(
         literal->bound_type = wanted;
     }
 
-    const CollectionFill fill = collection_fill_of(wanted, collector);
+    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
 
     if (fill.kind == CollectionFill::Kind::t_inline
         || fill.kind == CollectionFill::Kind::t_append

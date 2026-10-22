@@ -1,0 +1,20 @@
+// a leading dot may start a ?-> chain: the destination names the owner of the first call
+
+struct Point
+{
+    float64 $x;
+
+    static function of(float64 $v) : Point?
+    {
+        return Point($v);
+    }
+
+    function shifted(float64 $by) : Point
+    {
+        return Point($this->x + $by);
+    }
+}
+
+Point? $p = .of(1.0)?->shifted(1.5);
+Point $q = guard $p else { die('absent'); }
+echo $q->x;

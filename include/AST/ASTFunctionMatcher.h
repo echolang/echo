@@ -75,7 +75,9 @@ namespace AST
     //      still says "argument 1 of 'f' expects int32", rather than this returning t_no_viable
     //   3. a candidate is dropped if any argument does not fit it at all
     //   4. one candidate beats another only if it is no worse on every argument and better on at
-    //      least one. a summed score would let a candidate win by being much better on one
+    //      least one. wrapping into a tagged `T?` is a second key on the same payload rank, so
+    //      `g(string)` beats `g(string?)` for `'a'` without flattening wrap-of-exact with
+    //      wrap-of-promotion. a summed score would let a candidate win by being much better on one
     //      argument and slightly worse on another, which is how overload resolution becomes
     //      unpredictable
     //   5. only then does a non-generic candidate beat a generic one - how well the arguments fit

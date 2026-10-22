@@ -16,9 +16,19 @@ namespace
         std::vector<AST::ArgumentFit> fits;
     };
 
+    bool wraps_at(const Viable &v, size_t i)
+    {
+        return AST::arrival_wraps_optional(
+            v.candidate->argument_types[i], v.candidate->parameter_types[i]);
+    }
+
     // "is `a` at least as good as `b` on every argument, and better on at least one" - the
     // Pareto comparison. arguments that told us nothing are skipped on both sides, so they can
     // neither break a tie nor create one
+    //
+    // wrapping is a second key on the same payload rank: `g(string)` and `g(string?)` both score
+    // t_exact for `'a'`, and the one that does not wrap wins. a rank of its own would flatten
+    // wrap-of-exact with wrap-of-promotion, so `f(int32?)` vs `f(int64?)` for an int32 would tie
     bool strictly_better(const Viable &a, const Viable &b)
     {
         bool better_somewhere = false;
@@ -38,6 +48,18 @@ namespace
             }
 
             if (a.fits[i] < b.fits[i]) {
+                better_somewhere = true;
+                continue;
+            }
+
+            const bool a_wraps = wraps_at(a, i);
+            const bool b_wraps = wraps_at(b, i);
+
+            if (a_wraps && !b_wraps) {
+                return false;
+            }
+
+            if (!a_wraps && b_wraps) {
                 better_somewhere = true;
             }
         }

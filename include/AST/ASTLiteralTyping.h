@@ -189,7 +189,8 @@ namespace AST
     // the same walk for arguments that were untyped at parse (a foreach binding, an index).
     // a written `null` at any of those slots is bound here too (`AST::bind_null_to`): an
     // assignment through a `T&` the parser could not yet name (`$a[] = null`) is the one
-    // that had no earlier chance.
+    // that had no earlier chance. a declared `#[implicit]` conversion is minted here for
+    // the same reason: `$a[] = 'Desk'` is a place write CallResolver never sees
     // AST::function_needs_typing is the skip:
     // a template is meaningless until cloned, and a t_owned body is still walked because
     // settle can type a neighbouring call in the same round ownership marks t_owned.

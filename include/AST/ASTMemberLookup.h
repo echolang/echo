@@ -95,10 +95,18 @@ namespace AST
     //
     // **idempotent**, like bind_array_literal_to: several passes may reach one call, and the first
     // destination to name an owner is the one that meant it
+    //
+    // a leading `.of()->add(...)` is a member call whose receiver is the shorthand. the destination
+    // of the whole expression names the owner of `.of()`; AST::unbound_shorthand_call_of walks that
+    // spine, and this takes the owner. later steps type-check as ordinary member calls on whatever
+    // that returns
     bool bind_shorthand_to(ExprNode *expr, const ValueType &destination);
 
-    // the shorthand this expression is *and nothing has named an owner for*, or null - the
-    // tag-compare-plus-cast that keeps every asker from spelling it, null-safe on both axes.
+    // the unbound shorthand at the left of a postfix spine, or null. a leading `.of()->add(...)`
+    // / `.of()?->add(...)` is a member call (or optional chain) whose receiver is the shorthand,
+    // so both readers walk the same peel: AddrOf / Deref / member-access / is_member_lookup's
+    // receiver / optional-chain base. constructors, free calls, and statics (a type-parameter
+    // owner included) are not a spine - `take(Box(.origin()))` binds `.origin()` from Box's parameter
     //
     // unbound is the whole question rather than a mode, both readers wanting a call still waiting on a
     // destination: bind_shorthand_to, whose binding an already-bound call must not have redone, and the
