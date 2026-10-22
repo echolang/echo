@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] array_literal_at_map.eco:2:25
+
+  'map<string,int32>' cannot be built from an array literal - write '[key => value]' to fill a map.
+
+  1 | // a non-empty array literal at a map destination would mint `$m[] = el`, which maps do not declare
+  2 | map<string, int32> $m = [1, 2];
+    :                         ^
+  3 | 
+
+1 error, nothing was compiled.

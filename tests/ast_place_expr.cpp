@@ -190,6 +190,7 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
 
         // addressless, each for its own reason - see the switch
         { NodeType::n_expr_array_literal, StorageClass::t_addressless },
+        { NodeType::n_expr_map_literal, StorageClass::t_addressless },
         { NodeType::n_null, StorageClass::t_addressless },
         { NodeType::n_expr_addrof, StorageClass::t_addressless },
         { NodeType::n_expr_peel, StorageClass::t_addressless },

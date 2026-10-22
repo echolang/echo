@@ -1,5 +1,5 @@
-#ifndef ASTARRAYLITERALEXPANSION_H
-#define ASTARRAYLITERALEXPANSION_H
+#ifndef ASTCOLLECTIONLITERALEXPANSION_H
+#define ASTCOLLECTIONLITERALEXPANSION_H
 
 #pragma once
 
@@ -12,6 +12,8 @@
 namespace AST
 {
     class ArrayLiteralExprNode;
+    class CollectionLiteralExprNode;
+    struct CollectionFill;
     class Collector;
     class ComplexType;
     class DetachBatch;
@@ -23,7 +25,9 @@ namespace AST
     class ScopeNode;
     class VarDeclNode;
 
-    // **turns `[1, 2, 3]` into a constructor plus one append per element.**
+    // **turns `[1, 2, 3]` into a constructor plus one append per element, and `["k" => v]`
+    // into a constructor plus one `$dest[k] = v` per entry.** the placement is one rule;
+    // a second copy of the hoist is how a temp outlives a statement.
     //
     // a long integer table is one `arr::extend_from` of a constant global: fill_from_constant_data.
     //
@@ -36,10 +40,10 @@ namespace AST
     // declaration, an assignment through `$a[]` or `$s->items`, and an argument all hoist. what differs
     // is only where the walk places the statements this returns - siblings of a declaration so the
     // name outlives the temp, a wrapper around anything else so the temp dies with the statement
-    class ArrayLiteralExpansion
+    class CollectionLiteralExpansion
     {
     public:
-        ArrayLiteralExpansion(
+        CollectionLiteralExpansion(
             Module &module,
             Collector &collector,
             File *file,
@@ -48,17 +52,17 @@ namespace AST
             DetachBatch &detached
         );
 
-        // the two statement shapes an array literal may sit in, resolved to the storage being filled
-        // and the literal filling it. `decl` null with `slot` set is an assignment whose target is
-        // not a variable. `slot` null means the statement is not one of them
+        // the two statement shapes a collection literal may sit in, resolved to the storage being
+        // filled and the literal filling it. `decl` null with `slot` set is an assignment whose
+        // target is not a variable. `slot` null means the statement is not one of them
         struct Destination
         {
             VarDeclNode *decl = nullptr;
-            ArrayLiteralExprNode *literal = nullptr;
+            CollectionLiteralExprNode *literal = nullptr;
             ExprNode **slot = nullptr;
 
             // is this statement the declaration itself? **only a declaration may be typed *from* its
-            // elements** - an assignment writes storage somebody else already named
+            // entries** - an assignment writes storage somebody else already named
             bool declares = false;
         };
 
@@ -73,23 +77,39 @@ namespace AST
         // is the temp's name, or null when the literal is not ready. `hoist_barrier` is how deep
         // inside `??` / `?->` the walk is
         ExprNode *expand_expression(
-            ArrayLiteralExprNode &literal,
+            ExprNode *expr,
             std::vector<NodeReference> &hoisted,
             size_t hoist_barrier
         );
 
-        void report_unplaced(ArrayLiteralExprNode &literal);
+        void report_unplaced(CollectionLiteralExprNode &literal);
 
     private:
         bool settle_destination_type(const Destination &destination, ValueType &settled);
 
-        bool bind_unplaced_type(ArrayLiteralExprNode &literal);
+        bool bind_unplaced_type(CollectionLiteralExprNode &literal);
 
+        // classify once via collection_fill_of, mint the constructor (unless inline), then emit
+        // appends, keyed writes, indexed writes, or nothing
         bool build_expansion(
-            ArrayLiteralExprNode &literal,
+            CollectionLiteralExprNode &literal,
             VarDeclNode &into,
             const ValueType &type,
             ExprNode **slot,
+            std::vector<NodeReference> &appends
+        );
+
+        bool mint_constructor(
+            CollectionLiteralExprNode &literal,
+            const ValueType &type,
+            ExprNode **slot
+        );
+
+        void emit_index_assign(
+            CollectionLiteralExprNode &literal,
+            VarDeclNode &into,
+            std::vector<ExprNode *> indices,
+            ExprNode *value,
             std::vector<NodeReference> &appends
         );
 
@@ -97,14 +117,15 @@ namespace AST
         bool fill_from_constant_data(
             ArrayLiteralExprNode &literal,
             VarDeclNode &into,
-            const ComplexType &collection,
+            const ValueType &type,
+            const CollectionFill &fill,
             std::vector<NodeReference> &appends
         );
 
         // answers the temp's name, having appended the declaration and its appends to `hoisted`.
         // null when the literal is not ready, or when a hoist would move construction above a branch
         ExprNode *hoist(
-            ArrayLiteralExprNode &literal,
+            CollectionLiteralExprNode &literal,
             std::vector<NodeReference> &hoisted,
             size_t hoist_barrier
         );
@@ -128,7 +149,7 @@ namespace AST
     // places `hoisted` ahead of `scope.children[index]`. a declaration is spliced as a sibling so
     // the name it introduces outlives the temp; every other statement is wrapped so the temp dies
     // with the statement rather than the frame
-    void place_array_literal_hoists(
+    void place_collection_literal_hoists(
         ScopeNode &scope,
         size_t index,
         Module &module,

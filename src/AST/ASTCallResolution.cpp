@@ -5,6 +5,7 @@
 #include "AST/ASTArgumentBind.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTCFunction.h"
 #include "AST/ASTCast.h"
 #include "AST/ASTCollector.h"
@@ -252,7 +253,7 @@ namespace AST
                 // from result_type(), so arguments_are_determined below already holds the call for it
                 bind_shorthand_to(arguments[i], expected);
 
-                if (bind_array_literal_to(arguments[i], expected, core)) {
+                if (bind_collection_literal_to(arguments[i], expected, collector)) {
                     waiting_on_a_literal = true;
                 }
 

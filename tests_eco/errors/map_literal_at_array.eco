@@ -1,0 +1,2 @@
+// a map literal at an array destination: arrays append, they do not take a key
+array<int32> $a = ['a' => 1];

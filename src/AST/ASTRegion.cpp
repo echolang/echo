@@ -154,6 +154,16 @@ namespace
             RecursiveVisitor::visit_array_literal_expr(node);
         }
 
+        void visit_map_literal_expr(MapLiteralExprNode &node) override
+        {
+            if (!node.expansion_decided) {
+                pending = true;
+                return;
+            }
+
+            RecursiveVisitor::visit_map_literal_expr(node);
+        }
+
         // **an assignment through an undecided bracket may not be a write to a place at all.**
         // AST::OperatorRewriter::resolve_index_write replaces the whole statement with one call when the
         // container declares an element-write contract, and this pass walks a body exactly once - so a walk

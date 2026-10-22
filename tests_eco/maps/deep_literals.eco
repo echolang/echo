@@ -1,0 +1,66 @@
+// dest-typed nesting. each combination is a different expansion path: a map write becomes a
+// call (inner literal is an argument), an array append stays an assignment (inner literal is
+// hoisted from bound_type the outer expansion just wrote)
+
+map<string, array<int32>> $ma = ['a' => [1, 2], 'b' => [3]];
+echo $ma['a'][1];
+echo $ma['b'][0];
+
+array<map<string, int32>> $am = [['a' => 1], ['b' => 2, 'c' => 3]];
+echo $am[0]['a'];
+echo $am[1]['c'];
+
+map<string, map<string, int32>> $mm = ['o' => ['i' => 5, 'j' => 6]];
+echo $mm['o']['j'];
+
+map<string, array<map<string, int32>>> $mam = [
+    'g' => [
+        ['x' => 1],
+        ['y' => 2, 'z' => 3],
+    ],
+];
+echo $mam['g'][1]['z'];
+
+array<map<string, array<int32>>> $ama = [
+    ['a' => [7, 8]],
+    ['b' => [9]],
+];
+echo $ama[0]['a'][1];
+echo $ama[1]['b'][0];
+
+map<string, map<string, map<string, int32>>> $mmm = [
+    'a' => ['b' => ['c' => 42]],
+];
+echo $mmm['a']['b']['c'];
+
+array<array<array<int32>>> $aaa = [[[1, 2]]];
+echo $aaa[0][0][1];
+
+ordered_map<string, array<int32>> $oa = ['z' => [1], 'a' => [2, 3]];
+foreach ($oa as $k => $v) {
+    echo $k;
+    echo $v[0];
+}
+
+map<string, ordered_map<string, int32>> $mo = ['o' => ['z' => 1, 'a' => 2]];
+foreach ($mo['o'] as $k => $v) {
+    echo $k;
+}
+
+map<string, array<int32>> $empty_arr = ['a' => []];
+echo $empty_arr['a']->count();
+
+map<string, map<string, int32>> $empty_map = ['a' => []];
+echo $empty_map['a']->count();
+
+map<string, array<int32>> $trail = [
+    'a' => [1, 2,],
+    'b' => [3,],
+];
+echo $trail['b'][0];
+
+map<string, array<string>> $owning = ['n' => ['mario', 'ray']];
+echo $owning['n'][1];
+
+map<string, map<string, string>> $owning_map = ['o' => ['i' => 'hey']];
+echo $owning_map['o']['i'];

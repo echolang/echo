@@ -1,0 +1,2 @@
+// an inner collection is judged against V the way a scalar value is
+map<string, array<int32>> $m = ['a' => ['no']];

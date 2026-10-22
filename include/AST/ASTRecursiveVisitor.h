@@ -74,6 +74,7 @@ namespace AST
         void visit_release(ReleaseNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
         void visit_array_literal_expr(ArrayLiteralExprNode &node) override;
+        void visit_map_literal_expr(MapLiteralExprNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visitUnaryExpr(UnaryExprNode &node) override;
         void visitNull(NullNode &node) override;

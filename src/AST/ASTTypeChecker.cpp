@@ -1,6 +1,7 @@
 #include "AST/ASTTypeChecker.h"
 
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTConstruction.h"
 #include "AST/ASTEnumMap.h"
 #include "AST/ASTAtomics.h"
@@ -337,7 +338,7 @@ void TypeChecker::check_parameter_defaults(FunctionDeclNode &node)
             continue;
         }
 
-        if (array_literal_of(arg->init_expr) != nullptr) {
+        if (collection_literal_of(arg->init_expr)) {
             continue;
         }
 
@@ -2649,13 +2650,13 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
     // what still gets checked is the payload, in Parser::parse_guard: a declared type that does not match
     // what is inside the nullable is refused there, where the two are both in hand
     if (node.init_expr && node.has_type() && !node.binds_unwrapped) {
-        // an array literal has no type of its own - result_type() is unknown by design - so the
-        // ordinary conversion check would refuse `array<int32> $a = [1, 2]` as unknown → array.
+        // a collection literal has no type of its own - result_type() is unknown by design - so
+        // the ordinary conversion check would refuse `array<int32> $a = [1, 2]` as unknown → array.
         // a parameter default is cloned into the call and expanded there; bind the destination
         // so that clone already knows what to build. a declaration / assignment is expanded in
         // place by AST::OperatorRewriter before this pass, so those never reach here as literals
-        if (array_literal_of(node.init_expr) != nullptr) {
-            bind_array_literal_to(node.init_expr, node.type(), _collector.core_types);
+        if (collection_literal_of(node.init_expr)) {
+            bind_collection_literal_to(node.init_expr, node.type(), _collector);
         } else if (!_in_parameter
             && !unresolved_type_name_refusal(*node.type_node()).has_value()) {
             // the name is the sentence; a conversion to '[unknown]' would bury it

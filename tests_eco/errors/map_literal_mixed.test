@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] map_literal_mixed.eco:2:14
+
+  an array literal cannot mix in map entries - every element is a value, or every element is 'key => value'.
+
+  1 | // the first entry decides array vs map; a later `=>` in an array list is mixed
+  2 | $a = [1, 'a' => 2];
+    :              ^^
+  3 | 
+
+1 error, nothing was compiled.

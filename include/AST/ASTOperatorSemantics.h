@@ -77,6 +77,14 @@ namespace AST
     // The `template_or_self` redirect on both sides is what lets a `map<int32, string>` find the
     // `map<K, V>` template's declaration. That is AST::find_member_functions' idiom, which cannot be
     // reused directly here, because it walks an owner's methods and an operator is never one
+    // the declaration `declares_index_write` found, or null. collection_fill_of reads its
+    // parameter types for nested bind; the bool spelling stays the gate
+    const FunctionDeclNode *find_index_write(Collector &collector, const ValueType &receiver, size_t index_count);
+
+    // the borrowing bracket of the same arity: `operator []` with `index_count` indices.
+    // array append is this with zero indices, returning `T&`
+    const FunctionDeclNode *find_index(Collector &collector, const ValueType &receiver, size_t index_count);
+
     bool declares_index_write(Collector &collector, const ValueType &receiver, size_t index_count);
 
     // a symbol-safe spelling of the above, for AST::mangle_function_name. every character outside

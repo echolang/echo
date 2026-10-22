@@ -457,6 +457,22 @@ Node *ArrayLiteralExprNode::clone(CloneContext &cc) const
     return c;
 }
 
+Node *MapLiteralExprNode::clone(CloneContext &cc) const
+{
+    MapLiteralExprNode *c = cc.shallow(this);
+
+    for (auto &entry : c->entries) {
+        entry.key = cc.child(entry.key);
+        entry.value = cc.child(entry.value);
+    }
+
+    if (c->bound_type.has_value()) {
+        c->bound_type = cc.substitute(*c->bound_type);
+    }
+
+    return c;
+}
+
 Node *DerefExprNode::clone(CloneContext &cc) const
 {
     DerefExprNode *c = cc.shallow(this);

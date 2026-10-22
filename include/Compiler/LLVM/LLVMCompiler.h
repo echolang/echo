@@ -141,6 +141,7 @@ public:
     void visit_release(AST::ReleaseNode &node);
     void visit_index_expr(AST::IndexExprNode &node);
     void visit_array_literal_expr(AST::ArrayLiteralExprNode &node);
+    void visit_map_literal_expr(AST::MapLiteralExprNode &node);
     void visitBinaryExpr(AST::BinaryExprNode &node);
     void visitUnaryExpr(AST::UnaryExprNode &node);
     void visitNull(AST::NullNode &node);

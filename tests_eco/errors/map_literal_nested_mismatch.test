@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  map_literal_nested_mismatch.eco:2:40
+
+  Invalid type conversion: cannot assign 'string' to 'int32'
+
+  1 | // an inner collection is judged against V the way a scalar value is
+  2 | map<string, array<int32>> $m = ['a' => ['no']];
+    :                                        ^
+  3 | 
+
+1 error, nothing was compiled.

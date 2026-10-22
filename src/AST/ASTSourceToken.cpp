@@ -266,6 +266,9 @@ const TokenReference *source_token_of(const Node &node)
         case NodeType::n_expr_array_literal:
             return &static_cast<const ArrayLiteralExprNode &>(node).token_bracket;
 
+        case NodeType::n_expr_map_literal:
+            return &static_cast<const MapLiteralExprNode &>(node).token_bracket;
+
         case NodeType::n_expr_class_alloc:
             return &static_cast<const ClassAllocExprNode &>(node).token_type;
 

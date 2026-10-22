@@ -1,0 +1,2 @@
+// the destination names the value type; a string does not fit int32
+map<string, int32> $m = ['a' => 'no'];

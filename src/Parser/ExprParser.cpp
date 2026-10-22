@@ -14,6 +14,7 @@
 #include "AST/ASTConstantExpander.h"
 #include "AST/ExprNode.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
 #include "AST/OperatorNode.h"
@@ -31,6 +32,7 @@
 #include "External/infint.h"
 
 #include "Parser/CaptureParser.h"
+#include "Parser/CollectionLiteralParser.h"
 #include "Parser/ForeachParser.h"
 #include "Parser/FuncCallParser.h"
 #include "Parser/FuncDeclParser.h"
@@ -171,43 +173,6 @@ AST::StringInterpolationExprNode *parse_string_interpolation(Parser::Payload &pa
     }
 
     return &node;
-}
-
-// the comma separated expressions between a `[` and its `]`, cursor already past the opening bracket
-// and left after the closing one. answers false having reported when the list does not close
-//
-// **one grammar for what may sit inside brackets**, because two positions ask: an index list
-// (`$m[$r, $c]`) and an array literal (`[1, 2, 3]`). an empty list is legal at both - `$a[]` is the
-// append slot and `[]` is an empty literal - so emptiness is the caller's question, not this one's
-bool parse_bracketed_expr_list(Parser::Payload &payload, std::vector<AST::ExprNode *> &elements)
-{
-    auto &cursor = payload.cursor;
-
-    while (!cursor.is_type(Token::Type::t_close_bracket)) {
-        auto *element = Parser::parse_expr(payload, nullptr);
-
-        if (element == nullptr) {
-            return false;
-        }
-
-        elements.push_back(element);
-
-        if (cursor.is_type(Token::Type::t_comma)) {
-            cursor.skip();
-            continue;
-        }
-
-        break;
-    }
-
-    if (!cursor.is_type(Token::Type::t_close_bracket)) {
-        payload.collect_unexpected_token(Token::Type::t_close_bracket);
-        return false;
-    }
-
-    cursor.skip(); // `]`
-
-    return true;
 }
 
 /**
@@ -1304,7 +1269,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // assignment target - see AST::IndexExprNode::is_append
             std::vector<AST::ExprNode *> indices;
 
-            if (!parse_bracketed_expr_list(payload, indices)) {
+            if (!Parser::parse_bracketed_expr_list(payload, indices)) {
                 return AST::make_void_ref();
             }
 
@@ -1626,21 +1591,15 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return parse_literal_boolean(payload, expected_type);
     }
 
-    // `[1, 2, 3]`. the elements are parsed with no expected type of their own: each one is typed
-    // where it lands, by the append the rewriter expands this into, which is an ordinary assignment
-    // into a `T` slot - so `autocast_literal_int` and `coerce_value` do the work they already do
+    // `[1, 2, 3]` or `["k" => v]`. the entries are parsed with no expected type of their own:
+    // each one is typed where it lands, by the append or the index-write the rewriter expands
+    // this into
     else if (cursor.is_type(Token::Type::t_open_bracket)) {
-        const auto bracket_token = cursor.current();
-        cursor.skip();
+        AST::ExprNode *literal = Parser::parse_collection_literal(payload);
 
-        std::vector<AST::ExprNode *> elements;
-
-        if (!parse_bracketed_expr_list(payload, elements)) {
+        if (literal == nullptr) {
             return AST::make_void_ref();
         }
-
-        auto &literal = payload.context.emplace_node<AST::ArrayLiteralExprNode>(
-            std::move(elements), bracket_token);
 
         return AST::make_ref(literal);
     }

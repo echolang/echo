@@ -563,6 +563,22 @@ const std::string AST::ArrayLiteralExprNode::node_description()
     return "arraylit([" + rendered + "])";
 }
 
+const std::string AST::MapLiteralExprNode::node_description()
+{
+    std::string rendered;
+
+    for (const Entry &entry : entries) {
+        if (!rendered.empty()) {
+            rendered += ", ";
+        }
+        rendered += (entry.key != nullptr ? entry.key->node_description() : "?");
+        rendered += " => ";
+        rendered += (entry.value != nullptr ? entry.value->node_description() : "?");
+    }
+
+    return "maplit([" + rendered + "])";
+}
+
 AST::ValueType AST::DerefExprNode::result_type() const
 {
     return value_type_of(operand->result_type());

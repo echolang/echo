@@ -11,7 +11,7 @@
 namespace AST
 {
     // a long table of folded integers as `ptr<const E>`, in a private global. minted by
-    // ArrayLiteralExpansion so the table is one copy; never written, no owned edges.
+    // CollectionLiteralExpansion so the table is one copy; never written, no owned edges.
     // addressless: it already is an address
     class ConstantDataExprNode : public ExprNode
     {

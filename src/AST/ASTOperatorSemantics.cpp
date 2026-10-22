@@ -72,19 +72,23 @@ namespace AST
         return value_type_of(decl.parameter_type(0));
     }
 
-    bool declares_index_write(Collector &collector, const ValueType &receiver, size_t index_count)
+    namespace
+    {
+    const FunctionDeclNode *first_index_overload(
+        Collector &collector,
+        const ValueType &receiver,
+        size_t arity,
+        const std::string &name
+    )
     {
         if (!receiver.has_complex_type()) {
-            return false;
+            return nullptr;
         }
 
         const ComplexType *wanted = receiver.get_complex_type()->template_or_self();
 
-        // the receiver, then every index, then the value
-        const size_t arity = index_count + 2;
-
         for (const FunctionDeclNode *candidate :
-                collector.functions.overloads(index_write_operator_name(), collector.namespaces.root())) {
+                collector.functions.overloads(name, collector.namespaces.root())) {
             if (candidate == nullptr || candidate->args.size() != arity) {
                 continue;
             }
@@ -95,11 +99,30 @@ namespace AST
             // question, and whether *this* receiver may reach *that* declaration is argument_fit's -
             // asked later, of a candidate set this only decides the shape of
             if (declared.has_complex_type() && declared.get_complex_type()->template_or_self() == wanted) {
-                return true;
+                return candidate;
             }
         }
 
-        return false;
+        return nullptr;
+    }
+    }
+
+    const FunctionDeclNode *find_index_write(Collector &collector, const ValueType &receiver, size_t index_count)
+    {
+        // the receiver, then every index, then the value
+        return first_index_overload(
+            collector, receiver, index_count + 2, index_write_operator_name());
+    }
+
+    const FunctionDeclNode *find_index(Collector &collector, const ValueType &receiver, size_t index_count)
+    {
+        return first_index_overload(
+            collector, receiver, index_count + 1, index_operator_name());
+    }
+
+    bool declares_index_write(Collector &collector, const ValueType &receiver, size_t index_count)
+    {
+        return find_index_write(collector, receiver, index_count) != nullptr;
     }
 
     FunctionCallExprNode &build_operator_call_node(

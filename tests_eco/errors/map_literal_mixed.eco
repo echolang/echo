@@ -1,0 +1,2 @@
+// the first entry decides array vs map; a later `=>` in an array list is mixed
+$a = [1, 'a' => 2];

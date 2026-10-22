@@ -1,0 +1,13 @@
+// untyped outer: the first nested collection decides K/V or E, recursively
+$a = [[[1, 2]]];
+echo $a[0][0][1];
+
+$m = ['a' => ['b' => [9, 8]]];
+echo $m['a']['b'][0];
+
+$am = [['a' => 1], ['b' => 2]];
+echo $am[1]['b'];
+
+$ma = ['a' => [1, 2], 'b' => [3]];
+echo $ma['a'][1];
+echo $ma['b'][0];

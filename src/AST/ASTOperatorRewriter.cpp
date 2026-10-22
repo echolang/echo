@@ -2,8 +2,8 @@
 
 #include "AST/ASTFile.h"
 #include "AST/ASTRegion.h"
-#include "AST/ASTArrayLiteral.h"
-#include "AST/ASTArrayLiteralExpansion.h"
+#include "AST/ASTCollectionLiteral.h"
+#include "AST/ASTCollectionLiteralExpansion.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTDetach.h"
@@ -507,10 +507,10 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
         return nullptr;
     }
 
-    // an array literal reaching here is one no *statement* claimed - visitVarDecl and visit_assign
-    // hand theirs to ArrayLiteralExpansion::expand_statement and do not descend into them. so this
-    // is a literal in an expression position: an argument, which a destination can type, or a
-    // position nothing will ever type
+    // a collection literal reaching here is one no *statement* claimed - visitVarDecl and
+    // visit_assign hand theirs to CollectionLiteralExpansion::expand_statement and do not
+    // descend into them. so this is a literal in an expression position: an argument, which a
+    // destination can type, or a position nothing will ever type
     //
     // **a variadic pack is the one bracket that is not a collection**, so it is left alone by the
     // question rather than by the state: `expansion_decided` says "the rewriter is finished with this
@@ -520,11 +520,11 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
         return expr;
     }
 
-    if (auto *literal = array_literal_of(expr)) {
-        ArrayLiteralExpansion expansion(
+    if (collection_literal_of(expr)) {
+        CollectionLiteralExpansion expansion(
             *_current_module, _collector, _current_file, _finalizing, _hoist_count, _detached);
 
-        if (ExprNode *place = expansion.expand_expression(*literal, _hoisted, _hoist_barrier)) {
+        if (ExprNode *place = expansion.expand_expression(expr, _hoisted, _hoist_barrier)) {
             _changed = true;
             return place;
         }
@@ -592,7 +592,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
     // the base already walks children by index, but the literal expansion has to run *before* the
     // child is rewritten - so the constructor and the appends it produces are walked by this same
     // pass rather than waiting a round. that ordering is this pass's, so the loop is too
-    ArrayLiteralExpansion expansion(
+    CollectionLiteralExpansion expansion(
         *_current_module, _collector, _current_file, _finalizing, _hoist_count, _detached);
 
     for (size_t i = 0; i < node.children.size(); i++) {
@@ -611,7 +611,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
 
         if (!_hoisted.empty()) {
             assert_region_accepts_mutation(_current_function, _current_file);
-            place_array_literal_hoists(node, i, *_current_module, _hoisted);
+            place_collection_literal_hoists(node, i, *_current_module, _hoisted);
         }
 
         // saved around the descent, because a nested block runs this very loop: a literal hoisted
@@ -623,7 +623,7 @@ void OperatorRewriter::visitScope(ScopeNode &node)
 
         if (!_hoisted.empty()) {
             assert_region_accepts_mutation(_current_function, _current_file);
-            place_array_literal_hoists(node, i, *_current_module, _hoisted);
+            place_collection_literal_hoists(node, i, *_current_module, _hoisted);
         }
 
         _hoisted.swap(outer);
@@ -659,9 +659,10 @@ void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
 
 void OperatorRewriter::visitVarDecl(VarDeclNode &node)
 {
-    // an array literal initializer belongs to the enclosing scope, which has already had its turn at
-    // it above - descending here would report it as an expression in a position that cannot hold one
-    if (array_literal_of(node.init_expr) != nullptr) {
+    // a collection literal initializer belongs to the enclosing scope, which has already had its
+    // turn at it above - descending here would report it as an expression in a position that cannot
+    // hold one
+    if (collection_literal_of(node.init_expr)) {
         return;
     }
 
@@ -673,8 +674,8 @@ void OperatorRewriter::visit_assign(AssignNode &node)
     statement_edge(node.target_bind);
     value_edge(node.target);
 
-    // as for a declaration above: the scope owns an array literal on the right-hand side
-    if (array_literal_of(node.value_expr) == nullptr) {
+    // as for a declaration above: the scope owns a collection literal on the right-hand side
+    if (!collection_literal_of(node.value_expr)) {
         value_edge(node.value_expr);
     }
 

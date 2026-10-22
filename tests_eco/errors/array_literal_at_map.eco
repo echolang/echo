@@ -1,0 +1,2 @@
+// a non-empty array literal at a map destination would mint `$m[] = el`, which maps do not declare
+map<string, int32> $m = [1, 2];

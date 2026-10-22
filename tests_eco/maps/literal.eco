@@ -1,0 +1,72 @@
+// `[k => v]` takes its type from where it is going, the same destination rule as `[1, 2, 3]`.
+// AST::OperatorRewriter expands one into a zero-argument constructor of the destination type
+// plus one `$dest[key] = value` per entry, which resolve_index_write turns into the write operator
+
+enum Value
+{
+    case str(string $s);
+    case num(int32 $n);
+}
+
+function show(Value $v) : string
+{
+    return match ($v) {
+        .str($s) => $s,
+        .num($n) => 'num',
+    };
+}
+
+map<string, Value> $map = [
+    'foo' => .str('hey'),
+    'bar' => .num(324)
+];
+
+echo $map->count();
+echo show($map['foo']);
+echo show($map['bar']);
+
+// inferred from the first entry
+$ages = ['mario' => 34, 'ray' => 29];
+echo $ages->count();
+echo $ages['mario'];
+
+// empty `[]` at a map destination is the constructor only
+map<string, int32> $empty = [];
+echo $empty->count();
+
+// ordered_map takes its type from the destination; insertion order is the point
+ordered_map<string, int32> $order = ['zebra' => 1, 'apple' => 2];
+foreach ($order as $k => $v) {
+    echo $k;
+}
+
+// assignment replaces
+$ages = ['sam' => 7];
+echo $ages->count();
+echo $ages['sam'];
+
+// argument position hoists
+function total(map<string, int32> $m) : int32 { return $m['a'] + $m['b']; }
+function totalb(map<string, int32>& $m) : int32 { return $m['a'] + $m['b']; }
+echo total(['a' => 1, 'b' => 2]);
+echo totalb(['a' => 10, 'b' => 20]);
+
+// computed key, nested collections
+string $k = 'x';
+map<string, int32> $computed = [$k => 9];
+echo $computed['x'];
+
+map<string, array<int32>> $nested = ['a' => [1, 2, 3]];
+echo $nested['a'][2];
+
+map<string, map<string, int32>> $deep = ['outer' => ['inner' => 5]];
+echo $deep['outer']['inner'];
+
+// const fills a mutable hoist and moves it in
+const $frozen = ['a' => 1, 'b' => 2];
+echo $frozen['b'];
+
+// duplicate key last-write-wins: the expansion is sequential inserts
+map<string, int32> $dup = ['a' => 1, 'a' => 9];
+echo $dup->count();
+echo $dup['a'];

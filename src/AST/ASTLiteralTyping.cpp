@@ -1,6 +1,7 @@
 #include "AST/ASTLiteralTyping.h"
 
 #include "AST/ASTBundle.h"
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
@@ -874,6 +875,16 @@ namespace AST
             if (bind_null_to(slot, destination)) {
                 changed = true;
                 return;
+            }
+
+            // collection literals have no type of their own. a return, a match arm, a `??` fallback
+            // and a written `as` are destinations the declaration walk never sees, so this is the
+            // round that tells `['a' => [1, 2]]` it fills a `map<string, array<int32>>`
+            if (CollectionLiteralExprNode *literal = collection_literal_of(slot)) {
+                if (!literal->bound_type.has_value()
+                    && bind_collection_literal_to(slot, destination, _collector)) {
+                    changed = true;
+                }
             }
 
             if (!is_untyped_literal(slot)) {

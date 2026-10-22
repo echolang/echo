@@ -1,0 +1,2 @@
+// the first entry is a map pair, so a later bare value is mixed
+$m = ['a' => 1, 2];

@@ -160,7 +160,7 @@ namespace AST
         ExprNode *upgrade_optional_operand(ExprNode *operand, const TokenReference &at);
 
         // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.
-        // AST::ArrayLiteralExpansion is the rewrite; this walk places what it returns. a statement
+        // AST::CollectionLiteralExpansion is the rewrite; this walk places what it returns. a statement
         // whose type is not concrete yet is left for a later round, exactly as an index is
         //
         // the declarations and appends an expression-position hoist produced while walking the

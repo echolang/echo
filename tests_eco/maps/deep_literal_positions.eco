@@ -1,0 +1,111 @@
+// the same nested literal, in every position a destination already names the collection
+
+function maps() : array<map<string, int32>>
+{
+    return [['a' => 1], ['b' => 2]];
+}
+
+echo maps()[1]['b'];
+
+function nest() : map<string, array<int32>>
+{
+    return ['a' => [1, 2]];
+}
+
+echo nest()['a'][1];
+
+function pick(bool $left) : map<string, int32>
+{
+    if ($left) {
+        return ['a' => 1];
+    }
+
+    return ['b' => 2];
+}
+
+echo pick(true)['a'];
+echo pick(false)['b'];
+
+enum Side { case left; case right; }
+
+function from_side(Side $s) : map<string, array<int32>>
+{
+    return match ($s) {
+        .left => ['n' => [1, 2]],
+        .right => ['n' => [3]],
+    };
+}
+
+echo from_side(.left)['n'][1];
+echo from_side(.right)['n'][0];
+
+function def(map<string, array<int32>> $m = ['a' => [3, 4]]) : int32
+{
+    return $m['a'][1];
+}
+
+echo def();
+echo def(['a' => [8, 9]]);
+
+struct Holder
+{
+    map<string, array<int32>> $items;
+
+    constructor(map<string, array<int32>> $init)
+    {
+        $this->items = $init;
+    }
+}
+
+$h = Holder(['n' => [1, 2]]);
+echo $h->items['n'][1];
+
+struct Bag
+{
+    map<string, array<int32>> $items;
+}
+
+$g = Bag(['n' => [6, 7]]);
+echo $g->items['n'][0];
+
+enum Box { case full(map<string, int32> $m); }
+
+$boxed = Box::full(['a' => 11]);
+echo 1;
+
+map<string, array<int32>> $slot = ['x' => [1]];
+$slot = ['y' => [4, 5]];
+echo $slot['y'][1];
+
+map<string, map<string, int32>> $outer = map<string, map<string, int32>>();
+$outer['k'] = ['i' => 7];
+echo $outer['k']['i'];
+
+map<string, array<int32>> $arrs = map<string, array<int32>>();
+$arrs['k'] = [1, 2, 3];
+echo $arrs['k'][2];
+
+const map<string, array<int32>> $frozen = ['a' => [1, 2]];
+echo $frozen['a'][1];
+
+function first(array<map<string, int32>>& $xs) : int32
+{
+    return $xs[0]['n'];
+}
+
+int32 $i = 0;
+int32 $s = 0;
+
+while ($i < 2) {
+    $s = $s + first([['n' => $i]]);
+    $i = $i + 1;
+}
+
+echo $s;
+
+function add(map<string, int32> $p, map<string, int32> $q) : int32
+{
+    return $p['x'] + $q['x'];
+}
+
+echo add(['x' => 10], ['x' => 3]);

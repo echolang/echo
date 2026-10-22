@@ -540,6 +540,14 @@ void RecursiveVisitor::visit_array_literal_expr(ArrayLiteralExprNode &node)
     value_edges(node.elements);
 }
 
+void RecursiveVisitor::visit_map_literal_expr(MapLiteralExprNode &node)
+{
+    for (MapLiteralExprNode::Entry &entry : node.entries) {
+        value_edge(entry.key);
+        value_edge(entry.value);
+    }
+}
+
 void RecursiveVisitor::visitVarRef(VarRefNode &node)
 {
     if (node.is_var()) {

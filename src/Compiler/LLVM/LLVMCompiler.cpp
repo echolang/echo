@@ -731,6 +731,12 @@ void LLVMCompiler::visit_array_literal_expr(AST::ArrayLiteralExprNode &node)
         "constructor and appends " + _ctx.function_context());
 }
 
+void LLVMCompiler::visit_map_literal_expr(AST::MapLiteralExprNode &node)
+{
+    throw _ctx.error("a map literal survived to codegen - it should have been expanded into a "
+        "constructor and index writes " + _ctx.function_context());
+}
+
 // a peel marker is erased by the pointer adjustment pass; one surviving to codegen means the
 // pass missed a position, which would otherwise silently emit the wrong number of loads
 void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node)

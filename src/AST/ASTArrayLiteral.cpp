@@ -1,9 +1,9 @@
 #include "AST/ASTArrayLiteral.h"
 
-#include "AST/ASTCoreTypes.h"
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTCollector.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/ASTInstantiation.h"
-#include "AST/ASTPlaceExpr.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTVariadic.h"
 #include "AST/ExprNode.h"
@@ -19,11 +19,6 @@ namespace
         lookup.refusal = std::move(reason);
         return lookup;
     }
-
-    AST::ArrayLiteralLookup pending()
-    {
-        return AST::ArrayLiteralLookup {};
-    }
 }
 
 AST::ArrayLiteralExprNode *AST::array_literal_of(AST::ExprNode *expr)
@@ -38,7 +33,7 @@ AST::ArrayLiteralExprNode *AST::array_literal_of(AST::ExprNode *expr)
 bool AST::bind_array_literal_to(
     AST::ExprNode *expr,
     const AST::ValueType &destination,
-    const AST::CoreTypes &core
+    AST::Collector &collector
 )
 {
     AST::ArrayLiteralExprNode *literal = array_literal_of(expr);
@@ -51,7 +46,7 @@ bool AST::bind_array_literal_to(
     // elements are the call's own trailing arguments, so there is no `E` to unify them into and
     // nothing for AST::OperatorRewriter to expand. answering false is the point - the call is not
     // waiting on a literal, it already has everything it needs
-    if (AST::is_variadic_args(destination, core)) {
+    if (AST::is_variadic_args(destination, collector.core_types)) {
         literal->is_variadic_pack = true;
         literal->expansion_decided = true;
         literal->bound_type = destination;
@@ -68,6 +63,18 @@ bool AST::bind_array_literal_to(
     // is decided against this type, and a second opinion arriving later would decide it twice
     if (!literal->bound_type.has_value()) {
         literal->bound_type = wanted;
+    }
+
+    const CollectionFill fill = collection_fill_of(wanted, collector);
+
+    if (fill.kind == CollectionFill::Kind::t_inline
+        || fill.kind == CollectionFill::Kind::t_append
+        || fill.kind == CollectionFill::Kind::t_index) {
+        if (!is_undetermined_type(fill.element)) {
+            for (ExprNode *element : literal->elements) {
+                bind_collection_literal_to(element, fill.element, collector);
+            }
+        }
     }
 
     return true;
@@ -112,20 +119,23 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
             core.spelling(AST::CoreTypeKind::t_array)));
     }
 
-    if (literal.elements.front() == nullptr) {
-        return pending();
-    }
-
     // **the first element decides, and the rest are fitted to it.** not a common type over all of
     // them: the expansion writes one `$dest[] = element` per element, so AST::CallResolver and
     // AST::TypeChecker already judge every other element against this one - a second rule here would
     // be a second answer to a question they own, and would have to invent a widening the language has
     // not specified
-    const AST::ValueType element = AST::value_result_type(*literal.elements.front());
+    //
+    // a nested collection literal has no result_type of its own, so `$a = [[1]]` asks
+    // collection_entry_type_for of the inner list rather than waiting on a type that expansion
+    // never writes
+    const ArrayLiteralLookup entry =
+        collection_entry_type_for(literal.elements.front(), core, types);
 
-    if (AST::is_undetermined_type(element)) {
-        return pending();
+    if (entry.result != ArrayLiteralLookup::Result::t_ok) {
+        return entry;
     }
+
+    AST::ValueType element = entry.type;
 
     // the element's `const` is a property of *the place it was read from*, not of what the array
     // holds - `const int32 $x = 1; $a = [$x];` fills an `array<int32>`, exactly as `$b = $x` declares

@@ -3,24 +3,20 @@
 
 #pragma once
 
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTValueType.h"
-
-#include <string>
 
 namespace AST
 {
     class ArrayLiteralExprNode;
+    class Collector;
     class CoreTypes;
     class ExprNode;
 
     // **"is the thing on this edge an array literal?"** - null when it is not, and null for a null
-    // edge, so the two guards every asker needs are one call.
-    //
-    // six askers and rising: both arms of OperatorRewriter::literal_destination, the two statement
-    // arms that hand theirs to the scope, the expression walk that reports the ones nobody claimed,
-    // and OwnershipPass::body_is_concrete in another translation unit. spelled out at each of them it
-    // was a tag compare plus a static_cast, which is how the cross-file one came to recognise fewer
-    // shapes than the others
+    // edge, so the two guards every asker needs are one call. collection_literal_of is the combined
+    // peel; this stays the array-only one: the variadic pack, bind_array_literal_to, and
+    // collection_entry_type_for
     ArrayLiteralExprNode *array_literal_of(ExprNode *expr);
 
     // **the sole answer to "what type does a declaration take from its array literal".**
@@ -35,28 +31,9 @@ namespace AST
     // becomes the diagnostic.
     //
     // reports nothing itself. it has no CodeRef and the caller does - the same split
-    // AST::interface_erasure_refusal makes, and for the same reason
-    struct ArrayLiteralLookup
-    {
-        enum class Result
-        {
-            t_ok,
-
-            // ask again next round: an element's type is not settled yet
-            t_pending,
-
-            // `refusal` is a whole sentence, phrased for the author of the literal
-            t_refused,
-        };
-
-        Result result = Result::t_pending;
-
-        // the applied `array<E>`, with no opinion about `const` - the declaration's own, which the
-        // caller puts back on top exactly as AST::infer_declaration_type does
-        ValueType type;
-
-        std::string refusal;
-    };
+    // AST::interface_erasure_refusal makes, and for the same reason. the three-result shape is
+    // CollectionLiteralLookup; nested entries go through collection_entry_type_for
+    typedef CollectionLiteralLookup ArrayLiteralLookup;
 
     ArrayLiteralLookup array_literal_type_for(
         const ArrayLiteralExprNode &literal, const CoreTypes &core, TypeRegistry &types);
@@ -81,7 +58,10 @@ namespace AST
     // brackets are C's variadic tail there, so the literal is marked as a pack and left otherwise
     // untouched: its elements keep their own types instead of being unified into one `E`, nothing
     // expands it, and this answers *false* - the call is not waiting on anything
-    bool bind_array_literal_to(ExprNode *expr, const ValueType &destination, const CoreTypes &core);
+    //
+    // nested collection literals are bound from collection_fill_of's element, so
+    // `array<map<string, int32>> $a = [['a' => 1]]` dest-types the inner map here rather than in expansion
+    bool bind_array_literal_to(ExprNode *expr, const ValueType &destination, Collector &collector);
 };
 
 #endif

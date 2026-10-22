@@ -1186,88 +1186,109 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `[1, 2, 3]` - a bracketed list of elements, which the *destination* types.
+    // shared state of `[1, 2, 3]` and `["k" => v]`: the destination types them, they have no type
+    // of their own, and expansion fills named storage. two NodeTypes, one C++ base, so
+    // collection_literal_of returns this rather than a handle that copies the fields
+    class CollectionLiteralExprNode : public ExprNode
+    {
+    public:
+        TokenReference token_bracket;
+
+        // **the type a destination gave this literal.** NullNode::bound_type's shape: the entries say
+        // what goes in and never what holds them, and at an argument position only the parameter can
+        // say. AST::bind_array_literal_to / bind_map_literal_to are the writers
+        std::optional<ValueType> bound_type;
+
+        // has AST::OperatorRewriter finished with this node? IndexExprNode::resolution_decided's
+        // three-state. OwnershipPass::body_is_concrete answers false while an unexpanded literal is
+        // in a body; codegen throws if one survives. copied by clone through cc.shallow, which is
+        // correct only while the rewriter skips generic bodies
+        bool expansion_decided = false;
+
+        explicit CollectionLiteralExprNode(TokenReference token_bracket) :
+            token_bracket(token_bracket)
+        {
+        }
+
+        ~CollectionLiteralExprNode() {}
+
+        // **always unknown, deliberately.** answering with a guess is what would let an inferred
+        // declaration latch onto a wrong type
+        ValueType result_type() const override {
+            return ValueType::make_unknown();
+        }
+
+        const char *kind_spelling() const {
+            return get_node_type() == NodeType::n_expr_map_literal ? "map" : "array";
+        }
+    };
+
+    // `[1, 2, 3]` - a bracketed list of elements. **not `array<T>`-specific:** expansion is a
+    // constructor plus one `$dest[] = element` per element, so any type with both works.
     //
-    // It has no type of its own, and `result_type()` says so. A literal is a list of values, and what
-    // collection they go into is decided by the storage they are written to - the same expected-type
-    // rule that types every scalar literal.
-    //
-    // **not `array<T>`-specific.** AST::OperatorRewriter expands one into a zero-argument constructor
-    // of the destination type plus one `$dest[] = element` per element, so any type with both works.
-    // That is what a `Map<K, V>` literal will reuse rather than re-derive.
-    //
-    // It is therefore a **statement-level** construct: it needs storage to fill and somewhere to put
-    // the appends, and only the enclosing scope has both.
-    //
-    // Where the author named that storage - a declaration's initializer, an assignment to a variable -
-    // the expansion fills it. Everywhere else the compiler names it, hoisting a synthesized declaration
-    // ahead of the statement. a declaration is a sibling of that hoist so the name outlives it; any
-    // other statement is wrapped so the hoist dies with the statement rather than the frame
-    class ArrayLiteralExprNode : public ExprNode
+    // statement-level: it needs storage to fill. a named declaration is filled in place; everywhere
+    // else the compiler hoists a synthesized one. a declaration is a sibling of that hoist so the
+    // name outlives it; any other statement is wrapped so the hoist dies with the statement
+    class ArrayLiteralExprNode : public CollectionLiteralExprNode
     {
     public:
         ECO_AST_NODE_TYPE(n_expr_array_literal);
 
         std::vector<ExprNode *> elements;
 
-        TokenReference token_bracket;
-
-        // **the type a destination gave this literal**, which is how `f([1, 2, 3])` knows what to
-        // build. exactly NullNode::bound_type's shape and for exactly its reason: the elements say
-        // what goes in and never what holds them, and at an argument position the only thing that can
-        // say is the parameter - which lives on a declaration nobody has chosen while the literal is
-        // being parsed. AST::CallResolver is the one place holding both, so it is the one place that
-        // sets this, through AST::bind_array_literal_to
-        //
-        // a declaration and an assignment do not use it: they hand their own destination to
-        // AST::OperatorRewriter directly, and a *declaration* with no written type is answered from
-        // the elements by AST::array_literal_type_for. three ways to be typed, one expansion
-        std::optional<ValueType> bound_type;
-
-        // has AST::OperatorRewriter finished with this node? the same three-state problem
-        // IndexExprNode::resolution_decided solves, and the same answer: without it a destination
-        // that never becomes concrete is reported once per round.
-        //
-        // **the two arms this owes are not AST::ForeachNode's two.** the first is the same:
-        // OwnershipPass::body_is_concrete answers false while an unexpanded literal is in a body, so
-        // the pass that walks a body exactly once does not walk it before the appends exist.
-        //
-        // The second is *not* a throw in AST::PointerAdjuster. A foreach is a statement, so a refused
-        // one is replaced by an empty scope. A literal is an expression, and report_unplaced_literal
-        // refuses one from edges (`f([1, 2])`) with nothing to put in its place. Codegen's arm is the
-        // backstop instead, and it runs after the has_critical_issues() gate rather than before it
-        //
-        // copied by clone through cc.shallow, which is correct only while AST::OperatorRewriter skips
-        // generic bodies - a template's literal is therefore always still false when it is cloned
-        bool expansion_decided = false;
-
         // **is this list a C variadic tail rather than a collection?** set by AST::bind_array_literal_to
-        // when the parameter it arrived at is `#[echoc::core: variadic_args]`, and by nothing else - so it is
-        // a property of the *position*, exactly as `bound_type` is.
+        // when the parameter is `#[echoc::core: variadic_args]`, and by nothing else - a property of the
+        // *position*, exactly as `bound_type` is.
         //
-        // it changes three answers and no others: the elements keep their own types instead of being
-        // unified into one `E`, AST::OperatorRewriter must not expand this into an `array<E>()` and a
-        // run of appends, and codegen writes the elements out after the fixed arguments of a variadic
-        // call. everything else about the node stays what it was
+        // it changes three answers and no others: the elements keep their own types, OperatorRewriter
+        // must not expand this, and codegen writes the elements out after the fixed arguments
         bool is_variadic_pack = false;
 
         ArrayLiteralExprNode(std::vector<ExprNode *> elements, TokenReference token_bracket) :
-            elements(std::move(elements)), token_bracket(token_bracket)
+            CollectionLiteralExprNode(token_bracket),
+            elements(std::move(elements))
         {
         }
 
         ~ArrayLiteralExprNode() {}
 
-        // **always unknown, deliberately.** the elements say what goes in, never what holds them, and
-        // answering with a guess is what would let an inferred declaration latch onto a wrong type
-        ValueType result_type() const override {
-            return ValueType::make_unknown();
-        }
-
         const std::string node_description() override;
 
         void accept(Visitor &visitor) override {
             visitor.visit_array_literal_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `["k" => v]` - a bracketed list of key/value pairs. constructor plus `$dest[k] = v`.
+    // `ordered_map` takes its type from the destination and needs no core binding.
+    // untyped `$m = ["a" => 1]` is AST::map_literal_type_for, minting `map<K, V>`
+    class MapLiteralExprNode : public CollectionLiteralExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_map_literal);
+
+        struct Entry
+        {
+            ExprNode *key = nullptr;
+            ExprNode *value = nullptr;
+        };
+
+        std::vector<Entry> entries;
+
+        MapLiteralExprNode(std::vector<Entry> entries, TokenReference token_bracket) :
+            CollectionLiteralExprNode(token_bracket),
+            entries(std::move(entries))
+        {
+        }
+
+        ~MapLiteralExprNode() {}
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_map_literal_expr(*this);
         }
 
         Node *clone(CloneContext &cc) const override;

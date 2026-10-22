@@ -1,0 +1,15 @@
+// the same hoist-barrier as an array literal: a hoist runs unconditionally, and everything under
+// a `?->` runs only when the base was there
+
+class Holder
+{
+    int32 $n;
+
+    constructor(int32 $n) { $this->n = $n; }
+
+    function take(map<string, int32>& $m) : int32 { return $m['a']; }
+}
+
+Holder? $h = null;
+
+echo $h?->take(['a' => 1]) ?? 7;

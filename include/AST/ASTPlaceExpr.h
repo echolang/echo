@@ -70,6 +70,9 @@ namespace AST
             // into a declaration and one append per element, which needs a place to append into rather
             // than a slot to copy a value in to
             case NodeType::n_expr_array_literal:
+            // a map literal is the same shape with a key: constructor plus one `$dest[k] = v` per
+            // entry, so it also has to name the storage rather than sit in a slot
+            case NodeType::n_expr_map_literal:
             // NullNode::bound_type is set by the destination, so there is nothing here to size a slot
             // from until somebody else has spoken
             case NodeType::n_null:
