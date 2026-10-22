@@ -154,7 +154,9 @@ AST::EmbedPlan AST::embed_plan_for(AST::FunctionCallExprNode &call, const AST::C
 
     const std::filesystem::path relative(path_text);
 
-    if (relative.is_absolute()) {
+    // `is_absolute()` on Windows wants a drive; `/etc/passwd` only has a root
+    // directory, and the jail would then say "outside this module"
+    if (relative.has_root_name() || relative.has_root_directory()) {
         return refused(fmt::format(
             "'{}' is an absolute path; embed paths are relative to this file", path_text));
     }

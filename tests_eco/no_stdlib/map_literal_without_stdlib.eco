@@ -1,0 +1,3 @@
+// an untyped map literal is the one thing that needs the compiler to be able to *say* `map`, and
+// `#[echoc::core: map]` lives in the standard library this compilation left out
+$m = ['a' => 1];

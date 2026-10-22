@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] map_literal_without_stdlib.eco:3:1
+
+  a map literal with no declared type needs the core map type, and nothing in this program declares '#[echoc::core: map]'. it lives in the standard library, which this compilation left out - write the type, e.g. 'map<string, int32> $m = [...];'.
+
+  2 | // `#[echoc::core: map]` lives in the standard library this compilation left out
+  3 | $m = ['a' => 1];
+    : ^^
+  4 | 
+
+1 error, nothing was compiled.
