@@ -974,6 +974,10 @@ void Backend::prune_to_entry()
 
     const std::string entry = jit_entry_symbol(_ctx);
 
+    for (llvm::GlobalValue &gv : _ctx.current_module()->global_values()) {
+        gv.setDLLStorageClass(llvm::GlobalValue::DefaultStorageClass);
+    }
+
     Compiler::LLVM::run_module_passes(*_ctx.current_module(), _target_machine.get(), [&roots, &entry](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
