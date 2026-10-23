@@ -39,7 +39,6 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
-#define _CRT_RAND_S
 #include <windows.h>
 #include <direct.h>
 #include <fcntl.h>
@@ -48,6 +47,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// UCRT hides rand_s behind _CRT_RAND_S, and LLVM headers already included
+// <stdlib.h> without it. the export is still this
+extern "C" errno_t rand_s(unsigned int *);
 #endif
 
 #include <fmt/core.h>
@@ -200,7 +203,6 @@ bool Backend::prepare_execution()
     pin("getenv", getenv);
     pin("strtoull", strtoull);
     pin("rand_s", rand_s);
-    pin("__acrt_iob_func", __acrt_iob_func);
     // `--target-os darwin|linux` on Windows still JITs (native_run wants a host
     // binary). the stdlib then names POSIX `write`, not `_write`
     pin("write", _write);
