@@ -4,7 +4,7 @@
 #include "Compiler/LLVM/Codegen/PartitionHash.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/CompilationUnit.h"
-#include "Compiler/ModuleCache.h"
+#include "Compiler/Fnv.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
 #include "AST/FunctionDeclNode.h"

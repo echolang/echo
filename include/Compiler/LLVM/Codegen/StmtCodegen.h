@@ -11,6 +11,7 @@ namespace llvm
 
 namespace AST
 {
+    class Node;
     class ScopeNode;
     class VarDeclNode;
     class FunctionDeclNode;
@@ -36,6 +37,11 @@ namespace Compiler::LLVM
         StmtCodegen(CodegenContext &ctx) : _ctx(ctx) {};
 
         void gen_scope(AST::ScopeNode &node);
+
+        // one statement of a scope: location, accept, pop leftover expression values, stop
+        // once the block is terminated. gen_scope loops over it; TemporaryBind fills use it
+        void gen_statement(AST::Node &node);
+
         void gen_var_decl(AST::VarDeclNode &node);
 
         // the storage half of a declaration, idempotent: the slot and the zero-init a value needs before

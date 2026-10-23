@@ -5,6 +5,7 @@
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TestRunner.h"
 
+#include "AST/ASTBuiltin.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTValueType.h"
 #include "AST/ConstantDataExprNode.h"
@@ -26,6 +27,7 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <set>
@@ -48,6 +50,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.lvalues = &_lvalues;
     _ctx.classes = &_classes;
     _ctx.abort = &_abort;
+    _ctx.stmts = &_stmt;
     _ctx.atomics = &_atomics;
     _ctx.simd = &_simd;
     _ctx.memory = &_memory;
@@ -314,6 +317,20 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // which declared type is `string`, published before anything is lowered: gen_literal_string builds a
     // constant of it, so it has to be answerable from the first expression onward
     _ctx.core_types_ptr = &bundle.collector.core_types;
+
+    _ctx.program_hashes = std::any_of(
+        bundle.modules.begin(),
+        bundle.modules.end(),
+        [](const std::unique_ptr<AST::Module> &module) {
+            for (AST::FunctionDeclNode *fn : module->nodes.of_type<AST::FunctionDeclNode>()) {
+                if (fn != nullptr && fn->is_builtin()
+                    && AST::builtin_kind_for(fn->builtin.value()) == AST::BuiltinKind::t_hash_seed) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
 
     // the registry an interface widening reads, published beside the core types and for the same
     // reason - see CodegenContext. a widening resolves its vtable from the concrete class, which means

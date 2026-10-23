@@ -512,12 +512,13 @@ bool read_manifest_attributes(
         return false;
     }
 
-    // the name becomes an AST module name, which codegen requires to be unique across the bundle and
-    // the mangler never reads - so the only rule it needs is that it is spellable
-    if (out.name.find_first_of(" \t\"") != std::string::npos) {
+    // the name becomes an AST module name, and a **path component**: object, inputs record, C build,
+    // `--build-dir` subdirectory. held to the same artifact-name rule a target already is
+    if (!is_usable_artifact_name(out.name)) {
         payload.collector.collect_issue<AST::Issue::UnusableModuleName>(
             payload.context.code_ref(),
-            fmt::format("'{}' is not a usable module name - no spaces or quotes.", out.name));
+            fmt::format(
+                "'{}' is not a usable module name - letters, digits, '_' and '-' only.", out.name));
         return false;
     }
 

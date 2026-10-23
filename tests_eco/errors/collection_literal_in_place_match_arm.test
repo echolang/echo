@@ -1,13 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] array_literal_in_optional_chain.eco:21:16
+[error] collection_literal_in_place_match_arm.eco:19:25
 
   an array literal fills storage, so it has to name it - write it as a declaration's initializer or as an assignment to a variable.
 
-  20 | 
-  21 | echo $h?->take([1, 2]) ?? 7;
-     :                ^
-  22 | 
+  18 |     Slot::ok($n) => $named[0],
+  19 |     Slot::empty => wrap([7, 9])[0],
+     :                         ^^^^^^^
+  20 | };
 
 1 error, nothing was compiled.

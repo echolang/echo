@@ -472,17 +472,9 @@ FunctionCallExprNode &CollectionLiteralExpansion::build_named_call(
 
 ExprNode *CollectionLiteralExpansion::hoist(
     CollectionLiteralExprNode &literal,
-    std::vector<NodeReference> &hoisted,
-    size_t hoist_barrier
+    std::vector<NodeReference> &hoisted
 )
 {
-    // under a `?->` or a `??`, where hoisting would move the construction above the branch that
-    // decides whether it happens at all. refused outright rather than waited on
-    if (hoist_barrier > 0) {
-        report_unplaced(literal);
-        return nullptr;
-    }
-
     if (!literal.bound_type.has_value()) {
         return nullptr;
     }
@@ -556,7 +548,7 @@ bool CollectionLiteralExpansion::expand_statement(
         }
     }
 
-    ExprNode *place = hoist(*destination.literal, hoisted, 0);
+    ExprNode *place = hoist(*destination.literal, hoisted);
 
     if (place == nullptr) {
         return false;
@@ -569,8 +561,7 @@ bool CollectionLiteralExpansion::expand_statement(
 
 ExprNode *CollectionLiteralExpansion::expand_expression(
     ExprNode *expr,
-    std::vector<NodeReference> &hoisted,
-    size_t hoist_barrier
+    std::vector<NodeReference> &hoisted
 )
 {
     CollectionLiteralExprNode *literal = collection_literal_of(expr);
@@ -579,7 +570,7 @@ ExprNode *CollectionLiteralExpansion::expand_expression(
         return nullptr;
     }
 
-    ExprNode *place = hoist(*literal, hoisted, hoist_barrier);
+    ExprNode *place = hoist(*literal, hoisted);
 
     if (place != nullptr) {
         return place;
@@ -603,9 +594,11 @@ void place_collection_literal_hoists(
 
     // a declaration whose initializer contained the literal has to outlive the hoist. wrapping
     // both scoped the declared name to the hoist, so `$b = Bag([7, 9])` destroyed `$b` at the
-    // closing brace. GuardLowering splices for the same reason. every other statement still wraps:
-    // `$a->push([1, 2])` must not hold the temporary until the enclosing frame ends
-    if (statement != nullptr && statement->get_node_type() == NodeType::n_vardecl) {
+    // closing brace. a `guard` binding is the same: wrapping would drop an owning `$o` at the wrapper's brace.
+    // every other statement still wraps: `$a->push([1, 2])` must not hold the temp until the frame ends
+    const NodeType type = statement != nullptr ? statement->get_node_type() : NodeType::n_void;
+
+    if (type == NodeType::n_vardecl || type == NodeType::n_guard) {
         scope.children.insert(scope.children.begin() + index, hoisted.begin(), hoisted.end());
         hoisted.clear();
         return;

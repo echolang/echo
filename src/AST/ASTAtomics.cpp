@@ -47,9 +47,11 @@ namespace AST
             case BuiltinKind::t_free_bytes:
             case BuiltinKind::t_live_allocations:
             case BuiltinKind::t_process_argc:
+            case BuiltinKind::t_hash_seed:
             case BuiltinKind::t_process_argv:
             case BuiltinKind::t_process_envp:
             case BuiltinKind::t_exit:
+            case BuiltinKind::t_cold_die:
             case BuiltinKind::t_simd_splat:
             case BuiltinKind::t_simd_load:
             case BuiltinKind::t_simd_store:

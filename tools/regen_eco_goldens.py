@@ -183,10 +183,18 @@ def regenerate(path: Path, eco: Path, write: bool) -> bool:
 
 
 def main() -> int:
+    global ECHOC
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("subdir", nargs="?", default="", help="limit to one directory under tests_eco/")
     parser.add_argument("--write", action="store_true", help="write the files instead of listing them")
+    parser.add_argument("--echoc", type=Path, default=ECHOC, help=f"the compiler to use (default {ECHOC})")
     args = parser.parse_args()
+
+    ECHOC = args.echoc.resolve()
+
+    # pinned exactly as tests/test_main.cpp pins it, so a case that prints a map's order matches the suite
+    os.environ.setdefault("ECHO_HASH_SEED", "0")
 
     if not ECHOC.exists():
         print(f"no compiler at {ECHOC} - build it first", file=sys.stderr)

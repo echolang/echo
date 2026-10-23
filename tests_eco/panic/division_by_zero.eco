@@ -1,0 +1,9 @@
+// a runtime division by zero is UB to LLVM. a debug build stops on it; release pays nothing
+
+function divide(int32 $a, int32 $b) : int32
+{
+    return $a / $b;
+}
+
+echo divide(10, 2);
+echo divide(1, 0);

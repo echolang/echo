@@ -37,6 +37,9 @@ namespace AST
         inline constexpr std::string_view core = "echoc::core";
         inline constexpr std::string_view builtin = "echoc::builtin";
         inline constexpr std::string_view intrinsic = "echoc::intrinsic";
+
+        // a stdlib slow path kept *out of* the caller: `cold` and `noinline`, so the hot function stays inlinable
+        inline constexpr std::string_view cold = "echoc::cold";
     };
 
     enum class AttributeMedium

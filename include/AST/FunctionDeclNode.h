@@ -377,6 +377,9 @@ namespace AST
         // attribute stay honest when the inliner declines.
         bool is_inline = false;
 
+        // `#[echoc::cold]`: never inlined, laid out away from hot code. see AST::compiler_attribute::cold
+        bool is_cold = false;
+
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;

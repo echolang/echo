@@ -68,9 +68,22 @@ public class buf
         }
 
         // re-seated through `:$`, because realloc hands back an address rather than writing through
-        // the old one
-        $this->bytes:$ = mem::realloc<uint8>($this->bytes, $grown + 1);
+        // the old one. through text_regrow, which never hands back a block smaller than `$grown` text bytes
+        $this->bytes:$ = text_regrow($this->bytes, $grown);
         $this->capacity = $grown;
+    }
+
+    // the growth half of append and push, **out of their inline bodies**. `$s->push(97)` has to
+    // inline to a compare and a store; this method takes `buf&`, so it cannot be `#[echoc::cold]`
+    internal function grow_for(usize $count) : void
+    {
+        // `used + count` past the largest usize is a length no string can have, and would wrap to one the
+        // reserve below thinks already fits
+        if ($count > ~(0 as usize) - $this->used) {
+            mem::out_of_memory();
+        }
+
+        $this->reserve($this->used + $count);
     }
 
     /**
@@ -96,7 +109,11 @@ public class buf
     #[inline]
     internal function append(ptr<const uint8> $src, usize $count) : void
     {
-        $this->reserve($this->used + $count);
+        // room left rather than room needed: `used + count` can wrap for a count a caller computed, and
+        // `capacity - used` cannot, since `used <= capacity` always holds
+        if ($count > $this->capacity - $this->used) {
+            $this->grow_for($count);
+        }
 
         // the one place const is dropped in this file. `mem::copy` names one `T` for both sides,
         // and the destination genuinely is writable - it is this buffer's own base
@@ -111,7 +128,10 @@ public class buf
      */
     internal function push(uint8 $byte) : void
     {
-        $this->reserve($this->used + 1);
+        // room left, for append's reason
+        if ($this->used == $this->capacity) {
+            $this->grow_for(1);
+        }
 
         $this->bytes:$[$this->used] = $byte;
         $this->used = $this->used + 1;
@@ -300,8 +320,7 @@ public function from(ptr<const uint8> $b, usize $count) : string
         return string::from(string::view($b, $count));
     }
 
-    // `+ 1` is the NUL slot `$capacity` does not count
-    buf $owner = buf($count, 0, mem::alloc<uint8>($count + 1));
+    buf $owner = buf($count, 0, text_block($count));
     $owner->append($b, $count);
 
     return string(string::view($owner->bytes, $count), $owner);
@@ -995,4 +1014,45 @@ public function float(const string& $text) : float64?
     }
 
     return $value;
+}
+
+/**
+ * A block for `$capacity` text bytes and the NUL after them: the `+ 1` every `str::buf` counts.
+ *
+ * **Never smaller than asked.** A capacity with no room left for the NUL, or an allocator that says no,
+ * stops the program rather than hand back a block the caller then records `$capacity` over.
+ */
+#[inline]
+internal function text_block(usize $capacity) : ptr<uint8>
+{
+    if ($capacity == ~(0 as usize)) {
+        mem::out_of_memory();
+    }
+
+    ptr<uint8> $block = mem::alloc<uint8>($capacity + 1);
+
+    if ($block:$ == null) {
+        mem::out_of_memory();
+    }
+
+    return $block;
+}
+
+/**
+ * `$block` regrown to hold `$capacity` text bytes and the NUL, on the terms text_block gives.
+ */
+#[inline]
+internal function text_regrow(ptr<uint8> $block, usize $capacity) : ptr<uint8>
+{
+    if ($capacity == ~(0 as usize)) {
+        mem::out_of_memory();
+    }
+
+    ptr<uint8> $moved = mem::realloc<uint8>($block, $capacity + 1);
+
+    if ($moved:$ == null) {
+        mem::out_of_memory();
+    }
+
+    return $moved;
 }

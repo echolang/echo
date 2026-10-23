@@ -1,15 +1,16 @@
 /**
  * epm.lock.json. JSON, so libjson is the only serializer epm links.
- * No absolute paths. lockVersion is refused if it is not 1.
+ * No absolute paths. lockVersion 1 loads and is rewritten as 2; anything else is refused.
  */
 
 namespace epm::lock;
 
+use epm::manifest;
 use epm::manifest::Origin;
 use epm::sys;
 use std::io;
 
-public const LOCK_VERSION = 1;
+public const LOCK_VERSION = 2;
 
 public struct Entry
 {
@@ -34,10 +35,12 @@ public struct Entry
 public struct Lock
 {
     array<Entry> $packages;
+    int64 $version;
 
     constructor()
     {
         $this->packages = array<Entry>();
+        $this->version = LOCK_VERSION;
     }
 
     const function find(const string& $name) : Entry?
@@ -61,6 +64,34 @@ public function path_beside(const string& $manifest) : string
     return sys::join(sys::dirname($manifest), 'epm.lock.json');
 }
 
+/**
+ * The tree hash this lock version stored. Version 1 is path, newline, body;
+ * version 2 tags files and links. Asked of a vendored tree before a format
+ * bump rewrites the lock, so the old hash is actually checked.
+ */
+public function tree_hash(const string& $root, int64 $version) : string
+{
+    if ($version < LOCK_VERSION) {
+        return sys::tree_sha256_v1($root);
+    }
+
+    return sys::tree_sha256($root);
+}
+
+/**
+ * Whether this lock version can be checked against `$root`. Version 1
+ * followed directory links and skipped dangling ones; a link to a file
+ * hashes the same under both walks.
+ */
+public function tree_is_checkable(const string& $root, int64 $version) : bool
+{
+    if ($version >= LOCK_VERSION) {
+        return true;
+    }
+
+    return !sys::tree_has_v1_uncheckable_link($root);
+}
+
 public function load(const string& $path) : result<Lock, string>
 {
     if (!sys::is_file($path)) {
@@ -77,11 +108,12 @@ public function load(const string& $path) : result<Lock, string>
 
     int64 $ver = $root['lockVersion']->asInt() ?? 0;
 
-    if ($ver != 1) {
-        return .error("{$path} has lockVersion {$ver}, expected 1");
+    if ($ver < 1 || $ver > LOCK_VERSION) {
+        return .error("{$path} has lockVersion {$ver}, expected 1 or 2");
     }
 
     Lock $lock = Lock();
+    $lock->version = $ver;
     array<json::Value> $pkgs = guard $root['packages']->asArray() else {
         return .ok($lock);
     }
@@ -103,12 +135,23 @@ public function load(const string& $path) : result<Lock, string>
             return .error("{$path}: package '{$name}' has source kind '{$kind}', expected git");
         }
 
+        string $rev = $one['rev']->asStr() ?? '';
+        string $sha = $one['sha256']->asStr() ?? '';
+
+        // **a lock is input like any other file in a repository.** the name becomes vendor/<name>,
+        // the url and rev go to git. a lock that names `/` or `../x`, or hands git an option, is refused first
+        string $refused = refusal_of($name, $url, $rev, $sha);
+
+        if (!$refused->empty()) {
+            return .error("{$path}: package '{$name}' {$refused}");
+        }
+
         Entry $e = Entry(
             $name,
             $one['version']->asStr() ?? '',
             Origin::git($url),
-            $one['rev']->asStr() ?? '',
-            $one['sha256']->asStr() ?? ''
+            $rev,
+            $sha
         );
 
         array<json::Value> $reqs = $one['requires']->asArray() ?? array<json::Value>();
@@ -175,4 +218,56 @@ public function save(const string& $path, const Lock& $lock) : result<bool, stri
     }
 
     return .ok(true);
+}
+
+private function refusal_of(
+    const string& $name,
+    const string& $url,
+    const string& $rev,
+    const string& $sha
+) : string
+{
+    if (!manifest::usable_name($name)) {
+        return 'has a name that is not a package name';
+    }
+
+    if (!$url->empty() && !manifest::usable_url($url)) {
+        return "has url '{$url}', which epm will not hand to git";
+    }
+
+    if (!manifest::usable_rev($rev)) {
+        return "has rev '{$rev}', which epm will not hand to git";
+    }
+
+    if (!is_sha256_hex($sha)) {
+        return "has sha256 '{$sha}', which is not a sha256";
+    }
+
+    return '';
+}
+
+// empty, for an entry nothing has hashed yet, or 64 lowercase hex digits
+private function is_sha256_hex(const string& $sha) : bool
+{
+    if ($sha->empty()) {
+        return true;
+    }
+
+    if ($sha->size() != 64) {
+        return false;
+    }
+
+    usize $i = 0;
+
+    while ($i < $sha->size()) {
+        uint8 $b = $sha->byte($i);
+
+        if (!(($b >= 48 && $b <= 57) || ($b >= 97 && $b <= 102))) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
 }

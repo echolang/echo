@@ -1,6 +1,6 @@
 #include "Compiler/LLVM/Codegen/PartitionHash.h"
 
-#include "Compiler/ModuleCache.h"
+#include "Compiler/Fnv.h"
 #include "eco.h"
 
 #include <llvm/ADT/DenseMap.h>

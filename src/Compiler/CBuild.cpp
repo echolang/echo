@@ -2,8 +2,11 @@
 
 #include "eco.h"
 
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/ArtifactSeal.h"
 #include "Compiler/BuildLayout.h"
 #include "Compiler/CodegenTarget.h"
+#include "Compiler/Fnv.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/JobCount.h"
 #include "Compiler/LinkRequirement.h"
@@ -588,10 +591,11 @@ bool Compiler::build_c_sources(
 
     // **an unwritable store is a slower build and never a failed one**, the rule plan_module_artifacts
     // already follows for Echo objects. Both directories are echoc's own - one under a module directory the
-    // driver already vouched for, one under the system's temporary path - so neither has anything to prove
+    // driver already vouched for, one under the system's temporary path, so neither has a marker to prove.
+    // **t_confined all the same**: a `cc` under a dependency that arrived as a link is the one way around that
     std::error_code ec;
     const bool keeping =
-        prepare_build_directory(cache_dir, BuildDirTrust::t_ours) == BuildDirState::t_ready;
+        prepare_build_directory(cache_dir, BuildDirTrust::t_confined) == BuildDirState::t_ready;
     const std::filesystem::path directory = keeping ? cache_dir : scratch_dir;
 
     if (!keeping
@@ -614,11 +618,12 @@ bool Compiler::build_c_sources(
         const std::filesystem::path &source = job.source;
         const std::string &key = job.key;
 
-        // a hit is the object being there *and* the sidecar agreeing about what it was built from. Either
-        // one alone is not enough: an object with no sidecar is one an interrupted build left behind
+        // a hit is the object being there, the sidecar agreeing, and this user's seal on it.
+        // no sidecar is an interrupted build; no seal is one this machine never built
         if (keeping
             && std::filesystem::is_regular_file(job.object, ec)
-            && read_whole_file(job.sidecar).value_or(std::string()) == key) {
+            && read_whole_file(job.sidecar).value_or(std::string()) == key
+            && artifact_is_sealed(job.object)) {
             out_explain.push_back(fmt::format("  {}  {}  hit", source.filename().string(), key));
             continue;
         }
@@ -653,6 +658,11 @@ bool Compiler::build_c_sources(
                 out_error)) {
             return false;
         }
+
+        // clang opens both outputs in place, so whatever a shipped build directory left under their names
+        // (a link above all) goes first rather than being written through
+        clear_artifact_path(job.object);
+        clear_artifact_path(job.depfile);
 
         job.argv.push_back("-o");
         job.argv.push_back(job.object.string());
@@ -705,8 +715,8 @@ bool Compiler::build_c_sources(
             // sidecar: the key stored is the one the *next* build will compute, so a fresh store settles after
             // one build rather than compiling every source twice. The source's own bytes are the ones already
             // folded into source_digest - the compile did not change them
-            std::ofstream(job.sidecar, std::ios::binary)
-                << c_content_key(job.source, job.source_digest, job.depfile, seen);
+            write_artifact_file(job.sidecar, c_content_key(job.source, job.source_digest, job.depfile, seen));
+            seal_artifact(job.object);
         }
 
         out.objects.push_back(job.object);
@@ -734,7 +744,7 @@ bool Compiler::build_c_shared_library(
 
     std::error_code ec;
     const bool keeping =
-        prepare_build_directory(cache_dir, BuildDirTrust::t_ours) == BuildDirState::t_ready;
+        prepare_build_directory(cache_dir, BuildDirTrust::t_confined) == BuildDirState::t_ready;
     const std::filesystem::path directory = keeping ? cache_dir : scratch_dir;
 
     if (!keeping) {
@@ -756,13 +766,18 @@ bool Compiler::build_c_shared_library(
     out_library = directory / fmt::format(
         "lib{}.{}{}", spec.module_name, to_hex(digest), CodegenTarget{}.library_suffix());
 
-    if (keeping && std::filesystem::is_regular_file(out_library, ec)) {
+    // **sealed, like every artifact that is reused by name**, and this one is dlopened into echoc itself
+    // by `run` and `test`, so a planted one would be code running in the compiler
+    if (keeping && std::filesystem::is_regular_file(out_library, ec) && artifact_is_sealed(out_library)) {
         return true;
     }
 
     // through the clang driver rather than the system linker: a shared library's platform flags are
     // considerably fussier than an executable's, and this path is not the one Backend::link_program's
     // fast path exists to speed up - it runs once per module per change, not once per build
+    // the linker opens its output in place. see build_c_sources
+    clear_artifact_path(out_library);
+
     std::vector<std::string> argv = {
         Compiler::cc_driver(CodegenTarget{}), "-shared", "-o", out_library.string() };
     if (!Compiler::append_codegen_link_args(argv, CodegenTarget{}, false, out_error)) {
@@ -795,24 +810,13 @@ bool Compiler::build_c_shared_library(
         return false;
     }
 
-    std::ofstream def(def_path);
-
-    if (!def) {
-        out_error = fmt::format(
-            "could not write the export list for module '{}' at '{}'.",
-            spec.module_name, def_path.string());
-        return false;
-    }
-
-    def << "EXPORTS\n";
+    std::string exports = "EXPORTS\n";
 
     for (const std::string &name : coff_exports_from_nm(nm.output)) {
-        def << name << "\n";
+        exports += name + "\n";
     }
 
-    def.flush();
-
-    if (!def) {
+    if (!write_artifact_file(def_path, exports)) {
         out_error = fmt::format(
             "could not write the export list for module '{}' at '{}'.",
             spec.module_name, def_path.string());
@@ -826,6 +830,10 @@ bool Compiler::build_c_shared_library(
         out_error = fmt::format(
             "linking the C sources of module '{}' into a loadable library failed.", spec.module_name);
         return false;
+    }
+
+    if (keeping) {
+        seal_artifact(out_library);
     }
 
     return true;

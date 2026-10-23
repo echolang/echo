@@ -3,6 +3,7 @@
 #include "Compiler/LLVM/Codegen/FunctionTimeTrace.h"
 #include "Compiler/LLVM/Codegen/ModulePasses.h"
 #include "Compiler/LLVM/Codegen/TargetMachine.h"
+#include "Compiler/ArtifactSeal.h"
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/Comdat.h>
@@ -93,6 +94,8 @@ bool emit_module_object(
         return false;
     }
 
+    // after the object is in place, so a crash between the two leaves an object with no seal: a miss
+    Compiler::seal_artifact(object_path);
     return true;
 }
 

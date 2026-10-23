@@ -20,10 +20,15 @@ public class Git : Source
 
     const function list_versions() : result<resolve::Package, string>
     {
+        if (!manifest::usable_url($this->url)) {
+            return .error(unusable_url($this->url));
+        }
+
         array<string> $argv = array<string>();
         $argv[] = 'git';
         $argv[] = 'ls-remote';
         $argv[] = '--tags';
+        $argv[] = '--';
         $argv[] = $this->url;
         sys::Run $ran = sys::run($argv);
 
@@ -80,7 +85,16 @@ public class Git : Source
             return .error("cannot fetch a manifest from {$this->url} without a rev");
         }
 
+        if (!manifest::usable_rev($key)) {
+            return .error(unusable_rev($this->url, $key));
+        }
+
         string $cache = cache_dir($this->url, $key);
+
+        if ($cache->empty()) {
+            return .error("cannot fetch a manifest from {$this->url}: no user cache directory");
+        }
+
         string $mod = sys::join($cache, 'module.eco');
         result<manifest::Manifest, string> $cached = load_if_readable($mod);
 
@@ -102,6 +116,14 @@ public class Git : Source
     {
         if ($rev->empty()) {
             return .error("cannot check out {$this->url}: no rev");
+        }
+
+        if (!manifest::usable_url($this->url)) {
+            return .error(unusable_url($this->url));
+        }
+
+        if (!manifest::usable_rev($rev)) {
+            return .error(unusable_rev($this->url, $rev));
         }
 
         string $parent = sys::dirname($dest);
@@ -126,6 +148,12 @@ public class Git : Source
         if (!$failed->empty()) {
             sys::remove_all($tmp);
             return .error($failed);
+        }
+
+        // before anything hashes the tree. see sys::remove_build_dirs
+        if (!sys::remove_build_dirs($tmp)) {
+            sys::remove_all($tmp);
+            return .error("cannot clear build directories out of {$tmp}");
         }
 
         if (sys::exists($dest)) {
@@ -221,6 +249,7 @@ private function fetch_into(
     $remote[] = $tmp;
     $remote[] = 'remote';
     $remote[] = 'add';
+    $remote[] = '--';
     $remote[] = 'origin';
     $remote[] = $url;
     $ran = sys::run($remote);
@@ -236,6 +265,7 @@ private function fetch_into(
     $fetch[] = 'fetch';
     $fetch[] = '--depth';
     $fetch[] = '1';
+    $fetch[] = '--';
     $fetch[] = 'origin';
     $fetch[] = $rev;
     $ran = sys::run($fetch);
@@ -246,6 +276,7 @@ private function fetch_into(
         $full[] = '-C';
         $full[] = $tmp;
         $full[] = 'fetch';
+        $full[] = '--';
         $full[] = 'origin';
         $full[] = $rev;
         $ran = sys::run($full);
@@ -269,4 +300,14 @@ private function fetch_into(
     }
 
     return '';
+}
+
+private function unusable_url(const string& $url) : string
+{
+    return "'{$url}' is not a url epm will hand to git: use https://, ssh://, user@host:path or a local path";
+}
+
+private function unusable_rev(const string& $url, const string& $rev) : string
+{
+    return "'{$rev}' is not a rev epm will hand to git for {$url}";
 }

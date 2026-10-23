@@ -62,6 +62,7 @@ namespace
         { AST::compiler_attribute::core,      k_on_type },
         { AST::compiler_attribute::builtin,   k_on_function },
         { AST::compiler_attribute::intrinsic, k_on_function },
+        { AST::compiler_attribute::cold,      k_on_function },
     };
 
     // and the manifest's ten, which reach this parser too: a `module.eco` is **Echo**, read by the real

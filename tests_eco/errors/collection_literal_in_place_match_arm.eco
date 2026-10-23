@@ -1,0 +1,20 @@
+// a place-yielding match whose arm is `wrap([7, 9])[0]`: the collection is an
+// argument of the base, not an index operand. leftover hoists used to abort
+
+enum Slot
+{
+    case ok(int32 $n);
+    case empty;
+}
+
+function wrap(array<int32> $xs) : array<int32>
+{
+    return $xs;
+}
+
+array<int32> $named = [0];
+Slot $s = Slot::empty;
+echo match ($s) {
+    Slot::ok($n) => $named[0],
+    Slot::empty => wrap([7, 9])[0],
+};

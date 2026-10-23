@@ -61,6 +61,7 @@ namespace Compiler::LLVM
     class ErasureCodegen;
     class AbiCodegen;
     class DebugInfoCodegen;
+    class StmtCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -80,6 +81,10 @@ namespace Compiler::LLVM
         // by compile_bundle rather than reached for, so codegen never holds the whole collector - the
         // only thing it needs from it is which declared type is `string`
         const AST::CoreTypes *core_types_ptr = nullptr;
+
+        // **can anything in this program hash a key**: a `#[echoc::builtin: hash_seed]` is in the bundle.
+        // without it the startup draw is a getenv and an entropy call nothing would ever read
+        bool program_hashes = true;
 
         const AST::CoreTypes &core_types() const {
             assert(core_types_ptr && "core types not published - compile_bundle must set them");
@@ -310,6 +315,10 @@ namespace Compiler::LLVM
         // failed `assert`, the null narrowing check - goes through it, so they share one runtime,
         // one message shape and one release-mode gate
         AbortCodegen *abort = nullptr;
+
+        // the statement protocol gen_scope uses: debug location, leftover values, stop on a
+        // terminator. TemporaryBind fills go through it so they cannot drift
+        StmtCodegen *stmts = nullptr;
 
         // the seven `mem::atomic::` verbs. one protocol, one file - see AtomicCodegen.h
         AtomicCodegen *atomics = nullptr;

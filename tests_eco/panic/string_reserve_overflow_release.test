@@ -1,0 +1,6 @@
+flags: --release
+expect: fail
+
+--- OUT --->
+fatal error: out of memory: an allocation a container needed could not be made
+  at <runtime>:0

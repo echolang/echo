@@ -1,0 +1,21 @@
+// a collection in a while condition is rebuilt every iteration. planted above the loop, `$i` never
+// reaches the array and the condition is stuck on the first value
+
+function has3(array<int32> $xs) : bool
+{
+    return $xs[0] == 3;
+}
+
+int32 $i = 0;
+
+while (!has3([$i])) {
+    $i = $i + 1;
+
+    if ($i > 10) {
+        echo 'stuck';
+        echo $i;
+        return;
+    }
+}
+
+echo $i;

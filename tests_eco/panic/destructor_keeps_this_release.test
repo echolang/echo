@@ -1,0 +1,6 @@
+flags: --release
+expect: fail
+
+--- OUT --->
+fatal error: a destructor kept a reference to the object it was destroying: Node
+  at <runtime>:0

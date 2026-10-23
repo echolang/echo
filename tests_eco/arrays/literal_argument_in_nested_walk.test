@@ -1,0 +1,18 @@
+--- OUT --->
+1
+2
+3
+5
+8
+4
+9
+4
+0
+6
+7
+8
+--- RAST --->
+# match-arm literal stays inside a TemporaryBind, so `$v` is in scope
+CHECK: tempbind
+CHECK: vardecl<type<array<int32>>>($__lit
+CHECK: first(

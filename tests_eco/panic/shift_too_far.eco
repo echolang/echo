@@ -1,0 +1,9 @@
+// a shift by at least the width of the value is poison to LLVM. a debug build stops on it
+
+function shifted(uint32 $v, uint32 $by) : uint32
+{
+    return $v << $by;
+}
+
+echo shifted(1, 4);
+echo shifted(1, 32);

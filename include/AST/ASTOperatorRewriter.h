@@ -22,7 +22,10 @@ namespace AST
     class ExprNode;
     class FunctionCallExprNode;
     class IndexExprNode;
+    class MatchExprNode;
     class ScopeNode;
+    class WhileStatementNode;
+    class ForStatementNode;
 
     // **turns operand syntax into calls, once the types that decide what it means are known.**
     //
@@ -81,10 +84,13 @@ namespace AST
         void visitVarDecl(VarDeclNode &node) override;
         void visit_assign(AssignNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
+        void visitWhileStatement(WhileStatementNode &node) override;
+        void visit_for_statement(ForStatementNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
 
         // rule 5's three sites - see upgrade_optional_operand below
         void visit_guard(GuardNode &node) override;
+        void visit_match(MatchExprNode &node) override;
         void visit_null_coalesce(NullCoalesceExprNode &node) override;
         void visit_optional_chain(OptionalChainExprNode &node) override;
 
@@ -159,15 +165,28 @@ namespace AST
         // unchanged. answers the operand or its replacement, so every caller reseats its edge
         ExprNode *upgrade_optional_operand(ExprNode *operand, const TokenReference &at);
 
+        // wrap `expr` in a TemporaryBind that owns `_hoisted`, so a collection literal inside a
+        // match arm, a loop condition, an index, or a skipped `&&` / `||` / `??` / `?->` operand
+        // lives with that expression, not the statement
+        ExprNode *bind_expression_hoists(ExprNode *expr, const TokenReference &at);
+
+        // walk a value edge and wrap it if the walk hoisted, the same isolate `&&` / `||` use
+        // a `while` / `for` condition uses this so the array is rebuilt each iteration. `at` may
+        // be null on a compiler-made `while`; a token is then taken from the hoist itself
+        void bind_value_if_hoisted(ExprNode *&expr, const TokenReference &at);
+        void bind_value_if_hoisted(ExprNode *&expr, const TokenReference *at);
+
         // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.
         // AST::CollectionLiteralExpansion is the rewrite; this walk places what it returns. a statement
         // whose type is not concrete yet is left for a later round, exactly as an index is
         //
         // the declarations and appends an expression-position hoist produced while walking the
         // current statement. buffered rather than spliced on the spot because the walk is *inside*
-        // statement_edge and the scope's child list is what would be mutated under it. saved and
-        // restored around a nested scope's own loop, so a literal in an inner block is placed there
-        // rather than escaping to the outer one
+        // statement_edge. **isolated at visitScope entry**, so a nested scope cannot steal the outer
+        // statement's temps. a value match arm wraps its hoists in a TemporaryBind; a place arm wraps
+        // each index instead, so the arm stays a place, and leftover hoists (a collection that is
+        // not an index) are a refusal. a loop condition wraps the same way, or the
+        // array would be built once above the loop
         std::vector<NodeReference> _hoisted;
 
         // **the statements rule 6 discarded, batched.** AST::forget_subtree hands its walk to
@@ -179,25 +198,6 @@ namespace AST
         // how many literals this module has hoisted, so their names are distinct - a statement may
         // hold two (`f([1, 2], [3, 4])`), and a `RAST` golden has to be able to tell them apart
         size_t _hoist_count = 0;
-
-        // **how deep inside a form that does not evaluate its right side we are.** `?->` and `??` are
-        // the only two, and a hoist inside either would move the construction above the branch that
-        // decides whether it runs. a counter rather than a flag because the two nest
-        size_t _hoist_barrier = 0;
-
-        // raises the barrier for one subtree. an RAII guard rather than a set-and-clear, because the
-        // arms it sits in return early
-        struct HoistBarrier
-        {
-            explicit HoistBarrier(OperatorRewriter &pass) : _pass(pass) { _pass._hoist_barrier++; }
-            ~HoistBarrier() { _pass._hoist_barrier--; }
-
-            HoistBarrier(const HoistBarrier &) = delete;
-            HoistBarrier &operator=(const HoistBarrier &) = delete;
-
-        private:
-            OperatorRewriter &_pass;
-        };
 
         // the call an operator lowers to. the node is AST::build_operator_call_node's, the same one
         // Parser::build_operator_call builds - this only records that a round changed something.

@@ -21,6 +21,14 @@ namespace Compiler
     // declares, the working directory for anything the command line did. An absolute spelling ignores the
     // base, which is what lets a manifest name a system location without knowing where it sits itself
     std::filesystem::path settled_path(const std::filesystem::path &base, const std::string &spelled);
+
+    // like canonical_or_absolute, resolving existing components and normalizing the rest
+    // so a path whose tail is not there yet still has its `..` and symlinks taken out of the part that is
+    std::filesystem::path canonical_or_normal(const std::filesystem::path &path);
+
+    // **does this path stay inside that directory.** asked of `std::embed` and a dependency's sources.
+    // both sides canonical where they can be, so a symlink pointing out is outside
+    bool path_is_inside(const std::filesystem::path &candidate, const std::filesystem::path &bound);
 };
 
 #endif

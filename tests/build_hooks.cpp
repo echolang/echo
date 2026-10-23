@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <string>
 
-#include "Compiler/ModuleCache.h"
+#include "Compiler/ArtifactFile.h"
 #include "Compiler/PublicTools.h"
 #include "subprocess.h"
 

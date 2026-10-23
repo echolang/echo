@@ -1,0 +1,25 @@
+// a destructor that hands `$this` to a by-value parameter retains it and the callee releases it again.
+// the count is parked at a sentinel for the length of the teardown, so the inner release cannot reach zero
+
+class Node
+{
+    public int32 $visits = 0;
+
+    destructor()
+    {
+        $this->visits = $this->visits + 1;
+        echo "teardown {$this->visits}";
+        look_at($this);
+    }
+}
+
+function look_at(Node $n) : void
+{
+    echo "looked at {$n->visits}";
+}
+
+{
+    Node $n = Node();
+}
+
+echo mem::live_allocations();

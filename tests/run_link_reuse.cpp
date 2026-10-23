@@ -1,12 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <Compiler/ArtifactSeal.h>
+#include <Compiler/CodegenTarget.h>
+#include <Compiler/ModuleCache.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 
-#include "Compiler/CodegenTarget.h"
-#include "Compiler/ModuleCache.h"
 #include "subprocess.h"
 
 // a project: a loose file's scratch dies with the process
@@ -72,17 +73,34 @@ TEST_CASE("a link digest keys on the object path, so a same-path rewrite agrees"
 {
     EchoTests::ScopedProject project("run_link_reuse", "digest");
     const std::filesystem::path object = project.root() / "mod-abc.o";
+    // sealed after each write, as every object echoc emits is. an unsealed one is not an input the digest
+    // will vouch for at all
     {
         std::ofstream(object, std::ios::binary) << "one";
     }
+    REQUIRE(Compiler::seal_artifact(object));
 
     const std::vector<std::string> command = { "ld", "-o", "a", object.string() };
     const auto first = Compiler::link_inputs_digest(command, { object });
     {
         std::ofstream(object, std::ios::binary) << "two-different-bytes-here";
     }
+    REQUIRE(Compiler::seal_artifact(object));
     const auto second = Compiler::link_inputs_digest(command, { object });
 
     REQUIRE(first.has_value());
     REQUIRE(first == second);
+}
+
+TEST_CASE("a link digest refuses an object this user's echoc did not seal", "[cache][link]")
+{
+    EchoTests::ScopedProject project("run_link_reuse", "unsealed");
+    const std::filesystem::path object = project.root() / "mod-abc.o";
+    {
+        std::ofstream(object, std::ios::binary) << "shipped";
+    }
+
+    const std::vector<std::string> command = { "ld", "-o", "a", object.string() };
+
+    REQUIRE_FALSE(Compiler::link_inputs_digest(command, { object }).has_value());
 }

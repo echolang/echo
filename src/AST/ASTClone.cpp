@@ -391,10 +391,12 @@ Node *TemporaryBindExprNode::clone(CloneContext &cc) const
     // rather than off a scope, so ScopeNode::clone's declaration pre-pass never sees it
     for (auto *&temp : c->temporaries) temp = cc.child(temp);
 
+    for (auto &stmt : c->statements) stmt = cc.clone_ref(stmt);
+
     c->body = cc.child(c->body);
 
     // always empty in practice, for AssignNode::teardown_old's reason: only a template body is cloned,
-    // and AST::OwnershipPass - the only thing that builds one of these - skips a generic body entirely.
+    // and both producers (OwnershipPass, OperatorRewriter::bind_expression_hoists) skip a generic body.
     // cloned anyway because clone has to be total, and because the shallow copy above would otherwise
     // leave two nodes owning one drop
     for (auto &drop : c->teardown) drop = cc.clone_ref(drop);

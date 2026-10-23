@@ -249,6 +249,12 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      */
     internal function grow_by(usize $n) : void
     {
+        // `len + n` past the largest usize is a length no array can have, and would wrap to one
+        // the reserve below thinks already fits. `arr::extend_from` is a caller-supplied count
+        if ($n > ~(0 as usize) - $this->len) {
+            mem::out_of_memory();
+        }
+
         usize $needed = $this->len + $n;
 
         while ($this->storage->capacity() < $needed) {
@@ -419,6 +425,10 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
             return;
         }
 
+        if ($n > ~(0 as usize) - $this->len) {
+            mem::out_of_memory();
+        }
+
         $this->reserve($this->len + $n);
 
         // **one branch, two correct answers**, and the copy constructor above is written through this:
@@ -481,6 +491,10 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         }
 
         usize $old_len = $this->len;
+
+        if ($count > ~(0 as usize) - $old_len) {
+            mem::out_of_memory();
+        }
 
         // **one reserve, up front, and it is load-bearing rather than an optimisation.** after it the
         // buffer cannot move again for the rest of this call - which is what makes the source range
@@ -546,7 +560,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         // reading the slot here would be a *copy* - the element is a place, so the ownership pass gives
         // it a retain or a copy constructor, and the slot it came from keeps the claim it always had.
         // for a `string` that is a reference nothing will ever release, once per pop
-        return mem::take<T>($this->storage->at($this->len));
+        return $this->storage->take($this->len);
     }
 
     /**
@@ -563,7 +577,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
 
         // taken first and unconditionally, for pluck's reason: it keeps the single `return` outside
         // every branch, and an owning local moved out of on one arm and not the other is a conditional move
-        T $doomed = mem::take<T>($this->storage->at($index));
+        T $doomed = $this->storage->take($index);
 
         // **a bitwise relocation of the tail**, and deliberately not a loop of indexed writes: an indexed
         // write is a *re*-assignment, so the ownership pass would end whatever the destination held - and
@@ -602,7 +616,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         // unconditionally, which is what keeps the single `return` below outside any branch: an owning
         // local moved out of on one arm and not the other is a conditional move, and the ownership pass
         // says so
-        T $doomed = mem::take<T>($this->storage->at($index));
+        T $doomed = $this->storage->take($index);
 
         // the hole is filled from the end - unless it *is* the end, and the guard is not merely a
         // shortcut: `mem::copy`'s two regions must not overlap, and for the last element they are one
@@ -623,7 +637,8 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     }
 
     /**
-     * A copy of the element at `$index`, bounds-checked in every build.
+     * A copy of the element at `$index`, bounds-checked by `assert` like `$a[$index]`. A debug build stops
+     * on an index past the end, and `echoc build` drops the check, as arrays.md describes.
      *
      * `$a[$index]` is the same element without the copy, and is what to reach for.
      */
@@ -708,7 +723,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
             while ($this->len > $count) {
                 $this->len = $this->len - 1;
 
-                T $doomed = mem::take<T>($this->storage->at($this->len));
+                T $doomed = $this->storage->take($this->len);
             }
         }
 

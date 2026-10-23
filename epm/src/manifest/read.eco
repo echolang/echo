@@ -485,7 +485,7 @@ function origin_from_json(json::Value $node) : Origin
 
 public function usable_name(const string& $name) : bool
 {
-    if ($name->empty() || $name->contains('\\')) {
+    if ($name->empty() || $name->contains('\\') || sys::is_absolute($name)) {
         return false;
     }
 
@@ -509,7 +509,7 @@ public function usable_name(const string& $name) : bool
 
             string $part = $name->sub($start, $len);
 
-            if ($part == '.' || $part == '..') {
+            if ($part == '.' || $part == '..' || $part->contains(':')) {
                 return false;
             }
 

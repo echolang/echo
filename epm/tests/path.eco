@@ -96,4 +96,6 @@ test a_package_name_cannot_leave_vendor
     assert(!manifest::usable_name(''));
     assert(!manifest::usable_name('.'));
     assert(!manifest::usable_name('..'));
+    assert(!manifest::usable_name('C:/Windows'));
+    assert(!manifest::usable_name('C:\\Windows'));
 }

@@ -25,8 +25,8 @@ namespace AST
     // short-circuiting `&&` on the path that never evaluates it. a temporary has to live where it is
     // *used*, and only an expression knows where that is
     //
-    // bind `temporaries`, evaluate `body`, run `teardown`, hand back the body's value. every property
-    // of this node follows from those four being in that order: the body has already read what it
+    // bind `temporaries`, run `statements`, evaluate `body`, run `teardown`, hand back the body's
+    // value. every property of this node follows from that order: the body has already read what it
     // wanted out of the temporary before the teardown runs, which is why a class-typed member arrives
     // here already wrapped in a RetainExprNode - AST::OwnershipPass put it there through the ordinary
     // "a place is copied" arm, with no arm of its own - and is one reference up before the teardown's
@@ -55,6 +55,10 @@ namespace AST
         // declaration order at the scope's *end*, and for a temporary inside a condition neither the
         // position nor the count is right
         std::vector<VarDeclNode *> temporaries;
+
+        // statements that fill those temporaries, after they are seated and before the body reads
+        // them. a match arm is an expression, so collection-literal appends cannot be siblings of a statement
+        NodeReferenceList statements;
 
         // the expression the temporaries were bound for. its value is this node's value, which is also
         // why result_type() has nothing of its own to say

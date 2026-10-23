@@ -40,6 +40,10 @@ namespace Compiler::LLVM
         static constexpr unsigned weak_index = 1;
         static constexpr unsigned typeinfo_index = 2;
         static constexpr unsigned payload_index = 3;
+
+        // **the strong count while teardown runs.** parked here so a destructor that retains `$this`
+        // cannot take 0 -> 1 -> 0 and re-enter. negative, far below the `-0xEAD` poison. weak upgrade tests `<= 0`
+        static constexpr long long deiniting_count = -(1LL << 62);
     };
 
     // **a wrapped `T?` has no entry here, and that is the point.** its two slots are `AST::ComplexType`

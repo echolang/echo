@@ -154,7 +154,7 @@ public struct stream
      */
     const function readline() : string?
     {
-        str::buf $owner = str::buf(64, 0, mem::alloc<uint8>(65));
+        str::buf $owner = str::buf(64, 0, str::text_block(64));
 
         uint8 $byte = 0;
         bool $any = false;

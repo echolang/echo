@@ -1,0 +1,12 @@
+// `$m[pick(['x','delta'])]` wraps `pick(...)` in a TemporaryBind because the array
+// argument hoists. that node is a computed value, so `const string&` still ranks
+
+function pick(array<string> $xs) : string
+{
+    return $xs[1];
+}
+
+map<string, int32> $m;
+$m['x'] = 1;
+$m['delta'] = 4;
+echo $m[pick(['x', 'delta'])];

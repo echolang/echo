@@ -1,0 +1,9 @@
+// `cstr()` on a window that stops before its parent's end would hand C a pointer that reads on into the
+// rest of the parent. stopped in every build
+
+string $path = 'config.toml.bak';
+string $head = $path->sub(0, 11);
+
+echo $head;
+ptr<const uint8> $c = $head->cstr();
+echo 'unreachable';

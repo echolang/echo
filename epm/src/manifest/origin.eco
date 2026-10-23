@@ -36,3 +36,176 @@ public struct Origin
         return "{$this->kind} {$this->locator}";
     }
 }
+
+/**
+ * A url git can only read as a repository: `https://`, `ssh://`, the scp
+ * form `user@host:path`, or a path on this machine. Never an option (a leading
+ * `-` is how `--upload-pack=<command>` gets into `git fetch`) and never a
+ * transport helper (`ext::<command>` is git running a command).
+ */
+public function usable_url(const string& $url) : bool
+{
+    if ($url->empty() || $url->starts('-') || $url->contains('::') || has_control_byte($url)) {
+        return false;
+    }
+
+    if ($url->starts('https://') || $url->starts('ssh://')) {
+        usize $scheme = $url->find('://');
+        string $rest = $url->sub($scheme + 3, $url->size() - $scheme - 3);
+
+        // `-` right after `://` is an option as the host, or as userinfo before the last `@`
+        if ($rest->starts('-')) {
+            return false;
+        }
+
+        usize $slash = $rest->find('/');
+        string $authority = $rest;
+
+        if ($slash < $rest->size()) {
+            $authority = $rest->sub(0, $slash);
+        }
+
+        return usable_authority($authority);
+    }
+
+    usize $scheme = $url->find('://');
+
+    if ($scheme < $url->size()) {
+        return false;
+    }
+
+    string $host = host_of_url($url);
+
+    if ($host->empty()) {
+        return true;
+    }
+
+    return usable_authority($url);
+}
+
+/**
+ * A rev git reads as a commit or a ref: no leading `-`, no whitespace or
+ * control byte, and no `..`. Also not a path (`/`, `\`, `:`), so a Windows
+ * drive cannot land in a URL or a cache join. Empty is a rev nobody has
+ * resolved yet, and is usable.
+ */
+public function usable_rev(const string& $rev) : bool
+{
+    if ($rev->empty()) {
+        return true;
+    }
+
+    if ($rev->starts('-') || $rev->starts('/') || $rev->contains('..') || $rev->contains(' ')
+        || $rev->contains(':') || has_control_byte($rev)) {
+        return false;
+    }
+
+    return !$rev->contains('\\');
+}
+
+private function has_control_byte(const string& $text) : bool
+{
+    usize $i = 0;
+
+    while ($i < $text->size()) {
+        uint8 $b = $text->byte($i);
+
+        if ($b < 32 || $b == 127) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+private function usable_host(const string& $host) : bool
+{
+    return !$host->empty() && !$host->starts('-');
+}
+
+private function usable_authority(const string& $authority) : bool
+{
+    usize $at = last_index($authority, '@');
+
+    if ($at < $authority->size() && $authority->sub(0, $at)->starts('-')) {
+        return false;
+    }
+
+    return usable_host(host_of_authority($authority));
+}
+
+private function last_index(const string& $text, const string& $needle) : usize
+{
+    usize $at = $text->size();
+    usize $found = $text->find($needle);
+
+    while ($found < $text->size()) {
+        $at = $found;
+        $found = $text->find($needle, $found + 1);
+    }
+
+    return $at;
+}
+
+private function host_of_authority(const string& $authority) : string
+{
+    usize $at = last_index($authority, '@');
+    string $host = $authority;
+
+    if ($at < $authority->size()) {
+        $host = $authority->sub($at + 1, $authority->size() - $at - 1);
+    }
+
+    usize $colon = $host->find(':');
+
+    if ($colon < $host->size()) {
+        return $host->sub(0, $colon);
+    }
+
+    return $host;
+}
+
+private function windows_path(const string& $url) : bool
+{
+    if ($url->size() < 2 || $url->sub(1, 1) != ':') {
+        return false;
+    }
+
+    uint8 $a = $url->byte(0);
+
+    if (($a < 65 || $a > 90) && ($a < 97 || $a > 122)) {
+        return false;
+    }
+
+    if ($url->size() == 2) {
+        return true;
+    }
+
+    string $third = $url->sub(2, 1);
+
+    return $third == '/' || $third == '\\';
+}
+
+private function host_of_url(const string& $url) : string
+{
+    usize $scheme = $url->find('://');
+
+    if ($scheme < $url->size()) {
+        string $rest = $url->sub($scheme + 3, $url->size() - $scheme - 3);
+        usize $slash = $rest->find('/');
+
+        if ($slash < $rest->size()) {
+            return host_of_authority($rest->sub(0, $slash));
+        }
+
+        return host_of_authority($rest);
+    }
+
+    if (windows_path($url) || !$url->contains(':')) {
+        return '';
+    }
+
+    return host_of_authority($url);
+}

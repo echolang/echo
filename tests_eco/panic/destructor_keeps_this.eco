@@ -1,0 +1,26 @@
+// a destructor that stores `$this` somewhere that outlives it would leave a reference into a block
+// about to be freed. stopped in every build
+
+class Node
+{
+    destructor()
+    {
+        keep($this);
+    }
+}
+
+class Shelf
+{
+    public static Node? $kept = null;
+}
+
+function keep(Node $n) : void
+{
+    Shelf::$kept = $n;
+}
+
+{
+    Node $n = Node();
+}
+
+echo 'unreachable';

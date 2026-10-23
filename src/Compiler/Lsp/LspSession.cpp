@@ -460,7 +460,9 @@ Compiler::Lsp::RebuildReport Compiler::Lsp::Session::rebuild()
             continue;
         }
 
-        if (_dirty || _snapshot == nullptr) {
+        // a parse refusal (dependency jail, missing embed) leaves no snapshot. that is a finished
+        // rebuild, not a reason to compile forever
+        if (_dirty || (_snapshot == nullptr && !last.failed)) {
             if (!launch("sync")) {
                 last.failed = true;
                 return last;

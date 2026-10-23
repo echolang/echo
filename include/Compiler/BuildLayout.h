@@ -6,8 +6,10 @@
 #include "Parser/ManifestParser.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Compiler
 {
@@ -30,10 +32,14 @@ namespace Compiler
     // including artifacts an older echoc left behind. A `--build-dir` or a `#[build_dir:]` is a path
     // somebody typed, and one that is not provably ours is refused rather than written into, because the
     // typo that names a source directory is the one that `echoc clean` would later delete
+    //
+    // **a dependency's default is t_confined.** the name is the compiler's, the tree is shipped:
+    // a symlink or a file under that name is refused, and so is `cc/`
     enum class BuildDirTrust
     {
         t_ours,
-        t_asked_for
+        t_asked_for,
+        t_confined
     };
 
     // three answers, and the middle one is not a failure. **an unwritable store must never fail a build**:
@@ -63,10 +69,17 @@ namespace Compiler
     // it, and the most expensive thing in a build to produce again
     bool is_compiler_supplied_module(const Parser::ModuleManifest &manifest);
 
+    // the per-user echo store (`$XDG_CACHE_HOME/echo`, else `~/.cache/echo`; Windows: `%LOCALAPPDATA%\echo`).
+    // the stdlib's objects live here, and so does the key ArtifactSeal signs with
+    std::filesystem::path user_cache_root();
+
     // the embedded stdlib's virtual paths (`stdlib:/core/array.eco`). a
     // released echoc has no STDLIB_SOURCE_DIR on disk, so the manifest and
     // every source are this prefix rather than a checkout path
     bool is_embedded_stdlib_path(const std::filesystem::path &path);
+
+    // bytes of an embedded `stdlib:` path, or nothing. implemented beside the embed table
+    std::optional<std::string> embedded_stdlib_content(const std::filesystem::path &path);
 
     // `stdlib:/<relative>` — the path the embedded pool, the cache key and
     // the parser all name
@@ -125,7 +138,15 @@ namespace Compiler
         // `flag_directory` is --build-dir as written, empty for none. `entry` is the manifest of the module
         // being built, null when the program is a loose .eco file with no project around it, in which case
         // artifacts nothing owns go to `fallback_scratch`
-        static BuildLayout resolve(const std::filesystem::path &flag_directory, const Parser::ModuleManifest *entry, const std::filesystem::path &fallback_scratch);
+        //
+        // `roots` are the manifests this invocation was pointed at. **every other non-toolchain module is a
+        // dependency**: default dir is t_confined, and a `#[build_dir:]` that leaves its tree is ignored
+        static BuildLayout resolve(
+            const std::filesystem::path &flag_directory,
+            const Parser::ModuleManifest *entry,
+            const std::vector<std::filesystem::path> &roots,
+            const std::filesystem::path &fallback_scratch
+        );
 
         // where this module's own artifacts live - its object, its inputs record, its C build
         std::filesystem::path module_dir(const Parser::ModuleManifest &manifest) const;
@@ -203,7 +224,11 @@ namespace Compiler
         // itself. Shares module_dir's arm order deliberately - two walks of it would be two answers
         BuildDirTrust trust_of(const Parser::ModuleManifest &manifest) const;
 
+        // is this module's own `#[build_dir:]` the answer: always for a root, for a dependency only inside its tree
+        bool honours_declared_build_dir(const Parser::ModuleManifest &manifest) const;
+
         std::filesystem::path _flag_directory;
+        std::vector<std::filesystem::path> _roots;
 
         // the entry module's own directory, and how far it has to prove itself. Empty when the program is a
         // loose .eco file. Kept rather than re-derived because prepare_scratch_dir is the only thing that

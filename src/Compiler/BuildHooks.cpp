@@ -102,7 +102,7 @@ bool Compiler::run_before_build_hooks(
         return refused();
     }
 
-    const BuildLayout layout = BuildLayout::resolve(driver.build_dir, &root, {});
+    const BuildLayout layout = BuildLayout::resolve(driver.build_dir, &root, { root.path }, {});
     const bool json = diagnostics.is_machine_readable();
 
     // two hooks sharing a tool build it once, before the child would have to load itself to notice

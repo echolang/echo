@@ -65,6 +65,7 @@ namespace Compiler
         t_optimize,
         t_debug_symbols,
         t_no_tbaa,
+        t_fixed_hash_seed,
         t_track_allocations,
         t_check_refcounts,
         t_no_stdlib,

@@ -89,6 +89,22 @@ namespace Compiler::LLVM
             const std::string &detail,
             const std::string &symbol_stem);
 
+        // the same unlocated stop, through a **cold, argument-free function**. for a check inside something
+        // that has to stay inlinable: the failing path is one compare and a call taking nothing
+        void gen_cold_abort_if(
+            llvm::Value *condition,
+            const std::string &headline,
+            const std::string &detail,
+            const std::string &symbol_stem
+        );
+
+        // the same cold stop, unconditionally: the call and the `unreachable` (`mem::out_of_memory`)
+        void gen_cold_abort(
+            const std::string &headline,
+            const std::string &detail,
+            const std::string &symbol_stem
+        );
+
         // the crash-hook store. `swap` is set_hook: write `fn`, return what was there (null if
         // the default report was in place). `take` writes null. both are the only writers of
         // `__eco_crash_hook`
@@ -131,6 +147,13 @@ namespace Compiler::LLVM
         llvm::GlobalVariable *hook_global();
 
         void emit_thunk(llvm::Function *thunk);
+
+        // the function gen_cold_abort_if calls, created once per unit
+        llvm::Function *get_or_create_cold_stop(
+            const std::string &headline,
+            const std::string &detail,
+            const std::string &symbol_stem
+        );
 
         // a named linkonce_odr string constant, for the unlocated stop above
         llvm::Constant *odr_string(const std::string &symbol, const std::string &text);

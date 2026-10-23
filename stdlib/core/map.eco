@@ -132,6 +132,12 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
 
         $this->ctrl:$ = mem::alloc<uint8>($other->cap + 16);
         $this->entries:$ = mem::alloc<map_slot<K, V>>($other->cap);
+
+        // never a capacity it did not get. see `rehash`
+        if ($this->ctrl:$ == null || $this->entries:$ == null) {
+            mem::out_of_memory();
+        }
+
         $this->cap = $other->cap;
         $this->len = $other->len;
         $this->tombs = $other->tombs;
@@ -237,7 +243,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     }
 
     /**
-     * A **copy** of the value stored under `$key`, asserted to be there.
+     * A **copy** of the value stored under `$key`, which has to be there. A missing key stops the program.
      *
      * `->at()` for a borrow, and `->take()` to be handed the value itself. Written through the borrowing
      * element operator, so the assert has one implementation - `array<T>::get`'s shape exactly.
@@ -248,10 +254,10 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     }
 
     /**
-     * A borrow of the value stored under `$key`, asserted to be there.
+     * A borrow of the value stored under `$key`, which has to be there. A missing key stops the program.
      *
-     * Written *through* the element operator, the way `array<T>::at` is and for the same reason: the probe
-     * and the assert have one implementation. `$m->at($k)` and `&$m[$k]` are the same thing.
+     * Written *through* the element operator, the way `array<T>::at` is: the probe and the stop have one
+     * implementation. `$m->at($k)` and `&$m[$k]` are the same thing.
      */
     function at(const K& $key) : V&
     {
@@ -302,7 +308,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     }
 
     /**
-     * Removes `$key`'s entry and **hands the value over**, asserted to be there.
+     * Removes `$key`'s entry and **hands the value over**. A missing key stops the program.
      *
      * Hands over rather than duplicates: the caller receives the value the map was holding, and the map is
      * no longer holding it. For a `V` that owns something that is the whole difference between this and
@@ -310,9 +316,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      */
     function take(const K& $key) : V
     {
-        usize $at = $this->find($key);
-
-        assert($at < $this->cap, 'take of a key the map does not hold');
+        usize $at = $this->find_held($key);
 
         $this->vacate($at);
 
@@ -728,6 +732,11 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      */
     private const function slots_for(usize $count) : usize
     {
+        // **a count no table could hold.** past this, `over_load`'s products wrap. on the growth path only
+        if ($count > ~(0 as usize) >> 4) {
+            mem::out_of_memory();
+        }
+
         usize $slots = 16;
 
         while ($this->over_load($count, $slots)) {
@@ -746,51 +755,67 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      */
     const function find(const K& $key) : usize
     {
-        if ($this->cap == 0) {
-            return $this->cap;
-        }
+        return $this->probe($key, false);
+    }
 
-        uint64 $h = $this->slot_hash($key);
-        uint8 $h2 = $this->ctrl_h2($h);
-        usize $mask = $this->cap - 1;
+    /**
+     * The slot holding `$key`, **stopping the program when the map does not hold it**, in every build.
+     * What `[]`, `get`, `at` and `take` read. The stop is on the probe's own miss exit.
+     */
+    internal const function find_held(const K& $key) : usize
+    {
+        return $this->probe($key, true);
+    }
 
-        // the empty-table return above is what establishes `first_slot`'s nonzero capacity here
-        usize $pos = $this->first_slot($h);
-        usize $stride = 0;
+    #[inline]
+    private const function probe(const K& $key, bool $must_hold) : usize
+    {
+        if ($this->cap != 0) {
+            uint64 $h = $this->slot_hash($key);
+            uint8 $h2 = $this->ctrl_h2($h);
+            usize $mask = $this->cap - 1;
 
-        simd<uint8, 16> $want = simd::splat<uint8, 16>($h2);
-        simd<uint8, 16> $empty = simd::splat<uint8, 16>(0x80 as uint8);
+            // the nonzero capacity this branch is under is what `first_slot` needs
+            usize $pos = $this->first_slot($h);
+            usize $stride = 0;
 
-        // bounded by the capacity rather than `while (true)`: a table with no empty slot left has nothing
-        // to stop the walk, and the load factor is what makes that unreachable rather than impossible. a
-        // bound is cheaper than trusting an invariant. `$stride` grows by 16 each group, so this visits
-        // every group of a power-of-two table once
-        while ($stride < $this->cap) {
-            simd<uint8, 16> $group = $this->ctrl_group($pos);
-            uint64 $hits = $this->match_group($group, $want);
+            simd<uint8, 16> $want = simd::splat<uint8, 16>($h2);
+            simd<uint8, 16> $empty = simd::splat<uint8, 16>(0x80 as uint8);
 
-            while ($hits != 0) {
-                usize $at = $this->hit_slot($pos, $hits, $mask);
+            // bounded by the capacity rather than `while (true)`: a table with no empty slot left has
+            // nothing to stop the walk. a bound is cheaper than trusting an invariant
+            while ($stride < $this->cap) {
+                simd<uint8, 16> $group = $this->ctrl_group($pos);
+                uint64 $hits = $this->match_group($group, $want);
 
-                // h2 matched, so `==` - which for a `string` key is a byte loop - runs on roughly 1 in
-                // 128 misses rather than on every occupied slot. a deleted byte never equals h2
-                unsafe {
-                    if ($this->entries:$[$at]->key == $key) {
-                        return $at;
+                while ($hits != 0) {
+                    usize $at = $this->hit_slot($pos, $hits, $mask);
+
+                    // h2 matched, so `==` (a byte loop for a `string` key) runs on roughly 1 in 128 misses
+                    // rather than on every occupied slot. a deleted byte never equals h2
+                    unsafe {
+                        if ($this->entries:$[$at]->key == $key) {
+                            return $at;
+                        }
                     }
+
+                    $hits = $this->drop_hit($hits);
                 }
 
-                $hits = $this->drop_hit($hits);
-            }
+                // an empty slot **ends** the probe: anything inserted later would have taken it.
+                // a tombstone does not: the slot was empty once, and something walked past it
+                if ($this->match_group($group, $empty) != 0) {
+                    break;
+                }
 
-            // an empty slot **ends** the probe: anything inserted later would have taken it, so the key
-            // cannot be further along. a tombstone does not end it, and that is the entire cost of
-            // tombstones - the slot was empty once, and something walked past it
-            if ($this->match_group($group, $empty) != 0) {
-                return $this->cap;
+                $this->advance_group($pos, $stride, $mask);
             }
+        }
 
-            $this->advance_group($pos, $stride, $mask);
+        // **the one miss exit**: an empty table, an empty slot, and a walk of the whole table all arrive here.
+        // `$must_hold` is a constant at both callers, so finding a key is the same instructions it always was
+        if ($must_hold) {
+            mem::cold_die('map key not found');
         }
 
         return $this->cap;
@@ -990,6 +1015,13 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         // through the old one
         $this->ctrl:$ = mem::alloc<uint8>($slots + 16);
         $this->entries:$ = mem::alloc<map_slot<K, V>>($slots);
+
+        // **never a capacity it did not get**: `fill_ctrl` below would write `$slots + 16` bytes through a
+        // null address, and every later probe would trust `$cap`
+        if ($this->ctrl:$ == null || $this->entries:$ == null) {
+            mem::out_of_memory();
+        }
+
         $this->cap = $slots;
         $this->tombs = 0;
 
@@ -1086,7 +1118,7 @@ operator<K, V> (map<K, V>& $m)[const K& $key] = (V $value) : void
 }
 
 /**
- * The **borrowing** contract, over a mutable map: it hands back the element that is there, and asserts when
+ * The **borrowing** contract, over a mutable map: it hands back the element that is there, and stops when
  * there is none. It does not insert - inserting is the declaration above.
  *
  * Exactly `array<T>`'s bargain, keyed. Which is what lets `at()` and `get()` be written through it, the way
@@ -1094,12 +1126,9 @@ operator<K, V> (map<K, V>& $m)[const K& $key] = (V $value) : void
  */
 operator<K, V> (map<K, V>& $m)[const K& $key] : V&
 {
-    usize $at = $m->find($key);
+    usize $at = $m->find_held($key);
 
-    assert($at < $m->cap, 'map key not found');
-
-    // discharged by the probe: `find_slot` only answers an index whose slot is live, and the assert
-    // above turns "not found" into a stop rather than a borrow of nothing
+    // discharged by the probe: `find_held` only answers a live slot, and stops on a key that is not there
     unsafe {
         return &$m->entries:$[$at]->value;
     }
@@ -1113,12 +1142,9 @@ operator<K, V> (map<K, V>& $m)[const K& $key] : V&
  */
 operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
 {
-    usize $at = $m->find($key);
+    usize $at = $m->find_held($key);
 
-    assert($at < $m->cap, 'map key not found');
-
-    // discharged by the probe: `find_slot` only answers an index whose slot is live, and the assert
-    // above turns "not found" into a stop rather than a borrow of nothing
+    // discharged by the probe: `find_held` only answers a live slot, and stops on a key that is not there
     unsafe {
         return &$m->entries:$[$at]->value;
     }

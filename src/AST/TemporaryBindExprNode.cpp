@@ -22,6 +22,10 @@ const std::string TemporaryBindExprNode::node_description()
         desc += temp->node_description() + "; ";
     }
 
+    for (auto &stmt : statements) {
+        desc += stmt.node()->node_description() + "; ";
+    }
+
     desc += body->node_description();
 
     for (auto &drop : teardown) {

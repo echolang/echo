@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+8
+fatal error: shift count is negative or not less than the width of the value shifted
+  at shift_count_truncated.eco:6

@@ -5,6 +5,8 @@
 #include "Compiler/LLVM/Codegen/TargetMachine.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/ArtifactSeal.h"
 #include "Compiler/CodegenTarget.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/ModuleCache.h"
@@ -586,15 +588,41 @@ static std::optional<std::string> link_reuse_digest(
     return Compiler::link_inputs_digest(command, objects);
 }
 
+// the record is the digest and the executable's seal under it, so a shipped record and binary are a relink.
+// see Compiler::artifact_seal
+static std::optional<std::string> link_reuse_record(
+    const std::string &digest,
+    const std::string &executable_name
+)
+{
+    const std::optional<std::string> seal = Compiler::artifact_seal(executable_name, digest);
+
+    if (!seal.has_value()) {
+        return std::nullopt;
+    }
+
+    return digest + "\n" + seal.value() + "\n";
+}
+
 static bool link_reuse_hit(
     const std::optional<std::string> &digest,
     const std::filesystem::path *reuse_record,
     const std::string &executable_name
 )
 {
-    return digest.has_value()
-        && Compiler::cached_object_is_hit(executable_name)
-        && Compiler::read_whole_file(*reuse_record) == digest;
+    if (!digest.has_value()) {
+        return false;
+    }
+
+    std::error_code ec;
+
+    if (!std::filesystem::is_regular_file(executable_name, ec)) {
+        return false;
+    }
+
+    const std::optional<std::string> recorded = Compiler::read_whole_file(*reuse_record);
+
+    return recorded.has_value() && recorded == link_reuse_record(digest.value(), executable_name);
 }
 
 static void drop_link_reuse_record(const std::filesystem::path *reuse_record)
@@ -609,14 +637,17 @@ static void drop_link_reuse_record(const std::filesystem::path *reuse_record)
 
 static void store_link_reuse_record(
     const std::filesystem::path *reuse_record,
-    const std::optional<std::string> &digest
+    const std::optional<std::string> &digest,
+    const std::string &executable_name
 )
 {
     if (!digest.has_value()) {
         return;
     }
 
-    std::ofstream(*reuse_record, std::ios::binary | std::ios::trunc) << digest.value();
+    if (const std::optional<std::string> record = link_reuse_record(digest.value(), executable_name)) {
+        write_artifact_file(*reuse_record, record.value());
+    }
 }
 
 bool Backend::link_program(
@@ -647,13 +678,16 @@ bool Backend::link_program(
     // a half-written file if the process died between the two
     const auto run_and_record = [&](const std::vector<std::string> &command, const std::optional<std::string> &digest) {
         drop_link_reuse_record(reuse_record);
+        // ld / clang open `-o` in place; a planted symlink would be followed. unlink the path
+        // (the link itself, not its target) the way C objects and `ld -r` already do
+        Compiler::clear_artifact_path(executable_name);
 
         if (!Compiler::run_tool(command)) {
             return false;
         }
 
         gen_debug_symbols(executable_name);
-        store_link_reuse_record(reuse_record, digest);
+        store_link_reuse_record(reuse_record, digest, executable_name);
         return true;
     };
 

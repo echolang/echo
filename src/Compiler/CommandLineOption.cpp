@@ -455,6 +455,22 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_fixed_hash_seed, "fixed-hash-seed", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "hash map keys with no per-process seed",
+            "Hash map keys with a constant 0 seed instead of the per-process seed every program "
+            "otherwise draws at startup:\n"
+            "  echoc build --fixed-hash-seed -o app main.eco\n"
+            "A seed is what keeps a map keyed by somebody else's input from being a collision set they "
+            "worked out in advance, so leave it on for anything that reads untrusted keys. Turn it off "
+            "when a map's iteration order has to be the same on every run of that binary. String hashes "
+            "still go through mix, so numbers from before seeding still differ. To repeat one run "
+            "without rebuilding, set ECHO_HASH_SEED=<number> instead.",
+            {}, nullptr
+        },
+        {
             Opt::t_track_allocations, "track-allocations", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_build,
             accepts::compiling, 0, ExclusionGroup::t_none,

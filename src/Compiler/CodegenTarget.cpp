@@ -167,6 +167,51 @@ StdioUnbuffering CodegenTarget::stdio_unbuffering() const
     return StdioUnbuffering::t_none;
 }
 
+EntropySource CodegenTarget::entropy_source() const
+{
+    switch (_os) {
+        case TargetOs::t_darwin: return EntropySource::t_arc4random;
+        case TargetOs::t_ios: return EntropySource::t_arc4random;
+        case TargetOs::t_windows: return EntropySource::t_rand_s;
+        case TargetOs::t_linux: return EntropySource::t_getentropy;
+        case TargetOs::t_wasi: return EntropySource::t_getentropy;
+        case TargetOs::t_other: return EntropySource::t_getentropy;
+    }
+
+    assert(false && "unhandled TargetOs in entropy_source");
+    return EntropySource::t_getentropy;
+}
+
+HostSymbolLookup CodegenTarget::host_symbol_lookup() const
+{
+    switch (_os) {
+        case TargetOs::t_windows: return HostSymbolLookup::t_get_proc_address;
+        case TargetOs::t_darwin: return HostSymbolLookup::t_dlsym;
+        case TargetOs::t_ios: return HostSymbolLookup::t_dlsym;
+        case TargetOs::t_linux: return HostSymbolLookup::t_dlsym;
+        case TargetOs::t_wasi: return HostSymbolLookup::t_dlsym;
+        case TargetOs::t_other: return HostSymbolLookup::t_dlsym;
+    }
+
+    assert(false && "unhandled TargetOs in host_symbol_lookup");
+    return HostSymbolLookup::t_dlsym;
+}
+
+int64_t CodegenTarget::rtld_default() const
+{
+    switch (_os) {
+        case TargetOs::t_darwin: return -2;
+        case TargetOs::t_ios: return -2;
+        case TargetOs::t_linux: return 0;
+        case TargetOs::t_wasi: return 0;
+        case TargetOs::t_windows: return 0;
+        case TargetOs::t_other: return 0;
+    }
+
+    assert(false && "unhandled TargetOs in rtld_default");
+    return 0;
+}
+
 bool CodegenTarget::uses_pic() const
 {
     return !is_wasm();

@@ -1,0 +1,6 @@
+flags: --track-allocations
+
+--- OUT --->
+teardown 1
+looked at 1
+0

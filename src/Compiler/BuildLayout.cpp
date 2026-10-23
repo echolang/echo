@@ -1,7 +1,10 @@
 #include "Compiler/BuildLayout.h"
 
 #include "eco.h"
-#include "Compiler/ModuleCache.h"
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/DependencyTrust.h"
+#include "Compiler/Fnv.h"
+#include "Compiler/SettledPath.h"
 
 #include <fmt/core.h>
 
@@ -37,31 +40,6 @@ std::filesystem::path marker_path(const std::filesystem::path &directory)
     return directory / "CACHEDIR.TAG";
 }
 
-// `$XDG_CACHE_HOME/echo`, else `$HOME/.cache/echo`, else empty when neither is set.
-// Windows has no HOME by default: `%LOCALAPPDATA%\echo`, else `%USERPROFILE%\.cache\echo`
-std::filesystem::path user_cache_root()
-{
-    if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && *xdg != '\0') {
-        return std::filesystem::path(xdg) / "echo";
-    }
-
-#if defined(_WIN32)
-    if (const char *local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0') {
-        return std::filesystem::path(local) / "echo";
-    }
-
-    if (const char *profile = std::getenv("USERPROFILE"); profile != nullptr && *profile != '\0') {
-        return std::filesystem::path(profile) / ".cache" / "echo";
-    }
-#endif
-
-    if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-        return std::filesystem::path(home) / ".cache" / "echo";
-    }
-
-    return {};
-}
-
 // nothing there at all, or there and holding nothing. An empty directory is adoptable - somebody made the
 // path ahead of the build, which is not the mistake this guard is looking for
 bool is_empty_or_absent(const std::filesystem::path &directory)
@@ -86,7 +64,44 @@ bool relative_stays_inside(const std::filesystem::path &relative)
     return !relative.empty() && *relative.begin() != std::filesystem::path("..");
 }
 
+// something under the directory's name that is not a directory of its own: a symlink, or a file.
+// what a t_confined directory may never be
+bool is_planted(const std::filesystem::path &directory)
+{
+    std::error_code ec;
+    const std::filesystem::file_status status = std::filesystem::symlink_status(directory, ec);
+
+    if (ec || status.type() == std::filesystem::file_type::not_found) {
+        return false;
+    }
+
+    return status.type() != std::filesystem::file_type::directory;
+}
+
 };
+
+std::filesystem::path Compiler::user_cache_root()
+{
+    if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && *xdg != '\0') {
+        return std::filesystem::path(xdg) / "echo";
+    }
+
+#if defined(_WIN32)
+    if (const char *local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0') {
+        return std::filesystem::path(local) / "echo";
+    }
+
+    if (const char *profile = std::getenv("USERPROFILE"); profile != nullptr && *profile != '\0') {
+        return std::filesystem::path(profile) / ".cache" / "echo";
+    }
+#endif
+
+    if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return std::filesystem::path(home) / ".cache" / "echo";
+    }
+
+    return {};
+}
 
 bool Compiler::is_echo_build_directory(const std::filesystem::path &directory)
 {
@@ -185,6 +200,10 @@ bool Compiler::resolve_declared_build_dir(
 
 bool Compiler::is_foreign_build_directory(const std::filesystem::path &directory, BuildDirTrust trust)
 {
+    if (trust == BuildDirTrust::t_confined) {
+        return !directory.empty() && is_planted(directory);
+    }
+
     // a directory the compiler chose the name of is adopted whatever is in it - an older echoc's artifacts
     // are exactly what is expected there, and refusing them would make an upgrade a build failure
     if (trust != BuildDirTrust::t_asked_for || directory.empty()) {
@@ -214,15 +233,11 @@ Compiler::BuildDirState Compiler::prepare_build_directory(
         return BuildDirState::t_unusable;
     }
 
-    // the marker is the probe: writing it is what proves the directory can take an object
-    std::ofstream out(marker_path(directory), std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return BuildDirState::t_unusable;
-    }
-
-    out << marker_contents();
-
-    return out.good() ? BuildDirState::t_ready : BuildDirState::t_unusable;
+    // the marker is the probe: writing it proves the directory can take an object. replaced rather than
+    // truncated, since a shipped directory may hold a planted link under that name
+    return write_artifact_file(marker_path(directory), marker_contents())
+        ? BuildDirState::t_ready
+        : BuildDirState::t_unusable;
 }
 
 Compiler::BuildDirRemoval Compiler::remove_build_directory(
@@ -237,6 +252,14 @@ Compiler::BuildDirRemoval Compiler::remove_build_directory(
 
     if (!std::filesystem::exists(directory, ec)) {
         return BuildDirRemoval::t_absent;
+    }
+
+    if (trust == BuildDirTrust::t_confined && is_planted(directory)) {
+        out_reason = fmt::format(
+            "'{}' is not a directory of its own - it is a symbolic link or a file - so nothing was removed "
+            "through it.",
+            directory.string());
+        return BuildDirRemoval::t_refused;
     }
 
     if (trust == BuildDirTrust::t_asked_for && !is_echo_build_directory(directory)) {
@@ -260,11 +283,13 @@ Compiler::BuildDirRemoval Compiler::remove_build_directory(
 Compiler::BuildLayout Compiler::BuildLayout::resolve(
     const std::filesystem::path &flag_directory,
     const Parser::ModuleManifest *entry,
+    const std::vector<std::filesystem::path> &roots,
     const std::filesystem::path &fallback_scratch
 )
 {
     BuildLayout layout;
     layout._flag_directory = flag_directory;
+    layout._roots = roots;
 
     // **the project's own build directory, when there is a project.** A loose .eco file has no manifest and
     // therefore no place of its own to put an object nothing keeps, and the caller's fallback - a directory
@@ -333,7 +358,7 @@ std::filesystem::path Compiler::BuildLayout::module_dir(const Parser::ModuleMani
 
     // the module's own preference over its own artifacts, and never over a dependency's - the one-way rule
     // `#[sources:]` already follows. Already absolute: the manifest reader resolved it against the manifest
-    if (!manifest.build_dir.empty()) {
+    if (honours_declared_build_dir(manifest)) {
         return manifest.build_dir;
     }
 
@@ -397,11 +422,26 @@ Compiler::BuildDirTrust Compiler::BuildLayout::trust_of(const Parser::ModuleMani
         return BuildDirTrust::t_asked_for;
     }
 
-    if (!is_compiler_supplied_module(manifest) && !manifest.build_dir.empty()) {
+    if (!is_compiler_supplied_module(manifest) && honours_declared_build_dir(manifest)) {
         return BuildDirTrust::t_asked_for;
     }
 
+    if (!module_is_trusted(manifest, _roots)) {
+        return BuildDirTrust::t_confined;
+    }
+
     return BuildDirTrust::t_ours;
+}
+
+bool Compiler::BuildLayout::honours_declared_build_dir(const Parser::ModuleManifest &manifest) const
+{
+    if (manifest.build_dir.empty()) {
+        return false;
+    }
+
+    // **a dependency writes into its own tree and nowhere else.** a `#[build_dir:]` that leaves that
+    // tree is ignored and the default beside the manifest applies
+    return module_is_trusted(manifest, _roots) || path_is_inside(manifest.build_dir, manifest.directory);
 }
 
 Compiler::BuildDirState Compiler::BuildLayout::prepare_module_dir(
@@ -435,8 +475,20 @@ std::string Compiler::BuildLayout::first_foreign_directory(
     for (const Parser::ModuleManifest &manifest : manifests) {
         const std::filesystem::path directory = module_dir(manifest);
 
-        if (!is_foreign_build_directory(directory, trust_of(manifest))) {
+        const BuildDirTrust trust = trust_of(manifest);
+
+        if (!is_foreign_build_directory(directory, trust)) {
             continue;
+        }
+
+        if (trust == BuildDirTrust::t_confined) {
+            return fmt::format(
+                "'{}' is not a directory - it is a symbolic link or a file - and it belongs to module '{}', "
+                "which this build depends on. A dependency's build directory is written into, so one that "
+                "arrived as a link could point the build at any directory on this machine; nothing was "
+                "written through it.\n\n"
+                "Remove '{}' and build again.",
+                directory.string(), manifest.name, directory.string());
         }
 
         // it names what to change rather than only what is wrong: the two ways to get here are a

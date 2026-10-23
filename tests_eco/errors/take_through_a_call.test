@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] take_through_a_call.eco:5:22
+
+  'mem::take' cannot reach a slot a function handed back as a borrow: whatever it borrowed from still owns that value and will tear it down, so emptying it here would destroy it twice. Use the owner's own method - 'pop', 'remove', 'mem::buffer::take' or 'mem::buffer::put'.
+
+  4 | array<string> $names = [str::repeat('abcdefgh', 4)];
+  5 | string $taken = mem::take<string>($names->at(0));
+    :                      ^^^^
+  6 | 
+
+1 error, nothing was compiled.

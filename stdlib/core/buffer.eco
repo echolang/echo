@@ -85,7 +85,7 @@ public struct buffer<T>
      */
     function resize(usize $count) : void
     {
-        $this->data:$ = mem::realloc<T>($this->data, $count);
+        $this->data:$ = regrow<T>($this->data, $count);
         $this->cap = $count;
     }
 
@@ -180,4 +180,42 @@ public struct buffer<T>
             return &$this->data:$[$index];
         }
     }
+
+    /**
+     * The value in the slot at `$index`, handed over, **unchecked**. The slot is left holding bytes that
+     * own nothing. `mem::take` on `$b->at($index)` is refused: that borrow is a slot something still counts.
+     */
+    function take(usize $index) : T
+    {
+        return mem::take<T>($this->data:$[$index]);
+    }
+
+    /**
+     * Fills the slot at `$index` with `$value`, **unchecked**, ending nothing. The slot is taken to hold
+     * no value yet, as one fresh out of `resize` does. The mirror of `take`.
+     */
+    function put(usize $index, T $value) : void
+    {
+        mem::init<T>($this->data:$[$index], mv $value);
+    }
+}
+
+/**
+ * `$data` reallocated to `$count` elements, **never a block smaller than that**. A count whose bytes do
+ * not fit, or an allocator that says no, stops the program rather than let `resize` record a capacity it
+ * did not get. **Inline**, so LLVM can remove an allocation it can see is freed unused.
+ */
+#[inline]
+private function regrow<T>(ptr<T> $data, usize $count) : ptr<T>
+{
+    ptr<T> $moved = mem::realloc<T>($data, $count);
+
+    // `$count` is elements. a zero-size `T` asks the allocator for 0 bytes even at a
+    // positive count, and glibc / wasi-libc return null from `realloc(p, 0)` as a
+    // legitimate free. macOS often returns non-null, which is why this is easy to miss
+    if ($moved:$ == null && $count != 0 && mem::size<T>() != 0) {
+        out_of_memory();
+    }
+
+    return $moved;
 }

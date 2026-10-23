@@ -76,15 +76,26 @@ public function kind_named(const string& $word) : Kind?
 
 public function usable_project_name(const string& $name) : bool
 {
-    if ($name->contains('/') || $name->contains('"') || $name->contains("'")) {
+    // the name becomes `#[module:]`, a target's name and a directory: letters, digits, `_` and `-`.
+    // a dot or a separator would scaffold a project echoc then refuses
+    if ($name->empty()) {
         return false;
     }
 
-    if ($name->contains("\n") || $name->contains("\r")) {
-        return false;
+    usize $i = 0;
+
+    while ($i < $name->size()) {
+        uint8 $b = $name->byte($i);
+        bool $alnum = ($b >= 48 && $b <= 57) || ($b >= 65 && $b <= 90) || ($b >= 97 && $b <= 122);
+
+        if (!$alnum && $b != 95 && $b != 45) {
+            return false;
+        }
+
+        $i = $i + 1;
     }
 
-    return manifest::usable_name($name);
+    return true;
 }
 
 public function attribute_text_ok(const string& $text) : bool

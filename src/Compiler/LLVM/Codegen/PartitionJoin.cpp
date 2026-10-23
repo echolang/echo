@@ -1,5 +1,7 @@
 #include "Compiler/LLVM/Codegen/Partition.h"
 
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/ArtifactSeal.h"
 #include "Compiler/HostTool.h"
 
 #include <llvm/TargetParser/Triple.h>
@@ -32,6 +34,10 @@ bool Compiler::LLVM::join_relocatable(
         return false;
     }
 
+    // both writers below open the output in place, so whatever is under its name goes first.
+    // see Compiler::clear_artifact_path
+    Compiler::clear_artifact_path(output);
+
     if (objects.size() == 1) {
         std::error_code ec;
         std::filesystem::copy_file(
@@ -42,6 +48,7 @@ bool Compiler::LLVM::join_relocatable(
             return false;
         }
 
+        Compiler::seal_artifact(output);
         return true;
     }
 
@@ -74,5 +81,6 @@ bool Compiler::LLVM::join_relocatable(
         return false;
     }
 
+    Compiler::seal_artifact(output);
     return true;
 }

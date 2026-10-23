@@ -1,0 +1,159 @@
+use epm::fetch;
+use epm::lock;
+use epm::manifest;
+use epm::scratch;
+use epm::sys;
+
+test a_url_that_is_an_option_is_not_usable
+{
+    assert(manifest::usable_url('https://example.com/lib.git'));
+    assert(manifest::usable_url('ssh://git@example.com/lib.git'));
+    assert(manifest::usable_url('ssh://git@example.com:22/lib.git'));
+    assert(manifest::usable_url('git@github.com:echolang/libjson'));
+    assert(manifest::usable_url('../libs/json'));
+    assert(!manifest::usable_url('--upload-pack=touch /tmp/pwned'));
+    assert(!manifest::usable_url('-uevil'));
+    assert(!manifest::usable_url('ext::sh -c touch% /tmp/pwned'));
+    assert(!manifest::usable_url('fd::17'));
+    assert(!manifest::usable_url('http://example.com/lib.git'));
+    assert(!manifest::usable_url('git://example.com/lib.git'));
+    assert(!manifest::usable_url('ssh://-oProxyCommand=touch /tmp/pwned/repo.git'));
+    assert(!manifest::usable_url('ssh://git@-oProxyCommand=evil/repo.git'));
+    assert(!manifest::usable_url('ssh://-oProxyCommand=id@github.com/user/repo.git'));
+    assert(!manifest::usable_url('git@-oProxyCommand=touch /tmp/pwned:repo.git'));
+    assert(!manifest::usable_url('ssh:///repo.git'));
+    assert(!manifest::usable_url(''));
+}
+
+test a_rev_that_is_an_option_or_a_path_is_not_usable
+{
+    assert(manifest::usable_rev(''));
+    assert(manifest::usable_rev('v1.2.0'));
+    assert(manifest::usable_rev('0123456789abcdef0123456789abcdef01234567'));
+    assert(!manifest::usable_rev('--upload-pack=touch'));
+    assert(!manifest::usable_rev('../../etc'));
+    assert(!manifest::usable_rev('/etc'));
+    assert(!manifest::usable_rev('a b'));
+    assert(!manifest::usable_rev('C:/Windows'));
+    assert(!manifest::usable_rev('C:\\Windows'));
+}
+
+test a_cache_dir_hashes_the_rev_instead_of_joining_it
+{
+    string $tagged = fetch::cache_dir('https://example.com/x.git', 'v1.2.0');
+
+    if (!$tagged->empty()) {
+        assert(!$tagged->contains('v1.2.0'));
+    }
+
+    string $drive = fetch::cache_dir('https://example.com/x.git', 'C:/Windows');
+
+    if (!$drive->empty()) {
+        assert(!$drive->contains('Windows'));
+        assert(!$drive->contains('C:'));
+    }
+}
+
+test a_lock_naming_an_absolute_path_is_refused
+{
+    string $dir = scratch::dir('lock-abs');
+    string $path = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"/","version":"1.0.0","source":{"kind":"git","url":"https://example.com/x"},"rev":"","sha256":"","requires":[]}]}'
+    );
+    assert(lock::load($path)->failed());
+    scratch::gone($dir);
+}
+
+test a_lock_naming_a_windows_drive_path_is_refused
+{
+    string $dir = scratch::dir('lock-drive');
+    string $path = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"C:/Windows","version":"1.0.0","source":{"kind":"git","url":"https://example.com/x"},"rev":"","sha256":"","requires":[]}]}'
+    );
+    assert(lock::load($path)->failed());
+    scratch::gone($dir);
+}
+
+test a_lock_climbing_out_of_vendor_is_refused
+{
+    string $dir = scratch::dir('lock-climb');
+    string $path = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"../x","version":"1.0.0","source":{"kind":"git","url":"https://example.com/x"},"rev":"","sha256":"","requires":[]}]}'
+    );
+    assert(lock::load($path)->failed());
+    scratch::gone($dir);
+}
+
+test a_lock_handing_git_an_option_is_refused
+{
+    string $dir = scratch::dir('lock-opt');
+    string $path = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"lib","version":"1.0.0","source":{"kind":"git","url":"--upload-pack=touch /tmp/x"},"rev":"","sha256":"","requires":[]}]}'
+    );
+    assert(lock::load($path)->failed());
+
+    string $rev = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"lib","version":"1.0.0","source":{"kind":"git","url":"https://example.com/x"},"rev":"--upload-pack=x","sha256":"","requires":[]}]}'
+    );
+    assert(lock::load($rev)->failed());
+    scratch::gone($dir);
+}
+
+test a_lock_with_a_malformed_hash_is_refused
+{
+    string $dir = scratch::dir('lock-sha');
+    string $path = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"lib","version":"1.0.0","source":{"kind":"git","url":"https://example.com/x"},"rev":"","sha256":"nothex","requires":[]}]}'
+    );
+    assert(lock::load($path)->failed());
+    scratch::gone($dir);
+}
+
+#[if: os != windows]
+test remove_all_unlinks_a_link_and_leaves_its_target
+{
+    string $root = scratch::dir('rm-link');
+    string $outside = sys::join($root, 'outside');
+    string $tree = sys::join($root, 'tree');
+    assert(sys::mkdir_p($outside));
+    assert(sys::mkdir_p($tree));
+    scratch::file($outside, 'keep.txt', 'precious');
+
+    array<string> $ln = array<string>();
+    $ln[] = 'ln';
+    $ln[] = '-s';
+    $ln[] = $outside;
+    $ln[] = sys::join($tree, 'home');
+    assert(sys::run($ln)->ok());
+
+    assert(sys::remove_all($tree));
+    assert(!sys::exists($tree));
+    assert(sys::is_file(sys::join($outside, 'keep.txt')));
+    scratch::gone($root);
+}
+
+test a_marked_directory_in_a_fetched_tree_is_removed_before_hashing
+{
+    string $root = scratch::dir('marked');
+    string $src = sys::join($root, 'src');
+    assert(sys::mkdir_p($src));
+    scratch::file($src, 'evil.eco', 'echo 1;');
+    scratch::file($src, 'CACHEDIR.TAG', "Signature: 8a477f597d28d172789f06886806bc55\n# echoc-build-directory\n");
+
+    assert(sys::remove_build_dirs($root));
+    assert(!sys::exists($src));
+    scratch::gone($root);
+}
+#[end]

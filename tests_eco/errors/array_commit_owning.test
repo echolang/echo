@@ -5,4 +5,4 @@ expect: fail
 
 --- OUT --->
 fatal error: commit() needs elements that are just bytes - C cannot construct an owning T
-  at array.eco:381
+  at array.eco:387

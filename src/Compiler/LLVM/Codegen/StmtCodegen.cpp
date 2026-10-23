@@ -8,6 +8,8 @@
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/ASTAccess.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTNodeReference.h"
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
@@ -101,39 +103,8 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
             continue;
         }
 
-        // a statement must leave the value stack exactly as it found it. every value pushed by
-        // a subexpression belongs to the parent that asked for it, so anything still on the
-        // stack here is a leak - and a leak silently feeds the wrong value to a later pop
-        const size_t depth_before = _ctx.value_stack.size();
+        gen_statement(*child.node());
 
-        // **the statement seam.** set once here and inherited by every load, call and branch the
-        // subtree below emits, which is the whole of how a line table falls out of a walk that knows
-        // nothing about lines. Per statement rather than per expression deliberately: that is the
-        // granularity a `step` command means, and a location per expression node triples the metadata
-        // for no debugger benefit
-        _ctx.debug_info->set_location(*child.node());
-
-        child.node()->accept(*_ctx.visitor);
-
-        // an expression statement discards its value: `mem::free($p);` is a whole statement even
-        // though the call has a result, and libc's memcpy/memset return a pointer nobody wants.
-        // this is the one place a pushed value legitimately has no parent to claim it, so drop
-        // it here rather than making callees lie about their return type
-        if (AST::make_ref(child.node()).is_expression_node()) {
-            while (_ctx.value_stack.size() > depth_before) {
-                _ctx.value_stack.pop();
-            }
-        }
-
-        // anything else leaving a value behind is still a genuine codegen bug
-        assert(_ctx.value_stack.size() == depth_before && "statement leaked a value onto the stack");
-
-        // the block this statement left the builder in already ends, so everything after it is
-        // unreachable and must not be emitted - a second terminator in one block fails the
-        // verifier. asked of the block rather than of the statement because a return is not the
-        // only thing that terminates one: an `if` whose every arm returns leaves the builder
-        // inside the last arm, and the scope-exit drops the ownership pass appends after it would
-        // land there. that shape is only reachable at all once a scope owes drops
         if (_ctx.block_is_terminated()) {
             break;
         }
@@ -142,6 +113,36 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
     // the `break` above falls through to here, so this is the one exit and the stack stays balanced.
     // the early return at the top of this function is *ahead* of the push, deliberately
     _ctx.debug_info->pop_lexical_block(debug_block);
+}
+
+void StmtCodegen::gen_statement(AST::Node &node)
+{
+    // a statement must leave the value stack exactly as it found it. every value pushed by
+    // a subexpression belongs to the parent that asked for it, so anything still on the
+    // stack here is a leak - and a leak silently feeds the wrong value to a later pop
+    const size_t depth_before = _ctx.value_stack.size();
+
+    // **the statement seam.** set once here and inherited by every load, call and branch the
+    // subtree below emits, which is the whole of how a line table falls out of a walk that knows
+    // nothing about lines. Per statement rather than per expression deliberately: that is the
+    // granularity a `step` command means, and a location per expression node triples the metadata
+    // for no debugger benefit
+    _ctx.debug_info->set_location(node);
+
+    node.accept(*_ctx.visitor);
+
+    // an expression statement discards its value: `mem::free($p);` is a whole statement even
+    // though the call has a result, and libc's memcpy/memset return a pointer nobody wants.
+    // this is the one place a pushed value legitimately has no parent to claim it, so drop
+    // it here rather than making callees lie about their return type
+    if (AST::make_ref(&node).is_expression_node()) {
+        while (_ctx.value_stack.size() > depth_before) {
+            _ctx.value_stack.pop();
+        }
+    }
+
+    // anything else leaving a value behind is still a genuine codegen bug
+    assert(_ctx.value_stack.size() == depth_before && "statement leaked a value onto the stack");
 }
 
 llvm::Value *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)

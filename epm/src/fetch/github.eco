@@ -52,7 +52,17 @@ public class GitHub : Source
             return .error("cannot fetch a manifest from {$this->url} without a rev");
         }
 
+        // the rev is interpolated into a raw.githubusercontent.com path before git sees it
+        if (!manifest::usable_rev($key)) {
+            return .error("'{$key}' is not a rev epm will use for {$this->url}");
+        }
+
         string $cache = cache_dir($this->url, $key);
+
+        if ($cache->empty()) {
+            return .error("cannot fetch a manifest from {$this->url}: no user cache directory");
+        }
+
         string $mod = sys::join($cache, 'module.eco');
         result<manifest::Manifest, string> $cached = load_if_readable($mod);
 

@@ -37,6 +37,14 @@ namespace Compiler
         t_ns_get_environ,
         t_environ,
         t_stdout,
+        t_strtoull,
+        t_arc4random_buf,
+        t_getentropy,
+        t_rand_s,
+        t_get_module_handle_a,
+        t_get_proc_address,
+        t_dlopen,
+        t_dlsym,
         t_count
     };
 

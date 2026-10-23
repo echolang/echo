@@ -293,8 +293,16 @@ bool Compiler::append_codegen_link_args(
                 // the lib's own calls to an export stay inside the image.
                 // without it, a plugin that exports `floor` binds to libm
                 argv.push_back("-Wl,-Bsymbolic-functions");
+                // gen_startup copies the host's hash seed through dlsym
+                argv.push_back("-ldl");
             }
         }
+    }
+
+    // a plugin dlsyms this out of the main image. ELF executables keep defined
+    // symbols local unless named; Darwin exports globals by default
+    if (!target.is_library() && target.os() == TargetOs::t_linux) {
+        argv.push_back("-Wl,--export-dynamic-symbol=__eco_hash_seed");
     }
 
     if (target.is_wasm() && export_memory) {

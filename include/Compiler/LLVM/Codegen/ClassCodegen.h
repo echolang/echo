@@ -222,7 +222,30 @@ namespace Compiler::LLVM
         // the environment half: load the typeinfo deinit slot, skip if null, otherwise the same
         // spill-and-call. one path for every environment, because a callable's type says nothing
         // about which environment it holds
-        void gen_typeinfo_deinit_call(llvm::Value *handle);
+        void gen_typeinfo_deinit_call(llvm::Value *handle, CountAccess access);
+
+        // `teardown`, with the strong count parked at ClassBox::deiniting_count. a count that is not the
+        // sentinel afterwards is a destructor that kept `$this`: the block is about to be freed, so that stops
+        // the program. `type_name` is the message, `symbol_stem` the stop's symbol
+        void gen_guarded_teardown(
+            llvm::Value *handle,
+            CountAccess access,
+            const std::string &type_name,
+            const std::string &symbol_stem,
+            llvm::function_ref<void()> teardown
+        );
+
+        // gen_guarded_teardown, **in a function of its own**: `__eco_teardown_<symbol_stem>`, `noinline`.
+        // the release a caller inlines is then a decrement, a compare and this call
+        llvm::Function *get_or_create_guarded_teardown(
+            CountAccess access,
+            const std::string &type_name,
+            const std::string &symbol_stem,
+            llvm::function_ref<void(llvm::Value *handle)> body
+        );
+
+        // the env path: `__eco_teardown_env(ptr, ptr deinit)`, one noinline thunk
+        llvm::Function *get_or_create_env_teardown(CountAccess access);
 
         // **one decrement, two things that can end at zero.** the strong count reaching zero runs the
         // payload's teardown and gives back the collective weak reference; the weak count reaching zero

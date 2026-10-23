@@ -37,6 +37,8 @@ TEST_CASE("attribute_admission classifies each spelling by medium and gate", "[a
         { "echoc::builtin",  AttributeMedium::t_source,   true,  AttributeAdmission::t_compiler },
         { "echoc::core",     AttributeMedium::t_source,   true,  AttributeAdmission::t_compiler },
         { "echoc::intrinsic",AttributeMedium::t_source,   true,  AttributeAdmission::t_compiler },
+        { "echoc::cold",     AttributeMedium::t_source,   true,  AttributeAdmission::t_compiler },
+        { "echoc::cold",     AttributeMedium::t_source,   false, AttributeAdmission::t_reserved_namespace },
         { "echoc::bogus",    AttributeMedium::t_source,   true,  AttributeAdmission::t_unknown_compiler },
         { "export",          AttributeMedium::t_source,   true,  AttributeAdmission::t_language },
         { "web::js_name",    AttributeMedium::t_source,   true,  AttributeAdmission::t_tool },
@@ -75,5 +77,5 @@ TEST_CASE("known_attribute_list is the public declaration names only", "[attribu
     REQUIRE(listed.find("intrinsic") == std::string::npos);
     REQUIRE(listed.find("depends") == std::string::npos);
 
-    REQUIRE(AST::compiler_attribute_list() == "echoc::core, echoc::builtin, echoc::intrinsic");
+    REQUIRE(AST::compiler_attribute_list() == "echoc::core, echoc::builtin, echoc::intrinsic, echoc::cold");
 }

@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] cold_die_non_literal_message.eco:7:1
+
+  the message of 'cold_die' must be a string literal - it is folded into the binary along with the source location, so it has to be known at compile time
+
+  6 | int32 $m = 1;
+  7 | cold_die($m);
+    : ^^^^^^^^
+  8 | 
+
+1 error, nothing was compiled.

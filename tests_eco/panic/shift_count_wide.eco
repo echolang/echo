@@ -1,0 +1,8 @@
+// 2^32+1 as a uint64 count of a uint32 shift. narrowed to i32 it becomes 1, a legal count
+
+function shifted(uint32 $v, uint64 $by) : uint32
+{
+    return $v << $by;
+}
+
+echo shifted(1, 4294967297);

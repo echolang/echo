@@ -290,17 +290,18 @@ public struct string : contract::comparable<string>
         /**
          * The bytes as a NUL-terminated C string, with no copy.
          *
-         * Asserted rather than checked, because handing C a pointer that runs past the end of the
-         * window is a mistake in the caller and not a condition to recover from. `->clone()` first
-         * when you need a terminated copy of a substring, or ask `terminated()` when you would
-         * rather branch than die.
+         * **Stops the program in every build** when the window is not terminated. C reads a pointer until
+         * its NUL, so a substring handed over here becomes the rest of its parent: a longer path to `open`,
+         * a different name to `getenv`. `->clone()` first when you need a terminated copy of a substring.
          *
          * A 0 byte *inside* the window still ends the C string early. That is what a C string is,
          * and nothing here can do anything about it.
          */
         const function cstr() : ptr<const uint8>
         {
-            assert($this->terminated(), 'string is not NUL terminated - clone it first');
+            if (!$this->terminated()) {
+                mem::cold_die('string is not NUL terminated - clone it first');
+            }
 
             return $this->bytes;
         }
@@ -308,7 +309,7 @@ public struct string : contract::comparable<string>
         /**
          * The bytes, with no terminator required.
          *
-         * `cstr()` is this plus the assert that C can walk off the end of a substring. A window
+         * `cstr()` is this plus the check that C cannot walk off the end of a substring. A window
          * that stops early is still a valid pointer and length - hand both to anything that already
          * knows the count.
          */
@@ -410,7 +411,7 @@ public struct string : contract::comparable<string>
         if ($this->is_inline()) {
             return $this->sso_bytes();
         }
-        return $this->owner?->data() ?? die('string has no buffer');
+        return $this->owner?->data() ?? mem::cold_die('string has no buffer');
     }
 
     #[inline]
@@ -419,7 +420,7 @@ public struct string : contract::comparable<string>
         if ($this->is_inline()) {
             return self::INLINE;
         }
-        return $this->owner?->capacity ?? die('string has no buffer');
+        return $this->owner?->capacity ?? mem::cold_die('string has no buffer');
     }
 
     private function finish(usize $n) : void
@@ -433,7 +434,7 @@ public struct string : contract::comparable<string>
         }
 
         if ($this->owner == null) {
-            die('string has no buffer');
+            mem::cold_die('string has no buffer');
         }
 
         $this->owner?->set_used($n);
@@ -674,8 +675,13 @@ public struct string : contract::comparable<string>
             return $out;
         }
 
-        // `+ 1` is the NUL slot, exactly as str::buf counts it
-        str::buf $buf = str::buf($n + $extra, 0, mem::alloc<uint8>($n + $extra + 1));
+        // `$n + $extra` past the largest usize is a length no string can have, and would wrap to a small one
+        if ($extra > ~(0 as usize) - $n) {
+            mem::out_of_memory();
+        }
+
+        // `+ 1` is the NUL slot, exactly as str::buf counts it. str::text_block adds it
+        str::buf $buf = str::buf($n + $extra, 0, str::text_block($n + $extra));
         $buf->append($bytes, $n);
 
         return string(string::view($buf->bytes, $n), $buf);
@@ -749,8 +755,8 @@ public struct string : contract::comparable<string>
         }
 
         $this->window = string::view(
-            $this->owner?->data() ?? die('string has no buffer'),
-            $this->owner?->used ?? die('string has no buffer'));
+            $this->owner?->data() ?? mem::cold_die('string has no buffer'),
+            $this->owner?->used ?? mem::cold_die('string has no buffer'));
     }
 
     /**
@@ -774,7 +780,7 @@ public struct string : contract::comparable<string>
         }
 
         if ($this->owner == null) {
-            die('string has no buffer');
+            mem::cold_die('string has no buffer');
         }
 
         $this->owner?->reserve($capacity);
@@ -797,7 +803,7 @@ public struct string : contract::comparable<string>
             return $this->window->size;
         }
 
-        return $this->owner?->capacity ?? die('string has no buffer');
+        return $this->owner?->capacity ?? mem::cold_die('string has no buffer');
     }
 
     /**
@@ -813,7 +819,7 @@ public struct string : contract::comparable<string>
             $need = $n;
         }
 
-        str::buf $buf = str::buf($need, 0, mem::alloc<uint8>($need + 1));
+        str::buf $buf = str::buf($need, 0, str::text_block($need));
         $buf->append($src, $n);
         $this->owner = $buf;
         $this->window = string::view($buf->bytes, $n);
@@ -853,7 +859,13 @@ public struct string : contract::comparable<string>
 
         usize $n = $this->window->size;
 
-        if ($n + $count > $this->cap()) {
+        // room left rather than room needed, so a count a caller computed cannot wrap `n + count` into a
+        // size that already looks like it fits. `n <= cap()` always holds, so this cannot underflow
+        if ($count > $this->cap() - $n) {
+            if ($count > ~(0 as usize) - $n) {
+                mem::out_of_memory();
+            }
+
             $this->promote($n + $count);
         }
 
@@ -934,11 +946,11 @@ public struct string : contract::comparable<string>
     {
         usize $extra = $other->size();
 
-        if ($extra == 0) {
-            return;
+        // one exit rather than an early return: `$other` is dropped on every way out, and two ways out is
+        // that release emitted twice: enough body to stop this inlining into a caller's loop
+        if ($extra != 0) {
+            $this->append($other->live_bytes(), $extra);
         }
-
-        $this->append($other->live_bytes(), $extra);
     }
 
     /**

@@ -99,8 +99,6 @@ namespace AST
             case NodeType::n_expr_function_ref:
             // a constant table already is an address, same reason
             case NodeType::n_expr_constant_data:
-            // already carries its own request outward through the pending queue
-            case NodeType::n_expr_temp_bind:
                 return StorageClass::t_addressless;
 
             // a call, an indirect call, every literal, an arithmetic result, a cast, `strong($w)`,
@@ -112,6 +110,11 @@ namespace AST
             // storage. answering addressless instead was silently wrong in one direction - a
             // `const string&` parameter stopped ranking as a temporary borrow, so `println("{$x}")`
             // was refused as an impossible conversion rather than bound to a slot
+            //
+            // **a TemporaryBind is the same kind of computed value.** wrapping `pick(['x'])` so the
+            // nested `$__lit` dies with the index does not change what `pick` returned, and a
+            // `const K&` parameter still needs a slot for that. addressless here made
+            // `$m[pick(['x','delta'])]` fail to resolve `operator []`
             default:
                 return StorageClass::t_materializable;
         }
@@ -312,8 +315,8 @@ namespace AST
     // The member peel is place_anchor's, so the two cannot disagree about a base
     bool is_unaccounted_storage(const ExprNode &expr);
 
-    // a `T&` argument to `mem::take` / `mem::init`: AddrOf peels to
-    // is_unaccounted_storage, a varref is a borrow local and is accounted
+    // a `T&` argument to `mem::take` / `mem::init`: an AddrOf of is_unaccounted_storage, **nothing else**.
+    // a call returning `T&` (`$arr->at(0)`) is a slot its owner still counts, so taking from one double-frees
     bool is_unaccounted_address(const ExprNode &address);
 
     // **is there anything here to mint storage for at all?** the half the two requesting arms - a member
@@ -328,14 +331,13 @@ namespace AST
     //
     // a **pointer** operand needs nothing: a borrow-returning call already is the address
     //
-    // **it asks the place half of storage_of and deliberately not the addressless half**, which is the
-    // one place the two questions come apart. can_bind_temporary answers "may the compiler *ask* for a
-    // slot for this shape", which an array literal and a bare `null` must refuse. this answers "does an
-    // operand somebody has already decided to address have anything to size a slot from" - and
-    // `n_expr_temp_bind` is exactly the case where those differ: nothing may request one be materialised
-    // as an argument, because it carries its own request, yet an `&` over one a nested bind produced
-    // does need a slot. the type test below is what excludes the rest: a null and an array literal both
-    // answer unknown here
+    // **it asks the place half of storage_of and deliberately not the addressless half**, which is
+    // where the two questions come apart. can_bind_temporary answers "may the compiler *ask* for a
+    // slot for this shape", which an array literal and a bare `null` must refuse. this answers "does
+    // an operand somebody has already decided to address have anything to size a slot from". a
+    // TemporaryBind is materializable, so both questions admit it: the nested `$__lit` is its own
+    // request, and the body's value still needs a home for a borrow parameter. the type test below
+    // excludes the rest: a null and an array literal both answer unknown here
     //
     // answers *with the type it had to derive* rather than with a bool, so the two narrower questions
     // below share the one derivation. MemberAccessNode::result_type() recurses the whole `->` chain, so a

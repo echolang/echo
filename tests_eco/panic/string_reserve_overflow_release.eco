@@ -1,0 +1,7 @@
+// the string half: the `+ 1` for the NUL used to wrap a capacity of the largest usize to an allocation of
+// zero bytes, with the capacity recorded as the largest usize
+
+string $s = 'abc';
+$s->reserve(18446744073709551615);
+$s->append('more text than fits in nothing at all');
+echo 'unreachable';

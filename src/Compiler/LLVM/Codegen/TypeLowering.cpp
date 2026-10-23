@@ -364,6 +364,13 @@ void TypeLowering::apply_function_attributes(
         func->addFnAttr(llvm::Attribute::InlineHint);
     }
 
+    // a slow path that has to stay out of its caller: `noinline` rather than a hint, and `cold` so the
+    // call site's block is laid out away from the loop
+    if (node->is_cold) {
+        func->addFnAttr(llvm::Attribute::Cold);
+        func->addFnAttr(llvm::Attribute::NoInline);
+    }
+
     // wasm-ld exports a function that carries this attribute *and* roots it against gc, so
     // no `--export` flags. a native library still plants DLLExport for the Windows .dll
     // export table; hide_non_exported_symbols keeps anything that carries that marker

@@ -1,6 +1,8 @@
 #include "Compiler/ProgramStamp.h"
 
 #include "eco.h"
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/ArtifactSeal.h"
 #include "Compiler/CBuild.h"
 #include "Compiler/CodegenTarget.h"
 #include "Compiler/Fnv.h"
@@ -189,6 +191,19 @@ bool compute_program_c_key(
     return true;
 }
 
+// the stamp's text and a seal over the binary it describes, under that text: a shipped stamp and binary
+// are a rebuild, never a binary `install` copies into somebody's PATH. nothing when the binary cannot be read
+std::optional<std::string> sealed_stamp(const std::string &contents, const std::filesystem::path &output)
+{
+    const std::optional<std::string> seal = Compiler::artifact_seal(output, contents);
+
+    if (!seal.has_value()) {
+        return std::nullopt;
+    }
+
+    return contents + "seal " + seal.value() + "\n";
+}
+
 bool program_is_current(
     const std::filesystem::path &stamp,
     uint64_t echo_key,
@@ -214,7 +229,7 @@ bool program_is_current(
         return false;
     }
 
-    return recorded.value() == stamp_contents(echo_key, probed.value(), identity.value(), has_dsym(output));
+    return recorded == sealed_stamp(stamp_contents(echo_key, probed.value(), identity.value(), has_dsym(output)), output);
 }
 
 void write_program_stamp(
@@ -230,8 +245,10 @@ void write_program_stamp(
         return;
     }
 
-    std::ofstream(stamp, std::ios::binary | std::ios::trunc)
-        << stamp_contents(echo_key, c_key, identity.value(), has_dsym(output));
+    if (const std::optional<std::string> sealed =
+            sealed_stamp(stamp_contents(echo_key, c_key, identity.value(), has_dsym(output)), output)) {
+        Compiler::write_artifact_file(stamp, sealed.value());
+    }
 }
 
 std::optional<uint64_t> program_stamp_c_key(

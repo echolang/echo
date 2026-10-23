@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <charconv>
+#include <cstdlib>
 #include <fstream>
 #include <optional>
 #include <set>
@@ -246,7 +247,17 @@ std::filesystem::path EcoTestFile::linked_binary(
 std::vector<std::string> EcoTestFile::program_argv(const std::filesystem::path &binary) const
 {
     if (target == CorpusTarget::t_wasi) {
-        return { "wasmtime", binary.string() };
+        // wasmtime hands a module none of the host's environment, so the hash seed test_main pinned is
+        // passed through by name
+        std::vector<std::string> argv = { "wasmtime" };
+
+        if (const char *seed = std::getenv("ECHO_HASH_SEED"); seed != nullptr) {
+            argv.push_back("--env");
+            argv.push_back(std::string("ECHO_HASH_SEED=") + seed);
+        }
+
+        argv.push_back(binary.string());
+        return argv;
     }
 
     return { with_exe(binary).string() };

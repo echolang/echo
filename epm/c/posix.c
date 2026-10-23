@@ -68,6 +68,35 @@ int32_t epm_kind(const char *path)
     return S_ISDIR(st.st_mode) ? 2 : 1;
 }
 
+/* 1 when the path itself is a symbolic link, wherever it points; 0 otherwise */
+int32_t epm_is_link(const char *path)
+{
+    struct stat st;
+
+    if (lstat(path, &st) != 0) {
+        return 0;
+    }
+
+    return S_ISLNK(st.st_mode) ? 1 : 0;
+}
+
+/* the link's target text into buf, NUL-terminated; its length, or -1 */
+int32_t epm_readlink(const char *path, char *buf, uint64_t cap)
+{
+    if (buf == NULL || cap == 0) {
+        return -1;
+    }
+
+    ssize_t n = readlink(path, buf, cap - 1);
+
+    if (n < 0) {
+        return -1;
+    }
+
+    buf[n] = '\0';
+    return (int32_t)n;
+}
+
 int32_t epm_mkdir(const char *path)
 {
     if (mkdir(path, 0755) == 0) {

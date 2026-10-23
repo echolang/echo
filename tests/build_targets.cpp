@@ -823,6 +823,31 @@ TEST_CASE("an unexported helper is hidden from the dynamic symbol table", "[targ
     REQUIRE_FALSE(has_export(nm.output, "__eco_abort"));
 }
 
+TEST_CASE("a native lib exports the hash seed so a host can share it", "[targets]")
+{
+    ScopedProject project("lib_hash_seed_export");
+    write_lib_only(project,
+        "#[echoc::builtin: hash_seed]\n"
+        "function process_seed() : uint64;\n"
+        "\n"
+        "#[export]\n"
+        "public function bump() : uint64 { return process_seed(); }\n");
+
+    const ProcessResult built = project.echoc("build --no-stdlib");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const fs::path lib = default_lib(project.root() / "ecobuild");
+    const ProcessResult nm = exported_symbols(lib);
+    INFO(nm.output);
+    if (nm.exit_code != 0) {
+        SKIP("no tool to list dynamic exports");
+    }
+
+    REQUIRE(has_export(nm.output, "bump"));
+    REQUIRE(has_export(nm.output, "__eco_hash_seed"));
+}
+
 TEST_CASE("a native lib hides C globals from #[cc:]", "[targets][cbuild]")
 {
 #if defined(_WIN32)

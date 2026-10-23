@@ -324,6 +324,25 @@ test install_does_not_take_yes
     assert($err == "'install' does not take '-y, --yes'.");
 }
 
+test install_takes_rehash
+{
+    Got $got = parse_ok(words2('install', '--rehash'));
+    assert($got->parsed->stated($got->app->rehash));
+}
+
+test update_does_not_take_rehash
+{
+    string $err = parse_err(words2('update', '--rehash'));
+    assert($err == "'update' does not take '--rehash'.");
+}
+
+test install_help_names_rehash
+{
+    Got $got = parse_ok(words2('install', '--help'));
+    command::Block $page = command::renderHelp($got->app->cmd, $got->parsed, command::plain());
+    assert(blockHas($page, '--rehash'));
+}
+
 test module_before_the_command_is_refused
 {
     string $err = parse_err(words3('-m', 'app', 'install'));

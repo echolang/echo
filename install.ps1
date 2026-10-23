@@ -6,6 +6,7 @@
 # manager and sits next to it. clang, lld-link and a Windows sysroot ship in
 # the same archive, so `echoc build` works without a separate LLVM install.
 # set ECHO_INSTALL_DIR to install somewhere other than %LOCALAPPDATA%\echo.
+# set ECHO_REQUIRE_ATTESTATION=1 to refuse an archive `gh attestation verify` cannot prove.
 # set ECHO_UNINSTALL=1 (or pass -Uninstall when invoking the file) to remove it.
 
 $ErrorActionPreference = "Stop"
@@ -124,7 +125,40 @@ if ($arch -ne "AMD64") {
 }
 
 $asset = "echo-windows-x86_64"
-$url = "https://github.com/$Repo/releases/latest/download/$asset.zip"
+# resolve the tag once: two requests against /latest can see two releases
+$tag = $null
+try {
+    $latest = & curl.exe -fsSLI -o NUL -w "%{url_effective}" "https://github.com/$Repo/releases/latest" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $latest) {
+        $tag = ($latest.Trim().TrimEnd("/") -split "/")[-1]
+    }
+}
+catch {
+}
+if (-not $tag) {
+    try {
+        $req = [System.Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
+        $req.AllowAutoRedirect = $false
+        $req.Method = "HEAD"
+        $resp = $req.GetResponse()
+        $location = $resp.Headers["Location"]
+        $resp.Close()
+        if ($location) {
+            $tag = ($location.TrimEnd("/") -split "/")[-1]
+        }
+    }
+    catch {
+        if ($_.Exception.Response -and $_.Exception.Response.Headers["Location"]) {
+            $tag = ($_.Exception.Response.Headers["Location"].TrimEnd("/") -split "/")[-1]
+        }
+    }
+}
+if (-not $tag) {
+    Write-Error "echo: could not resolve the latest release at https://github.com/$Repo/releases/latest"
+    exit 1
+}
+$base = "https://github.com/$Repo/releases/download/$tag"
+$url = "$base/$asset.zip"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("echo-install-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
@@ -137,6 +171,48 @@ try {
     catch {
         Write-Error "echo: could not download $url`nsee https://github.com/$Repo/releases for what is available."
         exit 1
+    }
+
+    # checked before it is unpacked: an archive SHA256SUMS does not vouch for is never expanded
+    $sums = Join-Path $tmp "SHA256SUMS"
+    try {
+        Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $sums -UseBasicParsing
+    }
+    catch {
+        Write-Error "echo: could not download SHA256SUMS, so $asset.zip cannot be checked."
+        exit 1
+    }
+
+    $expected = $null
+    foreach ($line in Get-Content -LiteralPath $sums) {
+        $fields = $line -split '\s+', 2
+        if ($fields.Count -eq 2 -and $fields[1].TrimStart('*') -eq "$asset.zip") {
+            $expected = $fields[0].ToLowerInvariant()
+        }
+    }
+
+    $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (-not $expected -or $expected -ne $actual) {
+        Write-Error "echo: $asset.zip does not match the release's SHA256SUMS - nothing was installed."
+        exit 1
+    }
+
+    if ($env:ECHO_REQUIRE_ATTESTATION -eq "1") {
+        if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+            Write-Error "echo: ECHO_REQUIRE_ATTESTATION=1 needs gh on PATH."
+            exit 1
+        }
+        & gh attestation verify $zip --repo $Repo *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "echo: $asset.zip has no valid build attestation from $Repo - nothing was installed."
+            exit 1
+        }
+    }
+    elseif (Get-Command gh -ErrorAction SilentlyContinue) {
+        & gh attestation verify $zip --repo $Repo *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "echo: no valid build attestation from $Repo; SHA256SUMS still matched, installing."
+        }
     }
 
     Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force

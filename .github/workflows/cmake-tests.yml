@@ -820,6 +820,12 @@ jobs:
     needs: [resolve_version, build_release, build_release_linux_arm64, build_release_macos_arm64, build_release_windows_x86_64]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
 
+    # the attestation below is signed with this run's OIDC identity, and stored against the repository
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -830,6 +836,29 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # one flat directory of exactly what is published, so checksums, attestation and the release name the same files
+      - name: Checksum the release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp artifacts/echo-linux-x86_64/echo-linux-x86_64.tar.gz \
+             artifacts/echo-linux-arm64/echo-linux-arm64.tar.gz \
+             artifacts/echo-macos-arm64/echo-macos-arm64.tar.gz \
+             artifacts/echo-windows-x86_64/echo-windows-x86_64.zip \
+             artifacts/epm-linux-x86_64/epm-linux-x86_64.tar.gz \
+             artifacts/epm-linux-arm64/epm-linux-arm64.tar.gz \
+             artifacts/epm-macos-arm64/epm-macos-arm64.tar.gz \
+             artifacts/epm-windows-x86_64/epm-windows-x86_64.zip \
+             artifacts/echo-windows-x86_64-setup/echo-windows-x86_64-setup.exe \
+             release/
+          (cd release && sha256sum -- * > SHA256SUMS)
+
+      # a checksum only catches a corrupted download; the attestation ties each asset to this workflow run
+      - name: Attest the release assets
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'release/*'
 
       # asked again here rather than trusted from resolve_version: the builds took minutes, and a tag
       # that appeared meanwhile means this run's number is somebody else's
@@ -850,12 +879,4 @@ jobs:
             --target "${{ github.sha }}" \
             --title "echo ${TAG}" \
             --generate-notes \
-            artifacts/echo-linux-x86_64/echo-linux-x86_64.tar.gz \
-            artifacts/echo-linux-arm64/echo-linux-arm64.tar.gz \
-            artifacts/echo-macos-arm64/echo-macos-arm64.tar.gz \
-            artifacts/echo-windows-x86_64/echo-windows-x86_64.zip \
-            artifacts/epm-linux-x86_64/epm-linux-x86_64.tar.gz \
-            artifacts/epm-linux-arm64/epm-linux-arm64.tar.gz \
-            artifacts/epm-macos-arm64/epm-macos-arm64.tar.gz \
-            artifacts/epm-windows-x86_64/epm-windows-x86_64.zip \
-            artifacts/echo-windows-x86_64-setup/echo-windows-x86_64-setup.exe
+            release/*

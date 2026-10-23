@@ -126,7 +126,7 @@ bool Compiler::ToolConsumer::resolve_tools(const std::filesystem::path &build_di
         out.dependencies.push_back(dependency.name);
 
         const Compiler::BuildLayout layout =
-            Compiler::BuildLayout::resolve(build_dir_flag, &dependency, {});
+            Compiler::BuildLayout::resolve(build_dir_flag, &dependency, { dependency.path }, {});
 
         for (const Parser::ModuleTarget &target : dependency.targets) {
             if (target.kind != Parser::TargetKind::t_executable) {

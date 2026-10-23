@@ -26,6 +26,30 @@ public function is_file(const string& $path) : bool
     return epm_kind($path->cstr()) == 1;
 }
 
+/**
+ * Whether the path itself is a symbolic link (a reparse point on Windows),
+ * wherever it points. is_dir and is_file follow one. Anything that removes or
+ * walks a tree it did not create asks this first.
+ */
+public function is_link(const string& $path) : bool
+{
+    return epm_is_link($path->cstr()) == 1;
+}
+
+/** A link's target as written, or '' when it cannot be read. */
+public function link_target(const string& $path) : string
+{
+    string $buf = '';
+    $buf->reserve(4096);
+    ptr<uint8> $slot = $buf->spare();
+
+    if (epm_readlink($path->cstr(), $slot, 4096) < 0) {
+        return '';
+    }
+
+    return str::from($slot);
+}
+
 public function mkdir(const string& $path) : bool
 {
     return epm_mkdir($path->cstr()) == 0;
@@ -88,6 +112,19 @@ public function readdir(const string& $path) : array<string>
 
 public function remove_all(const string& $path) : bool
 {
+    // **the link, never what it points at.** epm_kind follows one, and a directory reached through it
+    // would be emptied: a vendored `home -> $HOME` made `epm update` delete a home directory
+    if (is_link($path)) {
+        result<bool, std::io::ioerror> $unlinked = std::io::remove($path);
+
+        if (!$unlinked->failed()) {
+            return true;
+        }
+
+        // a directory link or a junction on Windows is removed as a directory, which removes the link
+        return rmdir($path);
+    }
+
     int32 $k = epm_kind($path->cstr());
 
     if ($k == 0) {
@@ -137,7 +174,84 @@ public function sha256_hex(const string& $data) : string
     return hex_of($raw);
 }
 
+/**
+ * The tree hash a current lock stores: a type tag, the relative path, a NUL,
+ * then the file body or the link target, and a newline.
+ */
 public function tree_sha256(const string& $root) : string
+{
+    return hash_tree($root, 2);
+}
+
+/**
+ * The tree hash lockVersion 1 stored: each file is its relative path, a
+ * newline, then its body. The walk is collect_files, which does not follow
+ * links, so this does not reproduce a version 1 lock of a tree that had a
+ * directory or dangling link. A link to a file hashes the same. The gate
+ * is lock::tree_is_checkable; a match is rewritten as 2.
+ */
+public function tree_sha256_v1(const string& $root) : string
+{
+    return hash_tree($root, 1);
+}
+
+/**
+ * Whether the walk that hashes a tree recorded a symbolic link.
+ */
+public function tree_contains_link(const string& $root) : bool
+{
+    array<string> $files = array<string>();
+    collect_files($root, '', $files);
+    usize $i = 0;
+
+    while ($i < $files->count()) {
+        string $rel = $files[$i];
+        string $here = $root;
+
+        if (!$rel->empty()) {
+            $here = join($root, $rel);
+        }
+
+        if (is_link($here)) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+/**
+ * A directory link or a dangling one. Version 1 followed directories and
+ * skipped dangling entries; a link to a file hashes the same, because
+ * readfile follows it.
+ */
+public function tree_has_v1_uncheckable_link(const string& $root) : bool
+{
+    array<string> $files = array<string>();
+    collect_files($root, '', $files);
+    usize $i = 0;
+
+    while ($i < $files->count()) {
+        string $rel = $files[$i];
+        string $here = $root;
+
+        if (!$rel->empty()) {
+            $here = join($root, $rel);
+        }
+
+        if (is_link($here) && !is_file($here)) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+private function hash_tree(const string& $root, int64 $version) : string
 {
     array<string> $files = array<string>();
     collect_files($root, '', $files);
@@ -153,12 +267,38 @@ public function tree_sha256(const string& $root) : string
 
     while ($i < $files->count()) {
         string $rel = $files[$i];
-        epm_sha256_update($h, $rel->cstr(), $rel->size());
-        epm_sha256_update($h, str::from('\n')->cstr(), 1);
+        string $here = $root;
 
-        string $body = std::io::readfile(join($root, $rel))->or('');
+        if (!$rel->empty()) {
+            $here = join($root, $rel);
+        }
 
-        epm_sha256_update($h, $body->cstr(), $body->size());
+        if ($version < 2) {
+            string $body = std::io::readfile($here)->or('');
+            epm_sha256_update($h, $rel->cstr(), $rel->size());
+            epm_sha256_update($h, str::from('\n')->cstr(), 1);
+            epm_sha256_update($h, $body->cstr(), $body->size());
+        }
+        else {
+            // a type tag so a symlink `home -> /etc` cannot hash equal to a file named `home -> /etc`
+            if (is_link($here)) {
+                string $target = link_target($here);
+                epm_sha256_update($h, str::from('L')->cstr(), 1);
+                epm_sha256_update($h, $rel->cstr(), $rel->size());
+                epm_sha256_update($h, str::from('\0')->cstr(), 1);
+                epm_sha256_update($h, $target->cstr(), $target->size());
+            }
+            else {
+                string $body = std::io::readfile($here)->or('');
+                epm_sha256_update($h, str::from('F')->cstr(), 1);
+                epm_sha256_update($h, $rel->cstr(), $rel->size());
+                epm_sha256_update($h, str::from('\0')->cstr(), 1);
+                epm_sha256_update($h, $body->cstr(), $body->size());
+            }
+
+            epm_sha256_update($h, str::from('\n')->cstr(), 1);
+        }
+
         $i = $i + 1;
     }
 
@@ -177,6 +317,13 @@ private function collect_files(const string& $root, const string& $rel, array<st
 
     if (!$rel->empty()) {
         $here = join($root, $rel);
+    }
+
+    // a link is hashed as what it says, and never followed: following one would hash whatever it
+    // points at outside the tree, and a link that points back inside would make the walk endless
+    if (is_link($here)) {
+        $into[] = $rel;
+        return;
     }
 
     if (is_file($here)) {
@@ -213,6 +360,38 @@ private function collect_files(const string& $root, const string& $rel, array<st
         collect_files($root, $child, $into);
         $i = $i + 1;
     }
+}
+
+/**
+ * Removes every directory under `$root` that carries echoc's build marker.
+ *
+ * Called on a tree straight after it is fetched, before it is hashed. tree_sha256
+ * skips a marked directory, so a package that arrived with one could mark `src/`
+ * and take it out of the hash. Removing them first means every marked directory
+ * is one this machine's echoc made.
+ */
+public function remove_build_dirs(const string& $root) : bool
+{
+    if (is_link($root) || !is_dir($root)) {
+        return true;
+    }
+
+    if (is_build_dir($root)) {
+        return remove_all($root);
+    }
+
+    array<string> $kids = readdir($root);
+    usize $i = 0;
+
+    while ($i < $kids->count()) {
+        if ($kids[$i] != '.git' && !remove_build_dirs(join($root, $kids[$i]))) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
 }
 
 /**

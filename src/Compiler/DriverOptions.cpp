@@ -96,6 +96,7 @@ bool Compiler::resolve_driver_options(
 
     out.options.debug_info = cli.flag(Opt::t_debug_symbols);
     out.options.no_tbaa = cli.flag(Opt::t_no_tbaa);
+    out.options.fixed_hash_seed = cli.flag(Opt::t_fixed_hash_seed);
 
     // **--explain memory implies --track-allocations**, settled here rather than at the two readers: a
     // report over a counter nothing maintains does not fail, it reads zero forever - which is the answer

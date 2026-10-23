@@ -1,6 +1,5 @@
-// `mem::buffer<T>` is the allocation, owned by exactly one value. `array<T>` is built on one, so this
-// exercises the split the restructure introduced: an array's destructor destroys *values*, the
-// buffer's destructor releases the *storage*, and neither knows the other's half
+// `mem::buffer<T>` is the allocation, owned by exactly one value. an array's destructor destroys
+// *values*, the buffer's destructor releases the *storage*, and neither knows the other's half
 
 {
     mem::buffer<int32> $b = mem::buffer<int32>();
@@ -9,9 +8,8 @@
     $b->resize(4);
     echo $b->capacity();
 
-    // every way in and out is a method: the address and the capacity are `private`, so nothing
-    // outside the type can build a second value around one allocation
-    mem::init<int32>($b->at(0), 42);
+    // every way in and out is a method: the address and the capacity are `private`
+    $b->put(0, 42);
 
     slice<int32> $window = $b->sub(0, 1);
     echo $window->get(0);

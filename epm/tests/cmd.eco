@@ -1,3 +1,4 @@
+use command;
 use epm::cmd;
 use epm::lock;
 use epm::scratch;
@@ -282,3 +283,334 @@ test install_walks_target_depends_for_requires
     scratch::gone($lib);
     scratch::gone($app);
 }
+
+function write_v1_lock(
+    const string& $path,
+    const string& $url,
+    const string& $rev,
+    const string& $sha
+) : void
+{
+    scratch::write(
+        $path,
+        "{\"lockVersion\":1,\"packages\":[{\"name\":\"lib\",\"version\":\"1.0.0\",\"source\":{\"kind\":\"git\",\"url\":\"{$url}\"},\"rev\":\"{$rev}\",\"sha256\":\"{$sha}\",\"requires\":[]}]}"
+    );
+}
+
+test install_keeps_a_matching_v1_vendor_offline
+{
+    string $app = scratch::dir('cmd-v1-keep');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"/no/such/epm-repo\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'vendor/lib/module.eco',
+        "#[module: \"lib\"]\n#[version: \"1.0.0\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'vendor/lib/src/lib.eco', "namespace lib;\npublic function ping() : int32 { return 1; }\n");
+    scratch::file($app, 'vendor/lib/marker.txt', 'kept');
+
+    string $vendor = sys::join($app, 'vendor/lib');
+    string $v1 = sys::tree_sha256_v1($vendor);
+    write_v1_lock(lock::path_beside(sys::join($app, 'module.eco')), '/no/such/epm-repo', 'abc123', $v1);
+
+    assert(cmd::install_at($app) == 0);
+    assert(scratch::read(sys::join($vendor, 'marker.txt')) == 'kept');
+
+    lock::Lock $back = guard lock::load(lock::path_beside(sys::join($app, 'module.eco')));
+    assert($back->version == lock::LOCK_VERSION);
+    assert($back->packages[0]->sha256 == sys::tree_sha256($vendor));
+    assert($back->packages[0]->sha256 != $v1);
+
+    scratch::gone($app);
+}
+
+test install_refuses_a_v1_lock_when_the_fetched_tree_does_not_match
+{
+    string $pkg = scratch::dir('cmd-v1-mismatch-pkg');
+    scratch::git_module($pkg, 'lib', '1.0.0', '');
+    string $rev = scratch::rev_parse($pkg, 'HEAD');
+
+    string $app = scratch::dir('cmd-v1-mismatch-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"{$pkg}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    write_v1_lock(
+        lock::path_beside(sys::join($app, 'module.eco')),
+        $pkg,
+        $rev,
+        '0000000000000000000000000000000000000000000000000000000000000000'
+    );
+
+    assert(cmd::install_at($app) == 1);
+    assert(!sys::is_dir(sys::join($app, 'vendor/lib')));
+
+    scratch::gone($pkg);
+    scratch::gone($app);
+}
+
+test verify_leaves_a_matching_v1_lock
+{
+    string $app = scratch::dir('cmd-v1-verify-ok');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"/no/such/epm-repo\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'vendor/lib/module.eco',
+        "#[module: \"lib\"]\n#[version: \"1.0.0\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'vendor/lib/src/lib.eco', "namespace lib;\npublic function ping() : int32 { return 1; }\n");
+
+    string $vendor = sys::join($app, 'vendor/lib');
+    string $v1 = sys::tree_sha256_v1($vendor);
+    string $lock_path = lock::path_beside(sys::join($app, 'module.eco'));
+    write_v1_lock($lock_path, '/no/such/epm-repo', 'abc123', $v1);
+
+    assert(cmd::verify_at($app) == 0);
+
+    lock::Lock $back = guard lock::load($lock_path);
+    assert($back->version == 1);
+    assert($back->packages[0]->sha256 == $v1);
+
+    scratch::gone($app);
+}
+
+test verify_refuses_a_tampered_v1_vendor
+{
+    string $app = scratch::dir('cmd-v1-verify-bad');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"/no/such/epm-repo\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'vendor/lib/module.eco',
+        "#[module: \"lib\"]\n#[version: \"1.0.0\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'vendor/lib/src/lib.eco', "namespace lib;\npublic function ping() : int32 { return 1; }\n");
+
+    string $vendor = sys::join($app, 'vendor/lib');
+    string $v1 = sys::tree_sha256_v1($vendor);
+    string $lock_path = lock::path_beside(sys::join($app, 'module.eco'));
+    write_v1_lock($lock_path, '/no/such/epm-repo', 'abc123', $v1);
+    scratch::write(sys::join($vendor, 'src/lib.eco'), "namespace lib;\npublic function ping() : int32 { return 99; }\n");
+
+    assert(cmd::verify_at($app) == 1);
+
+    lock::Lock $back = guard lock::load($lock_path);
+    assert($back->version == 1);
+    assert($back->packages[0]->sha256 == $v1);
+
+    scratch::gone($app);
+}
+
+#[if: os != windows]
+function add_dir_symlink(const string& $tree, const string& $outside, const string& $name) : void
+{
+    array<string> $ln = array<string>();
+    $ln[] = 'ln';
+    $ln[] = '-s';
+    $ln[] = $outside;
+    $ln[] = sys::join($tree, $name);
+    assert(sys::run($ln)->ok());
+}
+
+function git_add_commit(const string& $dir, const string& $message) : void
+{
+    array<string> $add = array<string>();
+    $add[] = 'add';
+    $add[] = '-A';
+    assert(scratch::git($dir, $add)->ok());
+
+    array<string> $commit = array<string>();
+    $commit[] = 'commit';
+    $commit[] = '--no-gpg-sign';
+    $commit[] = '-m';
+    $commit[] = $message;
+    assert(scratch::git($dir, $commit)->ok());
+}
+
+test install_asks_for_rehash_when_a_v1_vendor_has_a_dir_link
+{
+    string $app = scratch::dir('cmd-v1-link-install');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"/no/such/epm-repo\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    string $vendor = sys::join($app, 'vendor/lib');
+    scratch::file($vendor, 'a.txt', 'A');
+    string $outside = sys::join($app, 'outside');
+    assert(sys::mkdir_p($outside));
+    scratch::file($outside, 'keep.txt', 'B');
+    add_dir_symlink($vendor, $outside, 'link');
+
+    string $old = sys::sha256_hex("a.txt\nAlink/keep.txt\nB");
+    string $lock_path = lock::path_beside(sys::join($app, 'module.eco'));
+    write_v1_lock($lock_path, '/no/such/epm-repo', 'abc123', $old);
+
+    assert(cmd::install_at($app) == 1);
+    assert(sys::is_file(sys::join($vendor, 'a.txt')));
+    assert(sys::is_link(sys::join($vendor, 'link')));
+
+    lock::Lock $back = guard lock::load($lock_path);
+    assert($back->version == 1);
+    assert($back->packages[0]->sha256 == $old);
+
+    scratch::gone($app);
+}
+
+test verify_asks_for_rehash_when_a_v1_vendor_has_a_dir_link
+{
+    string $app = scratch::dir('cmd-v1-link-verify');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"/no/such/epm-repo\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    string $vendor = sys::join($app, 'vendor/lib');
+    scratch::file($vendor, 'a.txt', 'A');
+    string $outside = sys::join($app, 'outside');
+    assert(sys::mkdir_p($outside));
+    scratch::file($outside, 'keep.txt', 'B');
+    add_dir_symlink($vendor, $outside, 'link');
+
+    string $old = sys::sha256_hex("a.txt\nAlink/keep.txt\nB");
+    string $lock_path = lock::path_beside(sys::join($app, 'module.eco'));
+    write_v1_lock($lock_path, '/no/such/epm-repo', 'abc123', $old);
+
+    assert(cmd::verify_at($app) == 1);
+
+    lock::Lock $back = guard lock::load($lock_path);
+    assert($back->version == 1);
+    assert($back->packages[0]->sha256 == $old);
+    assert(sys::is_file(sys::join($vendor, 'a.txt')));
+
+    scratch::gone($app);
+}
+
+test install_keeps_a_v1_vendor_whose_only_link_is_a_file
+{
+    string $app = scratch::dir('cmd-v1-file-link');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"/no/such/epm-repo\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    string $vendor = sys::join($app, 'vendor/lib');
+    scratch::file($vendor, 'a.txt', 'A');
+
+    array<string> $ln = array<string>();
+    $ln[] = 'ln';
+    $ln[] = '-s';
+    $ln[] = 'a.txt';
+    $ln[] = sys::join($vendor, 'LICENSE');
+    assert(sys::run($ln)->ok());
+
+    string $v1 = sys::tree_sha256_v1($vendor);
+    assert($v1 == sys::sha256_hex("LICENSE\nAa.txt\nA"));
+    write_v1_lock(lock::path_beside(sys::join($app, 'module.eco')), '/no/such/epm-repo', 'abc123', $v1);
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_link(sys::join($vendor, 'LICENSE')));
+
+    lock::Lock $back = guard lock::load(lock::path_beside(sys::join($app, 'module.eco')));
+    assert($back->version == lock::LOCK_VERSION);
+    assert($back->packages[0]->sha256 == sys::tree_sha256($vendor));
+
+    scratch::gone($app);
+}
+
+test install_fetches_a_v1_lock_whose_tree_has_a_dir_link
+{
+    string $pkg = scratch::dir('cmd-v1-fetch-link-pkg');
+    scratch::git_module($pkg, 'lib', '1.0.0', '');
+    scratch::file($pkg, 'data/keep.txt', 'B');
+    add_dir_symlink($pkg, sys::join($pkg, 'data'), 'link');
+    git_add_commit($pkg, 'link');
+    string $rev = scratch::rev_parse($pkg, 'HEAD');
+
+    string $app = scratch::dir('cmd-v1-fetch-link-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"{$pkg}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    write_v1_lock(
+        lock::path_beside(sys::join($app, 'module.eco')),
+        $pkg,
+        $rev,
+        '0000000000000000000000000000000000000000000000000000000000000000'
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_link(sys::join($app, 'vendor/lib/link')));
+
+    lock::Lock $back = guard lock::load(lock::path_beside(sys::join($app, 'module.eco')));
+    assert($back->version == lock::LOCK_VERSION);
+    assert($back->packages[0]->sha256 == sys::tree_sha256(sys::join($app, 'vendor/lib')));
+
+    scratch::gone($pkg);
+    scratch::gone($app);
+}
+
+test install_rehash_migrates_a_v1_vendor_with_a_dir_link
+{
+    string $pkg = scratch::dir('cmd-v1-rehash-pkg');
+    scratch::git_module($pkg, 'lib', '1.0.0', '');
+    scratch::file($pkg, 'data/keep.txt', 'B');
+    add_dir_symlink($pkg, sys::join($pkg, 'data'), 'link');
+    git_add_commit($pkg, 'link');
+    string $rev = scratch::rev_parse($pkg, 'HEAD');
+
+    string $app = scratch::dir('cmd-v1-rehash-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"{$pkg}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    string $vendor = sys::join($app, 'vendor/lib');
+    scratch::file($vendor, 'a.txt', 'stale');
+    string $outside = sys::join($app, 'outside');
+    assert(sys::mkdir_p($outside));
+    scratch::file($outside, 'keep.txt', 'B');
+    add_dir_symlink($vendor, $outside, 'link');
+
+    string $old = sys::sha256_hex("a.txt\nAlink/keep.txt\nB");
+    string $lock_path = lock::path_beside(sys::join($app, 'module.eco'));
+    write_v1_lock($lock_path, $pkg, $rev, $old);
+
+    assert(cmd::install_at($app) == 1);
+    assert(scratch::read(sys::join($vendor, 'a.txt')) == 'stale');
+
+    assert(cmd::install_at($app, command::CLIContext::plain(), true) == 0);
+    assert(sys::is_link(sys::join($vendor, 'link')));
+    assert(!sys::is_file(sys::join($vendor, 'a.txt')));
+
+    lock::Lock $back = guard lock::load($lock_path);
+    assert($back->version == lock::LOCK_VERSION);
+    assert($back->packages[0]->sha256 == sys::tree_sha256($vendor));
+    assert($back->packages[0]->rev == $rev);
+
+    scratch::gone($pkg);
+    scratch::gone($app);
+}
+#[end]

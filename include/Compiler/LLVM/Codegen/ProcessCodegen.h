@@ -46,6 +46,11 @@ namespace Compiler::LLVM
         llvm::Value *gen_argv(const llvm::Twine &name);
         llvm::Value *gen_envp(const llvm::Twine &name);
 
+        // the per-process hash seed `hash::of` folds in. **a plain load**, not a lazy static: that
+        // acquire would sit in every map probe. written once before anything hashes; constant 0 under `--fixed-hash-seed`.
+        // a native lib copies the host's exported cell at load so host and plugin hash the same key
+        llvm::Value *gen_hash_seed(const llvm::Twine &name);
+
     private:
         CodegenContext &_ctx;
 
@@ -67,6 +72,13 @@ namespace Compiler::LLVM
 
         llvm::Value *load_platform_envp();
         void store_platform_envp();
+
+        // uint64 @__eco_hash_seed, linkonce_odr like the three above, DLLExport so a lib does not hide it
+        llvm::GlobalVariable *get_or_create_hash_seed();
+
+        // fills it: `ECHO_HASH_SEED` when set, else CodegenTarget::entropy_source(). the cell is still
+        // emitted when the seed is fixed, so a plugin can copy a zero
+        void gen_seed_hash();
 
         // the two arms of unbuffer_stdio, one per StdioUnbuffering that does something
         void unbuffer_ucrt(llvm::Type *i32, llvm::Type *ptr);

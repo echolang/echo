@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <winioctl.h>
 
 #include "internal.h"
 
@@ -293,6 +294,176 @@ int32_t epm_kind(const char *path)
     }
 
     return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 2 : 1;
+}
+
+/* 1 for a symbolic link or a junction (a reparse point, wherever it points); 0 otherwise */
+int32_t epm_is_link(const char *path)
+{
+    wchar_t *wide;
+    DWORD attributes;
+
+    if (path == NULL) {
+        return 0;
+    }
+
+    wide = wide_ntpath(path);
+    if (wide == NULL) {
+        return 0;
+    }
+
+    attributes = GetFileAttributesW(wide);
+    free(wide);
+
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        return 0;
+    }
+
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
+}
+
+#ifndef IO_REPARSE_TAG_SYMLINK
+#define IO_REPARSE_TAG_SYMLINK (0xA000000CL)
+#endif
+#ifndef IO_REPARSE_TAG_MOUNT_POINT
+#define IO_REPARSE_TAG_MOUNT_POINT (0xA0000003L)
+#endif
+
+typedef struct {
+    ULONG ReparseTag;
+    USHORT ReparseDataLength;
+    USHORT Reserved;
+    union {
+        struct {
+            USHORT SubstituteNameOffset;
+            USHORT SubstituteNameLength;
+            USHORT PrintNameOffset;
+            USHORT PrintNameLength;
+            ULONG Flags;
+            WCHAR PathBuffer[1];
+        } SymbolicLink;
+        struct {
+            USHORT SubstituteNameOffset;
+            USHORT SubstituteNameLength;
+            USHORT PrintNameOffset;
+            USHORT PrintNameLength;
+            WCHAR PathBuffer[1];
+        } MountPoint;
+    } u;
+} EpReparse;
+
+int32_t epm_readlink(const char *path, char *buf, uint64_t cap)
+{
+    wchar_t *wide;
+    HANDLE handle;
+    char *block;
+    DWORD got = 0;
+    EpReparse *reparse;
+    USHORT off;
+    USHORT len;
+    WCHAR *src;
+    size_t path_off;
+    int utf8;
+
+    if (path == NULL || buf == NULL || cap == 0) {
+        return -1;
+    }
+
+    wide = wide_ntpath(path);
+    if (wide == NULL) {
+        return -1;
+    }
+
+    handle = CreateFileW(
+        wide,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        NULL);
+    free(wide);
+
+    if (handle == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+
+    block = malloc(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+    if (block == NULL) {
+        CloseHandle(handle);
+        return -1;
+    }
+
+    if (!DeviceIoControl(
+            handle,
+            FSCTL_GET_REPARSE_POINT,
+            NULL,
+            0,
+            block,
+            MAXIMUM_REPARSE_DATA_BUFFER_SIZE,
+            &got,
+            NULL)) {
+        free(block);
+        CloseHandle(handle);
+        return -1;
+    }
+
+    CloseHandle(handle);
+
+    if (got < 8 || got > MAXIMUM_REPARSE_DATA_BUFFER_SIZE) {
+        free(block);
+        return -1;
+    }
+
+    reparse = (EpReparse *)block;
+
+    if (reparse->ReparseTag == IO_REPARSE_TAG_SYMLINK) {
+        path_off = offsetof(EpReparse, u.SymbolicLink.PathBuffer);
+    } else if (reparse->ReparseTag == IO_REPARSE_TAG_MOUNT_POINT) {
+        path_off = offsetof(EpReparse, u.MountPoint.PathBuffer);
+    } else {
+        free(block);
+        return -1;
+    }
+
+    if ((size_t)got < path_off) {
+        free(block);
+        return -1;
+    }
+
+    if (reparse->ReparseTag == IO_REPARSE_TAG_SYMLINK) {
+        off = reparse->u.SymbolicLink.PrintNameOffset;
+        len = reparse->u.SymbolicLink.PrintNameLength;
+        if (len == 0) {
+            off = reparse->u.SymbolicLink.SubstituteNameOffset;
+            len = reparse->u.SymbolicLink.SubstituteNameLength;
+        }
+    } else {
+        off = reparse->u.MountPoint.PrintNameOffset;
+        len = reparse->u.MountPoint.PrintNameLength;
+        if (len == 0) {
+            off = reparse->u.MountPoint.SubstituteNameOffset;
+            len = reparse->u.MountPoint.SubstituteNameLength;
+        }
+    }
+
+    /* off/len are untrusted: they must sit in the bytes DeviceIoControl returned */
+    if ((len % sizeof(WCHAR)) != 0
+        || path_off + (size_t)off + (size_t)len > (size_t)got) {
+        free(block);
+        return -1;
+    }
+
+    src = (WCHAR *)(block + path_off + off);
+    utf8 = WideCharToMultiByte(
+        CP_UTF8, 0, src, (int)(len / sizeof(WCHAR)), buf, (int)(cap - 1), NULL, NULL);
+    free(block);
+
+    if (utf8 <= 0) {
+        return -1;
+    }
+
+    buf[utf8] = '\0';
+    return utf8;
 }
 
 int32_t epm_mkdir(const char *path)

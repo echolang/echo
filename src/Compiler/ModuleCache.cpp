@@ -1,5 +1,7 @@
 #include "Compiler/ModuleCache.h"
 
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/ArtifactSeal.h"
 #include "Compiler/TargetSubtarget.h"
 #include "eco.h"
 
@@ -24,11 +26,6 @@ using Compiler::k_fnv_offset_basis;
 
 };
 
-std::string Compiler::to_hex(uint64_t value)
-{
-    return fmt::format("{:016x}", value);
-}
-
 std::vector<std::string> Compiler::embedded_stdlib_relative_paths()
 {
 #if ECO_USE_EMBEDDED_STDLIB
@@ -47,40 +44,14 @@ std::optional<std::string> Compiler::embedded_stdlib_manifest_text()
 #endif
 }
 
-std::optional<std::string> Compiler::read_whole_file(const std::filesystem::path &path)
+std::optional<std::string> Compiler::embedded_stdlib_content(const std::filesystem::path &path)
 {
-    if (is_embedded_stdlib_path(path)) {
 #if ECO_USE_EMBEDDED_STDLIB
-        return EmbeddedModule::content_of(path);
+    return EmbeddedModule::content_of(path);
 #else
-        return std::nullopt;
+    (void)path;
+    return std::nullopt;
 #endif
-    }
-
-    std::ifstream in(path, std::ios::binary | std::ios::ate);
-    if (!in) {
-        return std::nullopt;
-    }
-
-    // sized up front and read straight into the string. Streaming through an ostringstream instead copied
-    // the bytes a second time before the hash ever saw them, once per source per build
-    const std::streamoff size = in.tellg();
-    if (size < 0) {
-        return std::nullopt;
-    }
-
-    std::string bytes(static_cast<size_t>(size), '\0');
-
-    in.seekg(0);
-    in.read(bytes.data(), size);
-
-    if (in.bad()) {
-        return std::nullopt;
-    }
-
-    bytes.resize(static_cast<size_t>(in.gcount()));
-
-    return bytes;
 }
 
 bool Compiler::fold_target_environment(
@@ -187,6 +158,9 @@ bool Compiler::compute_module_keys(
     // have planted, which is a different object for every module that loads or stores - and the one
     // that could be served from the other's store is exactly the differential `--no-tbaa` exists to run
     environment = fnv1a64(options.no_tbaa ? std::string("notbaa") : std::string("tbaa"), environment);
+
+    // and whether `hash::of` folds in a per-process seed: the stdlib's object holds a load of it or a 0
+    environment = fnv1a64(options.fixed_hash_seed ? std::string("fixedseed") : std::string("seeded"), environment);
 
     // **and what kind of program this is.** no two kinds share an object
     environment = fnv1a64(
@@ -347,7 +321,14 @@ std::filesystem::path Compiler::module_object_path(
 bool Compiler::cached_object_is_hit(const std::filesystem::path &object)
 {
     std::error_code ec;
-    return std::filesystem::is_regular_file(object, ec) && std::filesystem::file_size(object, ec) > 0 && !ec;
+
+    if (!std::filesystem::is_regular_file(object, ec) || std::filesystem::file_size(object, ec) == 0 || ec) {
+        return false;
+    }
+
+    // **there and non-empty is not enough**: the name is predictable from the sources, so a shipped
+    // build directory could hold an object under it. only one this user's echoc sealed is reused
+    return artifact_is_sealed(object);
 }
 
 std::optional<std::string> Compiler::link_inputs_digest(
@@ -393,35 +374,29 @@ std::filesystem::path Compiler::module_embed_inputs_path(
 
 bool Compiler::write_embed_inputs_record(
     const std::filesystem::path &path,
-    const std::vector<std::filesystem::path> &files)
+    const std::vector<std::filesystem::path> &files
+)
 {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return false;
-    }
+    std::string record;
 
     for (const std::filesystem::path &file : files) {
-        out << file.generic_string() << "\n";
+        record += file.generic_string() + "\n";
     }
 
-    return out.good();
+    return write_artifact_file(path, record);
 }
 
 bool Compiler::write_inputs_record(const std::filesystem::path &path, const ModuleCacheKey &key)
 {
     // the directory is the caller's - it prepared one before it decided to emit here at all, and creating
     // one on the way past would be a second place that answers where an artifact goes
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return false;
-    }
+    std::string record = key.hex + "\n";
 
-    out << key.hex << "\n";
     for (const auto &[input, digest] : key.inputs) {
-        out << to_hex(digest) << " " << input.string() << "\n";
+        record += to_hex(digest) + " " + input.string() + "\n";
     }
 
-    return out.good();
+    return write_artifact_file(path, record);
 }
 
 std::string Compiler::explain_miss(const std::filesystem::path &inputs_path, const ModuleCacheKey &key)

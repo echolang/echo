@@ -10,6 +10,17 @@ int main(int argc, char *argv[])
 {
     Catch::Session session;
 
+    // **the hash seed, pinned for every program this suite runs.** a seeded `map` iterates in an order
+    // that moves from run to run, and a golden that prints one would flake. not overwritten, so a case
+    // can still say `env: ECHO_HASH_SEED=7`
+#if defined(_WIN32)
+    if (std::getenv("ECHO_HASH_SEED") == nullptr) {
+        _putenv_s("ECHO_HASH_SEED", "0");
+    }
+#else
+    setenv("ECHO_HASH_SEED", "0", 0);
+#endif
+
     bool dev = false;
     std::string filter;
     std::string shard;

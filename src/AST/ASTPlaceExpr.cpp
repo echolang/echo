@@ -126,17 +126,15 @@ bool is_unaccounted_address(const ExprNode &address)
         return false;
     }
 
+    // **an allow-list: the address of storage reached through a pointer, and nothing else.**
+    // a call returning `T&` (`$arr->at(0)`) is a slot its owner still counts. emptying one goes through
+    // the owner's own method (`mem::buffer::take`, `put`)
     if (cur->get_node_type() == NodeType::n_expr_addrof) {
         const ExprNode *operand = static_cast<const AddrOfExprNode *>(cur)->operand;
         return operand != nullptr && is_unaccounted_storage(*operand);
     }
 
-    // taking through a T& local would empty storage the borrow still names
-    if (cur->get_node_type() == NodeType::n_varref) {
-        return false;
-    }
-
-    return true;
+    return false;
 }
 
 VarDeclNode *place_root_of(ExprNode *expr)

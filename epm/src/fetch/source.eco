@@ -101,9 +101,44 @@ function manifest_key(const string& $tag, const string& $rev) : string
 
 function cache_dir(const string& $url, const string& $rev) : string
 {
-    string $hash = sys::sha256_hex($url)->sub(0, 16);
-    string $tmp = str::from(env::tmp());
-    return sys::join(sys::join($tmp, "epm-cache/{$hash}"), $rev);
+    string $root = cache_root();
+
+    if ($root->empty()) {
+        return '';
+    }
+
+    // hashed so a rev is never a path component, even one usable_rev would admit
+    string $url_hash = sys::sha256_hex($url)->sub(0, 16);
+    string $rev_hash = sys::sha256_hex($rev)->sub(0, 16);
+    return sys::join(sys::join($root, $url_hash), $rev_hash);
+}
+
+/**
+ * The user's own cache, beside echoc's: `$XDG_CACHE_HOME/echo/epm`, else
+ * `~/.cache/echo/epm`. Empty when none of those are set. Not the shared
+ * temporary directory: a manifest found there is loaded as-is.
+ */
+private function cache_root() : string
+{
+#[if: os == windows]
+    string::view $local = env::var('LOCALAPPDATA', '');
+
+    if (!$local->empty()) {
+        return sys::join(str::from($local), 'echo/epm');
+    }
+#[else]
+    string::view $xdg = env::var('XDG_CACHE_HOME', '');
+
+    if (!$xdg->empty()) {
+        return sys::join(str::from($xdg), 'echo/epm');
+    }
+#[end]
+
+    string::view $home = guard env::home() else {
+        return '';
+    }
+
+    return sys::join(str::from($home), '.cache/echo/epm');
 }
 
 internal function load_if_readable(const string& $mod) : result<manifest::Manifest, string>

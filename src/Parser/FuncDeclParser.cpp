@@ -534,6 +534,7 @@ void Parser::publish_declaration_markers(
     // on every intrinsic in std/math/intrinsics.eco already. AST::function_emission_kind answers those before
     // it ever looks at this flag, so the combination costs nothing and refusing it would break that file
     funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
+    funcdecl->is_cold = funcdecl->attributes.get_first(std::string(AST::compiler_attribute::cold)) != nullptr;
 
     // both passes: the symbol name must agree between them, the reason the comment at the
     // extern_symbol arm gives. a bare `#[export]` takes the name token; a valued one is a string

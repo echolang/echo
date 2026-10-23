@@ -1,0 +1,16 @@
+--- OUT --->
+3
+1
+2
+Ada
+30
+15
+--- RAST --->
+# the temp is a sibling of the guard, not a child of the else arm: `$__lit1` has to appear before `guard $o`
+CHECK: vardecl<type<array<int32>>>($__lit1)
+CHECK: guard vardecl<type<int32>>($o)
+CHECK: vardecl<type<map<string,string>>>($__lit3)
+CHECK: guard vardecl<type<usize>>($n)
+# owning `$s` outlives the hoist: its drop is the frame's, after the echo
+CHECK: call echo(varref<string>(var($s)))
+CHECK: call $deinit(addrof<string&>(varref<string>(var($s))))

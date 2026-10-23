@@ -1,0 +1,7 @@
+// a --no-stdlib program that declares hash_seed still gets a real seed, not constant 0 from
+// naming the module anything other than "stdlib"
+
+#[echoc::builtin: hash_seed]
+function process_seed() : uint64;
+
+echo process_seed() == process_seed();

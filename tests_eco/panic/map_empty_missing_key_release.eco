@@ -1,0 +1,5 @@
+// the same over a map that never allocated: capacity is 0, so the slot it would have read was an offset from null
+
+map<string, string> $m;
+string $v = $m['anything'];
+echo 'unreachable';

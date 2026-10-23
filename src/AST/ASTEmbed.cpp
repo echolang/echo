@@ -7,7 +7,8 @@
 #include "AST/ASTStringLiteral.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
-#include "Compiler/ModuleCache.h"
+#include "Compiler/ArtifactFile.h"
+#include "Compiler/SettledPath.h"
 
 #include <fmt/core.h>
 
@@ -49,39 +50,6 @@ std::string embed_bytes_spelling(const AST::FunctionCallExprNode &call, const AS
     }
 
     return "bytes";
-}
-
-std::filesystem::path canonical_or_normal(const std::filesystem::path &path)
-{
-    std::error_code ec;
-    const std::filesystem::path canonical = std::filesystem::weakly_canonical(path, ec);
-
-    if (!ec) {
-        return canonical;
-    }
-
-    return std::filesystem::absolute(path).lexically_normal();
-}
-
-bool path_is_inside(const std::filesystem::path &candidate, const std::filesystem::path &bound)
-{
-    const std::filesystem::path a = canonical_or_normal(candidate);
-    const std::filesystem::path b = canonical_or_normal(bound);
-
-    std::error_code ec;
-    const std::filesystem::path relative = std::filesystem::relative(a, b, ec);
-
-    if (ec) {
-        return false;
-    }
-
-    for (const std::filesystem::path &part : relative) {
-        if (part == "..") {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 AST::EmbedPlan pending()
@@ -174,12 +142,12 @@ AST::EmbedPlan AST::embed_plan_for(AST::FunctionCallExprNode &call, const AST::C
     }
 
     const std::filesystem::path source_dir = source->get_path().parent_path();
-    const std::filesystem::path resolved = canonical_or_normal(source_dir / relative);
+    const std::filesystem::path resolved = Compiler::canonical_or_normal(source_dir / relative);
     const std::filesystem::path bound = store->directory.empty()
         ? source_dir
         : store->directory;
 
-    if (!path_is_inside(resolved, bound)) {
+    if (!Compiler::path_is_inside(resolved, bound)) {
         return refused(fmt::format("'{}' is outside this module", path_text));
     }
 

@@ -514,6 +514,7 @@ void RecursiveVisitor::visit_temporary_bind(TemporaryBindExprNode &node)
         statement_edge(temp);
     }
 
+    statement_edges(node.statements);
     value_edge(node.body);
     statement_edges(node.teardown);
 }

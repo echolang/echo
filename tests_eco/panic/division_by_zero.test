@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+5
+fatal error: division by zero
+  at division_by_zero.eco:5

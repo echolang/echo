@@ -1,0 +1,9 @@
+// a capacity whose byte size does not fit a usize used to wrap to a tiny allocation, with the huge
+// capacity recorded anyway. now the allocation is refused. read back on purpose: an array that is
+// written and dropped is one the optimizer may remove whole, and the stop has to hold for that one too
+
+array<int64> $a = [];
+$a->reserve(2305843009213693953);
+$a[] = 1;
+echo $a[0];
+echo 'unreachable';

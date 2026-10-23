@@ -1426,6 +1426,8 @@ void TypeChecker::visit_temporary_bind(TemporaryBindExprNode &node)
         statement_edge(temp);
     }
 
+    statement_edges(node.statements);
+
     // the body is the original expression. if this bind is a statement, the body is a statement
     // (`get()->write($t);`); if this bind is a value, rewrite_value_edge already asked about the
     // bind (expression_produces_no_value peels it). descending with accept keeps nested value
@@ -1497,6 +1499,24 @@ void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
     const ValueType place = value_type_of(node.arguments[0]->result_type());
 
     if (is_undetermined_type(place) || place.is_type_param()) {
+        return;
+    }
+
+    // a slot a function handed back as a borrow is still counted by whatever it borrowed from.
+    // the sentence differs from the one below because the remedy does: the owner's own removal, not `mv`
+    const ExprNode *written = strip_implicit_casts(node.arguments[0]);
+
+    if (written != nullptr && written->get_node_type() == NodeType::n_expr_call) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            fmt::format(
+                "'{}' cannot reach a slot a function handed back as a borrow: whatever it borrowed from still "
+                "owns that value and will tear it down, so {} it here would {}. Use the owner's own method - "
+                "'pop', 'remove', 'mem::buffer::take' or 'mem::buffer::put'.",
+                kind == BuiltinKind::t_take ? "mem::take" : "mem::init",
+                kind == BuiltinKind::t_take ? "emptying" : "filling",
+                kind == BuiltinKind::t_take ? "destroy it twice" : "leak what is there"));
+
         return;
     }
 

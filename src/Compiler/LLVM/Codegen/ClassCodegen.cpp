@@ -11,6 +11,7 @@
 
 #include "AST/ASTAtomicity.h"
 #include "AST/ASTMangler.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ReleaseNode.h"
@@ -213,8 +214,10 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
         strong->setAlignment(CountAtomics::word());
     }
 
+    // `<= 0` rather than `== 0`: a teardown holds ClassBox::deiniting_count, and the `--check-refcounts`
+    // poison is negative too. both are dead, and neither may be resurrected
     _ctx.builder->CreateCondBr(
-        _ctx.builder->CreateICmpEQ(strong, llvm::ConstantInt::get(i64, 0), "upgrade.dead"),
+        _ctx.builder->CreateICmpSLE(strong, llvm::ConstantInt::get(i64, 0), "upgrade.dead"),
         done_block,
         live_block);
 
@@ -818,13 +821,24 @@ llvm::Function *ClassCodegen::build_release_thunk(
 
     return build_count_release_thunk(
         thunk, header_box_type(layout), ClassBox::strong_index, "dead",
-        [this, complex, weak_release](llvm::Value *handle) {
+        [this, complex, weak_release, access](llvm::Value *handle) {
             // **the object is dead here, the block is not.** the payload's teardown runs, and then the one
             // weak reference the strong ones collectively held is given back - which frees the block only
             // if no `weak<T>` is still holding it. so a weak handle outlives the object it names and can
             // say so, rather than pointing at memory that has been handed back to malloc
+            // **guarded only where a written destructor runs**: that is the one body handed `$this`.
+            // a synthesized teardown only drops fields. an environment's teardown is a run-time fact, so it is guarded in its block
             if (complex == nullptr) {
-                gen_typeinfo_deinit_call(handle);
+                gen_typeinfo_deinit_call(handle, access);
+            }
+            else if (complex->deinit() != nullptr && AST::find_destructor(complex) != nullptr) {
+                llvm::Function *teardown = get_or_create_guarded_teardown(
+                    access, complex->namespaced_name(), complex->mangled_token(),
+                    [this, complex](llvm::Value *handle) {
+                        gen_deinit_call(complex, handle);
+                    });
+
+                _ctx.builder->CreateCall(teardown, { handle });
             }
             else {
                 gen_deinit_call(complex, handle);
@@ -869,7 +883,135 @@ void ClassCodegen::gen_deinit_call(const AST::ComplexType *complex, llvm::Value 
         _ctx.current_cmp_unit->function_table.get_llvm_function(deinit_id), { slot });
 }
 
-void ClassCodegen::gen_typeinfo_deinit_call(llvm::Value *handle)
+void ClassCodegen::gen_guarded_teardown(
+    llvm::Value *handle,
+    CountAccess access,
+    const std::string &type_name,
+    const std::string &symbol_stem,
+    llvm::function_ref<void()> teardown
+)
+{
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *header = _ctx.types->class_header_llvm_type();
+    llvm::Constant *parked = llvm::ConstantInt::getSigned(i64, ClassBox::deiniting_count);
+    llvm::Constant *zero = llvm::ConstantInt::get(i64, 0);
+
+    llvm::Value *strong_ptr = gen_header_ptr(handle, header, ClassBox::strong_index, "teardown_strong_ptr");
+
+    // **relaxed**: this block already holds the last reference, behind the acquire fence the zero arm emits.
+    // the only concurrent reader is a weak upgrade that needs to see "not alive", which zero already said
+    const auto store = [&](llvm::Value *value) {
+        apply_count_access(_ctx, access, handle, header, "teardown.park", [&](bool atomic) -> llvm::Value * {
+            llvm::StoreInst *written = _ctx.builder->CreateStore(value, strong_ptr);
+
+            if (atomic) {
+                written->setAtomic(CountAtomics::observe());
+                written->setAlignment(CountAtomics::word());
+            }
+
+            return nullptr;
+        });
+    };
+
+    store(parked);
+    teardown();
+
+    llvm::Value *after = apply_count_access(_ctx, access, handle, header, "teardown.check", [&](bool atomic) -> llvm::Value * {
+        llvm::LoadInst *loaded = _ctx.builder->CreateLoad(i64, strong_ptr, "teardown.strong");
+
+        if (atomic) {
+            loaded->setAtomic(CountAtomics::observe());
+            loaded->setAlignment(CountAtomics::word());
+        }
+
+        return loaded;
+    });
+
+    _ctx.abort->gen_cold_abort_if(
+        _ctx.builder->CreateICmpNE(after, parked, "teardown.escaped"),
+        "fatal error",
+        "a destructor kept a reference to the object it was destroying: " + type_name,
+        symbol_stem + "_escaped");
+
+    // back to zero, so a stale release after this is still the underflow the audit is looking for
+    store(zero);
+}
+
+llvm::Function *ClassCodegen::get_or_create_guarded_teardown(
+    CountAccess access,
+    const std::string &type_name,
+    const std::string &symbol_stem,
+    llvm::function_ref<void(llvm::Value *handle)> body
+)
+{
+    const std::string name = "__eco_teardown_" + symbol_stem;
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    llvm::Function *teardown = llvm::Function::Create(
+        llvm::FunctionType::get(
+            llvm::Type::getVoidTy(*_ctx.llvm_context), { _ctx.opaque_ptr_type() }, false),
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        name,
+        _ctx.current_module());
+
+    teardown->getArg(0)->setName("obj");
+    teardown->addFnAttr(llvm::Attribute::NoInline);
+
+    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", teardown));
+
+    gen_guarded_teardown(teardown->getArg(0), access, type_name, symbol_stem, [&] {
+        body(teardown->getArg(0));
+    });
+
+    _ctx.builder->CreateRetVoid();
+
+    return teardown;
+}
+
+llvm::Function *ClassCodegen::get_or_create_env_teardown(CountAccess access)
+{
+    const std::string name = "__eco_teardown_env";
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+    llvm::Function *teardown = llvm::Function::Create(
+        llvm::FunctionType::get(
+            llvm::Type::getVoidTy(*_ctx.llvm_context), { opaque_ptr, opaque_ptr }, false),
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        name,
+        _ctx.current_module());
+
+    teardown->getArg(0)->setName("obj");
+    teardown->getArg(1)->setName("deinit");
+    teardown->addFnAttr(llvm::Attribute::NoInline);
+
+    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", teardown));
+
+    gen_guarded_teardown(teardown->getArg(0), access, "a closure environment", "env", [&] {
+        llvm::Value *slot = _ctx.entry_alloca(opaque_ptr, "self_slot");
+        _ctx.builder->CreateStore(teardown->getArg(0), slot);
+        _ctx.builder->CreateCall(
+            llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), { opaque_ptr }, false),
+            teardown->getArg(1),
+            { slot });
+    });
+
+    _ctx.builder->CreateRetVoid();
+
+    return teardown;
+}
+
+void ClassCodegen::gen_typeinfo_deinit_call(llvm::Value *handle, CountAccess access)
 {
     llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
     llvm::Type *header = _ctx.types->class_header_llvm_type();
@@ -898,12 +1040,12 @@ void ClassCodegen::gen_typeinfo_deinit_call(llvm::Value *handle)
         skip);
 
     _ctx.set_insert_point(call);
-    llvm::Value *slot = _ctx.entry_alloca(opaque_ptr, "self_slot");
-    _ctx.builder->CreateStore(handle, slot);
-    _ctx.builder->CreateCall(
-        llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), { opaque_ptr }, false),
-        deinit,
-        { slot });
+
+    // an environment's teardown can be a closure capturing itself by value, so it is guarded like a
+    // written destructor. whether one is there is only known here, at run time
+    llvm::Function *teardown = get_or_create_env_teardown(access);
+
+    _ctx.builder->CreateCall(teardown, { handle, deinit });
     _ctx.builder->CreateBr(skip);
 
     _ctx.set_insert_point(skip);
@@ -969,8 +1111,14 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
         _ctx, access, handle, box_type, count_ptr, count.c_str());
 
     if (_ctx.options.checking_refcounts() || _ctx.options.assertions_enabled()) {
+        // **near zero only**: a release inside a teardown takes the parked ClassBox::deiniting_count back
+        // down to itself, which is negative and is not an underflow
+        llvm::Value *negative = _ctx.builder->CreateICmpSLT(next, llvm::ConstantInt::get(i64, 0));
+        llvm::Value *near_zero = _ctx.builder->CreateICmpSGT(
+            next, llvm::ConstantInt::getSigned(i64, ClassBox::deiniting_count / 2));
+
         _ctx.abort->gen_abort_if(
-            _ctx.builder->CreateICmpSLT(next, llvm::ConstantInt::get(i64, 0), count + ".dead"),
+            _ctx.builder->CreateAnd(negative, near_zero, count + ".dead"),
             "fatal error",
             "released an object that was already destroyed: " + audit_label,
             audit_label + "_" + count);

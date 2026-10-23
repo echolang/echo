@@ -107,7 +107,11 @@ public function verify_at(const string& $start, command::CLIContext $ctx) : int3
             $errors[] = "lock entry '{$e->name}' has no sha256 - run `epm update`";
             $failed = $failed + 1;
         }
-        else if (sys::tree_sha256($dir) != $e->sha256) {
+        else if (!lock::tree_is_checkable($dir, $lock->version)) {
+            $errors[] = "{$e->name} cannot be checked against a version 1 lock because the tree contains a directory or dangling symbolic link - run `epm install --rehash`";
+            $failed = $failed + 1;
+        }
+        else if (lock::tree_hash($dir, $lock->version) != $e->sha256) {
             $errors[] = "sha256 mismatch for {$e->name}";
             $failed = $failed + 1;
         }
@@ -128,6 +132,11 @@ public function verify_at(const string& $start, command::CLIContext $ctx) : int3
 
     $bar->set($total, "{$total} packages");
     $bar->finish();
+
+    if ($lock->version < lock::LOCK_VERSION) {
+        $ctx->line('epm.lock.json is lockVersion 1 - run `epm install` to upgrade the lock');
+    }
+
     return 0;
 }
 

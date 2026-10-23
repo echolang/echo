@@ -138,6 +138,22 @@ TEST_CASE("ios-device with no arch override is arm64 for facts too", "[target]")
 #endif
 }
 
+TEST_CASE("host_symbol_lookup is a row capability", "[target]")
+{
+    REQUIRE(Compiler::CodegenTarget::for_triple("x86_64-pc-windows-msvc").host_symbol_lookup()
+        == Compiler::HostSymbolLookup::t_get_proc_address);
+
+    const Compiler::CodegenTarget gnu =
+        Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
+    REQUIRE(gnu.host_symbol_lookup() == Compiler::HostSymbolLookup::t_dlsym);
+    REQUIRE(gnu.rtld_default() == 0);
+
+    const Compiler::CodegenTarget darwin =
+        Compiler::CodegenTarget::for_triple("arm64-apple-macosx");
+    REQUIRE(darwin.host_symbol_lookup() == Compiler::HostSymbolLookup::t_dlsym);
+    REQUIRE(darwin.rtld_default() == -2);
+}
+
 TEST_CASE("effective_triple falls back to the host", "[target]")
 {
     Compiler::CodegenTarget target;
@@ -420,6 +436,7 @@ TEST_CASE("native library link args pass -shared", "[target]")
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-soname,greeter.dylib") != argv.end());
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-z,defs") != argv.end());
         REQUIRE(std::find(argv.begin(), argv.end(), "-Wl,-Bsymbolic-functions") != argv.end());
+        REQUIRE(std::find(argv.begin(), argv.end(), "-ldl") != argv.end());
     }
 }
 

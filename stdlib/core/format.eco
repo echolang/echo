@@ -332,7 +332,7 @@ private function float_to_string(float64 $value, const spec& $s, int32 $default_
     usize $capacity = 32;
 
     while (true) {
-        buf $owner = buf($capacity, 0, mem::alloc<uint8>($capacity + 1));
+        buf $owner = buf($capacity, 0, text_block($capacity));
 
         int32 $needed = c_snprintf($owner->bytes, $capacity + 1, $format->cstr(), [$precision, $value]);
 

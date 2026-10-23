@@ -1,0 +1,9 @@
+// a missing key stops the program in every build. it was an `assert`, so a release build read one slot past
+// the table (or offset from null, for an empty map) and `$m->at($k) = $v` wrote there
+
+map<string, int32> $m;
+$m['present'] = 1;
+
+echo $m['present'];
+echo $m->get('absent');
+echo 'unreachable';

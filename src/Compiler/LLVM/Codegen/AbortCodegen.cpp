@@ -506,6 +506,64 @@ void AbortCodegen::gen_abort_if(
     });
 }
 
+llvm::Function *AbortCodegen::get_or_create_cold_stop(
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &symbol_stem
+)
+{
+    const std::string name = "__eco_stop_" + symbol_stem;
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    llvm::Function *stop = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), {}, false),
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        name,
+        _ctx.current_module());
+
+    // cold and never inlined: the whole point is that the message stays out of the caller
+    stop->addFnAttr(llvm::Attribute::NoReturn);
+    stop->addFnAttr(llvm::Attribute::Cold);
+    stop->addFnAttr(llvm::Attribute::NoInline);
+    stop->addFnAttr(llvm::Attribute::NoUnwind);
+
+    llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
+    _ctx.set_insert_point(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", stop));
+
+    emit_unlocated_abort(headline, detail, symbol_stem);
+    return stop;
+}
+
+void AbortCodegen::gen_cold_abort_if(
+    llvm::Value *condition,
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &symbol_stem
+)
+{
+    llvm::Function *stop = get_or_create_cold_stop(headline, detail, symbol_stem);
+
+    abort_when(condition, [&] {
+        llvm::CallInst *call = _ctx.builder->CreateCall(stop, {});
+        call->setDoesNotReturn();
+        _ctx.builder->CreateUnreachable();
+    });
+}
+
+void AbortCodegen::gen_cold_abort(
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &symbol_stem
+)
+{
+    llvm::CallInst *call = _ctx.builder->CreateCall(get_or_create_cold_stop(headline, detail, symbol_stem), {});
+    call->setDoesNotReturn();
+    _ctx.builder->CreateUnreachable();
+}
+
 llvm::Value *AbortCodegen::swap_hook(llvm::Value *fn)
 {
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();

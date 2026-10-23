@@ -45,6 +45,8 @@ namespace
             { "process_argv", AST::BuiltinKind::t_process_argv },
             { "process_envp", AST::BuiltinKind::t_process_envp },
             { "exit", AST::BuiltinKind::t_exit },
+            { "cold_die", AST::BuiltinKind::t_cold_die },
+            { "hash_seed", AST::BuiltinKind::t_hash_seed },
             { "atomic_load", AST::BuiltinKind::t_atomic_load },
             { "atomic_store", AST::BuiltinKind::t_atomic_store },
             { "atomic_add", AST::BuiltinKind::t_atomic_add },
@@ -133,9 +135,11 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_free_bytes:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_cold_die:
         case AST::BuiltinKind::t_atomic_load:
         case AST::BuiltinKind::t_atomic_store:
         case AST::BuiltinKind::t_atomic_add:
@@ -169,6 +173,7 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_cold_die:
             return true;
 
         case AST::BuiltinKind::t_assert:
@@ -197,6 +202,7 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_free_bytes:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_atomic_load:
@@ -245,6 +251,7 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_cold_die:
         case AST::BuiltinKind::t_assert:
         case AST::BuiltinKind::t_crash_set_hook:
         case AST::BuiltinKind::t_crash_take_hook:
@@ -266,6 +273,7 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_free_bytes:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_atomic_load:
@@ -302,6 +310,7 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
     // that silently accepts a message it cannot fold
     switch (kind) {
         case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_cold_die:
             return 0;
 
         // behind the condition
@@ -338,6 +347,7 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_free_bytes:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_unwrap_abort:
@@ -379,6 +389,7 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
     // accept a runtime message that the call then compiled out
     switch (kind) {
         case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_cold_die:
             return true;
 
         case AST::BuiltinKind::t_die:
@@ -409,6 +420,7 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_free_bytes:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_atomic_load:

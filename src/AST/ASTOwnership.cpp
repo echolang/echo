@@ -1794,6 +1794,54 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             break;
         }
 
+        // OperatorRewriter plants one around a match arm whose value expanded a collection literal,
+        // so this walk has to reach it: the default walks nothing. temps are this node's, not the frame's
+        case NodeType::n_expr_temp_bind:
+        {
+            auto *bind = static_cast<TemporaryBindExprNode *>(expr);
+
+            for (VarDeclNode *temp : bind->temporaries) {
+                const ValueType type = temp->has_type() ? temp->type() : ValueType::make_unknown();
+
+                temp->init_expr = resolve_value_arrival(
+                    temp->init_expr, type, nullptr, ValueDestination::t_declaration);
+            }
+
+            for (auto &stmt : bind->statements) {
+                stmt = walk_statement(stmt);
+            }
+
+            // the bind is about to die, so its body hands the temp over the way a `return` does.
+            // those temps are this node's, not the frame's: erase the move after teardown so a
+            // match arm does not look like it moved a function-local on one branch
+            const ValueType wanted = bind->body != nullptr
+                ? ValueType::make_mutable(value_result_type(*bind->body))
+                : ValueType::make_unknown();
+
+            bind->body = resolve_value_arrival(
+                bind->body, wanted, nullptr, ValueDestination::t_return);
+
+            if (bind->teardown.empty()) {
+                for (size_t i = bind->temporaries.size(); i-- > 0;) {
+                    VarDeclNode *temp = bind->temporaries[i];
+
+                    if (_flow.moved.count(temp) > 0 || !needs_destruction(temp->type())) {
+                        continue;
+                    }
+
+                    std::vector<std::string> path;
+                    emit_drop(temp, path, temp->type(), bind->teardown);
+                }
+            }
+
+            for (VarDeclNode *temp : bind->temporaries) {
+                _flow.moved.erase(temp);
+                _flow.maybe_moved.erase(temp);
+            }
+
+            break;
+        }
+
         // **a match owns a declaration and N scopes, so it is walked like the statement it half is.**
         // named here rather than left to `default:` for the reason the arms above are: that one walks
         // nothing, so a subtree reached only through this node would never be walked at all - which is

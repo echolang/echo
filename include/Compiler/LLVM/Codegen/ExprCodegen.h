@@ -135,6 +135,9 @@ namespace Compiler::LLVM
     private:
         CodegenContext &_ctx;
 
+        // `cold_die`: a literal message, one cold thunk per message. see BuiltinKind::t_cold_die
+        void gen_cold_die_builtin(AST::FunctionCallExprNode &node);
+
         // a call whose declaration is an interface **requirement**: the callee is loaded out of the
         // receiver's own vtable rather than looked up in the function table, because a requirement has no
         // symbol - the implementors have the bodies, under their own names

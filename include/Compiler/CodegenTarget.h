@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -50,6 +51,24 @@ namespace Compiler
         t_none,
         t_ucrt_stdout_stderr,
         t_wasi_libc_stdout,
+    };
+
+    // where the per-process hash seed comes from. none of these can block or fail once a process is running
+    enum class EntropySource
+    {
+        // `arc4random_buf`, which has no failure path at all
+        t_arc4random,
+        // `getentropy`, glibc 2.25+, musl, Android 28+, and wasi-libc over `random_get`
+        t_getentropy,
+        // UCRT `rand_s`, four bytes a call
+        t_rand_s,
+    };
+
+    // how a native lib looks up a symbol in the host image. `dlopen(NULL)` from a ctor can deadlock
+    enum class HostSymbolLookup
+    {
+        t_dlsym,
+        t_get_proc_address,
     };
 
     struct ReservedExportNames
@@ -149,6 +168,11 @@ namespace Compiler
 
         EnvironSource environ_source() const;
         StdioUnbuffering stdio_unbuffering() const;
+        EntropySource entropy_source() const;
+        HostSymbolLookup host_symbol_lookup() const;
+
+        // `RTLD_DEFAULT` as an integer `dlsym` takes. unused on `t_get_proc_address`
+        int64_t rtld_default() const;
 
         // false for every wasm ISA, not only wasi. a switch on OS would say yes for a
         // wasm triple LLVM still classifies as linux

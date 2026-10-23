@@ -1,0 +1,7 @@
+stdlib: off
+
+--- OUT --->
+1
+--- IR --->
+CHECK: __eco_hash_seed
+CHECK: __eco_seed_hash

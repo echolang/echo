@@ -1,0 +1,10 @@
+// the debug check must see the count before it is narrowed to the shifted type. 259 truncated to
+// uint8 is 3, which is a legal count, so a check-after-narrow prints 8 instead of stopping
+
+function shifted(uint8 $v, uint32 $by) : uint8
+{
+    return $v << $by;
+}
+
+echo shifted(1, 3);
+echo shifted(1, 259);

@@ -1,3 +1,4 @@
+use epm::lock;
 use epm::scratch;
 use epm::sys;
 
@@ -94,3 +95,134 @@ test tree_hash_includes_the_relative_path
     scratch::gone($left);
     scratch::gone($right);
 }
+
+test tree_hash_v1_differs_from_v2_on_a_file
+{
+    string $root = scratch::dir('tree-v1-v2');
+    scratch::file($root, 'a.txt', 'A');
+    string $v1 = sys::tree_sha256_v1($root);
+    string $v2 = sys::tree_sha256($root);
+    assert($v1->size() == 64);
+    assert($v2->size() == 64);
+    assert($v1 != $v2);
+    scratch::gone($root);
+}
+
+test tree_hash_v1_is_path_newline_body
+{
+    string $root = scratch::dir('tree-v1-pin');
+    scratch::file($root, 'a.txt', 'A');
+    assert(sys::tree_sha256_v1($root) == sys::sha256_hex("a.txt\nA"));
+    scratch::gone($root);
+}
+
+test tree_hash_v1_concatenates_sorted_entries
+{
+    string $root = scratch::dir('tree-v1-two');
+    scratch::file($root, 'b.txt', 'B');
+    scratch::file($root, 'a.txt', 'A');
+    assert(sys::tree_sha256_v1($root) == sys::sha256_hex("a.txt\nAb.txt\nB"));
+    scratch::gone($root);
+}
+
+test tree_hash_v1_is_stable
+{
+    string $root = scratch::dir('tree-v1-stable');
+    scratch::file($root, 'b.txt', 'B');
+    scratch::file($root, 'a.txt', 'A');
+    string $first = sys::tree_sha256_v1($root);
+    string $second = sys::tree_sha256_v1($root);
+    assert($first == $second);
+    scratch::gone($root);
+}
+
+test tree_hash_v1_changes_when_a_file_does
+{
+    string $root = scratch::dir('tree-v1-change');
+    scratch::file($root, 'a.txt', 'A');
+    string $before = sys::tree_sha256_v1($root);
+    scratch::write(sys::join($root, 'a.txt'), 'B');
+    string $after = sys::tree_sha256_v1($root);
+    assert($before != $after);
+    scratch::gone($root);
+}
+
+test an_empty_tree_hashes_the_same_in_v1_and_v2
+{
+    string $root = scratch::dir('tree-v1-empty');
+    assert(sys::tree_sha256_v1($root) == sys::tree_sha256($root));
+    scratch::gone($root);
+}
+
+test tree_contains_link_is_false_for_plain_files
+{
+    string $root = scratch::dir('tree-no-link');
+    scratch::file($root, 'a.txt', 'A');
+    assert(!sys::tree_contains_link($root));
+    assert(!sys::tree_has_v1_uncheckable_link($root));
+    scratch::gone($root);
+}
+
+#[if: os != windows]
+test a_directory_symlink_is_a_link_in_the_tree
+{
+    string $root = scratch::dir('tree-dir-link');
+    string $outside = sys::join($root, 'outside');
+    string $tree = sys::join($root, 'tree');
+    assert(sys::mkdir_p($outside));
+    assert(sys::mkdir_p($tree));
+    scratch::file($outside, 'keep.txt', 'B');
+    scratch::file($tree, 'a.txt', 'A');
+
+    array<string> $ln = array<string>();
+    $ln[] = 'ln';
+    $ln[] = '-s';
+    $ln[] = $outside;
+    $ln[] = sys::join($tree, 'link');
+    assert(sys::run($ln)->ok());
+
+    assert(sys::tree_contains_link($tree));
+    assert(sys::tree_has_v1_uncheckable_link($tree));
+    assert(!lock::tree_is_checkable($tree, 1));
+    // old walk followed the link and hashed link/keep.txt; this walk records `link` with an empty body
+    assert(sys::tree_sha256_v1($tree) != sys::sha256_hex("a.txt\nAlink/keep.txt\nB"));
+    scratch::gone($root);
+}
+
+test a_dangling_symlink_is_a_link_in_the_tree
+{
+    string $root = scratch::dir('tree-dangling');
+    array<string> $ln = array<string>();
+    $ln[] = 'ln';
+    $ln[] = '-s';
+    $ln[] = 'missing';
+    $ln[] = sys::join($root, 'gone');
+    assert(sys::run($ln)->ok());
+
+    assert(sys::tree_contains_link($root));
+    assert(sys::tree_has_v1_uncheckable_link($root));
+    assert(!lock::tree_is_checkable($root, 1));
+    // old walk skipped a dangling link; this walk records it with an empty body
+    assert(sys::tree_sha256_v1($root) != sys::sha256_hex(''));
+    scratch::gone($root);
+}
+
+test a_file_symlink_hashes_the_same_as_the_old_walk
+{
+    string $root = scratch::dir('tree-file-link');
+    scratch::file($root, 'a.txt', 'A');
+
+    array<string> $ln = array<string>();
+    $ln[] = 'ln';
+    $ln[] = '-s';
+    $ln[] = 'a.txt';
+    $ln[] = sys::join($root, 'LICENSE');
+    assert(sys::run($ln)->ok());
+
+    assert(sys::tree_contains_link($root));
+    assert(!sys::tree_has_v1_uncheckable_link($root));
+    assert(lock::tree_is_checkable($root, 1));
+    assert(sys::tree_sha256_v1($root) == sys::sha256_hex("LICENSE\nAa.txt\nA"));
+    scratch::gone($root);
+}
+#[end]

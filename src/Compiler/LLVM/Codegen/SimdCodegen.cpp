@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 
+#include "Compiler/LLVM/Codegen/IntegerChecks.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
@@ -73,6 +74,11 @@ namespace Compiler::LLVM
         const bool is_float = lane.is_floating_type();
 
         auto splat_count = [&]() {
+            gen_shift_count_check(
+                _ctx,
+                right,
+                AST::get_integer_size(lane.get_primitive_type()).bit_width(),
+                node.op_node->token_literal);
             llvm::Value *count = _ctx.types->coerce_value(
                 CodegenValue::scalar(right), AST::value_type_of(rhs), lane, *_ctx.current_cmp_unit).scalar();
             auto *vec_ty = llvm::cast<llvm::FixedVectorType>(left->getType());

@@ -1,0 +1,21 @@
+// the same `_hoisted` leak as a collection-literal argument inside `guard`, reached through
+// `if` / `while` instead. visitScope used to plant `$__litN` in the body while the condition ran first
+
+function pred(array<int32> $xs) : bool
+{
+    return $xs[0] > 0;
+}
+
+if (pred([1, 2])) {
+    echo 7;
+}
+
+int32 $n = 0;
+
+while (pred([1, 2])) {
+    echo $n;
+    $n = $n + 1;
+    if ($n >= 1) {
+        break;
+    }
+}

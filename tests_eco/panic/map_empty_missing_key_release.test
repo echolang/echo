@@ -1,0 +1,6 @@
+flags: --release
+expect: fail
+
+--- OUT --->
+fatal error: map key not found
+  at <runtime>:0

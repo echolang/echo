@@ -1,10 +1,9 @@
 // `hash::of` is an overload set rather than a `contract::`, because a primitive cannot declare a
 // conformance - so an interface constraint would refuse `map<int32, V>`, the first map anybody writes
 //
-// the goldened **string** hashes are what pin the FNV constants. they are canonical FNV-1a 64 values and
-// can be checked against any other implementation; note the compiler's own `fnv1a64`, which hashes module
-// cache keys, carries a basis one digit short of the real one - the two are unrelated uses that never
-// compare a value, so this file spells the canonical constants
+// the goldened **string** hashes are FNV-1a then `mix`, so they are not canonical FNV values. equal
+// spellings of the same text still agree; that is the property the numbers pin. the compiler's own
+// `fnv1a64` (module cache keys) is a different basis and a different use
 //
 // the **integer** values are not canonical anything - they are `hash::mix`, a SplitMix64 finalizer, and the
 // only claims made about them are the ones asserted below: equal numbers agree, unequal ones do not

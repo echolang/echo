@@ -1,0 +1,10 @@
+--- OUT --->
+7
+0
+--- RAST --->
+# the `if` runs once, so `$__lit1` sits ahead of it. the `while` rebuilds `$__lit2` each
+# iteration inside a TemporaryBind on the condition
+CHECK: vardecl<type<array<int32>>>($__lit1)
+CHECK: if (call pred(
+CHECK: while (tempbind
+CHECK: vardecl<type<array<int32>>>($__lit2)

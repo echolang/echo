@@ -38,8 +38,9 @@ namespace AST
     //
     // **one predicate for in-place vs hoist:** the destination is mutable variable storage. a const
     // declaration, an assignment through `$a[]` or `$s->items`, and an argument all hoist. what differs
-    // is only where the walk places the statements this returns - siblings of a declaration so the
-    // name outlives the temp, a wrapper around anything else so the temp dies with the statement
+    // is only where the walk places the statements this returns: siblings of a declaration or a
+    // `guard` so the name outlives the temp, a wrapper around anything else so the temp dies with
+    // the statement
     class CollectionLiteralExpansion
     {
     public:
@@ -74,12 +75,10 @@ namespace AST
         bool expand_statement(ScopeNode &scope, size_t index, std::vector<NodeReference> &hoisted);
 
         // an expression-position literal. the hoist statements go into `hoisted`; the replacement
-        // is the temp's name, or null when the literal is not ready. `hoist_barrier` is how deep
-        // inside `??` / `?->` the walk is
+        // is the temp's name, or null when the literal is not ready
         ExprNode *expand_expression(
             ExprNode *expr,
-            std::vector<NodeReference> &hoisted,
-            size_t hoist_barrier
+            std::vector<NodeReference> &hoisted
         );
 
         void report_unplaced(CollectionLiteralExprNode &literal);
@@ -123,11 +122,10 @@ namespace AST
         );
 
         // answers the temp's name, having appended the declaration and its appends to `hoisted`.
-        // null when the literal is not ready, or when a hoist would move construction above a branch
+        // null when the literal is not ready
         ExprNode *hoist(
             CollectionLiteralExprNode &literal,
-            std::vector<NodeReference> &hoisted,
-            size_t hoist_barrier
+            std::vector<NodeReference> &hoisted
         );
 
         FunctionCallExprNode &build_named_call(
@@ -146,9 +144,9 @@ namespace AST
         DetachBatch &_detached;
     };
 
-    // places `hoisted` ahead of `scope.children[index]`. a declaration is spliced as a sibling so
-    // the name it introduces outlives the temp; every other statement is wrapped so the temp dies
-    // with the statement rather than the frame
+    // places `hoisted` ahead of `scope.children[index]`. a declaration **or a `guard`** is spliced
+    // as a sibling so the binding outlives the temp; wrapping would drop it with the hoist.
+    // every other statement is wrapped so the temp dies with the statement
     void place_collection_literal_hoists(
         ScopeNode &scope,
         size_t index,

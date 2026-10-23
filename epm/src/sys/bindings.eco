@@ -12,6 +12,8 @@ internal extern {
     function epm_closedir(ptr<uint8> $dir) : void;
 
     function epm_kind(ptr<const uint8> $path) : int32;
+    function epm_is_link(ptr<const uint8> $path) : int32;
+    function epm_readlink(ptr<const uint8> $path, ptr<uint8> $buf, usize $cap) : int32;
     function epm_mkdir(ptr<const uint8> $path) : int32;
     function epm_rmdir(ptr<const uint8> $path) : int32;
     function epm_rename(ptr<const uint8> $from, ptr<const uint8> $to) : int32;

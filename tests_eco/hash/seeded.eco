@@ -1,0 +1,13 @@
+// the per-process seed reaches every hash: under a pinned seed other than 0 the values move away from
+// the unseeded ones, while equal keys still agree and a map still finds them
+
+echo hash::of(42);
+echo hash::of('abc');
+
+string $owned = str::from('ab');
+$owned->append('c');
+echo hash::of('abc') == hash::of($owned);
+
+map<string, int32> $m;
+$m['abc'] = 7;
+echo $m[$owned];

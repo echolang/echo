@@ -1,0 +1,21 @@
+// collection literals under `?->` and `??` wrap in a TemporaryBind, so they
+// run only on the path that evaluates them
+
+class Holder
+{
+    int32 $n;
+
+    constructor(int32 $n) { $this->n = $n; }
+
+    function take(array<int32>& $a) : int32 { return $a[0]; }
+
+    function take_map(map<string, int32>& $m) : int32 { return $m['a']; }
+}
+
+Holder? $h = null;
+echo $h?->take([1, 2]) ?? 7;
+echo $h?->take_map(['a' => 4]) ?? 7;
+
+Holder? $p = Holder(0);
+echo $p?->take([9, 8]) ?? 7;
+echo $p?->take_map(['a' => 4]) ?? 7;

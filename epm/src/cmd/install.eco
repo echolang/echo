@@ -18,15 +18,20 @@ public function install(const App& $app, const command::Parsed& $cli) : int32
         return 1;
     }
 
-    return install_at($start, $ctx);
+    return install_at($start, $ctx, $cli->stated($app->rehash));
 }
 
 public function install_at(const string& $start) : int32
 {
-    return install_at($start, command::CLIContext::plain());
+    return install_at($start, command::CLIContext::plain(), false);
 }
 
 public function install_at(const string& $start, command::CLIContext $ctx) : int32
+{
+    return install_at($start, $ctx, false);
+}
+
+public function install_at(const string& $start, command::CLIContext $ctx, bool $rehash) : int32
 {
     manifest::Manifest $man = guard project_at($start) else ($e) {
         $ctx->printError($e);
@@ -58,7 +63,7 @@ public function install_at(const string& $start, command::CLIContext $ctx) : int
         return 1;
     }
 
-    return apply_lock($man, $lock, $lock_path, $ctx);
+    return apply_lock($man, $lock, $lock_path, $ctx, $rehash);
 }
 
 public function update(const App& $app, const command::Parsed& $cli) : int32
@@ -197,7 +202,8 @@ private function apply_lock(
     const manifest::Manifest& $man,
     lock::Lock $lock,
     const string& $lock_path,
-    command::CLIContext $ctx
+    command::CLIContext $ctx,
+    bool $rehash
 ) : int32
 {
     string $vendor = sys::join(sys::dirname($man->path), 'vendor');
@@ -219,7 +225,22 @@ private function apply_lock(
     while ($i < $lock->packages->count()) {
         lock::Entry $e = $lock->packages[$i];
         string $dest = sys::join($vendor, $e->name);
-        Placed $got = guard materialize($dest, $e->origin, $e->rev, $e->sha256) else ($err) {
+
+        // a v1 lock of a directory or dangling link cannot be checked. refuse before
+        // fetch so an already-vendored copy is not replaced. --rehash fetches the
+        // locked rev and rewrites hashes without re-resolving
+        if (
+            !$rehash
+            && !$e->sha256->empty()
+            && sys::is_dir($dest)
+            && !lock::tree_is_checkable($dest, $lock->version)
+        ) {
+            $bar->fail();
+            $ctx->printError("{$e->name}@{$e->version} cannot be checked against a version 1 lock because the tree contains a directory or dangling symbolic link - run `epm install --rehash`");
+            return 1;
+        }
+
+        Placed $got = guard materialize($dest, $e->origin, $e->rev, $e->sha256, $lock->version) else ($err) {
             $bar->fail();
             $ctx->printError($err);
             return 1;
@@ -232,7 +253,28 @@ private function apply_lock(
             $fetched = $fetched + 1;
         }
 
-        if ($got->sha256 != $e->sha256 || $got->rev != $e->rev) {
+        // **the lock is what install checks against, so install never rewrites a hash it has.**
+        // only `epm update` moves a hash; a lock with no hash yet is filled in on first install.
+        // a v1 lock is checked with tree_sha256_v1 first; only a match is rewritten as v2.
+        // a freshly fetched tree that cannot be checked is the locked rev: write v2, do not leave it
+        // materialize already compared a keep-hit. a fetch on a current lock compared
+        // $got->sha256 as it walked; a v1 fetch still needs the v1 walk
+        if (!$got->kept && !$e->sha256->empty() && lock::tree_is_checkable($dest, $lock->version)) {
+            string $check = $got->sha256;
+
+            if ($lock->version < lock::LOCK_VERSION) {
+                $check = lock::tree_hash($dest, $lock->version);
+            }
+
+            if ($check != $e->sha256) {
+                sys::remove_all($dest);
+                $bar->fail();
+                $ctx->printError("{$e->name}@{$e->version} does not match epm.lock.json: the tree at {$got->rev} hashes to {$check}, the lock says {$e->sha256}. Nothing was installed for it - run `epm update` if this change is expected");
+                return 1;
+            }
+        }
+
+        if ($got->sha256 != $e->sha256 || $got->rev != $e->rev || $lock->version < lock::LOCK_VERSION) {
             $lock->packages[$i]->sha256 = $got->sha256;
             $lock->packages[$i]->rev = $got->rev;
             $dirty = true;
@@ -290,7 +332,7 @@ private function apply_plan(
         string $expect = expected_sha($old, $c->name, $want);
         string $ver = $c->version->spelling();
 
-        Placed $got = guard materialize($dest, $c->origin, $want, $expect) else ($e) {
+        Placed $got = guard materialize($dest, $c->origin, $want, $expect, $old->version) else ($e) {
             $bar->fail();
             $ctx->printError($e);
             return 1;
@@ -370,12 +412,19 @@ function materialize(
     const string& $dest,
     const manifest::Origin& $origin,
     const string& $rev,
-    const string& $expected_sha
+    const string& $expected_sha,
+    int64 $hash_version
 ) : result<Placed, string>
 {
     if (!$rev->empty() && sys::is_dir($dest) && !$expected_sha->empty()) {
-        if (sys::tree_sha256($dest) == $expected_sha) {
-            return .ok(Placed($rev, $expected_sha, true));
+        string $have = lock::tree_hash($dest, $hash_version);
+
+        if ($have == $expected_sha) {
+            if ($hash_version >= lock::LOCK_VERSION) {
+                return .ok(Placed($rev, $have, true));
+            }
+
+            return .ok(Placed($rev, sys::tree_sha256($dest), true));
         }
     }
 

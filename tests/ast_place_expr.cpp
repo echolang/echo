@@ -195,7 +195,6 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         { NodeType::n_expr_addrof, StorageClass::t_addressless },
         { NodeType::n_expr_peel, StorageClass::t_addressless },
         { NodeType::n_expr_move, StorageClass::t_addressless },
-        { NodeType::n_expr_temp_bind, StorageClass::t_addressless },
         { NodeType::n_expr_const_ref, StorageClass::t_addressless },
         { NodeType::n_expr_generic_value, StorageClass::t_addressless },
 
@@ -246,6 +245,10 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         // is a value one of its arms chose and nobody stored. so a `const T&` parameter has to be able
         // to bind a slot for it, exactly as it does for `f($a ?? $b)`
         { NodeType::n_expr_match, StorageClass::t_materializable },
+
+        // wrapping `pick(['x'])` so the nested `$__lit` dies with the index leaves a computed
+        // value. a `const K&` parameter still needs a slot for what `pick` returned
+        { NodeType::n_expr_temp_bind, StorageClass::t_materializable },
     };
 
     // asked of the tag rather than of a node, which is the whole of what storage_of reads - so the

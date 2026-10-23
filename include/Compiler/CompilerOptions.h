@@ -79,6 +79,12 @@ namespace Compiler
         // reason the flag exists, so the e2e corpus runs its adversarial cases both ways
         bool no_tbaa = false;
 
+        // **`--fixed-hash-seed`: `hash::of` uses constant 0.** iteration order is then stable across
+        // runs of that binary. string hashes still go through `mix`, so numbers from before seeding
+        // still differ. default seeds, because a map keyed by untrusted input is otherwise a
+        // collision set anyone can compute offline. part of the module cache key
+        bool fixed_hash_seed = false;
+
         // **what was asked for, never what it resolved to.**
         //
         // `--target-cpu` and `--target-features`, both empty meaning "the platform baseline for this

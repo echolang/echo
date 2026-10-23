@@ -140,6 +140,25 @@ public function mix(uint64 $key) : uint64
 }
 
 /**
+ * This process's hash seed, drawn once at startup and folded into every `of` below. A map keyed by input
+ * somebody else chose is otherwise a collision set they can compute offline. A plain load.
+ * `ECHO_HASH_SEED=<decimal>` pins it; `echoc build --fixed-hash-seed` makes it the constant 0, which
+ * keeps iteration order stable. String hashes still go through `mix`.
+ */
+#[echoc::builtin: hash_seed]
+private function process_seed() : uint64;
+
+/**
+ * A machine word, seeded and then stirred: what every integer, bool and float key goes through. `mix`
+ * stays pure, so composing a hash of your own out of it means what it always meant.
+ */
+#[inline]
+private function keyed(uint64 $key) : uint64
+{
+    return mix($key ^ process_seed());
+}
+
+/**
  * One FNV-1a step: folds `$byte` into `$seed`.
  *
  * The multiply overflows constantly, and that is the algorithm rather than a bug - it is defined on
@@ -222,7 +241,7 @@ public function bits<T>(const T& $value) : uint64
     // a `ptr<const uint8>` over the value's bytes, walked by value. no borrow is formed, so nothing
     // is promised and no `unsafe` is owed - the doc above is the whole of the argument about when
     // this is the wrong thing to do, and it stays advice rather than a compiler rule
-    return bytes(ptr<const uint8>($value:$), mem::size<T>(), OFFSET_BASIS);
+    return mix(bytes(ptr<const uint8>($value:$), mem::size<T>(), OFFSET_BASIS ^ process_seed()));
 }
 
 /**
@@ -246,23 +265,23 @@ public function bits<T>(const T& $value) : uint64
  * the attribute every lookup and every insert pays an opaque cross-unit call around six instructions - and
  * an opaque call is also a memory barrier, so the probe loop reloads the capacity and the key across it.
  */
-#[inline] public function of(const int8& $value) : uint64 { return mix($value); }
-#[inline] public function of(const int16& $value) : uint64 { return mix($value); }
-#[inline] public function of(const int32& $value) : uint64 { return mix($value); }
-#[inline] public function of(const int64& $value) : uint64 { return mix($value); }
-#[inline] public function of(const isize& $value) : uint64 { return mix($value); }
+#[inline] public function of(const int8& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const int16& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const int32& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const int64& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const isize& $value) : uint64 { return keyed($value); }
 
-#[inline] public function of(const uint8& $value) : uint64 { return mix($value); }
-#[inline] public function of(const uint16& $value) : uint64 { return mix($value); }
-#[inline] public function of(const uint32& $value) : uint64 { return mix($value); }
-#[inline] public function of(const uint64& $value) : uint64 { return mix($value); }
-#[inline] public function of(const usize& $value) : uint64 { return mix($value); }
+#[inline] public function of(const uint8& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const uint16& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const uint32& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const uint64& $value) : uint64 { return keyed($value); }
+#[inline] public function of(const usize& $value) : uint64 { return keyed($value); }
 
 /**
  * A bool has two values, so the only thing its hash owes anybody is that they differ - but they should
  * differ *everywhere*, not just in the bottom bit, or a `map<bool, V>` puts both in adjacent slots.
  */
-#[inline] public function of(const bool& $value) : uint64 { return mix($value); }
+#[inline] public function of(const bool& $value) : uint64 { return keyed($value); }
 
 /**
  * The float overloads, which are **not** a byte hash.
@@ -298,7 +317,7 @@ public function of(const float32& $value) : uint64
     // and read through it, which meant one live object readable as both a float and an integer - the
     // exact shape that needs a promise. `bit_cast` copies the bytes out instead, so there is nothing
     // to promise and no `unsafe` here at all
-    return mix(mem::bit_cast<uint32, float32>($normal));
+    return keyed(mem::bit_cast<uint32, float32>($normal));
 }
 
 #[inline]
@@ -314,7 +333,7 @@ public function of(const float64& $value) : uint64
     // and read through it, which meant one live object readable as both a float and an integer - the
     // exact shape that needs a promise. `bit_cast` copies the bytes out instead, so there is nothing
     // to promise and no `unsafe` here at all
-    return mix(mem::bit_cast<uint64, float64>($normal));
+    return keyed(mem::bit_cast<uint64, float64>($normal));
 }
 
 /**
@@ -328,15 +347,19 @@ public function of(const float64& $value) : uint64
  * Two overloads and not one. A `string` argument matches the `string` overload at borrow-const, which
  * beats the `#[implicit]` view conversion outright - a declared conversion ranks below every built-in
  * one - so neither ever surprises the other.
+ *
+ * The seed is FNV's starting value, then `mix` so the table's low bits are not FNV's. That is not a
+ * keyed hash: it retires a collision set computed against the unseeded basis, it does not prevent one
+ * computed against this process's seed.
  */
 #[inline]
 public function of(const string& $value) : uint64
 {
-    return bytes($value->data(), $value->size(), OFFSET_BASIS);
+    return mix(bytes($value->data(), $value->size(), OFFSET_BASIS ^ process_seed()));
 }
 
 #[inline]
 public function of(const string::view& $value) : uint64
 {
-    return bytes($value->bytes, $value->size, OFFSET_BASIS);
+    return mix(bytes($value->bytes, $value->size, OFFSET_BASIS ^ process_seed()));
 }

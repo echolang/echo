@@ -42,6 +42,26 @@ private function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
 private function free_bytes(ptr<uint8> $p) : void;
 
 /**
+ * `die` for a stdlib check that has to stay inlinable. Never returns. The message is a literal, and it
+ * lowers to one cold stop per message: the happy path is a compare and a branch. No location, since the
+ * one worth naming is the caller's.
+ */
+#[echoc::builtin: cold_die]
+internal function cold_die(string $message) : void;
+
+/**
+ * Stops the program: an allocation a container needed could not be made. Never returns.
+ *
+ * What a container calls when `alloc` or `realloc` hands back `null`, so it never records a capacity it
+ * does not have.
+ */
+#[inline]
+internal function out_of_memory() : void
+{
+    cold_die('out of memory: an allocation a container needed could not be made');
+}
+
+/**
  * The three byte-level operations that move memory around without ever asking for any.
  *
  * Still bound straight to C, because there is nothing about them the compiler needs to know: they
@@ -192,7 +212,50 @@ public function alloc<T>(usize $count) : ptr<T>
     // **the raw seam.** the allocator hands back bytes and this is what says they are `T`s - but it
     // needs no `unsafe`, and that is the boundary working as intended: this produces a `ptr<T>`, and
     // a raw pointer promises nothing. the word is owed by whoever turns one of these into a `T&`
-    return ptr<T>(alloc_bytes($count * size<T>()));
+    return ptr<T>(unless_overflowed<T>(alloc_bytes(bytes_for<T>($count)), $count));
+}
+
+/**
+ * `$count` elements of `T`, in bytes, or the largest usize when that many bytes do not fit one.
+ *
+ * **A count whose bytes do not fit is an allocation that cannot succeed.** Multiplied as written it wraps
+ * to a small one the caller then writes `$count` elements into. Asking for the largest usize instead makes
+ * `alloc` and `realloc` answer `null` through the check every caller already makes.
+ */
+#[inline]
+private function bytes_for<T>(usize $count) : usize
+{
+    usize $bytes = $count * size<T>();
+
+    if (overflows<T>($count)) {
+        $bytes = ~(0 as usize);
+    }
+
+    return $bytes;
+}
+
+#[inline]
+private function overflows<T>(usize $count) : bool
+{
+    return size<T>() != 0 && $count > ~(0 as usize) / size<T>();
+}
+
+/**
+ * `$block`, or `null` when `$count` overflowed: **whatever the allocator answered**.
+ *
+ * The request for the largest usize cannot succeed, but an optimizer that removes an unused allocation
+ * may assume it did. The null here is a select on the overflow itself, which nothing can fold.
+ */
+#[inline]
+private function unless_overflowed<T>(ptr<uint8> $block, usize $count) : ptr<uint8>
+{
+    ptr<uint8> $answer = $block;
+
+    if (overflows<T>($count)) {
+        $answer:$ = null;
+    }
+
+    return $answer;
 }
 
 /**
@@ -203,7 +266,8 @@ public function alloc<T>(usize $count) : ptr<T>
  */
 public function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
 {
-    return ptr<T>(realloc_bytes(ptr<uint8>($p:$), $count * size<T>()));
+    // see `bytes_for`. a failed realloc leaves the block where it was
+    return ptr<T>(unless_overflowed<T>(realloc_bytes(ptr<uint8>($p:$), bytes_for<T>($count)), $count));
 }
 
 /**

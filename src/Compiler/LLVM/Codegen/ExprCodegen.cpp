@@ -10,6 +10,8 @@
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
+#include "Compiler/LLVM/Codegen/IntegerChecks.h"
+#include "Compiler/Fnv.h"
 
 #include "AST/ASTCast.h"
 #include "AST/ASTControlFlow.h"
@@ -17,6 +19,7 @@
 #include "AST/ASTNullability.h"
 #include "AST/ASTConstFold.h"
 #include "AST/ASTOperatorSemantics.h"
+#include "AST/ASTValueType.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTConformance.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
@@ -33,6 +36,7 @@
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
+#include "Compiler/LLVM/Codegen/StmtCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
@@ -402,11 +406,13 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                 _ctx.push_scalar(_ctx.builder->CreateMul(left, right));
                 break;
             case Token::Type::t_op_div:
+                gen_division_check(_ctx, left, right, is_unsigned, node.op_node->token_literal);
                 _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateUDiv(left, right)
                     : _ctx.builder->CreateSDiv(left, right));
                 break;
             case Token::Type::t_op_mod:
+                gen_division_check(_ctx, left, right, is_unsigned, node.op_node->token_literal);
                 _ctx.push_scalar(is_unsigned
                     ? _ctx.builder->CreateURem(left, right)
                     : _ctx.builder->CreateSRem(left, right));
@@ -473,7 +479,15 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             // that leaves the operation where the user wrote it: `uint8 200 << int64 40` is a `uint8`
             // shift by 40, refused by AST::shift_count_refusal, rather than an int64 one that answers
             case Token::Type::t_op_shl:
-                _ctx.push_scalar(_ctx.builder->CreateShl(left, shift_count()));
+                {
+                    gen_shift_count_check(
+                        _ctx,
+                        right,
+                        AST::get_integer_size(op_type.get_primitive_type()).bit_width(),
+                        node.op_node->token_literal);
+                    llvm::Value *count = shift_count();
+                    _ctx.push_scalar(_ctx.builder->CreateShl(left, count));
+                }
                 break;
             // **the one bitwise operator that is not sign-agnostic**, and it reads the same `is_unsigned`
             // `/ % **` and the comparisons above already read rather than asking a second time: a right
@@ -482,9 +496,17 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             // type cannot pick the instruction - which it did, and `int32 -16 >> uint32 2` answered
             // 1073741820 where the same shift by an `int32 2` answered -4
             case Token::Type::t_op_shr:
-                _ctx.push_scalar(is_unsigned
-                    ? _ctx.builder->CreateLShr(left, shift_count())
-                    : _ctx.builder->CreateAShr(left, shift_count()));
+                {
+                    gen_shift_count_check(
+                        _ctx,
+                        right,
+                        AST::get_integer_size(op_type.get_primitive_type()).bit_width(),
+                        node.op_node->token_literal);
+                    llvm::Value *count = shift_count();
+                    _ctx.push_scalar(is_unsigned
+                        ? _ctx.builder->CreateLShr(left, count)
+                        : _ctx.builder->CreateAShr(left, count));
+                }
                 break;
             case Token::Type::t_logical_eq:
                 _ctx.push_scalar(_ctx.builder->CreateICmpEQ(left, right));
@@ -1069,6 +1091,8 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             return;
 
         case AST::BuiltinKind::t_process_argc:
+
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
             // one arm for all three, for the reason the raw-memory trio has one: they read three
@@ -1078,6 +1102,10 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
 
         case AST::BuiltinKind::t_exit:
             gen_exit_builtin(node);
+            return;
+
+        case AST::BuiltinKind::t_cold_die:
+            gen_cold_die_builtin(node);
             return;
 
         case AST::BuiltinKind::t_atomic_load:
@@ -1359,9 +1387,11 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_free_bytes:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_hash_seed:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_cold_die:
         case AST::BuiltinKind::t_atomic_load:
         case AST::BuiltinKind::t_atomic_store:
         case AST::BuiltinKind::t_atomic_add:
@@ -1532,6 +1562,14 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
         return;
     }
 
+    if (kind == AST::BuiltinKind::t_hash_seed) {
+        _ctx.push(_ctx.types->coerce_value(
+            CodegenValue::scalar(_ctx.process->gen_hash_seed("hash_seed")),
+            AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+            node.decl->get_return_type(), *_ctx.current_cmp_unit));
+        return;
+    }
+
     // `ptr<ptr<uint8>>`, and **nullable at both levels** - which is not a formality. The outer word can
     // genuinely be null: `envp` is absent on a platform that does not pass it, and both blocks are null
     // in a unit whose `main` never ran the capture. The inner one is how each block says it has ended,
@@ -1547,6 +1585,22 @@ void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST
 
     _ctx.push(_ctx.types->coerce_value(
         CodegenValue::scalar(block), block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
+}
+
+void ExprCodegen::gen_cold_die_builtin(AST::FunctionCallExprNode &node)
+{
+    // AST::TypeChecker refused a message that is not a literal, through builtin_message_must_be_literal
+    const std::optional<std::string> message =
+        node.arguments.empty() ? std::nullopt : AST::literal_string_value(node.arguments[0]);
+
+    if (!message.has_value()) {
+        throw _ctx.error(fmt::format("'cold_die' needs a literal message {}", _ctx.function_context()));
+    }
+
+    // one stop per message: the stem is the message's digest, so two call sites with one message share a thunk
+    const std::string stem = "cold_" + Compiler::to_hex(Compiler::fnv1a64(message.value(), Compiler::k_fnv_offset_basis));
+
+    _ctx.abort->gen_cold_abort("fatal error", message.value(), stem);
 }
 
 void ExprCodegen::gen_exit_builtin(AST::FunctionCallExprNode &node)
@@ -1728,6 +1782,19 @@ void ExprCodegen::gen_temporary_bind(AST::TemporaryBindExprNode &node)
     // ahead of every read. the same reason TemporaryBindExprNode::clone clones the temporaries first
     for (AST::VarDeclNode *temp : node.temporaries) {
         temp->accept(*_ctx.visitor);
+    }
+
+    for (auto &stmt : node.statements) {
+        if (_ctx.block_is_terminated()) {
+            break;
+        }
+
+        assert(_ctx.stmts != nullptr && "TemporaryBind fills need the statement protocol");
+        _ctx.stmts->gen_statement(*stmt.node());
+    }
+
+    if (_ctx.block_is_terminated()) {
+        return;
     }
 
     const size_t depth_before = _ctx.value_stack.size();

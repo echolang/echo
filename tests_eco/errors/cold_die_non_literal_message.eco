@@ -1,0 +1,7 @@
+// cold_die keys its thunk on the message text, so the argument has to be a literal
+
+#[echoc::builtin: cold_die]
+function cold_die(int32 $message) : void;
+
+int32 $m = 1;
+cold_die($m);

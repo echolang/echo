@@ -1,0 +1,8 @@
+// a negative count truncated to the shifted width can become 0. the check is of the original value
+
+function shifted(uint8 $v, int32 $by) : uint8
+{
+    return $v << $by;
+}
+
+echo shifted(1, -256);

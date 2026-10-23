@@ -32,10 +32,14 @@
 #include "AST/VarRefNode.h"
 #include "AST/TypeNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
+#include <cassert>
+#include <stdexcept>
 #include <fmt/core.h>
 
 namespace AST
@@ -524,7 +528,7 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
         CollectionLiteralExpansion expansion(
             *_current_module, _collector, _current_file, _finalizing, _hoist_count, _detached);
 
-        if (ExprNode *place = expansion.expand_expression(expr, _hoisted, _hoist_barrier)) {
+        if (ExprNode *place = expansion.expand_expression(expr, _hoisted)) {
             _changed = true;
             return place;
         }
@@ -589,6 +593,12 @@ ExprNode *OperatorRewriter::resolve_builtin_operator(ExprNode *expr)
 
 void OperatorRewriter::visitScope(ScopeNode &node)
 {
+    // **the list is the statement this walk is inside, and a nested visitScope must not see it.**
+    // visit_guard fills `_hoisted` from the subject then walks the else arm; without this swap
+    // `$__litN` lands in the else while gen_guard evaluates the subject first
+    std::vector<NodeReference> incoming;
+    incoming.swap(_hoisted);
+
     // the base already walks children by index, but the literal expansion has to run *before* the
     // child is rewritten - so the constructor and the appends it produces are walked by this same
     // pass rather than waiting a round. that ordering is this pass's, so the loop is too
@@ -628,6 +638,10 @@ void OperatorRewriter::visitScope(ScopeNode &node)
 
         _hoisted.swap(outer);
     }
+
+    // a leftover is a hoist this scope produced and then never placed: the per-child plant empties the list
+    assert(_hoisted.empty() && "a collection-literal hoist outlived the statement that produced it");
+    _hoisted.swap(incoming);
 }
 
 void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
@@ -682,10 +696,71 @@ void OperatorRewriter::visit_assign(AssignNode &node)
     statement_edge(node.teardown_old);
 }
 
+void OperatorRewriter::bind_value_if_hoisted(ExprNode *&expr, const TokenReference &at)
+{
+    bind_value_if_hoisted(expr, &at);
+}
+
+void OperatorRewriter::bind_value_if_hoisted(ExprNode *&expr, const TokenReference *at)
+{
+    std::vector<NodeReference> enclosing;
+    enclosing.swap(_hoisted);
+    value_edge(expr);
+
+    if (!_hoisted.empty()) {
+        if (at == nullptr) {
+            if (!_hoisted.front().has()) {
+                throw std::runtime_error("hoist entry has no node");
+            }
+
+            at = source_token_of(*_hoisted.front().node());
+        }
+
+        if (at == nullptr) {
+            throw std::runtime_error("hoist with no token to bind at");
+        }
+
+        expr = bind_expression_hoists(expr, *at);
+    }
+
+    _hoisted.swap(enclosing);
+}
+
 void OperatorRewriter::visitBinaryExpr(BinaryExprNode &node)
 {
-    RecursiveVisitor::visitBinaryExpr(node);
+    value_edge(node.lhs);
+
+    const bool skips = node.op_node != nullptr && node.op_node->op != nullptr
+        && binary_skips_rhs(node.op_node->op->type);
+
+    if (skips) {
+        // `&&` / `||` skip the right operand. wrapping the RHS's hoists in a TemporaryBind keeps
+        // construction on the path that runs; hoisting to the statement would build it on the skipped one
+        bind_value_if_hoisted(node.rhs, node.op_node->token_literal);
+    }
+    else {
+        value_edge(node.rhs);
+    }
+
     widen_binary_operands(node);
+}
+
+void OperatorRewriter::visitWhileStatement(WhileStatementNode &node)
+{
+    // the condition runs every iteration. planting `$__lit` above the `while` would build it once
+    const TokenReference *at = node.token_while ? &*node.token_while
+        : (node.condition != nullptr ? source_token_of(*node.condition) : nullptr);
+
+    bind_value_if_hoisted(node.condition, at);
+    statement_edge(node.loop_scope);
+}
+
+void OperatorRewriter::visit_for_statement(ForStatementNode &node)
+{
+    bind_value_if_hoisted(node.condition, node.token_for);
+    statement_edge(node.loop_scope);
+    // the step is a ScopeNode: visitScope plants inside it, so the array is rebuilt each iteration
+    statement_edge(node.step);
 }
 
 ExprNode *OperatorRewriter::upgrade_optional_operand(ExprNode *operand, const TokenReference &at)
@@ -709,26 +784,94 @@ void OperatorRewriter::visit_guard(GuardNode &node)
     node.set_tested(upgrade_optional_operand(node.tested(), node.token));
 }
 
+ExprNode *OperatorRewriter::bind_expression_hoists(ExprNode *expr, const TokenReference &at)
+{
+    if (_hoisted.empty() || expr == nullptr) {
+        return expr;
+    }
+
+    assert_region_accepts_mutation(_current_function, _current_file);
+
+    // resolve_index_write lives on visitScope, and the appends are AssignNodes until it runs
+    auto &holder = _current_module->nodes.emplace_back<ScopeNode>();
+    holder.children = std::move(_hoisted);
+    _hoisted.clear();
+    visitScope(holder);
+
+    auto &bind = _current_module->nodes.emplace_back<TemporaryBindExprNode>(expr, at);
+
+    for (auto &ref : holder.children) {
+        if (ref.has_type<VarDeclNode>()) {
+            bind.temporaries.push_back(ref.get_ptr<VarDeclNode>());
+        } else {
+            bind.statements.push_back(ref);
+        }
+    }
+
+    holder.children.clear();
+    _changed = true;
+    return &bind;
+}
+
+void OperatorRewriter::visit_match(MatchExprNode &node)
+{
+    statement_edge(node.subject);
+
+    for (MatchExprNode::Arm &arm : node.arms) {
+        statement_edge(arm.scope);
+
+        if (arm.value == nullptr) {
+            continue;
+        }
+
+        // the subject's hoists belong to the enclosing statement; the arm's must not join them
+        std::vector<NodeReference> enclosing;
+        enclosing.swap(_hoisted);
+
+        // IndexExpr is a place even before MatchResolution sets yields_a_place. wrapping the
+        // whole arm would drop leftover hoists or phi a dangling address; wrap indices only
+        if (is_place_expression(*arm.value) || node.arm_yields_address(arm)) {
+            place_edge(arm.value);
+
+            if (!_hoisted.empty()) {
+                const TokenReference *at = _hoisted.front().has()
+                    ? source_token_of(*_hoisted.front().node())
+                    : nullptr;
+
+                if (at == nullptr) {
+                    at = &arm.token;
+                }
+
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(*at),
+                    "an array literal fills storage, so it has to name it - write it as a "
+                    "declaration's initializer or as an assignment to a variable.");
+                arm.value = bind_expression_hoists(arm.value, arm.token);
+            }
+        } else {
+            value_edge(arm.value);
+
+            if (!_hoisted.empty()) {
+                arm.value = bind_expression_hoists(arm.value, arm.token);
+            }
+        }
+
+        _hoisted.swap(enclosing);
+    }
+}
+
 void OperatorRewriter::visit_null_coalesce(NullCoalesceExprNode &node)
 {
-    // the other half of the rule above: `$a ?? [1, 2]` evaluates its right side only when the left was
-    // null, and a hoist would build the collection either way
-    const HoistBarrier barrier(*this);
-
-    RecursiveVisitor::visit_null_coalesce(node);
+    // `$a ?? [1, 2]` evaluates its right side only when the left was null. wrap the RHS like `&&` / `||`
+    value_edge(node.lhs);
+    bind_value_if_hoisted(node.rhs, node.token);
+    value_edge(node.present_value);
 
     node.lhs = upgrade_optional_operand(node.lhs, node.token);
 }
 
 void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
 {
-    // **the one position a hoist must not reach.** everything under a `?->` runs only when the base
-    // was there, and a hoisted declaration runs unconditionally, ahead of the statement - so
-    // `$o?->take([f()])` would call `f()` on the null path too. `?->` and `??` are the only two forms
-    // in the language that do not evaluate their right side, which is what makes this a two-arm rule
-    // rather than a control-flow analysis
-    const HoistBarrier barrier(*this);
-
     // base, then upgrade, then the marker, then the continuation. a late-typed base (`$a[0]`, a
     // pending call, a `foreach` binding) is settled by the base walk; the marker has to carry that
     // type before `->v` under it resolves. RecursiveVisitor walks both edges in one go, which is
@@ -754,7 +897,7 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
         }
     }
 
-    value_edge(node.continuation);
+    bind_value_if_hoisted(node.continuation, node.token);
 
     // **the stored result type, refreshed every round.** it cannot be derived at the ask - wrapping a
     // payload with no null value of its own interns a layout and `result_type()` has no registry - so this
@@ -773,7 +916,13 @@ void OperatorRewriter::visit_index_expr(IndexExprNode &node)
     // **the operands before the bracket itself**: `$a[$b[0]]` has to decide the inner one before the
     // outer can read a type off it, which is what descending first gets. the base's own order is not
     // a second rule to keep in step with - `element_call` and the operands are never both present
-    RecursiveVisitor::visit_index_expr(node);
+    statement_edge(node.element_call);
+    place_edge(node.base);
+
+    // wrap each index so `$v[first([0])]` stays a place: the TemporaryBind is the index, not the arm
+    for (ExprNode *&index : node.indices) {
+        bind_value_if_hoisted(index, node.token_bracket);
+    }
 
     resolve_index(node);
 }

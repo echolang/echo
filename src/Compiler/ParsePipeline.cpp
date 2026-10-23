@@ -9,8 +9,9 @@
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeChecker.h"
+#include "Compiler/ArtifactFile.h"
 #include "Compiler/BuildLayout.h"
-#include "Compiler/ModuleCache.h"
+#include "Compiler/DependencyTrust.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
@@ -194,6 +195,14 @@ namespace
 
             const Parser::ModuleContribution contribution =
                 Parser::module_contribution_for(manifest, active_targets);
+
+            if (!Compiler::module_is_trusted(manifest, roots)) {
+                if (const std::optional<std::string> refusal =
+                        Compiler::dependency_contribution_refusal(manifest, contribution)) {
+                    return Compiler::FrontEndFailure{
+                        "Dependency Refused", refusal.value(), manifest.path };
+                }
+            }
 
             for (const auto &source : contribution.sources) {
                 if (auto file = input_file_for(source, overlay)) {

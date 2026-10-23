@@ -25,6 +25,7 @@ public struct App
     command::Arg $path;
     command::Arg $range;
     command::Flag $yes;
+    command::Flag $rehash;
 
     constructor()
     {
@@ -53,7 +54,7 @@ public struct App
         command::Subcommand $install = $cmd->command(
             'install',
             'apply epm.lock.json to vendor/',
-            'Apply the lock file to vendor/. A first install with no lock file does an update.\nAfter this, echoc build needs no flags: vendor/ is on disk and the compiler finds it.'
+            'Apply the lock file to vendor/. A first install with no lock file does an update.\nAfter this, echoc build needs no flags: vendor/ is on disk and the compiler finds it.\n--rehash fetches each locked rev and rewrites hashes; it does not re-resolve versions.'
         );
 
         command::Subcommand $add = $cmd->command(
@@ -202,6 +203,17 @@ public struct App
             'Skip the wizard. Needs a module name:\n  epm init greet --yes\nWithout --yes, init asks. Without a terminal, --yes is the only way through.'
         );
 
+        command::Flag $rehash = $cmd->flag(
+            'rehash',
+            '',
+            'rewrite lock hashes from the locked revs'
+        );
+        $cmd->accept($rehash, $install);
+        $cmd->describe(
+            $rehash,
+            'Fetch each locked rev and rewrite epm.lock.json hashes. Versions stay put.\nA version 1 lock of a tree with a directory or dangling symbolic link cannot be checked; this migrates it. `epm update` re-resolves and may pick a newer release.'
+        );
+
         $this->cmd = $cmd;
         $this->init = $init;
         $this->install = $install;
@@ -216,6 +228,7 @@ public struct App
         $this->path = $path;
         $this->range = $range;
         $this->yes = $yes;
+        $this->rehash = $rehash;
     }
 }
 

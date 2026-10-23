@@ -234,6 +234,14 @@ namespace AST
         // missing return; AST::scope_exit_kind gives it the arm `t_die` has instead
         t_exit,
 
+        // `die` for a stdlib check that has to stay inlinable. one cold, argument-free stop per message;
+        // the happy path is a compare and a branch. message is a literal, no location
+        t_cold_die,
+
+        // the per-process seed `hash::of` folds in. a plain load; constant 0 under `--fixed-hash-seed`.
+        // that pins iteration order, it does not restore hashes from before mix
+        t_hash_seed,
+
         // the seven `mem::atomic::` verbs. a builtin over a borrow, same argument as `take`/`init`:
         // the compiler is the only thing that can emit an `atomicrmw`, and an ordering is a claim
         // about two accesses nothing in the language can check - so there is no ordering parameter
@@ -323,9 +331,8 @@ namespace AST
     // builtin_message_must_be_literal - a different question, asked by TypeChecker
     std::optional<size_t> builtin_message_index(BuiltinKind kind);
 
-    // **must the message argument be a compile-time literal?** `assert` yes: the call is compiled
-    // out in release, so a runtime string would vanish with the check. `die` no: its location is
-    // still folded, the text is written at the crash. every other builtin has no message
+    // **must the message be a compile-time literal?** `assert` and `cold_die` yes (the stripped check /
+    // the thunk is keyed on the text). `die` no: the text is written at the crash
     bool builtin_message_must_be_literal(BuiltinKind kind);
 
     // **does a call to this builtin never come back?** `die` and `exit` do not, so a statement that is

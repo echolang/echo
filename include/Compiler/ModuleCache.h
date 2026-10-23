@@ -20,19 +20,6 @@
 
 namespace Compiler
 {
-    // a digest as it is written into a filename or a sidecar. One spelling, because a key compared against
-    // one formatted a hair differently is a permanent miss that looks exactly like a working cache
-    std::string to_hex(uint64_t value);
-
-    // the whole file, or nullopt. **the content, never the timestamp**: a manifest's file list is a glob, so
-    // a checkout, a branch switch or a `touch` all move mtimes without changing what is compiled - and the
-    // reverse matters more, since two files can share an mtime and differ.
-    //
-    // shared with the C object cache, which hashes a source and every header it reached. Sized up front and
-    // read straight into the string; the ostringstream spelling this replaced copied the bytes a second time
-    // before the hash ever saw them, once per file per build
-    std::optional<std::string> read_whole_file(const std::filesystem::path &path);
-
     // the embedded stdlib's file list and `module.eco` text. empty when this
     // binary was not built with ECO_EMBED_STDLIB. the parser's virtual source
     // pool and the cache key both read through here, so a `stdlib:` path that
@@ -108,6 +95,7 @@ namespace Compiler
     std::filesystem::path module_object_path(
         const Parser::ModuleManifest &manifest, const ModuleCacheKey &key, const BuildLayout &layout);
 
+    // an object this user's echoc wrote and sealed, and nothing else. see Compiler::artifact_is_sealed
     bool cached_object_is_hit(const std::filesystem::path &object);
 
     // what this link was: the argv plus each object's path, once it is on disk.

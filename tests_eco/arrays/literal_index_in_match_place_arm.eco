@@ -1,0 +1,20 @@
+// a collection in a place arm's index. wrapping the whole arm in TemporaryBind would make it a
+// non-place; the index is wrapped instead so `$v[first([0])]` still names `$v`'s storage
+
+enum Slot
+{
+    case ok(array<int32> $items);
+    case empty;
+}
+
+function first(array<int32> $xs) : int32
+{
+    return $xs[0];
+}
+
+array<int32> $items = [7, 9];
+Slot $s = Slot::ok($items);
+echo match ($s) {
+    Slot::ok($v) => $v[first([0])],
+    Slot::empty => 0,
+};

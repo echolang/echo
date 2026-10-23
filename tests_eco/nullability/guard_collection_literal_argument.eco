@@ -1,0 +1,64 @@
+// a collection literal as a call argument inside a `guard`. expansion mints `$__litN` and
+// OperatorRewriter has to plant it ahead of the guard, not inside the else arm
+
+function sum(array<int32> $xs) : int32?
+{
+    if ($xs->empty()) {
+        return null;
+    }
+
+    return $xs[0] + $xs[1];
+}
+
+function exec(map<string, string> $params) : result<usize, string>
+{
+    return .ok($params->count());
+}
+
+function names(array<string> $xs) : string?
+{
+    if ($xs->empty()) {
+        return null;
+    }
+
+    return $xs[0];
+}
+
+// file-root initializer, T?
+int32 $o = guard sum([1, 2]) else { die('no'); }
+echo $o;
+
+// file-root statement form
+guard sum([3, 4]) else { die('no'); }
+echo 1;
+
+// map literal + `else ($e)`, the shape tests/session.eco hits
+usize $n = guard exec(['b' => 'Ada', 'c' => 'Bob']) else ($e) {
+    echo $e;
+    die('no');
+}
+echo $n;
+
+// owning binding: wrapping the guard would drop `$s` at the wrapper's brace
+string $s = guard names(['Ada']) else { die('no'); }
+echo $s;
+
+function in_a_function() : int32
+{
+    int32 $v = guard sum([10, 20]) else { return -1; }
+    return $v;
+}
+
+echo in_a_function();
+
+function in_a_closure() : int32
+{
+    function<int32()> $f = function[]() : int32 {
+        int32 $v = guard sum([7, 8]) else { return -1; }
+        return $v;
+    };
+
+    return $f();
+}
+
+echo in_a_closure();

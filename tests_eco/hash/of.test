@@ -1,6 +1,6 @@
-# the four repeated `11831194018420276491`s are the point of the string half: a literal, a string built by
-# appending, a substring of a larger buffer and a view all hash the same text to the same number. that is
-# canonical FNV-1a 64 of "hello" and can be checked against any other implementation
+# the four repeated string hashes are the point of the string half: a literal, a string built by
+# appending, a substring of a larger buffer and a view all hash the same text to the same number.
+# they are FNV-1a then mix, not canonical FNV
 #
 # the five repeated `6238072747940578789`s are the point of the integer half, and they are **not** canonical
 # anything - they are hash::mix of the number 1. an integer is hashed by value rather than by width, so an
@@ -11,12 +11,12 @@
 expect: ok
 
 --- OUT --->
-11831194018420276491
-11831194018420276491
+1656767905311477007
+1656767905311477007
 1
-11831194018420276491
-11831194018420276491
-5717881983045765875
+1656767905311477007
+1656767905311477007
+1347049952501568909
 6238072747940578789
 6238072747940578789
 6238072747940578789

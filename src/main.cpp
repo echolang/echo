@@ -609,7 +609,13 @@ static void report_cache_plan(
             continue;
         }
 
-        const std::string why = Compiler::explain_miss(artifact->second.record, key);
+        // an object under the key's own name that was still a miss is one this user's echoc did not seal,
+        // which explain_miss, comparing inputs, would otherwise call a compiler change
+        std::error_code ec;
+        const std::string why = std::filesystem::is_regular_file(artifact->second.object, ec)
+            ? "an object is there, but this user's echoc did not seal it"
+            : Compiler::explain_miss(artifact->second.record, key);
+
         if (!why.empty()) {
             std::cout << "  (" << why << ")";
         }
@@ -1056,7 +1062,7 @@ static bool resolve_programs(
     // **the layout before the programs**, because a target's binary is a path this owns. It is a function
     // of the entry manifest and `--build-dir`, both of which are settled by here, and resolving it once is
     // what stops two answers disagreeing about a directory one of them has written into
-    out.layout = Compiler::BuildLayout::resolve(driver.build_dir, entry, fallback_scratch_dir());
+    out.layout = Compiler::BuildLayout::resolve(driver.build_dir, entry, out.roots, fallback_scratch_dir());
 
     // **the one refusal a build directory can earn, and it is asked before anything is built.** An
     // unwritable store is never fatal - it is an optimization - but a directory that is somebody else's
@@ -2665,7 +2671,7 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
     }
 
     const Compiler::BuildLayout layout = Compiler::BuildLayout::resolve(
-        driver.build_dir, nullptr, {});
+        driver.build_dir, nullptr, roots, {});
 
     const bool including_stdlib = driver.with_stdlib;
     const bool dry_run = driver.dry_run;

@@ -1,0 +1,5 @@
+// `mem::take` empties storage nothing is accounting for. a borrow a method handed back is a slot its
+// owner still counts, so taking from one is two owners of one value: refused
+
+array<string> $names = [str::repeat('abcdefgh', 4)];
+string $taken = mem::take<string>($names->at(0));

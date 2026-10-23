@@ -1,0 +1,7 @@
+flags: --release
+expect: fail
+
+--- OUT --->
+config.toml
+fatal error: string is not NUL terminated - clone it first
+  at <runtime>:0

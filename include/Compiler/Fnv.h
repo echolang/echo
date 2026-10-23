@@ -32,6 +32,21 @@ namespace Compiler
     {
         return fnv1a64(text.data(), text.size(), seed);
     }
+
+    // a digest as it is written into a filename or a sidecar. one spelling, because a key compared
+    // against one formatted a hair differently is a permanent miss that looks like a working cache
+    inline std::string to_hex(uint64_t value)
+    {
+        std::string out(16, '0');
+
+        for (size_t i = 16; i-- > 0;) {
+            const unsigned nibble = static_cast<unsigned>(value & 0xf);
+            out[i] = static_cast<char>(nibble < 10 ? '0' + nibble : 'a' + (nibble - 10));
+            value >>= 4;
+        }
+
+        return out;
+    }
 };
 
 #endif

@@ -1,0 +1,102 @@
+// collection-literal arguments in the other nested walks that share `_hoisted` with `guard`
+
+function items(array<int32> $xs) : array<int32>
+{
+    return $xs;
+}
+
+function first(array<int32> $xs) : int32
+{
+    return $xs[0];
+}
+
+function pred(array<int32> $xs) : bool
+{
+    return $xs[0] > 0;
+}
+
+function classify(array<int32> $xs) : result<int32, string>
+{
+    return .ok($xs[0]);
+}
+
+function both(array<int32> $a, array<int32> $b) : int32
+{
+    return $a[0] + $b[0];
+}
+
+function nest(array<array<int32>> $rows) : int32?
+{
+    return $rows[0][0];
+}
+
+function pick(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('no');
+    }
+
+    return .ok($n);
+}
+
+class Holder
+{
+    function take(array<int32>& $a) : int32
+    {
+        return $a[0];
+    }
+}
+
+foreach (items([1, 2, 3]) as $x) {
+    echo $x;
+}
+
+echo match (classify([5, 6])) {
+    .ok($v) => $v,
+    .error($e) => -1,
+};
+
+for (int32 $k = 0; pred([1, 2]) && $k < 1; $k++) {
+    echo 8;
+}
+
+echo both([1, 2], [3, 4]);
+
+int32 $nested = guard nest([[9, 8], [7]]) else { die('no'); }
+echo $nested;
+
+Holder $h = Holder();
+if ($h->take([3, 0]) > 0) {
+    echo $h->take([4, 0]);
+}
+
+// the arm binding is only in scope inside the arm. hoisting `[$v, 99]` above the match
+// is `Variable 'v' has no allocation in scope`
+echo match (pick(-1)) {
+    .ok($v) => first([$v, 99]),
+    .error($e) => 0,
+};
+
+echo match (pick(6)) {
+    .ok($v) => first([$v, 99]),
+    .error($e) => 0,
+};
+
+// the arm *is* the collection: TemporaryBind's body is `$__lit`, moved out because the temp is dying
+array<int32> $from_arm = match (pick(7)) {
+    .ok($v) => [$v, 8],
+    .error($e) => [0],
+};
+echo $from_arm[0];
+echo $from_arm[1];
+
+function mark() : int32
+{
+    die('skipped');
+}
+
+// `&&` skips the right operand; constructing the array (and running `mark`) must stay on
+// the path that actually evaluates it
+if (false && pred([mark()])) {
+    echo 0;
+}

@@ -4,6 +4,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -20,6 +21,8 @@ namespace
     constexpr const char *k_argc_symbol = "__eco_argc";
     constexpr const char *k_argv_symbol = "__eco_argv";
     constexpr const char *k_envp_symbol = "__eco_envp";
+    constexpr const char *k_hash_seed_symbol = "__eco_hash_seed";
+    constexpr const char *k_seed_function = "__eco_seed_hash";
 
     // `_IONBF` as each C runtime spells it. the two disagree
     constexpr uint64_t k_ucrt_ionbf = 4;
@@ -39,6 +42,172 @@ llvm::GlobalVariable *ProcessCodegen::get_or_create_argv()
 llvm::GlobalVariable *ProcessCodegen::get_or_create_envp()
 {
     return _ctx.get_or_create_odr_global(k_envp_symbol, _ctx.opaque_ptr_type());
+}
+
+llvm::GlobalVariable *ProcessCodegen::get_or_create_hash_seed()
+{
+    llvm::GlobalVariable *seed =
+        _ctx.get_or_create_odr_global(k_hash_seed_symbol, llvm::Type::getInt64Ty(*_ctx.llvm_context));
+
+    // hide-except-export would make a lib's copy a different cell from the host's.
+    // DLLExport is the keep-visible marker; a plugin then copies the host's value at load
+    seed->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
+    return seed;
+}
+
+llvm::Value *ProcessCodegen::gen_hash_seed(const llvm::Twine &name)
+{
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+
+    if (_ctx.options.fixed_hash_seed) {
+        return llvm::ConstantInt::get(i64, 0);
+    }
+
+    return _ctx.builder->CreateLoad(i64, get_or_create_hash_seed(), name);
+}
+
+void ProcessCodegen::gen_seed_hash()
+{
+    if (!_ctx.program_hashes) {
+        return;
+    }
+
+    // the cell has to exist even when the seed is fixed: a plugin dlsyms it. zero-init is 0
+    get_or_create_hash_seed();
+
+    if (_ctx.options.fixed_hash_seed) {
+        return;
+    }
+
+    llvm::Module *module = _ctx.current_module();
+    llvm::Function *seed = module->getFunction(k_seed_function);
+
+    if (seed == nullptr) {
+        llvm::Type *void_ty = llvm::Type::getVoidTy(*_ctx.llvm_context);
+        llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
+        llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+        llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+        llvm::Type *ptr = _ctx.opaque_ptr_type();
+        llvm::Type *size_ty = _ctx.size_int_ty();
+
+        seed = llvm::Function::Create(
+            llvm::FunctionType::get(void_ty, false), llvm::GlobalValue::LinkOnceODRLinkage, k_seed_function, module);
+        seed->addFnAttr(llvm::Attribute::NoInline);
+        seed->addFnAttr(llvm::Attribute::Cold);
+
+        llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+        _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+
+        auto *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", seed);
+        auto *env = llvm::BasicBlock::Create(*_ctx.llvm_context, "seed.env", seed);
+        auto *check = llvm::BasicBlock::Create(*_ctx.llvm_context, "seed.check", seed);
+        auto *parse = llvm::BasicBlock::Create(*_ctx.llvm_context, "seed.parse", seed);
+        auto *draw = llvm::BasicBlock::Create(*_ctx.llvm_context, "seed.draw", seed);
+
+        _ctx.builder->SetInsertPoint(entry);
+        llvm::Value *slot = _ctx.builder->CreateAlloca(i64, nullptr, "seed.slot");
+        _ctx.builder->CreateStore(llvm::ConstantInt::get(i64, 0), slot);
+
+        // a lib's own cell is a different image. copy the host's seed when the main
+        // module exported one (dynlib after main); otherwise draw, which is a C host
+        if (_ctx.options.codegen.is_native_library()) {
+            auto *copy = llvm::BasicBlock::Create(*_ctx.llvm_context, "seed.from_host", seed);
+            llvm::Constant *sym =
+                _ctx.builder->CreateGlobalStringPtr(k_hash_seed_symbol, ".eco.hash_seed_sym");
+            llvm::Value *host = nullptr;
+
+            switch (_ctx.options.codegen.host_symbol_lookup()) {
+                case Compiler::HostSymbolLookup::t_get_proc_address: {
+                    llvm::FunctionCallee module_handle = _ctx.libc_callee(
+                        Compiler::RuntimeSymbol::t_get_module_handle_a, ptr, { ptr });
+                    llvm::Value *main_image = _ctx.builder->CreateCall(
+                        module_handle,
+                        { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)) },
+                        "seed.main");
+                    llvm::FunctionCallee proc = _ctx.libc_callee(
+                        Compiler::RuntimeSymbol::t_get_proc_address, ptr, { ptr, ptr });
+                    host = _ctx.builder->CreateCall(proc, { main_image, sym }, "seed.host");
+                    break;
+                }
+
+                case Compiler::HostSymbolLookup::t_dlsym: {
+                    llvm::Value *handle = _ctx.builder->CreateIntToPtr(
+                        llvm::ConstantInt::getSigned(
+                            _ctx.size_int_ty(), _ctx.options.codegen.rtld_default()),
+                        ptr,
+                        "seed.rtld");
+                    llvm::FunctionCallee lookup =
+                        _ctx.libc_callee(Compiler::RuntimeSymbol::t_dlsym, ptr, { ptr, ptr });
+                    host = _ctx.builder->CreateCall(lookup, { handle, sym }, "seed.host");
+                    break;
+                }
+            }
+
+            _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(host), env, copy);
+
+            _ctx.builder->SetInsertPoint(copy);
+            _ctx.builder->CreateStore(
+                _ctx.builder->CreateLoad(i64, host, "seed.copied"), get_or_create_hash_seed());
+            _ctx.builder->CreateRetVoid();
+        }
+        else {
+            _ctx.builder->CreateBr(env);
+        }
+
+        _ctx.builder->SetInsertPoint(env);
+        llvm::Constant *name = _ctx.builder->CreateGlobalStringPtr("ECHO_HASH_SEED", ".eco.hash_seed_var");
+        llvm::FunctionCallee getenv = _ctx.libc_callee(Compiler::RuntimeSymbol::t_getenv, ptr, { ptr });
+        llvm::Value *spelled = _ctx.builder->CreateCall(getenv, { name }, "seed.env");
+        _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(spelled), draw, check);
+
+        // set but empty reads as unset, so `ECHO_HASH_SEED=` in a wrapper can undo a pin
+        _ctx.builder->SetInsertPoint(check);
+        llvm::Value *first = _ctx.builder->CreateLoad(i8, spelled, "seed.first");
+        _ctx.builder->CreateCondBr(
+            _ctx.builder->CreateICmpEQ(first, llvm::ConstantInt::get(i8, 0)), draw, parse);
+
+        _ctx.builder->SetInsertPoint(parse);
+        llvm::FunctionCallee strtoull = _ctx.libc_callee(Compiler::RuntimeSymbol::t_strtoull, i64, { ptr, ptr, i32 });
+        llvm::Value *pinned = _ctx.builder->CreateCall(
+            strtoull,
+            { spelled, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), llvm::ConstantInt::get(i32, 10) },
+            "seed.pinned");
+        _ctx.builder->CreateStore(pinned, get_or_create_hash_seed());
+        _ctx.builder->CreateRetVoid();
+
+        _ctx.builder->SetInsertPoint(draw);
+
+        switch (_ctx.options.codegen.entropy_source()) {
+            case Compiler::EntropySource::t_arc4random: {
+                llvm::FunctionCallee fill = _ctx.libc_callee(
+                    Compiler::RuntimeSymbol::t_arc4random_buf, void_ty, { ptr, size_ty });
+                _ctx.builder->CreateCall(fill, { slot, llvm::ConstantInt::get(size_ty, 8) });
+                break;
+            }
+
+            case Compiler::EntropySource::t_getentropy: {
+                // a failure leaves the zero stored above, and the address below still varies it
+                llvm::FunctionCallee fill = _ctx.libc_callee(
+                    Compiler::RuntimeSymbol::t_getentropy, i32, { ptr, size_ty });
+                _ctx.builder->CreateCall(fill, { slot, llvm::ConstantInt::get(size_ty, 8) });
+                break;
+            }
+
+            case Compiler::EntropySource::t_rand_s: {
+                llvm::FunctionCallee fill = _ctx.libc_callee(Compiler::RuntimeSymbol::t_rand_s, i32, { ptr });
+                _ctx.builder->CreateCall(fill, { slot });
+                _ctx.builder->CreateCall(fill, { _ctx.builder->CreateConstGEP1_32(i8, slot, 4, "seed.high") });
+                break;
+            }
+        }
+
+        llvm::Value *drawn = _ctx.builder->CreateLoad(i64, slot, "seed.drawn");
+        llvm::Value *where = _ctx.builder->CreatePtrToInt(slot, i64, "seed.where");
+        _ctx.builder->CreateStore(_ctx.builder->CreateXor(drawn, where, "seed"), get_or_create_hash_seed());
+        _ctx.builder->CreateRetVoid();
+    }
+
+    _ctx.builder->CreateCall(seed, {});
 }
 
 void ProcessCodegen::gen_capture(llvm::Function *entry)
@@ -63,6 +232,9 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
     else {
         store_platform_envp();
     }
+
+    // before any of the program's own statements, like the three stores above: a module-scope map is one
+    gen_seed_hash();
 
     unbuffer_stdio();
 }
@@ -168,8 +340,9 @@ void ProcessCodegen::unbuffer_wasi_libc(llvm::Type *i32, llvm::Type *ptr)
 
 void ProcessCodegen::gen_startup()
 {
-    // nothing to unbuffer
-    if (_ctx.options.codegen.stdio_unbuffering() == Compiler::StdioUnbuffering::t_none) {
+    // nothing to unbuffer and no seed to draw
+    if (_ctx.options.codegen.stdio_unbuffering() == Compiler::StdioUnbuffering::t_none
+        && (_ctx.options.fixed_hash_seed || !_ctx.program_hashes)) {
         return;
     }
 
@@ -191,6 +364,9 @@ void ProcessCodegen::gen_startup()
     _ctx.builder->SetInsertPoint(
         llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn));
 
+    // a library has no entry prologue, so the seed a host's first call into it hashes with is drawn here:
+    // at `dlopen`, DLL attach or `_initialize`, before any export can run
+    gen_seed_hash();
     unbuffer_stdio();
     _ctx.builder->CreateRetVoid();
 
