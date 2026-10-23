@@ -1,0 +1,21 @@
+// a heap string temporary converted to string::view must outlive the callee. SSO (15)
+// happens to still sit on the stack; 16 bytes is a str::buf the callee's own allocation
+// can reuse. the drop used to run when view() returned, before show ran
+
+function show(string::view $v) : void
+{
+    string $scratch = 'x-sixteen-chars!';
+    echo string($v);
+}
+
+int32 $i = 10;
+show("league0-{$i}.jsonl");
+
+function long_name() : string
+{
+    return "league0-10.jsonl";
+}
+
+show(long_name());
+
+show("fifteen-chars!!");

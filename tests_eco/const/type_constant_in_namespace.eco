@@ -1,0 +1,17 @@
+// a type constant is reached as Type::CONST from inside the namespace that declared the type,
+// the same way demo::Grid::W is from anywhere
+
+namespace demo;
+
+struct Grid
+{
+    const usize W = 4;
+}
+
+function width() : usize
+{
+    return Grid::W;
+}
+
+echo width();
+echo demo::Grid::W;

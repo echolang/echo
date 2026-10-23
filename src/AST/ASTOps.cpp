@@ -56,6 +56,16 @@ AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &typ
         case Token::Type::t_or:
             return {OpAssociativity::left, 90};
 
+        // `??` - tighter than comparison, looser than `|` and the custom-operator default at 95
+        //
+        // `$a ?? 0 == 7` is `($a ?? 0) == 7`: a fallback, then a comparison
+        //
+        // **right associative**, so `$a ?? $b ?? $c` is `$a ?? ($b ?? $c)` - a chain of fallbacks, each
+        // tried in turn. left associativity would ask for the non-null of `$a ?? $b` and then fall back
+        // to `$c`, which can never fire
+        case Token::Type::t_qmark_qmark:
+            return {OpAssociativity::right, 97};
+
         // comparison
         case Token::Type::t_open_angle:
         case Token::Type::t_close_angle:
@@ -70,18 +80,6 @@ AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &typ
 
         case Token::Type::t_logical_or:
             return {OpAssociativity::left, 120};
-
-        // `??` - looser than every comparison and than `&&`/`||`, tighter than assignment
-        //
-        // that placement is what makes the two readings people actually write come out right:
-        // `$a ?? $b == $c` groups as `$a ?? ($b == $c)` rather than comparing a fallback, and
-        // `int32 $v = lookup($k) ?? 0;` binds the whole coalesce rather than just the left side
-        //
-        // **right associative**, so `$a ?? $b ?? $c` is `$a ?? ($b ?? $c)` - a chain of fallbacks, each
-        // tried in turn. left associativity would ask for the non-null of `$a ?? $b` and then fall back
-        // to `$c`, which can never fire
-        case Token::Type::t_qmark_qmark:
-            return {OpAssociativity::right, 125};
 
         // assignment
         case Token::Type::t_assign:

@@ -1,0 +1,28 @@
+// a string literal at a const string& parameter default, including a field default
+// that became one. OwnershipPass has to walk the default so the AddrOf has a slot
+
+struct SessionId
+{
+    public string $bytes;
+
+    constructor(const string& $bytes)
+    {
+        $this->bytes = $bytes;
+    }
+}
+
+struct Row
+{
+    public SessionId $id = SessionId('');
+}
+
+Row $row = Row();
+echo $row->id->bytes->size();
+
+function label(const string& $s = '') : int32
+{
+    return $s->size();
+}
+
+echo label();
+echo label('ab');

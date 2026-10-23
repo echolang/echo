@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] index_array_literal.eco:4:14
+
+  only a place can be indexed - a variable, a field or an element. Bind this expression to a name first, then index that.
+
+  3 | 
+  4 | echo [31, 28][0];
+    :              ^
+  5 | 
+
+1 error, nothing was compiled.

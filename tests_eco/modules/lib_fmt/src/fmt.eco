@@ -1,0 +1,11 @@
+namespace fmtlib;
+
+public function describe(int32 $v) : string
+{
+    return 'int';
+}
+
+public function show<T>(T $v) : string
+{
+    return describe($v);
+}

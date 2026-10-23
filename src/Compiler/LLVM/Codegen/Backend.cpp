@@ -39,6 +39,7 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#define _CRT_RAND_S
 #include <windows.h>
 #include <direct.h>
 #include <fcntl.h>
@@ -197,6 +198,19 @@ bool Backend::prepare_execution()
     pin("free", free);
     pin("realloc", realloc);
     pin("getenv", getenv);
+    pin("strtoull", strtoull);
+    pin("rand_s", rand_s);
+    pin("__acrt_iob_func", __acrt_iob_func);
+    // `--target-os darwin|linux` on Windows still JITs (native_run wants a host
+    // binary). the stdlib then names POSIX `write`, not `_write`
+    pin("write", _write);
+    pin("read", _read);
+    pin("open", _open);
+    pin("close", _close);
+    pin("lseek", _lseeki64);
+    pin("unlink", _unlink);
+    pin("access", _access);
+    pin("isatty", _isatty);
     pin("strcmp", strcmp);
     pin("strlen", strlen);
     pin("memcpy", memcpy);
@@ -365,6 +379,25 @@ void append_objects(
     }
 }
 
+// `__eco_hash_seed` is DLLExport, so lld-link writes an import library. keep it
+// with the objects, not next to `-o`
+std::filesystem::path windows_link_implib(
+    const std::string &executable_name,
+    const std::vector<std::filesystem::path> &objects)
+{
+    const std::string stem = std::filesystem::path(executable_name).stem().string() + ".lib";
+
+    if (!objects.empty()) {
+        const std::filesystem::path dir = objects.front().parent_path();
+
+        if (!dir.empty()) {
+            return dir / stem;
+        }
+    }
+
+    return std::filesystem::path(executable_name).replace_extension(".lib");
+}
+
 #if defined(__APPLE__)
 struct DarwinPlatformVersion
 {
@@ -469,6 +502,9 @@ std::optional<std::vector<std::string>> host_linker_command(
         "/nologo",
         "/subsystem:console",
         "/out:" + executable_name,
+        // `__eco_hash_seed` is DLLExport so a native lib can copy the host cell.
+        // without this, lld-link writes `out.lib` next to `-o`
+        "/implib:" + windows_link_implib(executable_name, objects).string(),
     };
 
     if (!sysroot.empty()) {
@@ -715,6 +751,9 @@ bool Backend::link_program(
 
     std::vector<std::string> fallback = {
         Compiler::cc_driver(_ctx.options.codegen), "-o", executable_name };
+    if (_ctx.options.codegen.is_windows() && !_ctx.options.codegen.is_native_library()) {
+        fallback.push_back("-Wl,/IMPLIB:" + windows_link_implib(executable_name, objects).string());
+    }
     std::string target_error;
     if (!Compiler::append_codegen_link_args(
             fallback,

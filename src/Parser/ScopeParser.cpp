@@ -437,7 +437,7 @@ AST::ScopeNode & Parser::parse_scope(
             // this the statement forms lagged the expression form - `echo first(&$o)->x;` read
             // fine while `first(&$o)->bump(1);` was `Unexpected '->'`
             const AST::NodeReference target_ref =
-                Parser::parse_postfix_chain(payload, AST::make_ref(*call));
+                Parser::parse_postfix_chain(payload, AST::make_ref(call));
 
             if (!target_ref.has()) {
                 continue;

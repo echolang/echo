@@ -306,6 +306,11 @@ namespace AST
         void resolve_function(FunctionDeclNode &decl);
         void resolve_root(ScopeNode &root);
 
+        // parameter defaults are evaluated at the call site as arguments, so
+        // `const string& $s = ''` is a borrow argument. this scope binds the slot
+        // on the original; call-site clones are arguments of the call that used them
+        void walk_parameter_defaults(const std::vector<VarDeclNode *> &params);
+
         // are every declaration in this body's types settled? a body is walked exactly once, so a
         // question asked before the monomorphizer has substituted is answered wrongly forever
         bool body_is_concrete(ScopeNode &scope) const;

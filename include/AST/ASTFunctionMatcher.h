@@ -46,9 +46,9 @@ namespace AST
             // several candidates accept the arguments and none is better than the rest
             t_ambiguous,
 
-            // several candidates remain and the arguments that would tell them apart have no
-            // type yet. not an error: the call is left unresolved for a later pass, because
-            // reporting it here would reject a program that is perfectly well typed
+            // pending: the arguments that would decide have no type yet, including a lone
+            // candidate whose argument still names a type parameter. not an error: the call
+            // is left unresolved for a later pass
             t_undecidable,
         };
 
@@ -69,10 +69,11 @@ namespace AST
     //   1. arity must match exactly on the *bound* list - defaults and names are applied by
     //      AST::bind_arguments before this runs, so a hole that had a default is already filled. C
     //      variadic tails stay a last-parameter type, not a matcher exception
-    //   2. if exactly one candidate survives arity, it wins *without* consulting types. that is
-    //      what makes a program with no overloads behave precisely as it did before overload
-    //      resolution existed, right down to which pass reports a bad argument: the type checker
-    //      still says "argument 1 of 'f' expects int32", rather than this returning t_no_viable
+    //   2. if exactly one candidate survives arity, it wins *without* consulting types - unless an
+    //      argument still names a type parameter. that call sits in a generic body and must stay
+    //      pending so the clone can re-resolve against the consumer's overload set. a determined
+    //      mismatch still binds, which is what keeps a program with no overloads reporting
+    //      "argument 1 of 'f' expects int32". a written `null` is unknown, not a parameter
     //   3. a candidate is dropped if any argument does not fit it at all
     //   4. one candidate beats another only if it is no worse on every argument and better on at
     //      least one. wrapping into a tagged `T?` is a second key on the same payload rank, so

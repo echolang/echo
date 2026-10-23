@@ -1,0 +1,25 @@
+// a const field read is a copy, so inbound from(uint64) answers const uint64 the same way
+// a mutable one does. exact == on the parameter missed it
+
+struct Value
+{
+    public int64 $n;
+
+    #[implicit]
+    static function from(uint64 $v) : Value
+    {
+        return Value($v as int64);
+    }
+}
+
+struct Outcome
+{
+    public const uint64 $lastInsertId;
+}
+
+function query(const string& $sql, Value $v) : int64
+{
+    return $v->n;
+}
+
+echo query('x', Outcome(9 as uint64)->lastInsertId);

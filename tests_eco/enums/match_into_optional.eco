@@ -1,0 +1,32 @@
+// a payload arm and a T? local meet as a value, not as a place. phis of those addresses
+// read the payload bits as the optional's __has and returned null
+
+enum E
+{
+    case a(uint64 $v);
+    case b;
+}
+
+function get(E $e) : uint64?
+{
+    uint64? $none = null;
+    return match ($e) {
+        E::a($v) => $v,
+        else => $none,
+    };
+}
+
+echo get(E::a(42 as uint64)) == null;
+echo get(E::a(42 as uint64)) ?? 0;
+echo get(E::b) == null;
+
+// two payload places of the same type still yield a place
+function same(E $e, uint64 $fallback) : uint64
+{
+    return match ($e) {
+        E::a($v) => $v,
+        else => $fallback,
+    };
+}
+
+echo same(E::a(7 as uint64), 0 as uint64);

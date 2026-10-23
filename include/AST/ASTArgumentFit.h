@@ -345,9 +345,13 @@ namespace AST
 
     inline ValueType implicit_conversion_source(const ValueType &from, const ExprNode *expr)
     {
-        return implicit_conversion_peels_borrow(from, expr)
-            ? ValueType::make_mutable(value_type_of(from))
+        const ValueType source = implicit_conversion_peels_borrow(from, expr)
+            ? value_type_of(from)
             : from;
+
+        // a copy out of const storage is a mutable value, so `const uint64` reaches
+        // `from(uint64)`. inbound compares parameter types exactly
+        return ValueType::make_mutable(source);
     }
 
     // **which conversion answers this argument at this parameter, or none.** the two peels

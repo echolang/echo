@@ -1,0 +1,16 @@
+// a lone overload in a generic library body must stay pending so this module's
+// describe(Point) is in the set when show<Point> is instantiated
+
+namespace fmtlib;
+
+public struct Point
+{
+    public int32 $x;
+}
+
+public function describe(Point $p) : string
+{
+    return 'point';
+}
+
+echo fmtlib::show(fmtlib::Point(2));

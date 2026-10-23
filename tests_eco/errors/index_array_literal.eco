@@ -1,0 +1,4 @@
+// an array literal fills storage, so indexing it in place is refused. the index
+// list is consumed, so there is no second UnexpectedToken on the subscript
+
+echo [31, 28][0];

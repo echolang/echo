@@ -1,0 +1,13 @@
+// an untyped integer at a wrapped T? is typed at the payload, then wrapped. without the
+// peel in type_literal_at, 42 stayed int32 and wrap-of-int32 could not reach int64?
+
+int64? $x = 42;
+echo $x == null;
+echo $x ?? 0;
+
+function takes_opt(int64? $n) : int64
+{
+    return $n ?? 0;
+}
+
+echo takes_opt(42);

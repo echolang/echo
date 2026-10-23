@@ -103,8 +103,24 @@ AST::FunctionMatch AST::match_function(const std::vector<AST::FunctionCandidate>
     // 2. the single-candidate short circuit. deliberately before any type check: with one
     // candidate there is nothing to choose between, and letting a type mismatch fall through to
     // the type checker keeps its located, argument-numbered diagnostic as the thing the user sees
+    //
+    // **not while an argument still names a type parameter.** `describe($v)` inside
+    // `show<T>(T $v)` has one candidate `describe(int32)` and binding it here stamps
+    // that decl onto every clone, so a consumer's `describe(Point)` never gets a look.
+    // a written `null` or a shorthand is unknown, not a parameter - those still bind so
+    // CallResolver can type them
     if (by_arity.size() == 1) {
-        return resolved(by_arity.front()->decl);
+        const FunctionCandidate *only = by_arity.front();
+
+        for (const ValueType &type : only->argument_types) {
+            if (contains_type_param(type)) {
+                result.outcome = FunctionMatch::Outcome::t_undecidable;
+                result.tied.push_back(only->decl);
+                return result;
+            }
+        }
+
+        return resolved(only->decl);
     }
 
     // 3. score, dropping anything an argument cannot reach at all

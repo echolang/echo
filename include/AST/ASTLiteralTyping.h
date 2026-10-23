@@ -100,10 +100,11 @@ namespace AST
 
     // `destination` is the type as written at the position the literal sits in. A destination that
     // cannot decide a literal is answered `t_unchanged` rather than refused. this is the rule: it
-    // types at any concrete primitive, `bool` included (0 and 1 become true and false).
+    // types at any concrete primitive, `bool` included (0 and 1 become true and false), and peels a
+    // wrapped `T?` so `int64? $x = 42` is typed at int64 then wrapped.
     // AST::can_type_a_literal is the *parse-time operand-hint* filter only, and the two differ by
-    // exactly that one case - a shunting yard must not hand `bool` to an operand it has not read
-    // the operator for
+    // `bool` and by that peel - a shunting yard must not hand `bool` or `int64?` to an operand it
+    // has not read the operator for
     LiteralTyping type_literal_at(ExprNode *literal, const ValueType &destination, NodeCollection &nodes);
 
     // **which channel a refusal goes out on, written once.** four askers report one of these, and the

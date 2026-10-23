@@ -26,16 +26,17 @@ namespace Parser
     // UnexpectedToken issue and returns make_void_ref(); callers do their own recovery
     const AST::NodeReference parse_postfix_chain(Payload &payload, AST::NodeReference base);
 
-    // **`Type::f(...)`, a call whose candidates come from a type rather than a namespace.** null when
-    // these tokens are not one, with the cursor put back exactly as it was found - so an operand
-    // position tries this first and reads a namespace-qualified call as it always did.
-    //
-    // it has to be tried *before* Parser::parse_namespace, which mints what it does not find: once
+    // **`Type::f(...)`, `Type::case`, `Type::CONST`.** null when these tokens are not one, cursor
+    // put back. tried *before* Parser::parse_namespace, which mints what it does not find: once
     // that has consumed `Point::` there is a namespace called `Point` and the type is unreachable.
+    // a bare `Type::name` is an enum case (a no-arg static) or a constant on the member surface;
+    // `demo::Grid::W` written inside `namespace demo` is the constant arm. `Type::$x` is a
+    // different token shape, try_parse_static_property
+    //
     // it also has to *commit* once the owner is known to be a type - falling back to the namespace
     // path there is what lets FunctionRegistry::overloads walk outward and answer `Foo::f()` with an
     // enclosing free `f`, which is the pre-existing bug this arm must not inherit
-    AST::FunctionCallExprNode *try_parse_static_call(Payload &payload);
+    AST::ExprNode *try_parse_static_call(Payload &payload);
 
     // **does a `.name` start here?** - the shorthand static call, whose owner comes from wherever its
     // value goes rather than from anything written at the call site.

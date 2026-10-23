@@ -1,0 +1,11 @@
+// a constant is substitution: MONTH_DAYS[$i] is the cloned array, indexed from a hoist
+
+const MONTH_DAYS = [31, 28, 31, 30];
+
+function days(usize $i) : int32
+{
+    return MONTH_DAYS[$i];
+}
+
+echo days(1);
+echo days(0);

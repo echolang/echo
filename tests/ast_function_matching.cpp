@@ -2,6 +2,7 @@
 
 #include <AST/ASTArgumentFit.h>
 #include <AST/ASTFunctionMatcher.h>
+#include <AST/ASTTypeParam.h>
 #include <AST/ASTValueType.h>
 #include <AST/FunctionDeclNode.h>
 
@@ -186,6 +187,38 @@ TEST_CASE("a borrow parameter is answered by a conversion to what it borrows", "
     // address is a decision the caller should be able to see in the source
     const ValueType nullable = ValueType::make_pointer(t_int32, true);
     REQUIRE( AST::implicit_conversion_target(nullable) == nullable );
+}
+
+TEST_CASE("a lone candidate with a type-parameter argument stays pending", "[fnmatch]")
+{
+    // describe($v) inside show<T>(T) has one candidate; binding it would stamp
+    // describe(int32) onto every clone. a written null is unknown, not a parameter,
+    // and still binds
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function id<T>(T $v) : T { return $v; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    AST::TypeParamDecl *param = nullptr;
+    for (auto &module_ptr : bundle->modules) {
+        for (auto *fn : module_ptr->nodes.of_type<AST::FunctionDeclNode>()) {
+            if (!fn->type_parameters.empty()) {
+                param = fn->type_parameters[0];
+                break;
+            }
+        }
+    }
+
+    REQUIRE(param != nullptr);
+
+    const ValueType t_param = ValueType::make_type_param(param);
+    const std::vector<FunctionCandidate> candidates = {
+        candidate({ t_int32 }),
+    };
+
+    REQUIRE( match(candidates, { t_param }).outcome == FunctionMatch::Outcome::t_undecidable );
+    REQUIRE( match(candidates, { ValueType::make_unknown() }).outcome
+        == FunctionMatch::Outcome::t_resolved );
+    REQUIRE( match(candidates, { t_bool }).outcome == FunctionMatch::Outcome::t_resolved );
 }
 
 TEST_CASE("arity filters before anything else", "[fnmatch]")

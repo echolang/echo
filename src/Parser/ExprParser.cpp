@@ -5,6 +5,7 @@
 #include "AST/ConstRefExprNode.h"
 #include "AST/GenericValueExprNode.h"
 #include "AST/ASTImport.h"
+#include "AST/ASTNamespace.h"
 #include "AST/ASTSymbol.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
@@ -803,8 +804,8 @@ namespace
             // `DistanceUnit::meter` is a case, `Point::MAX` is a constant, and `std::math::PI` is a
             // constant in a namespace - all three the same three tokens, told apart by what the *owner*
             // declares and not by what follows. so the shape scan widens and the commit narrows: a name
-            // whose owner is not a type never reaches an owner at all, and one whose owner declares no
-            // such case is put back for the constant path to read
+            // whose owner is not a type never reaches an owner at all, and one whose owner is a type
+            // is planted as the case call or the ConstRef
             //
             // the *last* such `::` in the run wins, which is what lets `game::Session::active()` name
             // a type inside a namespace rather than a namespace called Session
@@ -954,7 +955,7 @@ AST::TypeNode *Parser::try_parse_static_owner(Parser::Payload &payload, bool wan
     return parse_static_owner(payload, shape.value());
 }
 
-AST::FunctionCallExprNode *Parser::try_parse_static_call(Parser::Payload &payload)
+AST::ExprNode *Parser::try_parse_static_call(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
@@ -980,41 +981,42 @@ AST::FunctionCallExprNode *Parser::try_parse_static_call(Parser::Payload &payloa
         return nullptr;
     }
 
-    // **`DistanceUnit::meter` with no argument list, which only an enum's case may be.**
-    //
-    // read as the call that builds it rather than as a form of its own: a case *is* a static function
-    // of no arguments, so the paren-free spelling is sugar and nothing downstream - resolution, the
-    // monomorphizer, ownership, codegen - learns that it existed. `-p ast-resolved` shows the call,
-    // which is the same bargain a drop and an implicit conversion already make
-    //
-    // asked here rather than in the shape scan because it is a question about the *owner*: the scan saw
-    // three tokens that `Point::MAX` and `std::math::PI` spell identically, and what tells them apart is
-    // that this owner is an enum and declares this case. anything else goes back untouched, which is
-    // what keeps the constant path reading exactly what it read before
+    // **`Type::name` with no argument list.** an enum case is the call that builds it; anything else
+    // on a type's member surface is a constant. `Point::MAX` and `DistanceUnit::meter` are the same
+    // three tokens, told apart by what the owner declares. a namespace-qualified `std::math::PI`
+    // never reaches here: try_parse_static_owner failed and parse_namespace reads it
     if (!cursor.peek_is_type(1, Token::Type::t_open_paren)
         && !cursor.peek_is_type(1, Token::Type::t_open_angle)) {
-        if (!owner.has_complex_type()) {
+        if (!owner.has_complex_type() || !cursor.is_type(Token::Type::t_identifier)) {
             cursor.restore(start);
             return nullptr;
         }
 
         const AST::ComplexType *ct = owner.get_complex_type()->template_or_self();
 
-        if (!cursor.is_type(Token::Type::t_identifier)
-            || !ct->is_enum_kind()
-            || ct->find_enum_case(cursor.current().value()) == nullptr) {
+        if (ct->is_enum_kind() && ct->find_enum_case(cursor.current().value()) != nullptr) {
+            const TokenReference case_token = cursor.current();
+            cursor.skip();
+
+            auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(
+                case_token, std::vector<AST::ExprNode *>{});
+            call.static_owner = owner;
+
+            return &call;
+        }
+
+        AST::Namespace *surface = AST::member_surface_namespace(payload.collector.namespaces, *ct);
+
+        if (surface == nullptr) {
             cursor.restore(start);
             return nullptr;
         }
 
-        const TokenReference case_token = cursor.current();
+        auto &const_ref = payload.context.emplace_node<AST::ConstRefExprNode>(
+            cursor.current(), surface, /*is_qualified=*/true);
         cursor.skip();
 
-        auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(
-            case_token, std::vector<AST::ExprNode *>{});
-        call.static_owner = owner;
-
-        return &call;
+        return &const_ref;
     }
 
     // **committed.** from here the owner is known to be a type, so a name it does not declare is a
@@ -1248,28 +1250,29 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // way it looks. the container is operand 0 of the element call, so it is an
             // ordinary borrow argument from there on and AST::argument_fit ranks it t_borrow_temporary
             //
-            // what is left is genuinely addressless - a bare `null`, an array literal - and the message
-            // is the one the shunting yard's fallback still gives `5[0]` and `[1, 2][0]`, which no
-            // postfix chain claims. nearly the method-receiver gate in FuncCallParser, and for the same
-            // reason - a receiver *is* a borrow argument in position 0 - **but for `:$`**, which is
-            // addressless there and admitted here. a `->` base is read by parse_postfix_chain, which
-            // never hands one over, so the two gates have not had to answer it in the same terms yet
-            if (AST::storage_of(*base) == AST::StorageClass::t_addressless
-                && base->get_node_type() != AST::NodeType::n_expr_peel) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(bracket_token),
-                    "only a place can be indexed - a variable, a field or an element. Bind this "
-                    "expression to a name first, then index that.");
-                return AST::make_void_ref();
-            }
-
             // **an empty `[]` is legal here**, and means the slot after the last one. it is not read
             // as "an index that failed to parse": AST::OperatorRewriter resolves it against the
             // container's one-operand `operator []`, and Parser refuses it anywhere but an
             // assignment target - see AST::IndexExprNode::is_append
+            //
+            // the list is parsed *before* the addressless refusal so `$i]` is not left in the
+            // stream as a second UnexpectedToken when `MONTH_DAYS[$i]` is still a ConstRef
             std::vector<AST::ExprNode *> indices;
 
             if (!Parser::parse_bracketed_expr_list(payload, indices)) {
+                return AST::make_void_ref();
+            }
+
+            // a constant reference is transient: ConstantExpander replaces it with a clone of the
+            // initializer, and that clone answers storage. `:$` names an address directly. what is
+            // left is genuinely addressless - a bare `null`, an array literal
+            if (AST::storage_of(*base) == AST::StorageClass::t_addressless
+                && base->get_node_type() != AST::NodeType::n_expr_peel
+                && base->get_node_type() != AST::NodeType::n_expr_const_ref) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(bracket_token),
+                    "only a place can be indexed - a variable, a field or an element. Bind this "
+                    "expression to a name first, then index that.");
                 return AST::make_void_ref();
             }
 
@@ -2026,13 +2029,12 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return Parser::parse_postfix_chain(payload, AST::make_ref(const_ref));
     }
 
-    // **a static call, `Type::f(...)`, and a static property, `Type::$x`** - both claimed before the
-    // namespace walk below for the reason the `self::` arm above gives: parse_namespace mints what it
-    // does not find, so by the time it has consumed `Point::` there is a namespace called `Point` and
-    // the type it named is out of reach. a `$name` after the `::` would then fall off the end of this
-    // function entirely, since neither the call arm nor the constant arm accepts one
+    // **a static call, `Type::f(...)` / `Type::CONST`, and a static property, `Type::$x`** - claimed
+    // before the namespace walk below: parse_namespace mints what it does not find, so by the time
+    // it has consumed `Point::` there is a namespace called `Point` and the type is out of reach.
+    // a `$name` after the `::` matches no arm in parse_operand
     if (auto *static_call = Parser::try_parse_static_call(payload)) {
-        return Parser::parse_postfix_chain(payload, AST::make_ref(*static_call));
+        return Parser::parse_postfix_chain(payload, AST::make_ref(static_call));
     }
 
     if (auto *static_property = Parser::try_parse_static_property(payload)) {

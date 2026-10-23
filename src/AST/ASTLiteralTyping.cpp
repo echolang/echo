@@ -465,10 +465,14 @@ namespace AST
             return unchanged(literal);
         }
 
-        // **deliberately not AST::can_type_a_literal.** that one answers a parse-time question - may a
-        // hint for this type be threaded down into an expression's operands before it is parsed - and a
-        // `bool` is exactly the type for which the answer is no while the answer *here* is the 0/1
-        // conversion. the two differ by that one case and by nothing else
+        // **deliberately not AST::can_type_a_literal.** that one is the parse-time operand hint,
+        // and the two differ by `bool` and by this peel. a wrapped `T?` is a layout, so without
+        // it `int64? $x = 42` stays int32; handing `int64?` down would retype the `3` and `4`
+        // of `int64? $x = 3 < 4`
+        if (destination.is_wrapped_optional()) {
+            return type_literal_at(literal, destination.optional_payload(), nodes);
+        }
+
         if (!destination.is_primitive() || destination.is_void()) {
             return unchanged(literal);
         }

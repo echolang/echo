@@ -142,6 +142,22 @@ namespace
         return true;
     }
 
+    // **does an argument destination forward** (open no scope)? a borrow is an address; a
+    // known trivial aggregate may window a temp (`string::view`). unknown / primitive /
+    // owning bind, so `echo make()->doubled()` still drops the buffer after `doubled()`
+    bool argument_forwards(const ValueType &wanted)
+    {
+        if (wanted.is_pointer()) {
+            return true;
+        }
+
+        if (is_undetermined_type(wanted) || wanted.is_primitive() || wanted.is_void()) {
+            return false;
+        }
+
+        return !needs_destruction(wanted);
+    }
+
 }
 
 OwnershipPass::OwnershipPass(Bundle &bundle)
@@ -369,9 +385,26 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     _handover_reads = handover_reads_in(*decl.body, declared_params);
 
     _frames.push_back(Frame{decl.body, owned_params});
+    walk_parameter_defaults(declared_params);
+
     walk_scope(*decl.body);
     _frames.pop_back();
     decl.region_state = RegionState::t_owned;
+}
+
+void OwnershipPass::walk_parameter_defaults(const std::vector<VarDeclNode *> &params)
+{
+    for (VarDeclNode *arg : params) {
+        if (arg == nullptr || arg->init_expr == nullptr) {
+            continue;
+        }
+
+        const ValueType type = arg->has_type() ? arg->type() : ValueType::make_unknown();
+        MaterializationScope scope(*this);
+        arg->init_expr = resolve_value_arrival(
+            arg->init_expr, type, arg, ValueDestination::t_argument);
+        arg->init_expr = scope.close(arg->init_expr);
+    }
 }
 
 bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
@@ -1533,11 +1566,10 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // are ordinary library declarations, so no enumeration of
             // shapes could be trusted to catch the next one
             //
-            // so the tighter lifetime went, and nothing replaced it: resolve_value_arrival already binds
-            // at every destination that *reads* a value, which is where tightness was sound. only a
-            // **borrow** argument travels past here, and that is exactly the set that needed to. so
-            // `echo sum(Point(3, 4))` still binds around `sum(...)` - echo's own argument reads a value -
-            // while `f(&make())` binds at the statement, where nothing can still be pointing into it
+            // so the tighter lifetime went: resolve_value_arrival binds at every destination that
+            // *reads* a value, and argument_forwards is what lets a borrow or a window (`string::view`)
+            // travel past here. `echo sum(Point(3, 4))` binds around `sum(...)`; `f(&make())` binds
+            // at the statement
             for (size_t i = 0; i < call->arguments.size(); i++) {
                 const VarDeclNode *param = nullptr;
                 ValueType wanted = ValueType::make_unknown();
@@ -1985,10 +2017,10 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     // wrong place to destroy the temporary. Which of the three answers that means depends on how long
     // the destination holds on:
     //
-    //  - an **argument** hands the address to a callee that reads through it and returns, so the
-    //    request travels one step further out. this position *forwards*, which is spelled by opening
-    //    no scope at all - and it is why `use($b->make()->node)` works, and the receiver
-    //    `$o->get()->size()` with it
+    //  - an **argument** is read *during* the call. argument_forwards is the question: a borrow
+    //    or a by-value window (`string::view`) opens no scope, so `show("{$i}")` still has the
+    //    string; a primitive or an owning value binds, so `echo make()->doubled()` drops the
+    //    buffer after `doubled()` returns
     //  - a **declaration, an assignment, a return or an initialization** keeps it past the statement
     //    entirely, and no lifetime a temporary can have would be long enough. refused
     //  - anything else *reads* the value, so this edge outlives every request below it. bound
@@ -1996,7 +2028,7 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     // Asked of `wanted` rather than of the parameter, so all four destinations answer through one
     // rule. That is also what makes it hold whether or not AST::CallResolver has addressed the
     // argument yet - a different pass in the same fixpoint, which may not have run
-    if (wanted.is_pointer() && destination == ValueDestination::t_argument) {
+    if (destination == ValueDestination::t_argument && argument_forwards(wanted)) {
         return arrive_value(expr, wanted, param, destination);
     }
 

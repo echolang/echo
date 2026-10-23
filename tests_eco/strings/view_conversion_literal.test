@@ -14,8 +14,8 @@ CHECK: tempbind<void>(vardecl<type<string>>($__temp1) = literal<string>("'hello'
 CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp2))))
 CHECK: call $deinit(addrof<string&>(varref<string>(var($__temp1))))
 
-# a by-value parameter needs only the receiver's temporary: the view travels as a plain two-word value
-CHECK: call showv(tempbind<string::view>(vardecl<type<string>>($__temp3) = literal<string>("'hi'")
+# a by-value view is a window into the receiver, so the string lives for the whole call
+CHECK: tempbind<void>(vardecl<type<string>>($__temp3) = literal<string>("'hi'"); call showv(call view(addrof<string&>(varref<string>(var($__temp3)))): string::view): void; call $deinit(addrof<string&>(varref<string>(var($__temp3)))): void)
 
 # and a place needs no receiver temporary at all - `$owned` already has storage, so the only one minted
 # is for the borrow of the conversion's result

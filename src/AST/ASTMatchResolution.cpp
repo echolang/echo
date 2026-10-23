@@ -518,11 +518,25 @@ void MatchResolution::resolve(MatchExprNode &node)
         // the wider of the two, through the same rule every other destination uses. a `void` beside a
         // value is not a widening in either direction, which is what makes mixing the two shapes the
         // located error it should be rather than a phi of one arm
+        //
+        // a conversion copies, so the match cannot phi addresses. identity-modulo-const
+        // is still a place; the most-const of those arms is `place_pointee_const`
+        const bool same_shape =
+            ValueType::make_mutable(arm_type) == ValueType::make_mutable(unified);
+
         if (is_implicitly_convertible(arm_type, unified)) {
+            if (!same_shape) {
+                all_places = false;
+            }
+
             continue;
         }
 
         if (is_implicitly_convertible(unified, arm_type)) {
+            if (!same_shape) {
+                all_places = false;
+            }
+
             unified = arm_type;
             unified_from_block = arm.value == nullptr;
             continue;

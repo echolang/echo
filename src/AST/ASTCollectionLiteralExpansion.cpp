@@ -570,6 +570,12 @@ ExprNode *CollectionLiteralExpansion::expand_expression(
         return nullptr;
     }
 
+    // a clone of a constant's array literal has no destination of its own. infer from
+    // the first element so MONTH_DAYS[$i] can hoist the same way an argument literal does
+    if (!bind_unplaced_type(*literal)) {
+        return nullptr;
+    }
+
     ExprNode *place = hoist(*literal, hoisted);
 
     if (place != nullptr) {
