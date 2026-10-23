@@ -15,6 +15,7 @@ namespace AST
 {
     class VarDeclNode;
     class FunctionDeclNode;
+    class ChainBaseNode;
 
     // **what storage does this expression have?** the one taxonomy behind every question the compiler
     // asks about an expression's address
@@ -409,14 +410,19 @@ namespace AST
     // share the spine walk. a new place kind that updates one and not the other fails silently
     VarDeclNode *place_root_of(ExprNode *expr);
 
+    // the `?->` marker this place sits on, if the spine ends at one. the same walk as
+    // place_root_of, with ChainBase as the other leaf - so `$el?->items[0]->bump()` and
+    // `$el?->trace()` cannot disagree about whose continuation they are
+    ChainBaseNode *chain_base_of(ExprNode *expr);
+
     // **does this place's storage outlive the statement it sits in?** the same spine
-    // place_root_of walks (varref / member / index / deref / peel / addrof), yes for a
+    // place_root_of walks (varref / member / index / deref / peel / addrof / chain_base), yes for a
     // local *and* for `n_expr_static_property`. a rewritten container index walks the
     // `operator []` receiver, because `base` is cleared once the call owns the operands.
-    // a call result, and a place rooted in one (`Box()->n`, `Rows()->rows`), answers no:
-    // that storage dies at the end of the statement, so ForeachLowering binds `$__src`
-    // and statement-form `T?` hoists `$__guardN`. seat_receiver_local borrows vs copies
-    // on this answer
+    // a call result, a `?->` marker, and a place rooted in one (`Box()->n`, `Rows()->rows`),
+    // answers no: that storage dies at the end of the statement, so ForeachLowering binds
+    // `$__src` and statement-form `T?` hoists `$__guardN`. seat_receiver_local borrows vs
+    // copies on this answer
     bool place_outlives_statement(ExprNode *expr);
 
     // **would this return hand the caller an address that dies with the call?**

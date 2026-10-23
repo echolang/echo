@@ -1,0 +1,13 @@
+--- OUT --->
+from
+32
+4
+wide
+32
+4
+keyed
+[32, 4]
+--- RAST --->
+CHECK: vardecl<type<usize>>($viaFrom)
+CHECK: vardecl<type<usize>>($viaWide)
+CHECK: vardecl<type<usize>>($extent)

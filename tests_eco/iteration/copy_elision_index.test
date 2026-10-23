@@ -1,0 +1,4 @@
+--- OUT --->
+7
+--- RAST --->
+CHECK: vardecl<type<const map<string,int32>&>>($cell)

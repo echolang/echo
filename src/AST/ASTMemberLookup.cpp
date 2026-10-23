@@ -357,6 +357,27 @@ AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode 
     return receiver_for_member_call(module.nodes, place);
 }
 
+AST::AddrOfExprNode *AST::parser_receiver_addrof(const AST::FunctionCallExprNode &call, const AST::VarDeclNode &decl)
+{
+    if (!call.is_member_lookup()) {
+        return nullptr;
+    }
+
+    AST::ExprNode *arg = call.arguments[0];
+
+    if (arg->get_node_type() != AST::NodeType::n_expr_addrof) {
+        return nullptr;
+    }
+
+    auto *addrof = static_cast<AST::AddrOfExprNode *>(arg);
+
+    if (place_root_of(addrof->operand) != &decl) {
+        return nullptr;
+    }
+
+    return addrof;
+}
+
 void AST::seat_receiver_local(AST::Module &module, AST::VarDeclNode &local, AST::ExprNode *expr)
 {
     // a local and a static already live, so the seated local borrows them. a call

@@ -391,12 +391,12 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     /**
      * Appends one element. Exactly what `$a[] = $value` means, written as a call.
      *
-     * The body *is* `$a[] = $value`, so the growth, the fresh-slot rule and the append itself have
-     * one implementation rather than two that could drift.
+     * The body *is* `$a[] = mv $value`: the parameter is already an owner. The growth, the
+     * fresh-slot rule and the append itself have one implementation rather than two that could drift.
      */
     function push(T $value) : void
     {
-        $this[] = $value;
+        $this[] = mv $value;
     }
 
     /**

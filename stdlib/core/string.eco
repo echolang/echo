@@ -968,15 +968,21 @@ public struct string : contract::comparable<string>
     }
 
     /**
-     * Empties the string, keeping the capacity.
+     * Empties the string, keeping the capacity when this value uniquely owns its buffer.
      *
-     * The gate copies bytes this is about to discard, which is the price of every mutator sharing
-     * one rule rather than each carrying its own. This is the only one where that shows.
+     * A literal or a shared buffer has no private allocation to keep. Detach rather than
+     * clone bytes that `finish(0)` would immediately discard. `make_unique` is the wrong
+     * gate here: every other mutator still needs the cloned text.
      */
     function clear() : void
     {
-        $this->make_unique();
-        $this->finish(0);
+        if ($this->is_inline() || ($this->owner != null && mem::refs($this->owner) == 1)) {
+            $this->finish(0);
+            return;
+        }
+
+        $this->owner = null;
+        $this->seat_inline($this->sso_addr(), 0);
     }
 }
 

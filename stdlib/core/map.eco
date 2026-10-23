@@ -276,7 +276,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * Stores `$value` under `$key`, replacing any value already there.
      *
      * The call form of `$m[$key] = $value`, and written *through* it - the mirror of `array<T>::push`, whose
-     * body really is `$this[] = $value`. So the growth, the probe and the teardown of a replaced value stay
+     * body really is `$this[] = mv $value`. So the growth, the probe and the teardown of a replaced value stay
      * in the one place that owns them, and there is one implementation of the write rather than two that
      * have to agree.
      */

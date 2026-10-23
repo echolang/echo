@@ -1,0 +1,14 @@
+// a destructor and no copy constructor. `push` takes T by value, so a surviving local is a
+// copy at the call, and that is the copy this type has not defined. `mv` is the transfer
+struct Item
+{
+    int32 $n;
+
+    destructor()
+    {
+    }
+}
+
+array<Item> $items = array<Item>();
+Item $two = Item(2);
+$items->push($two);

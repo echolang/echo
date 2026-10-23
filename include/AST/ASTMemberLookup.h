@@ -12,6 +12,7 @@
 
 namespace AST
 {
+    class AddrOfExprNode;
     class Collector;
     class ExprNode;
     class FunctionCallExprNode;
@@ -217,6 +218,12 @@ namespace AST
     // NodeCollection alone. one body, so the rule stays single even where the seam differs
     ExprNode *receiver_for_member_call(NodeCollection &nodes, ExprNode *place);
     ExprNode *receiver_for_member_call(Module &module, ExprNode *place);
+
+    // **the parser's wrap of `decl` as member-call argument 0.** `$el->m()` is AddrOf($el) because
+    // `$el` was untyped at parse. ForeachLowering reseats it through receiver_for_member_call after
+    // eliding to `const V&`; is_never_written skips it so the call, not the AddrOf, answers. a
+    // written `&$el` is a different argument and is not this
+    AddrOfExprNode *parser_receiver_addrof(const FunctionCallExprNode &call, const VarDeclNode &decl);
 
     // **seat `expr` as the initializer of a local a later member call will receive.**
     // AST::place_outlives_statement decides: a living place is borrowed, through

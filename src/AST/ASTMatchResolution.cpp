@@ -87,7 +87,7 @@ bool arm_has_unproven_write(MatchExprNode::Arm &arm)
     return finder.found();
 }
 
-bool binding_arm_may_write(MatchExprNode &node, ExprNode *place)
+bool binding_arm_may_write(MatchExprNode &node, ExprNode *place, Collector &collector)
 {
     VarDeclNode *root = place_root_of(place);
 
@@ -107,11 +107,11 @@ bool binding_arm_may_write(MatchExprNode &node, ExprNode *place)
             continue;
         }
 
-        if (arm.scope != nullptr && !is_never_written(*root, *arm.scope)) {
+        if (arm.scope != nullptr && !is_never_written(*root, *arm.scope, collector)) {
             return true;
         }
 
-        if (arm.value != nullptr && !is_never_written(*root, *arm.value)) {
+        if (arm.value != nullptr && !is_never_written(*root, *arm.value, collector)) {
             return true;
         }
     }
@@ -199,7 +199,7 @@ void MatchResolution::resolve(MatchExprNode &node)
             ValueType seated = derived;
 
             if (is_place_expression(*subject->init_expr)
-                && binding_arm_may_write(node, subject->init_expr)) {
+                && binding_arm_may_write(node, subject->init_expr, _collector)) {
                 seated = ValueType::make_const(derived);
             }
             else if (is_place_expression(*subject->init_expr)) {

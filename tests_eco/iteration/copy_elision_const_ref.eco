@@ -1,0 +1,145 @@
+// a const T& argument (and a const method) is a read, so the by-value binding elides. a T& argument,
+// a mutable method, a mixed overload set, and a by-value parameter whose copy ctor needs a mutable
+// source all still copy. `as &$item` writes the collection
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(Item& $other)
+    {
+        $this->n = $other->n;
+        echo 'copy';
+    }
+
+    const function trace() : int32
+    {
+        return $this->n;
+    }
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+function look(const Item& $item) : int32
+{
+    return $item->n;
+}
+
+function glance(const Item& $item, int32 $n = 0) : int32
+{
+    return $item->n + $n;
+}
+
+function mutate(Item& $item) : void
+{
+    $item->n = $item->n + 1;
+}
+
+function take(Item $item) : int32
+{
+    return $item->n;
+}
+
+function peek(Item& $item) : int32
+{
+    return $item->n;
+}
+
+function peek(const Item& $item) : int32
+{
+    return $item->n;
+}
+
+$items = array<Item>();
+$items[] = Item(1);
+$items[] = Item(2);
+
+echo 'field';
+foreach ($items as $field) {
+    echo $field->n;
+}
+
+echo 'const-ref';
+foreach ($items as $viaLook) {
+    echo look($viaLook);
+}
+
+echo 'default-read';
+foreach ($items as $viaGlance) {
+    echo glance($viaGlance);
+}
+
+echo 'explicit';
+foreach ($items as const &$explicit) {
+    echo look($explicit);
+}
+
+echo 'const-method';
+foreach ($items as $viaTrace) {
+    echo $viaTrace->trace();
+}
+
+echo 'mut-method';
+foreach ($items as $viaBump) {
+    $viaBump->bump();
+    echo $viaBump->n;
+}
+
+echo 'mutate-param';
+foreach ($items as $viaMutate) {
+    mutate($viaMutate);
+    echo $viaMutate->n;
+}
+
+echo 'by-value-param';
+foreach ($items as $viaTake) {
+    echo take($viaTake);
+}
+
+echo 'mixed-overloads';
+foreach ($items as $viaPeek) {
+    echo peek($viaPeek);
+}
+
+echo 'addr-of-arg';
+foreach ($items as $viaAddrLook) {
+    echo look(&$viaAddrLook);
+}
+
+echo 'stored-addr';
+foreach ($items as $viaStored) {
+    Item& $p = &$viaStored;
+    echo $p->n;
+}
+
+echo 'borrow-mut';
+foreach ($items as &$borrowed) {
+    mutate($borrowed);
+}
+
+$maybe = array<Item?>();
+$maybe[] = Item(1);
+$maybe[] = Item(2);
+
+echo 'opt-const-method';
+foreach ($maybe as $viaOptTrace) {
+    echo $viaOptTrace?->trace() ?? 0;
+}
+
+echo 'opt-mut-method';
+foreach ($maybe as $viaOptBump) {
+    $viaOptBump?->bump();
+    echo $viaOptBump?->n ?? 0;
+}
+
+echo 'after';
+foreach ($items as $after) {
+    echo $after->n;
+}

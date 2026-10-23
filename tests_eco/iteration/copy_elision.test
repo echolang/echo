@@ -1,5 +1,7 @@
 --- OUT --->
 1
+1
 --- RAST --->
 CHECK: vardecl<type<const int32&>>($reader)
+CHECK: vardecl<type<const int32&>>($viaIdent)
 CHECK: vardecl<type<int32>>($writer)
