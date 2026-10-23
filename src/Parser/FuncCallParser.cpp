@@ -469,9 +469,14 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     // a **static** call names neither: its candidates come from the type, so the namespace is left
     // null and nothing walks outward from it. that omission is the whole of what stops `Foo::f()`
     // from quietly resolving to an enclosing free `f`. a **shorthand** names neither yet, and leaving
-    // both unset is the honest state - not a lookup that found nothing
+    // both unset is the honest state - not a lookup that found nothing. a destination that already
+    // names the owner fills static_owner too
     if (lookup.shorthand_dot.has_value()) {
         funcall.token_shorthand_dot.emplace(lookup.shorthand_dot.value());
+
+        if (!lookup.static_owner.is_unknown()) {
+            funcall.static_owner = lookup.static_owner;
+        }
     }
     else if (!lookup.constructed_type.is_unknown()) {
         funcall.constructed_type = lookup.constructed_type;

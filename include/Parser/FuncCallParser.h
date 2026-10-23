@@ -32,10 +32,12 @@ namespace Parser
         // it. that omission is what stops a static call from quietly meaning an enclosing free function
         AST::ValueType static_owner = AST::ValueType::make_unknown();
 
-        // `.f(...)`: nothing names the owner yet - the destination will. so there is no lookup to do,
-        // no candidates to find, and **no unknown name to report**: an empty set here is a not-yet that
-        // AST::CallResolver::settle answers with the retryable t_unknown_name, and the diagnostic if it
-        // never resolves belongs to the monomorphizer's finalizing sweep, which knows it ran out of rounds
+        // `.f(...)`: the destination names the owner. a declared variable or a return can fill
+        // `static_owner` here so parse-time resolve dest-types arguments the way `Type::f(...)` does.
+        // an argument cannot - the parameter sits on a declaration nobody has chosen yet - and an
+        // empty set is a not-yet that AST::CallResolver::settle answers with the retryable
+        // t_unknown_name. the diagnostic if it never resolves belongs to the monomorphizer's
+        // finalizing sweep, which knows it ran out of rounds
         //
         // **the `.` itself rather than a flag beside it**: it is where every diagnostic about a
         // shorthand points, and it is also what the node answers `is_shorthand_static_call()` from - so

@@ -1659,17 +1659,20 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         bool is_call = false;
-        auto *call = parse_funccall(payload, nullptr, &is_call, Parser::CallLookup { nullptr, {}, dot_token });
+        Parser::CallLookup lookup;
+        lookup.shorthand_dot.emplace(dot_token);
+
+        // a declared variable or a return names the owner, so parse-time resolve dest-types
+        // the arguments. an argument still cannot: the parameter sits on a declaration nobody
+        // has chosen yet
+        if (expected_type != nullptr) {
+            lookup.static_owner = AST::static_owner_of_destination(expected_type->type);
+        }
+
+        auto *call = parse_funccall(payload, nullptr, &is_call, lookup);
 
         if (call == nullptr) {
             return AST::make_void_ref();
-        }
-
-        // the destination, where the position carries one it already knows: a declared variable's type
-        // and a return type both arrive here. an *argument* cannot - the parameter sits on a
-        // declaration nobody has chosen yet - so that one is bound by AST::CallResolver instead
-        if (expected_type != nullptr) {
-            AST::bind_shorthand_to(call, expected_type->type);
         }
 
         return Parser::parse_postfix_chain(payload, AST::make_ref(*call));

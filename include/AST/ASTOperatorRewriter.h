@@ -21,6 +21,7 @@ namespace AST
     class FunctionDeclNode;
     class ExprNode;
     class FunctionCallExprNode;
+    class IndirectCallExprNode;
     class IndexExprNode;
     class MatchExprNode;
     class ScopeNode;
@@ -87,6 +88,8 @@ namespace AST
         void visitWhileStatement(WhileStatementNode &node) override;
         void visit_for_statement(ForStatementNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
+        void visitFunctionCallExpr(FunctionCallExprNode &node) override;
+        void visit_indirect_call_expr(IndirectCallExprNode &node) override;
 
         // rule 5's three sites - see upgrade_optional_operand below
         void visit_guard(GuardNode &node) override;
@@ -175,6 +178,9 @@ namespace AST
         // be null on a compiler-made `while`; a token is then taken from the hoist itself
         void bind_value_if_hoisted(ExprNode *&expr, const TokenReference &at);
         void bind_value_if_hoisted(ExprNode *&expr, const TokenReference *at);
+
+        // bound_type is idempotent; CallResolver types call arguments after this pass
+        void value_edges_except_untyped_collections(std::vector<ExprNode *> &arguments);
 
         // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.
         // AST::CollectionLiteralExpansion is the rewrite; this walk places what it returns. a statement
