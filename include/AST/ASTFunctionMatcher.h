@@ -60,32 +60,13 @@ namespace AST
         std::vector<FunctionDeclNode *> tied;
     };
 
-    // picks the candidate a call resolves to
-    //
-    // each candidate carries its own bound argument list in parameter order. CallResolver fills
-    // those from AST::bind_arguments; tests copy the written types onto every candidate
-    //
-    // the rules, in order:
-    //   1. arity must match exactly on the *bound* list - defaults and names are applied by
-    //      AST::bind_arguments before this runs, so a hole that had a default is already filled. C
-    //      variadic tails stay a last-parameter type, not a matcher exception
-    //   2. if exactly one candidate survives arity, it wins *without* consulting types - unless an
-    //      argument still names a type parameter. that call sits in a generic body and must stay
-    //      pending so the clone can re-resolve against the consumer's overload set. a determined
-    //      mismatch still binds, which is what keeps a program with no overloads reporting
-    //      "argument 1 of 'f' expects int32". a written `null` is unknown, not a parameter
-    //   3. a candidate is dropped if any argument does not fit it at all
-    //   4. one candidate beats another only if it is no worse on every argument and better on at
-    //      least one. wrapping into a tagged `T?` is a second key on the same payload rank, so
-    //      `g(string)` beats `g(string?)` for `'a'` without flattening wrap-of-exact with
-    //      wrap-of-promotion. a summed score would let a candidate win by being much better on one
-    //      argument and slightly worse on another, which is how overload resolution becomes
-    //      unpredictable
-    //   5. only then does a non-generic candidate beat a generic one - how well the arguments fit
-    //      is a statement about the call, "concrete or template" only about the declaration, so it
-    //      gets a say once the call itself cannot tell them apart
-    //   6. undetermined arguments are excluded from the comparison entirely. if what remains
-    //      cannot separate the survivors, the answer is t_undecidable, not t_ambiguous
+    // picks the candidate a call resolves to. CallResolver fills each candidate's bound list.
+    //   1. arity matches the bound list exactly
+    //   2. one survivor of arity wins without types, unless an argument still names a type parameter
+    //   3. drop a candidate any argument does not fit
+    //   4. Pareto: no worse on every argument, better on at least one (wrap into `T?` is a second key)
+    //   5. then concrete beats template
+    //   6. undetermined arguments are excluded; leftover ties are t_undecidable, not t_ambiguous
     FunctionMatch match_function(const std::vector<FunctionCandidate> &candidates);
 
     // renders "foo(int32, float64)" for a diagnostic listing what was tried

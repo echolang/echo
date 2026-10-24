@@ -63,24 +63,8 @@ namespace Compiler::LLVM
         // the per-unit dump, for the build path that has no merge - see the implementation
         void print_unit_ir();
 
-        // **the JIT in two halves, and the seam between them is the interface.** A program is preparing and
-        // then calling `main`; a test run is preparing once and then calling a definition of its own per
-        // test, each in a forked child - which is not spellable as "run the program", so there is no
-        // combined entry point for either of them to be the odd one out of.
-        //
-        // `prepare_execution` prunes the module to what its roots reach - see prune_to_entry, so what runs
-        // is smaller than what print_ir printed - then builds the engine and finalizes the objects:
-        // everything up to the moment machine code could be called. It is idempotent, and false with a
-        // message already printed. Nothing may be called before it has returned true, and the module is
-        // gone afterwards - the engine owns it.
-        //
-        // **every native library this program needs is already open by the time this is called**, and the
-        // driver is what opened them: MCJIT resolves an external out of the running process and nothing
-        // else ever puts one there, so a `#[link:]` becomes a
-        // llvm::sys::DynamicLibrary::LoadLibraryPermanently before the engine exists. Deliberately not a
-        // parameter here - the registry it loads into is process-global either way, and refusing over one
-        // that will not open needs the requirement's declaring module and the diagnostic renderer, neither
-        // of which the backend has. A missing one is not survivable: MCJIT hangs rather than reporting
+        // prune, build the engine, finalize objects. idempotent; false with a message already printed.
+        // the module is gone afterwards. native libraries must already be open: MCJIT hangs on a missing one
         bool prepare_execution();
 
         // calls the entry point.
@@ -163,32 +147,9 @@ namespace Compiler::LLVM
         // linker puts the DWARF in the executable itself
         void gen_debug_symbols(const std::string &executable_name);
 
-        // drops everything the roots cannot reach, by internalizing the module and running GlobalDCE over
-        // what is left. The root set is ECO_ENTRY_SYMBOL_NAME plus set_jit_roots' names, so it is read off
-        // the backend rather than passed: what a caller will look up by name is the same list it already
-        // stated, and two spellings of it are how one gets deleted and then asked for.
-        //
-        // **the JIT only, and sound only there** - which is why it is private and prepare_execution is its
-        // one caller. It merges every unit into one module because the JIT can only be handed one, and the
-        // only things ever looked up by name in that module are the entry symbol and those roots - which
-        // makes them the complete root set. A `build` must not do this: its per-module objects are the
-        // cache contract, and a library's object may not depend on which application consumes it.
-        // Reachable only from the JIT, it cannot be asked for anywhere that would be unsound.
-        //
-        // without it a `return 0;` program still machine-codes the whole of core/string.eco,
-        // core/mem.eco and core/crash.eco - 54 definitions to reach two. Nothing else prunes them:
-        // codegen gives every function ExternalLinkage and only weakens `t_odr_shared` to
-        // linkonce_odr, so GlobalDCE alone - which is all `-O` has - cannot touch them.
-        //
-        // **`-p` prints the module this has not run on, deliberately.** The prune is not codegen, and
-        // `-p` is how codegen is read: half the corpus's IR contracts are about what codegen *emitted*
-        // and where - a definition's placement, an alloca hoisted to the entry block, a `foreach` that
-        // copies nothing - and every one of them is about a body `main` may well never call. A `-p` that
-        // showed the pruned module would answer a different question than the one it is asked, and would
-        // hide any function under debug that the entry point does not happen to reach. Being part of the
-        // JIT is what guarantees that ordering: the dump is a step the driver takes before it runs
-        // anything, so it cannot see this. That is the one place in the compiler where a dump and the
-        // thing it describes diverge, and `--explain-prune` is what makes the difference sayable
+        // JIT only: drop everything the entry and set_jit_roots cannot reach. a `build` must not:
+        // a library object may not depend on which application consumes it. `-p` dumps the module
+        // this has not run on; `--explain prune` is the other answer
         void prune_to_entry();
 
         CodegenContext &_ctx;

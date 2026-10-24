@@ -160,26 +160,9 @@ namespace AST
         // argument 0, so a member call needs nothing stored at all
         const Namespace *lookup_namespace = nullptr;
 
-        // **the type a static call names**, and the third way a call finds its candidates - beside a
-        // namespace for a free one and argument 0 for a member one. `unknown` for both of those, and
-        // `is_undetermined_type` is the test rather than an optional, that already being how every
-        // other reader spells "nothing has said yet".
-        //
-        // set at parse time for `Type::f(...)`, and by AST::bind_shorthand_to for the shorthand
-        // `.f(...)`, whose owner its *destination* names. so a shorthand sits here unset, answering
-        // `unknown` from result_type() - honestly undetermined, which is what stops it from being ranked
-        // against an overload set it cannot choose between.
-        //
-        // **it is also the substitution seed**, and that is the half easy to miss: AST::can_instantiate
-        // binds an owner's type parameters by unifying `args[0]` against the receiver, and a static has
-        // no args[0]. `result<T, E>::ok(T $v)` mentions E nowhere in its signature, so without this the
-        // instantiation is undecidable - and both the monomorphizer's still-generic skip and
-        // determine_type_args' undecided arm report nothing, so the call would compile to nothing at
-        // all. See AST::static_owner_bindings
-        //
-        // **CloneContext::shallow copy-constructs, so this needs substituting on a clone** - see
-        // FunctionCallExprNode::clone. A static call written inside a generic body that kept its
-        // template's `result<T, E>` is undecidable in every instance, silently
+        // the type a static call names, and the substitution seed: a static has no args[0], so
+        // `result<T, E>::ok(T $v)` binds E from here. CloneContext::shallow copy-constructs, so a
+        // clone must substitute (FunctionCallExprNode::clone)
         ValueType static_owner = ValueType::make_unknown();
 
         // **the type `T(...)` constructs**, when the callee is a type rather than a function name.
@@ -362,32 +345,10 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `&E` - the address of the storage E denotes
-    //
-    // deliberately takes the *storage* type, with no transparency peeling, so `&$buf` on a
-    // `ptr<uint8>` is a `ptr<ptr<uint8>>`: the address of $buf's own slot, not the address
-    // $buf holds
-    //
-    // **over a class, where a weak reference is what is being asked for, it means one instead.** a class
-    // handle already *is* an address, so the address of a slot holding one is rarely what a program wants;
-    // what it wants is a second reference that does not own. `weak<Foo> $w = &$obj;` says so.
-    //
-    // **the destination decides, not the operand's type.** that is the rule this chapter already runs
-    // on: a destination decides how far a value is read (`as_value_for`), and a `Foo&` parameter is what
-    // turns a place argument into an address.
-    //
-    // It also has to be the rule here rather than "a written `&` over a class", which was tried. Six
-    // generic accessors in stdlib/core take `&` of a `T` place and need the slot address, so keying on
-    // the operand made `array<int32>` compile and `array<Counter>` not - a generic body whose meaning
-    // depends on its instantiation, which is the one thing a generic must never be.
-    //
-    // This node is also how every *compiler-inserted* borrow is spelled: a method receiver
-    // (FuncCallParser), a borrow-parameter coercion (CallResolver), a drop's receiver (OwnershipPass).
-    // Those must keep meaning the slot's address, or `$this` would stop being `Foo&`.
-    //
-    // One bit separates them rather than a second node, because every pass that special-cases
-    // `n_expr_addrof` - place_root_of, PointerAdjuster::adjust_call_arguments, OwnershipPass's place
-    // edge - would otherwise need a duplicate arm that could drift
+    // `&E`: the address of E's storage, no peeling, so `&$buf` on a `ptr<uint8>` is `ptr<ptr<uint8>>`.
+    // a `weak<T>` destination turns it into a weak; the destination decides, because a generic `T`
+    // body that takes `&` of a place must mean the slot even when T is a class. compiler-inserted
+    // borrows use the same node (one bit, not a second kind)
     class AddrOfExprNode : public ExprNode
     {
     public:
@@ -397,13 +358,8 @@ namespace AST
         // and later an index; not a temporary, which has no address to take
         ExprNode *operand;
 
-        // **was a weak reference what this `&` was asked for?** set by the unary arm in ExprParser when the
-        // destination is a `weak<T>`, and unconditionally by `weak($obj)`, which says so itself. never by
-        // a pass inserting a borrow, and never by the `$x:$:$` collapse - both mean the slot's address
-        //
-        // a stored bit rather than something derivable, because the destination is knowable only where the
-        // node is built. read through denotes_weak_reference() below, so "what does this `&` denote" still
-        // has exactly one owner
+        // set by the unary parser when the destination is `weak<T>`, and by `weak($obj)`. compiler-inserted
+        // borrows and `$x:$:$` leave it false (those mean the slot)
         bool weak_wanted = false;
 
         AddrOfExprNode(ExprNode *operand, bool weak_wanted = false) :
@@ -860,24 +816,8 @@ namespace AST
         ExprNode *lhs;
         ExprNode *rhs;
 
-        // **what the present arm yields**, when unwrapping the left side is not the whole of it.
-        //
-        // null is the common case and the whole no-regression story: a payload that copies as bytes,
-        // a computed left side whose extractvalue *is* the move - every `??` in the tree before a
-        // tagged optional owned anything - leaves this unset and codegen unwraps exactly as it
-        // always did.
-        //
-        // it is set for one shape: a *place* whose payload needs a real copy. There the `??` and the
-        // place are two names for one value, so the payload has to be copied rather than moved out
-        // from under a value somebody else still holds - and the copy cannot live on `lhs`, because
-        // that edge is also the value being tested. GuardNode::bound_value's shape, and for its
-        // reason.
-        //
-        // **written by AST::OwnershipPass and by nothing else.** arrive_value of the `??` itself
-        // cannot insert the copy: the node is not a place (`gen_lvalue` throws), so the copy is
-        // this edge, over the `__value` place for a tagged optional and over the handle for a flag
-        // one. TypeChecker validates it, `-p ast-resolved` shows it, and codegen evaluates it on
-        // the present arm
+        // the present arm's value, when the payload needs a real copy. written by OwnershipPass.
+        // null when codegen can unwrap lhs itself
         ExprNode *present_value = nullptr;
 
         TokenReference token;

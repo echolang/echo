@@ -153,7 +153,7 @@ namespace Parser
 
         // true when the current token can close a single generic level: a plain '>'
         // (t_close_angle) or a '>>' (t_op_shr), the latter closing one level and leaving
-        // a '>' for the enclosing level (the standard C++ nested-generics token split)
+        // a '>' for the enclosing level
         inline bool is_generic_close() const {
             return is_type(Token::Type::t_close_angle) || is_type(Token::Type::t_op_shr);
         }

@@ -11,26 +11,8 @@
 
 namespace AST
 {
-    // **what an attribute value is.**
-    //
-    // `#[...]` is a compile-time data region, and one rule holds all of it together: *a bare name means
-    // itself*. Never a constant, never a variable, never a type. `#[if: os == darwin]` has always read
-    // names that way; this is that rule applied to the whole bracket, which is what lets a closed
-    // vocabulary be spelled bare (`lib`, `array`, `size_of`) and leaves quotes to mean free text.
-    //
-    // A value may be **tagged** by a name - `framework "OpenGL"`, `git { url: "..." }`. The tag is the
-    // *kind* and the payload is the fields, which is what promoted `"framework:OpenGL"`'s scheme out of
-    // a string the lexer never saw and into the grammar.
-    //
-    // **deliberately not an expression node.** Parser::parse_expr_ref cannot say four of these six
-    // shapes: a bare `framework` becomes a ConstRefExprNode that AST::ConstantExpander later reports
-    // as an unknown constant, `lib "GL"` is two expressions with no operator, `{` is not an
-    // expression token, and `["a", "b"]` becomes an ArrayLiteralExprNode - a statement-level
-    // construct needing a hoisted declaration and the core array type, which a manifest's scratch
-    // bundle does not have. `a::b` in that position would also *mint a namespace* as a side effect.
-    // an attribute value never reaches codegen, has no type, no storage and no lifetime, so it is
-    // a value with no behaviour - shaped like AST::Diagnostic and Compiler::LinkRequirement, and
-    // owned by nothing
+    // what an attribute value is. a bare name means itself, never a constant or a type.
+    // optionally tagged (`framework "OpenGL"`). not an expression node: it never reaches codegen
     enum class AttributeValueKind
     {
         t_string,   // "..."       - free text, quotes stripped and escapes decoded

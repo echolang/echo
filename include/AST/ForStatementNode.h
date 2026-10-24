@@ -9,29 +9,9 @@
 
 namespace AST
 {
-    // `for (init; condition; step) { }`.
-    //
-    // **the one loop shape whose `continue` target is not its condition**, and that is the whole of what
-    // it adds. a `while` puts its step in the condition, so the back edge and a `continue` are the same
-    // edge - see StmtCodegen::gen_loop, which both statements go through with this one holding a step
-    // scope and a `while` holding none.
-    //
-    // **the init is not an edge here**, deliberately. it is the preceding sibling in a wrapper scope the
-    // parser mints, and that scope *is* the init's lifetime:
-    //
-    //     {                                   // a scope of its own, so `$i` dies at loop exit
-    //         int32 $i = 0;
-    //         for (; $i < 10; $i = $i + 1) { ... }
-    //     }
-    //
-    // an edge would need a frame that opens before the loop and closes after it, which AST::OwnershipPass
-    // has no rule for; as a sibling, `$i`'s drop is the ordinary reverse-order frame drop and a `break` or
-    // a `return` out of the body unwinds it through the machinery that already exists. the same shape
-    // AST::ForeachLowering's `$__it` wrapper and the array literal's hoist already have
-    //
-    // and **not a transient node**: unlike AST::ForeachNode this reaches codegen, so it owes no
-    // `body_is_concrete` arm and no PointerAdjuster throw. it owes no AST::statement_exit_kind arm either,
-    // for the reason a `while` does not - a loop may run zero times
+    // `for (init; condition; step) { }`. `continue` goes to the step; a `while` continues to the
+    // condition. both go through StmtCodegen::gen_loop. the init is the preceding sibling in a
+    // wrapper scope, so `$i` is an ordinary frame local. reaches codegen (unlike `foreach`)
     class ForStatementNode : public Node
     {
     public:

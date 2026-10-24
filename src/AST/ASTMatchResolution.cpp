@@ -179,23 +179,8 @@ void MatchResolution::resolve(MatchExprNode &node)
         const ValueType derived = infer_declaration_type(*subject->init_expr, false);
 
         if (!is_undetermined_type(derived)) {
-            // **the subject is never copied when it names storage** - it is borrowed, and the two shapes
-            // of that are told apart the way AST::GuardLowering tells them apart: a place is borrowed, a
-            // value the program computed is owned by this declaration and dropped by the ordinary frame.
-            //
-            // it began as a copy, and the copy was wrong twice over. a `match` over an owning enum
-            // retained every payload on the way in and released them again at the scope's end, for a
-            // read; and a payload borrow handed *out* of the match - which is what lets an enum answer
-            // `contract::unwrappable<V>::unwrap() : V&` - pointed into the copy rather than into the value
-            // the author named, so a write through it went somewhere nobody could see and a `return` of
-            // it outlived its target by one scope
-            //
-            // **and no second address when the subject already is one.** `match ($this)` inside a method
-            // has a receiver of type `Foo&`, so wrapping it would build a `ptr<Foo&>` - the address of the
-            // slot holding the receiver - which unifies against nothing and is the trap CLAUDE.md lists
-            // for every synthesized member call. AST::receiver_for_member_call is that rule's one owner,
-            // asked here rather than restated: a rule whose failure mode is silence must not have two
-            // copies of itself to keep in step. the seated type is then simply what the edge answers
+            // a place subject is borrowed; a computed value is owned by this declaration. no second
+            // address when the subject already is one (`match ($this)` is already `Foo&`)
             ValueType seated = derived;
 
             if (is_place_expression(*subject->init_expr)
@@ -323,25 +308,8 @@ void MatchResolution::resolve(MatchExprNode &node)
             const ComplexType::Property &prop =
                 ct->get_property(entry->first_payload_property + i);
 
-            // **`V& $v = &$__match->__cN_field`** - a *borrow* of the payload, not a copy of it, and
-            // that is the one decision in this pass that is not bookkeeping.
-            //
-            // a copy would be dropped at the end of the arm's scope, and an arm's *value* is evaluated
-            // after that scope - so a `string` binding would be freed one instruction before the value
-            // that reads it. a borrow owns nothing, so AST::OwnershipPass emits no drop and the
-            // ordering question does not arise. it is also simply right: the subject either names storage
-            // that outlives the whole form or is a value this node owns for exactly as long, so there is
-            // nothing here for a copy to protect against
-            //
-            // **and it carries the subject's `const`**, through the one rule that owns it:
-            // AST::member_type_through. the payload is reached *through* the subject, so a `const E&`
-            // receiver - which is every `const function` on an enum - hands out `const V&` and a write
-            // through the binding is refused where it should be. it could not come up while the subject
-            // was a copy, that copy always being mutable, so this is the const half of borrowing it
-            //
-            // the same shape a `foreach` element and `contract::unwrappable<V>::unwrap()` already have,
-            // which is why reading one needs nothing new: AST::PointerAdjuster wraps the read, the
-            // binding reads as `V`, and a use that wants a value of its own copies at the arrival
+            // `V& $v = &$__match->__cN_field`: a borrow, carrying the subject's const. a copy would
+            // drop at the arm's brace, one instruction before the arm's value reads it
             ExprNode *member = make_member_place(*_current_module, *subject, prop.name, arm.token);
 
             binding->init_expr = &_current_module->nodes.emplace_back<AddrOfExprNode>(member);

@@ -1,0 +1,244 @@
+/**
+ * Cutting text: `split`, `lines`, `replace`.
+ *
+ * `str::parts` and `join` stay in str.eco; this file is the walks that mint parts or rewrite a
+ * buffer. `find_byte` lives here so the comma scan has no `push` inside it.
+ */
+
+namespace str;
+
+/**
+ * Offset of the first `$b` in `$n` bytes at `$p`, or `$n` when it is not there.
+ *
+ * Its own function so the loop has no `push` inside it. Fields here are a
+ * handful of bytes; a `memchr` call per field is slower than this walk.
+ */
+private function find_byte(ptr<const uint8> $p, usize $n, uint8 $b) : usize
+{
+    usize $i = 0;
+
+    while ($i < $n) {
+        if ($p:$[$i] == $b) {
+            return $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $n;
+}
+
+/**
+ * `$text` cut at every occurrence of `$sep`.
+ *
+ * Always answers at least one part, and `n` separators give `n + 1` of them - so an empty text
+ * splits to one empty part and `",a,"` on `","` gives three. That is the rule that makes
+ * `str::join(str::split($t, $s), $s)` give `$t` back, which is the only rule worth promising here.
+ *
+ * An empty separator would match everywhere and nowhere, so it answers the whole text unsplit
+ * rather than one part per byte.
+ *
+ * The parts are offsets into `$text`. `$p->at($i)` rebuilds a window. `$p->owned()` is
+ * the list of owning strings this used to return.
+ */
+public function split(const string& $text, const string& $sep) : parts
+{
+    return split($text, $sep, ~(0 as usize));
+}
+
+/**
+ * `$text` cut at the first `$limit - 1` occurrences of `$sep`, so at most `$limit` parts and the
+ * last one is the rest of the text, separators and all.
+ *
+ * A limit of `0` reads as `1`: there is no way to answer fewer parts than the one every split
+ * promises, and refusing a zero would make a computed limit a crash.
+ */
+public function split(const string& $text, const string& $sep, usize $limit) : parts
+{
+    array<part> $spans = array<part>();
+    string::view $all = $text->view();
+    usize $n = $all->size;
+
+    if ($sep->empty()) {
+        $spans->push(part(0, $n));
+
+        return parts($text, $spans);
+    }
+
+    // `$limit` parts is one cut fewer, the last part being whatever is left
+    usize $cuts = 0;
+
+    if ($limit > 1) {
+        $cuts = $limit - 1;
+    }
+
+    string::view $needle = $sep->view();
+    bool $one = $needle->size == 1;
+    uint8 $b = 0;
+
+    if ($one) {
+        $b = $sep->byte(0);
+    }
+
+    ptr<const uint8> $bytes = $all->bytes;
+    usize $start = 0;
+
+    while (true) {
+        usize $remain = $n - $start;
+        // with no cut left the rest is the last part, which is the not-found answer
+        usize $at = $remain;
+
+        if ($cuts > 0) {
+            // a character separator is a byte scan with no store inside it, then one
+            // push. a loop that stores a view on every comma will not vectorise
+            if ($one) {
+                $at = find_byte($bytes:$ + $start, $remain, $b);
+            }
+            else {
+                $at = $all->sub($start, $remain)->find($needle);
+            }
+        }
+
+        // `find` answers the haystack's own size when there is no match - there is no `Option`
+        // to hand back, and the size is the one value always to hand and never a valid index
+        if ($at >= $remain) {
+            $spans->push(part($start, $remain));
+
+            return parts($text, $spans);
+        }
+
+        $spans->push(part($start, $at));
+        $start = $start + $at + $needle->size;
+        $cuts = $cuts - 1;
+    }
+}
+
+/**
+ * `$text` cut into lines, without their line endings.
+ *
+ * A line ends at `\n`, and a `\r` just before that `\n` goes with it. A newline ends the line in
+ * front of it rather than starting an empty one after it, so `"a\nb\n"` is two lines - the count
+ * `foreach` over a file gives - and an empty text is none. That is the one place this parts from
+ * `split($text, "\n")`, which answers three and one.
+ *
+ * A `\r` with no `\n` behind it is text, not an ending.
+ */
+public function lines(const string& $text) : parts
+{
+    array<part> $spans = array<part>();
+    string::view $all = $text->view();
+    usize $n = $all->size;
+    ptr<const uint8> $bytes = $all->bytes;
+    usize $start = 0;
+
+    while ($start < $n) {
+        usize $at = find_byte($bytes:$ + $start, $n - $start, CH_LF);
+        usize $len = $at;
+
+        if ($start + $at < $n && $at > 0 && $bytes:$[$start + $at - 1] == CH_CR) {
+            $len = $at - 1;
+        }
+
+        $spans->push(part($start, $len));
+        $start = $start + $at + 1;
+    }
+
+    return parts($text, $spans);
+}
+
+/**
+ * `$text` with every `$from` in it replaced by `$to`.
+ *
+ * Left to right, and a match never overlaps the one before it: `'aaa'` with `'aa'` replaced is one
+ * replacement and the `a` after it. The replacement is not searched again, so replacing `'a'` with
+ * `'aa'` terminates.
+ *
+ * An empty `$from` answers `$text` unchanged - `split`'s rule for an empty separator, for its
+ * reason. Text with nothing to replace is the same string, sharing its buffer; only a replacement
+ * allocates, and then exactly once.
+ */
+public function replace(const string& $text, const string& $from, const string& $to) : string
+{
+    return replace_upto($text, $from, $to, ~(0 as usize));
+}
+
+/**
+ * `$text` with the first `$from` in it replaced by `$to`. Everything `replace` says, once.
+ */
+public function replace_first(const string& $text, const string& $from, const string& $to) : string
+{
+    return replace_upto($text, $from, $to, 1);
+}
+
+/**
+ * Both `replace`s: at most `$limit` matches. A limit of `0` answers `$text` unchanged.
+ *
+ * Two walks of `$text`, and the first is what makes the second one allocation: it counts, so the
+ * result's size is known before a byte is written. The second starts at the first match the count
+ * found, so `replace_first` searches once.
+ */
+private function replace_upto(const string& $text, const string& $from, const string& $to, usize $limit) : string
+{
+    string::view $all = $text->view();
+    string::view $needle = $from->view();
+    usize $n = $all->size;
+    usize $from_n = $needle->size;
+
+    // an empty `$from` matches everywhere; a limit of 0 is no replacements. both are `$text`
+    if ($from_n == 0 || $limit == 0) {
+        return $text->sub(0, $n);
+    }
+
+    usize $count = 0;
+    usize $first = $all->find($needle);
+    usize $at = $first;
+
+    while ($at < $n) {
+        $count = $count + 1;
+
+        if ($count == $limit) {
+            break;
+        }
+
+        $at = $all->find($needle, $at + $from_n);
+    }
+
+    if ($count == 0) {
+        return $text->sub(0, $n);
+    }
+
+    // the matches are disjoint slices of `$text`, so `$count * $from_n` cannot pass `$n`. what the
+    // replacements add can pass anything
+    usize $to_n = $to->size();
+    usize $kept = $n - $count * $from_n;
+
+    if ($to_n > 0 && $count > (~(0 as usize) - $kept) / $to_n) {
+        mem::out_of_memory();
+    }
+
+    string $out = '';
+    $out->reserve($kept + $count * $to_n);
+
+    ptr<const uint8> $src = $all->bytes;
+    ptr<const uint8> $rep = $to->data();
+    usize $start = 0;
+    usize $hit = $first;
+    usize $done = 0;
+
+    while (true) {
+        $out->append_reserved($src:$ + $start, $hit - $start);
+        $out->append_reserved($rep, $to_n);
+        $start = $hit + $from_n;
+        $done = $done + 1;
+
+        if ($done == $count) {
+            break;
+        }
+
+        $hit = $all->find($needle, $start);
+    }
+
+    $out->append_reserved($src:$ + $start, $n - $start);
+
+    return $out;
+}

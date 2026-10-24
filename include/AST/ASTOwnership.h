@@ -43,27 +43,11 @@ namespace AST
         void set(ExprNode *place) const;
     };
 
-    // where a value is arriving. two of the five take a place as an implicit move, a third takes one
-    // where the place is provably dead afterwards; at the other two a place is always a copy:
-    //
-    //  - **t_return** is the one the whole feature rests on. a local is destroyed at the end of its
-    //    scope and `return` *is* the end of its scope, so a returned local either moves or is
-    //    destroyed out from under the caller. no `mv` is written because there is nothing else it
-    //    could be
-    //  - **t_initialization** is the synthesized field-wise constructor writing its parameters into
-    //    the struct it is building (AssignNode::is_initialization). the user wrote none of it, so
-    //    there is nowhere to put a `mv`, and the meaning is unambiguous: the parameter was handed
-    //    over to be built into the struct, and the constructor is the only thing that ever writes
-    //    that field. a *hand-written* constructor is not this - it says `$this->data = mv $data`,
-    //    because there the transfer is a thing the author can and should be able to see
-    //  - **t_argument** is the conditional one, and the condition is a proof rather than a
-    //    destination: a by-value parameter handed a local the enclosing `return` was about to destroy
-    //    anyway takes it over, because `return f($x)` is `return $x` with a call in between and the
-    //    two must not disagree about who ends `$x`. AST::handover_reads_in is the proof, and it is
-    //    deliberately not part of this enum - what a destination *does* with a value is a property of
-    //    the position, and whether the source is still wanted afterwards is a property of the body.
-    //    **everywhere else an argument is a copy**, so the caller keeps its reference and the object
-    //    outlives the call
+    // where a value is arriving. a place is a copy except:
+    //   - t_return: the local's scope ends here, so it moves with no `mv`
+    //   - t_initialization: the synthesized field-wise constructor (a user ctor writes `mv`)
+    //   - t_argument: only when handover_reads_in proves the enclosing `return` was about to
+    //     destroy it anyway (`return f($x)`). everywhere else an argument is a copy
     enum class ValueDestination
     {
         t_declaration,
@@ -73,51 +57,11 @@ namespace AST
         t_return,
     };
 
-    // single ownership: one owner per value,
-    // destroyed exactly once when that owner's scope ends, `mv` to hand it elsewhere.
-    //
-    // Three jobs in one tree walk, because they answer each other:
-    //
-    //  - **copy or move.** at each place a value arrives - a declaration's initializer, an
-    //    assignment, an initialization, a call argument, a `return` - a *place* source is a copy and a
-    //    non-place source is already a move. For an owning type the copy is rejected (below) and `mv`
-    //    marks the source moved-from.
-    //
-    //    `return $local` is a move with no `mv`, and that is the rule the feature rests on: a
-    //    constructor's `$this` is a body-local with an implicit `return $this`, so without it
-    //    `$a = Buffer(...)` frees the buffer twice
-    //  - **moved state.** a set of moved-from declarations carried down the walk and merged by union
-    //    at a branch, so a move on one arm of an `if` leaves the variable unset after it. Reading a
-    //    moved local is a located error rather than a runtime surprise
-    //  - **drops.** at every scope end and before every `return`, a destructor call per live local in
-    //    reverse declaration order, skipping whatever was moved out
-    //
-    // **every drop is an ordinary FunctionCallExprNode in the tree**, receiver `&$local`. That is the
-    // same choice AST::PointerAdjuster makes about derefs, and it buys the same three things: codegen
-    // needs no scope-exit machinery, -ar shows the drops, and AST::TypeChecker validates what this
-    // pass inserted. (-a is the tree as *parsed*, before this pass runs at all.)
-    //
-    // **a copy is a call to the type's copy constructor**, when it has one.
-    //
-    // The member-wise deep copy the chapter describes is not what happens, and never was. That
-    // recursion has no bottom: every owning type bottoms out at a raw `ptr<uint8>` the type system
-    // knows nothing about, so copying it member-wise leaves two owners freeing one allocation. The
-    // type holding the pointer is the one that knows, and a constructor taking a borrow of its own
-    // type is it saying so.
-    //
-    // Two things fall out of *recognising* that constructor rather than spelling a new form for it
-    // (AST::is_copy_constructor). `$b = $a` and `Foo($a)` are one declaration, so they cannot drift.
-    // And it is honoured whether or not the type owns anything, so what a copy means never depends on
-    // whether a destructor happens to be declared.
-    //
-    // With no copy constructor, an implicit copy of an *owning* type is still a located error naming
-    // `mv`, a borrow, and now the third option.
-    //
-    // **runs inside the monomorphizer's fixpoint**, beside the "re-derive a declaration's type from
-    // its initializer" step. It has to, for two reasons. Whether a `T $x` needs destroying is unknown
-    // until substitution. And inserting a drop *creates* a generic call site - a `Box<int32>` local's
-    // drop names the template's destructor, and the next round instantiates it through the ordinary
-    // path, which is why no instantiation logic lives here
+    // one owner per value, destroyed at scope end, `mv` to hand it elsewhere.
+    // one walk: copy vs move, moved-from state, drops as ordinary calls in the tree.
+    // `return $local` moves with no `mv` (a constructor's `$this` is a body-local).
+    // a copy is the type's copy constructor; without one, an owning copy is a located error.
+    // inside the fixpoint: a drop of `Box<int32>` creates a generic call site. a body is walked once
     class OwnershipPass
     {
     public:
@@ -130,33 +74,11 @@ namespace AST
         bool run_round();
 
     private:
-        // **what an enclosing position does with the storage requests raised beneath it**, opened
-        // where the decision is made and closed over the expression the decision is about.
-        //
-        // There are three answers, and only two of them are a scope. That is the point:
-        //
-        //  - **bind.** the position *reads a value*, so it outlives every request below it. closing
-        //    mints the slots, reseats the operands and hangs the drops on the result
-        //  - **refuse.** no lifetime a temporary can have is long enough, so binding one would be
-        //    silently wrong rather than merely tight. closing reports and leaves the tree exactly as
-        //    it was written, which is what lets the reader see the program they wrote
-        //  - **forward** - *no scope at all.* the position keeps an **address** rather than reading a
-        //    value, so it does not outlive the storage and the request travels one step further out.
-        //    every place edge is one, and so is a call: when the value a call hands back is made of a
-        //    temporary it borrowed, the call is not where the lifetime ends
-        //
-        // Spelling "forward" as the absence of a scope is deliberate. It is the overwhelmingly common
-        // case - every `&`, `->`, `[…]`, `:$` and `?->` in the program - so a walker arm says nothing
-        // and gets the right answer, while a position that *does* decide has to say which decision it
-        // is making.
-        //
-        // The two constructors are the two decisions, and neither can be written without its reason:
-        // no refusal without wording, no bind without an expression to hang the drops on.
-        //
-        // A **frame** lifetime is deliberately not one of these. Binding a value to the enclosing
-        // frame is a rewrite of the *statement* rather than of an expression edge - the statement
-        // becomes the declaration - so bind_discarded_temporary owns it, sharing make_temporary and
-        // nothing else. One mint, two shapes
+        // what an enclosing position does with storage requests raised beneath it:
+        //   - bind: the position reads a value, so it outlives every request below
+        //   - refuse: no lifetime is long enough (needs wording)
+        //   - forward: no scope at all (a call, every place edge). a walker arm that
+        //     says nothing forwards, which is the common case
         class MaterializationScope
         {
         public:
@@ -725,48 +647,13 @@ namespace AST
 
         // --- teardown ---------------------------------------------------------------------------
 
-        // **the one function that tears a value of this type down**, or null when it owes no teardown.
-        //
-        // A class reaches it from its release thunk at the moment the strong count hits zero; a struct
-        // reaches it from the drop this pass wrote at the end of the value's scope. One question, because
-        // there is one teardown: what a class destroys at zero and what a struct destroys at a scope end
-        // can never disagree, since one piece of code decides both.
-        //
-        // Three answers, and the middle one is the interesting one:
-        //
-        //   - null, when AST::needs_deinit says the value owns nothing. For a class that is a release
-        //     which decrements and frees, and codegen skips the call it has nothing to make.
-        //   - **the declared destructor, when it is the whole teardown** - a struct with no owning
-        //     property. Nothing is synthesized and nothing fills the slot: the drop site calls what the
-        //     author wrote, which is what it has always done. `mem::buffer<T>` is the live example, and
-        //     every array, string and map holds one. A *class* is excluded from this arm, because its end
-        //     of the wire is codegen reading the slot, which needs a concrete symbol - and for an
-        //     instantiation AST::find_destructor answers the template's declaration, which has none.
-        //   - a synthesized `$deinit` otherwise, built by build_deinit below.
-        //
-        // Idempotent through the slot, so it is safe to ask at every drop site, and it answers "not yet"
-        // rather than guessing for a layout whose properties are not filled in - see build_deinit.
-        //
-        // `at` is the teardown that asked, and is used only when the type has no home to be written at -
-        // absent from the sweep, which is asking about types nothing in the program has torn down yet
+        // the teardown for this type, or null when it owns nothing. a struct with only a declared
+        // destructor uses that; everything else gets a synthesized `$deinit`. idempotent through the
+        // slot. `at` is the drop site, used only when the type has no home
         FunctionDeclNode *ensure_deinit(const ValueType &type, std::optional<TokenReference> at);
 
-        // **the function that seats a static property's value, and the one that ends it.**
-        //
-        // a static's initializer is written outside every body: it sits on the declaration, in a type
-        // declaration, where no frame exists and no pass that decides ownership ever walks. so the
-        // whole of what this does is *give it a body* - `Type::$x = <what was written>;` in a real
-        // scope, published like any other synthesized declaration - and from there every rule that
-        // matters was decided by the passes that already know how: the copy taxonomy, the temporary
-        // materialization, the drop of whatever the initializer built and did not hand over.
-        //
-        // that is the reason this is here rather than in codegen. an initializer emitted straight into
-        // the init function would be an expression nobody had walked, so an owning value would be
-        // seated with no retain and torn down twice - or not at all
-        //
-        // memoized on (type, index), and idempotent: every access to one static asks, and the first
-        // one to be reached is the author. answers null while the owner is a template, which is a
-        // *not yet* on the same terms ensure_deinit's guards are
+        // give a static property a real body (`Type::$x = <written>;`) so ownership walks it. memoized
+        // on (type, index); null while the owner is still a template
         void ensure_static_init(StaticPropertyExprNode &node);
 
         // what a static property's storage owes: the function that fills it, and the one that ends it.
@@ -802,25 +689,9 @@ namespace AST
         // would name the owner's file and a line from somewhere else entirely
         FunctionDeclNode *build_deinit(ComplexType &type, const TokenReference &site);
 
-        // every **class** in the bundle whose payload needs tearing down gets its deinit, whether or not
-        // this program happens to release one.
-        //
-        // Synthesizing on demand alone is not sound across separate compilations, and the failure is
-        // silent. `__eco_release_<T>` is emitted per unit with linkonce_odr linkage, and its body
-        // branches on whether the class has a deinit. So a build that never released a `str::buf`
-        // produced a thunk that decrements and frees, a build that did produced one that also tears the
-        // payload down, and both claim the same ODR symbol. The linker keeps whichever it saw first,
-        // and the program leaks with nothing anywhere to point at.
-        //
-        // So existence has to be a function of the *type* rather than of what the build did with it,
-        // which AST::needs_deinit already is. This makes the synthesis agree with it.
-        //
-        // Deliberately **not** done for a struct, nor for copy constructors, which are generated the same
-        // way and share the same linkage - because nothing else observes whether either exists. A struct's
-        // deinit is reached from a call the ownership pass writes at the drop site, and that call and the
-        // body are minted together; a copy constructor's body is field-wise assignment derived from the
-        // properties. In both cases two units that need one write the same bytes and a unit that does not
-        // simply does not ask. The class deinit is special only because the release thunk reads the slot
+        // every class whose payload needs tearing down gets its deinit, whether this program released
+        // one or not. `__eco_release_<T>` is linkonce_odr and branches on the slot: two units that
+        // disagree leak with nothing to point at
         void synthesize_pending_class_deinits();
 
         // where a type was declared: the module, so a synthesized deinit lands somewhere deterministic
@@ -840,19 +711,9 @@ namespace AST
 
         void build_type_module_map();
 
-        // **writes a synthesized body at its type rather than at the site that asked for it**, for the
-        // duration of a scope.
-        //
-        // every `linkonce_odr` body this pass mints owes this: a deinit, a copy constructor and a
-        // static's initializer are shared by every use of the type, so the first use to need one is the
-        // worst possible author. the body's DISubprogram would take its file from the owner and its line
-        // from a virtual token in another file, and its call nodes would land in whichever module's walk
-        // reached the type first - which build_function_maps' arena sweep turns into a different
-        // function order in that module's object. two units emitting different bytes for one symbol is
-        // unsound rather than untidy, which is why this is the shape it is.
-        //
-        // **scoped rather than a swap-and-restore pair**: an early return between them leaves the pass
-        // writing into another module's file, and nothing downstream says so
+        // write a synthesized body at its type, not at the site that asked. a deinit / copy ctor /
+        // static init is shared; the first use is the worst author. scoped so an early return cannot
+        // leave the pass writing into another module
         class TypeHomeScope
         {
         public:
@@ -895,32 +756,10 @@ namespace AST
 
         // --- copies ----------------------------------------------------------------------------
 
-        // the copy constructor for a struct whose owning properties are all classes, transitively:
-        // the body its author would have written, which is a field-wise assignment and nothing else
-        //
-        // No retain appears in what this builds. `$this->a = $other->a` is an ordinary assignment, so
-        // the next round's walk reaches it through resolve_value_arrival and inserts the retain there -
-        // the same arm a hand-written copy constructor's body goes through.
-        //
-        // A property that is a struct with a copy of its own gets a resolved call to it instead, and
-        // one that needs a synthesized copy asks for its own here. That is where the recursion lives.
-        //
-        // Synthesized on demand at the first copy that needs it, and per *concrete* type rather than
-        // per template - because whether the compiler can write the body at all depends on the property
-        // types, and `Box<Handle>` can while `Box<Buffer>` cannot. AST::copy_is_synthesizable
-        // (ASTCopy.h) is the rule, and it declines a type that already has a written one.
-        //
-        // **answers the declaration**, which is what the caller goes on to call. That is one asking of
-        // the copy-constructor lookup rather than "publish it, then read the slot back". The arm that
-        // gets here has already classified the type, and re-deriving what it just decided is what A24
-        // took out of this ladder.
-        //
-        // Deliberately **not** registered in AST::FunctionRegistry, unlike the parser's field-wise
-        // constructor. That registry is read only while parsing, and a call site is resolved as it is
-        // parsed, so a declaration created inside this fixpoint arrives after every written call was
-        // already resolved or already reported. Registering it would make `Pair($p)` no more callable
-        // than it is now, and would put a per-instantiation declaration into a name-keyed overload set
-        // the parser owns. `$q = $p` is the spelling
+        // field-wise copy for a struct whose owning properties are all classes, transitively.
+        // synthesized per concrete type (`Box<Handle>` can, `Box<Buffer>` cannot). not registered in
+        // FunctionRegistry: a declaration minted in the fixpoint arrives after every written call was
+        // already resolved
         FunctionDeclNode *ensure_copy_constructor(const ValueType &type, const TokenReference &site);
 
         // **the function that copies a `T[N]` whose element is not a byte copy.** T[N] has no

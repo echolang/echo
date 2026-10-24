@@ -338,9 +338,8 @@ void TypeLowering::emit_returned_value(const CodegenValue &value)
             return;
         }
 
-        // a small SSA aggregate (string, result, Vec4): fieldwise, not one store of the whole
-        // struct. SROA reconstitutes a whole-struct store into the insertvalue chain it came from,
-        // which is the 4.7x phi-of-aggregate LoopVectorize refuses. Vec4[512] never reaches here
+        // small SSA aggregate (string, result, Vec4): fieldwise. a whole-struct store reconstitutes
+        // the insertvalue chain SROA came from, which is the phi LoopVectorize refuses
         store_aggregate_fieldwise(value.scalar(), _ctx.sret_pointer, _ctx.sret_type);
         _ctx.builder->CreateRetVoid();
         return;
@@ -460,8 +459,7 @@ void TypeLowering::apply_function_attributes(
         // **the bargain, stated because it is a real one.** a borrow is non-nullable by the type system,
         // and the one path that can produce a null one is a `ptr<T>` narrowing whose check a release build
         // drops - so in a program that is already undefined, this lets the optimizer act on it. That is
-        // the same trade C++ makes for a reference, and it is the trade this language already took when
-        // it made the narrowing check a debug-only one
+        // the trade this language already took when it made the narrowing check a debug-only one
         param->addAttr(llvm::Attribute::NonNull);
 
         const AST::ValueType pointee = AST::value_type_of(type);

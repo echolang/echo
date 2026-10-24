@@ -125,27 +125,9 @@ namespace AST
     // otherwise land on the wrong thing in three places out of four
     CodeRef code_ref_at_literal(const CodeRef &within, const ExprNode *literal);
 
-    // **what two operands of one binary expression agree on**, and the one place the answer is written.
-    //
-    // the parser and AST::OperatorRewriter both reconcile a binary expression's operands, and both used
-    // to spell the same policy - "wrap whichever side's primitive is not the common type in a cast".
-    // That policy has no notion of which side *knows* what it is, so `uint32 $u = ...; $u / 2` cast the
-    // **variable** down to meet an `int32` the literal had defaulted to, and every sign-sensitive
-    // operator downstream read a negative number.
-    //
-    // the rule, in order:
-    //
-    //  1. exactly one operand is an untyped literal and both are in the same numeric family - the
-    //     literal is *retyped* at the typed operand's type. no cast node at all, and the typed operand
-    //     is left alone, which is the whole fix
-    //  2. otherwise AST::common_numeric_type as before, cast on the side that differs. that keeps the
-    //     cross-family step (`$i + 2.5` is float arithmetic) and every widening between two typed
-    //     operands exactly as it was
-    //  3. where (2) would reconcile a typed operand into something that **reinterprets** it - a
-    //     same-width signedness change - and the other side is a literal that simply did not fit, it is
-    //     refused instead. silently reading `$u` as negative is the bug; widening it is not
-    //
-    // reports nothing, mints nothing on a refusal. `refused_operand` is the literal to point at
+    // what two operands of one binary agree on. a lone untyped literal is retyped at the typed
+    // side (no cast). otherwise common_numeric_type. a same-width signedness flip of a typed
+    // operand is refused
     struct BinaryReconciliation
     {
         enum class Result
@@ -181,24 +163,10 @@ namespace AST
         const Module *module,
         const BinaryReconciliation &reconciled);
 
-    // **the post-parse moment of type_literal_at**, walked on the live tree.
-    //
-    // three written destinations: a declaration's initializer, an assignment's right-hand side, a
-    // return. plus the two wrappers that are themselves a destination: a `??` RHS at the unwrapped
-    // left type, and a `match` arm at the unified type. and a written `$x as T`, whose operand is
-    // typed against the type the author named. an indirect call whose callee has a signature is
-    // the same walk for arguments that were untyped at parse (a foreach binding, an index).
-    // a written `null` at any of those slots is bound here too (`AST::bind_null_to`): an
-    // assignment through a `T&` the parser could not yet name (`$a[] = null`) is the one
-    // that had no earlier chance. a declared `#[implicit]` conversion is minted here for
-    // the same reason: `$a[] = 'Desk'` is a place write CallResolver never sees
-    // AST::function_needs_typing is the skip:
-    // a template is meaningless until cloned, and a t_owned body is still walked because
-    // settle can type a neighbouring call in the same round ownership marks t_owned.
-    // of_type is deliberately not this: a detached assign stays in the arena forever
-    //
-    // after AST::rederive_stale_variable_types in the fixpoint, because that step may be what makes
-    // a declaration's type concrete in this same round
+    // dest-type literals on the live tree: initializer, assignment rhs, return, `??` RHS, match
+    // arm, `$x as T`, untyped indirect-call args. also bind_null_to and `#[implicit]` at a place
+    // write CallResolver never sees. skip templates; walk t_owned bodies. after
+    // rederive_stale_variable_types, which may make a declaration's type concrete this round
     bool type_destination_literals(Bundle &bundle);
 };
 

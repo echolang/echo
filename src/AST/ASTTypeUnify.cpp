@@ -49,30 +49,9 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         return unify_type(param.weak_target(), arg.weak_target(), out, false, position);
     }
 
-    // a bare type parameter binds directly to the argument type, with the argument's `const` stripped
-    // wherever that `const` describes a **place** rather than a type - AST::UnifyPosition owns which of
-    // the two this is, and the two cases are worth keeping apart here because both are load-bearing
-    //
-    // on a level, `const` is a property of the *place* a value was read from, not of the value: `$key`
-    // inside `f(const K& $key)` reads as a `const K`, and passing it on must bind `K` and not `const K`.
-    // Without the strip one intent mints two instantiations - `map<const string, int32>` beside
-    // `map<string, int32>` - and because ValueType equality is exact they are unrelated types, so the
-    // receiver of the second call no longer converts to the first. Which is how it surfaced: a container
-    // whose accessors take `const K&` could not call one from another
-    //
-    // the same rule AST::constraint_admits already applies when it compares ("compare with const stripped
-    // so `const float` still matches `float`") and the same one AST::array_literal_type_for applies when it
-    // mints from an element. stated here so inference agrees with both rather than being a third answer
-    //
-    // inside a type argument the strip is the opposite of harmless: `slice<T>` against a
-    // `slice<const int32>` argument bound T=int32, so the substituted parameter came back `slice<int32>`
-    // and AST::argument_fit scored t_none against the very argument that produced the binding - a refusal
-    // whose diagnostic never says the word const. a read-only window is a *type*, and a parameter written
-    // over it has to be able to name it
-    //
-    // a `const` the parameter's own level already states is consumed either way, so `slice<const T>`
-    // against `slice<const int32>` still binds T=int32: the parameter said const, and what it is matching
-    // is what is left
+    // a bare type parameter binds to the argument. UnifyPosition says whether to strip `const`:
+    // on a level it describes the place and is stripped (`const K&` binds K, not const K);
+    // inside a type argument it is identity (`slice<T>` vs `slice<const int32>` binds T=const int32)
     if (param.is_type_param()) {
         const TypeParamDecl *decl = param.get_type_param();
 

@@ -1,0 +1,19 @@
+# str::replace and replace_first: non-overlapping, left to right, the replacement never rescanned, and
+# text with nothing to replace handed back sharing its buffer
+
+--- OUT --->
+hell0 w0rld
+a cat sat on a mat
+ba
+aa
+abc
+abc
+ab
+1 two one
+none here
+1
+2
+a long enough text, 32 bytes....
+2
+a short enough text, 32 bytes....
+a long enough text, 32 bytes....

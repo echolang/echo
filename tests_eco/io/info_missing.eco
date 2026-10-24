@@ -1,0 +1,24 @@
+// every one of the new verbs answers a missing path the same way: ENOENT, `missing()`
+string $dir = str::from(std::env::tmp());
+string $pid = str::from(std::env::pid());
+string $gone = std::env::join($dir, "echo-io-not-there-{$pid}");
+string $to = std::env::join($dir, "echo-io-copy-of-nothing-{$pid}");
+
+result<std::io::fileinfo, std::io::ioerror> $a = std::io::info($gone);
+echo $a->failure()->missing();
+
+result<std::io::fileinfo, std::io::ioerror> $b = std::io::linkinfo($gone);
+echo $b->failure()->missing();
+
+result<string, std::io::ioerror> $c = std::io::realpath($gone);
+echo $c->failure()->missing();
+
+result<bool, std::io::ioerror> $d = std::io::copy($gone, $to);
+echo $d->failure()->missing();
+
+// and a failed copy made nothing at the destination
+result<bool, std::io::ioerror> $made = std::io::exists($to);
+echo $made->unwrap();
+
+result<bool, std::io::ioerror> $f = std::io::chmod($gone, std::io::fileperms(0x1a4));
+echo $f->failure()->missing();

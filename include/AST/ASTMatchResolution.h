@@ -15,28 +15,9 @@ namespace AST
     class FunctionDeclNode;
     class MatchExprNode;
 
-    // **which case each arm of a `match` selects, and what each of its bindings holds.**
-    //
-    // a resolution rather than a lowering, which is the whole difference from AST::GuardLowering and
-    // AST::ForeachLowering beside it: those two replace a node with statements, and this one fills a
-    // node in and leaves it for codegen. what it has in common with them is the *moment* - the subject's
-    // type is exactly what no parse could have answered, `.timeout($s)` naming its enum only by where it
-    // sits, so this cannot run before the fixpoint has settled the subject.
-    //
-    // **inside the monomorphizer's fixpoint**, after the stale-variable sweep that types the subject
-    // and before the ownership pass, which walks a body exactly once ever - safe rather than merely
-    // early, because `body_is_concrete` answers false while `MatchExprNode::patterns_decided` is false.
-    //
-    // **every diagnostic about a match's shape is here**, and deliberately not spread between here and
-    // AST::TypeChecker: what a pattern names, how many bindings a case has and whether the arms cover
-    // the enum are one question asked of one table, and the checker would have to re-derive that table
-    // to ask any of them. what is left for the checker is what it already does for every other tree -
-    // the bindings are ordinary declarations with ordinary initializers by then, and an arm's value is
-    // an ordinary expression
-    //
-    // **the walk, the exit obligation and the generic-body skip are AST::FixpointLowering's.** this
-    // pass hoists nothing, so it never asks next_hoist_index(); what it needed from the chassis is
-    // exactly the three invariants, so they are not a fourth copy here
+    // which case each arm of a `match` selects, and what its bindings hold. a resolution, not a
+    // lowering: the node stays for codegen. every diagnostic about a match's shape is here.
+    // inside the fixpoint, before ownership. body_is_concrete is false until patterns_decided
     class MatchResolution : private FixpointLowering
     {
     public:

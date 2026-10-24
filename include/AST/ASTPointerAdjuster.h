@@ -15,29 +15,8 @@ namespace AST
     class File;
     class ExprNode;
 
-    // inserts the auto-deref that a pointer's transparency implies, explicitly, into the tree
-    //
-    // a pointer "behaves like the value it points to", and codegen has always honoured that by
-    // emitting a second load when it read a pointer variable. the AST did not: a read of
-    // `int32& $x` reported its type as `int32&` while the value produced was an `int32`, and
-    // every consumer downstream - binary operand typing, the echo format dispatch, argument
-    // matching, generic inference - had to reach for value_type_of() to paper over it
-    //
-    // this pass wraps every pointer read in a value position with a DerefExprNode, so after it
-    // runs `result_type()` means what it says and nobody has to compensate
-    //
-    // it is a *rewriter*: it replaces the parent's edge to a child rather than only reading it.
-    // AST::RecursiveVisitor owns the descent, and rewrite_value_edge / rewrite_place_edge are the
-    // two seams that make a walker a rewriter. a switch over NodeType ending in a `default:` that
-    // treats an unknown tag as a leaf would silently skip a `guard`, a `??`, a `?->` or a `strong`
-    //
-    // **what stayed here is the destination type**, and only that: the six positions below where a
-    // value is read *toward* something. the destination comes from a sibling field, a cross-reference
-    // or this pass's own function stack, none of which a generic walker could answer - so hoisting it
-    // would be a second answer to "how far is a value read", which is this file's whole question
-    //
-    // runs after monomorphization - a type parameter's pointer-ness is not known until it is
-    // substituted - and before the type checker, which can then compare types structurally
+    // wrap every pointer read in a value position with a DerefExprNode, so `result_type()` is
+    // the truth afterwards. after monomorphization, before the type checker
     class PointerAdjuster : public RecursiveVisitor
     {
     public:

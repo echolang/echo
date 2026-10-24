@@ -15,15 +15,7 @@ namespace AST
     class FunctionCallExprNode;
     class ScopeNode;
 
-    // **the sole answer to "what does this expression fold to before codegen".**
-    //
-    // three results rather than an optional, for AST::iteration_plan_for's reason: `t_pending` is what
-    // an expression whose calls the fixpoint has not settled yet must get, and it has to be
-    // distinguishable from a refusal - otherwise the first round's guess becomes the diagnostic, once
-    // per round, at a token nothing was wrong with.
-    //
-    // it reports nothing itself: it has no CodeRef and each of its callers has one. the split
-    // AST::interface_erasure_refusal makes, and for the same reason
+    // what this expression folds to before codegen. three results: t_pending is not a refusal
     struct ConstFoldResult
     {
         enum class Result

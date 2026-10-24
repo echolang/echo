@@ -24,29 +24,8 @@ namespace AST
     class ScopeNode;
     struct ConstFoldResult;
 
-    // decides everything the language asked the compiler to decide, and removes the marker afterwards.
-    //
-    //     const if (mem::is_trivially_copyable<T>()) { A }   ->   { A }
-    //     else                                       { B }
-    //
-    //     const(4 * 8)                                       ->   literal<int32>(32)
-    //
-    // two rules and one pass, because they share the round slot, the finalizing flag and the folder - and
-    // because a `const(...)` inside a `const if`'s condition has to settle in the same walk. the statement
-    // rule lives in visitScope and the expression rule in rewrite_value_edge, which is the split
-    // AST::OperatorRewriter already has for the same reason.
-    //
-    // **inside AST::Monomorphizer's fixpoint, immediately after instantiate_generic_calls and ahead of
-    // everything else in the round.** three constraints pin that position and all three are load-bearing;
-    // the call site states them, because that is where a reader trying to move it will be looking.
-    //
-    // the tree is walked through scope children and **never** through nodes.of_type<ConstIfNode>():
-    // NodeCollection owns a detached node forever, so an of_type sweep would re-process one that had
-    // already been folded away - and would blame arms that were correctly discarded.
-    //
-    // **built on AST::RecursiveVisitor**, AST::ForeachLowering's reason verbatim: a hand-rolled statement
-    // walk is a second answer to "what are this node's owned children", and it fails by omission - a
-    // missing arm silently never reaches the subtree under it
+    // `const if` splices the taken arm; `const(...)` becomes the folded literal. first thing in
+    // the fixpoint round. walk scope children, never `of_type<ConstIfNode>`
     class ConstFolding : private RecursiveVisitor
     {
     public:

@@ -1,7 +1,7 @@
 /**
  * Sleep for a duration.
  *
- * A non-positive duration returns immediately. Negative sleep is a no-op, matching Rust and Go.
+ * A non-positive duration returns immediately. Negative sleep is a no-op.
  * The duration is already a timespec, so the body is a loop over `nanosleep` that retries on
  * EINTR from the remainder. `$rem` is zeroed before every call: a non-EINTR failure leaves it
  * zero and that is the exit, a proof of progress with no errno binding.

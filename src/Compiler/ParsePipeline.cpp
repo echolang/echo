@@ -499,25 +499,9 @@ Parser::ActiveTargets Compiler::workspace_analysis_targets(
     return active;
 }
 
-// which of the project's modules this program is made of, in the order they were resolved.
-//
-// **a module the walk cannot reach is not compiled at all**, which is the whole of what a scoped
-// `#[depends:]` buys: a test-only dependency is parsed, keyed and linked by `echoc test` and is absent
-// from `echoc build` entirely. Reachability is asked of Parser::module_contribution_for, so what a scope
-// contributes is one answer here as it is everywhere else.
-//
-// **a reachability walk, and the deny-list is only what seeds it.**
-//
-// Seeding on the roots alone would be wrong: the standard library is added to every build and is
-// deliberately *not* one of the user's roots, and neither is a module a `-m` named. So the seed is asked
-// the other way round - a module no target's scope anywhere declares is part of every program this project
-// produces, exactly as it always was, and is in from the start.
-//
-// From there it has to be a **closure**, not one step. A module a scope names may be needed by another
-// module a scope names: dropping it because no *unconditional* manifest reaches it drops something the
-// build genuinely compiles, and the failure is an unresolved symbol in a module whose own manifest looks
-// fine. The list is dependency-first, so walking it backwards settles the closure in one pass - everything
-// that could name a module is decided before the module is
+// modules this program is made of, dependency-first. a scoped `#[depends:]` is compiled only when
+// that scope is open. seed is "every module no target's scope declares", then close over what
+// opened scopes name
 std::vector<const Parser::ModuleManifest *> Compiler::program_manifests(
     const std::vector<Parser::ModuleManifest> &manifests,
     const Parser::ActiveTargets &active

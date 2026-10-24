@@ -1,0 +1,9 @@
+# info, linkinfo, realpath, copy and chmod of a missing path all answer missing()
+
+--- OUT --->
+1
+1
+1
+1
+0
+1

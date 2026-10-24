@@ -625,25 +625,8 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
         receiver_type = receiver_type.pointee();
     }
 
-    // a receiver needs an address, so it needs storage - but a value that has none can be *given* some.
-    // AST::OwnershipPass binds a temporary for the address below and destroys it once the call has
-    // returned, so a call result is a legal receiver and `$o->get()->size()` reads the way
-    // it looks. the predicate also admits a literal and an arithmetic result, which is
-    // right in principle - a receiver *is* a borrow argument in position 0, so it should take a value
-    // wherever an ordinary borrow parameter would - but unreachable in practice from here: a `->` base is
-    // read by parse_postfix_chain, which does not accept a parenthesised group, and a primitive declares
-    // no methods to call. so what actually reaches this refusal is unchanged
-    //
-    // spelled as the one taxonomy rather than as two of its three predicates negated: place,
-    // materializable and addressless are exhaustive, so "neither of the first two" *is* the third,
-    // and saying so keeps this readable against AST::storage_of when a class is added
-    //
-    // **a constant reference is the one thing this may not ask about**, and that is a statement about
-    // *when* rather than about what: AST::ConstantExpander replaces it with a clone of the constant's
-    // expression before anything else in the compiler runs, and whatever that expression is answers
-    // for it. this check is the only storage question asked while one is still in the tree, so it is
-    // the only place that has to say so - `std::io::stdout->write($t)` is `stream(1)->write($t)` by
-    // the time storage means anything, which is an ordinary temporary receiver
+    // a receiver needs storage. OwnershipPass binds a temporary for a call result
+    // (`$o->get()->size()`). skip a ConstRef: ConstantExpander has not cloned it yet
     if (self_arg->get_node_type() != AST::NodeType::n_expr_const_ref
         && AST::storage_of(*self_arg) == AST::StorageClass::t_addressless) {
         payload.collector.collect_issue<AST::Issue::GenericError>(

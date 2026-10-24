@@ -1,0 +1,23 @@
+function show(const str::parts& $p) : void
+{
+    string $j = str::join($p, '|');
+    echo "{$p->count()} [{$j}]";
+}
+
+// at most `limit` parts, and the last one keeps the rest, separators and all
+show(str::split('a,b,c,d', ',', 2));
+show(str::split('a,b,c,d', ',', 3));
+show(str::split('a::b::c', '::', 2));
+
+// one part is the whole text, and so is zero
+show(str::split('a,b,c', ',', 1));
+show(str::split('a,b,c', ',', 0));
+
+// a limit past the separators changes nothing
+show(str::split('a,b', ',', 9));
+
+// an empty separator still answers the text unsplit
+show(str::split('abc', '', 2));
+
+// what makes join(split(t, s, n), s) == t hold for a limit too
+echo str::join(str::split(',a,,b,', ',', 3), ',');

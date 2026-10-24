@@ -179,28 +179,9 @@ llvm::Value *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
     // alloca rather than at the written position, so it dominates every use - see declare_local
     _ctx.debug_info->declare_local(alloca, node, std::nullopt);
 
-    // an aggregate with no initializer used to be left holding `undef`, which a constructor that
-    // writes only some of its fields then read back as garbage. it is a prerequisite of scope-exit
-    // destruction rather than a tidy-up: a destructor over an undef pointer field frees whatever
-    // happened to be in those bytes. only aggregates, and only when nothing else writes the slot -
-    // a scalar with an initializer is fully covered by the store gen_var_decl emits
-    //
-    // a class local is a scalar - one handle - but needs the same treatment for the same reason and
-    // one step more urgently: the scope-exit release reads that slot unconditionally, so an
-    // uninitialized `Foo $x;` would decrement a count at whatever address was on the stack. null is
-    // a legitimate value of the type, and releasing null is a no-op
-    //
-    // **it stays here, where the alloca above no longer is** - see the split at the top of this function.
-    // and not at the *declaration's* position either, where it would zero a value the statements above
-    // already built. scope entry is the one height that is right for it
-    //
-    // **a guard's binding counts as having no initializer here**, and for exactly the reason this
-    // zero-init exists. it is only written on the path where the value was there, but the scope-exit
-    // release reads the slot on *both* - the else arm's unwind releases it too, because the frame's local
-    // list is positional and does not know the arm cannot reach the binding. so on that path the slot
-    // would hold whatever was on the stack, and the release would decrement a count at that address
-    //
-    // null is a legitimate value of every type this applies to, and releasing null is a no-op
+    // zero an aggregate / class with no initializer: a destructor over undef frees whatever was
+    // on the stack, and a class release reads the slot unconditionally. a guard's binding is
+    // written on one path; the else arm still releases it. at scope entry, not at the declaration
     const bool needs_zero_init = type->isAggregateType() || node.type_node()->type.is_class();
     if (needs_zero_init && (!node.init_expr || node.binds_unwrapped)) {
         _ctx.lvalues->gen_zero(LValue{ alloca, node.type_node()->type });

@@ -149,30 +149,9 @@ namespace AST
         return storage_of(expr) == StorageClass::t_place;
     }
 
-    // **does a read of this expression reach storage, rather than a value it computed?**
-    //
-    // every place does, by definition. the one shape that names no storage and still hands one back is a
-    // **call returning a borrow**: `$a->at(0)`'s value *is* the address of the container's element, so a
-    // value-position read of it reads *through* it and owes a copy of what it found, exactly as a place's
-    // read does. four mirrors of that one answer - the deref AST::PointerAdjuster writes, the type
-    // value_result_type yields below, AST::argument_fit's t_read_through rank, and the copy
-    // AST::OwnershipPass owes. they have to agree, or a call returning a borrow is copied as a
-    // handle with no retain
-    //
-    // a *different* question from AST::storage_of, which stays a deny-list about the address an
-    // expression **has**: a call has none, so `&$o->get()` is still refused, a call is still not an
-    // assignment target, and a call result can still be *given* storage as a temporary
-    //
-    // **a `ptr<T>` a call returned is not one.** reading through an address that may be absent is
-    // something the program has to say - `:$`, an explicit cast, a `guard` - which is the line
-    // AST::argument_fit's t_read_through rank, LValue::provenance and AST::access_path_of already draw
-    // for this very expression. a `ptr<T>` *place* is still read through, because that read is of the
-    // slot and the slot is certainly there
-    //
-    // the place test comes first because it is the cheap one and what almost everything answers, and the
-    // node test sits ahead of result_type() so a literal, a binary or a cast never pays for the
-    // derivation. an unsettled call answers `unknown`, so this is false until the call settles - which is
-    // what makes it safe to ask from inside the monomorphizer's fixpoint
+    // every place, plus a call returning a non-nullable borrow (`$a->at(0)`). a `ptr<T>` a call
+    // returned is not one: the program has to say `:$` / `guard`. four mirrors of this: PointerAdjuster's
+    // deref, value_result_type, argument_fit t_read_through, OwnershipPass's copy
     inline bool read_reaches_storage(const ExprNode &expr, const ValueType &result_type)
     {
         if (is_place_expression(expr)) {
@@ -289,60 +268,16 @@ namespace AST
         return storage_of(expr) == StorageClass::t_materializable;
     }
 
-    // **is this storage the compiler is not accounting for?**
-    //
-    // A *different* question from every other one in this header, which are all about whether an
-    // expression has an address. This one is about who owes that address's value an end.
-    //
-    // A local gets a scope-exit drop, a temporary gets one from the frame it was bound to, and a
-    // property gets one from its owner's teardown - so every one of those is storage some pass already
-    // walks. What is left is storage reached **through a pointer**, `$p:$` and `$p:$[$i]`, which nothing
-    // walks, because a pointer is not an owner.
-    //
-    // That is exactly the storage a container manages itself, and therefore exactly the storage the two
-    // unsafe seams in `mem::` are allowed to touch: `mem::take` empties one, `mem::init` fills one.
-    //
-    // Two readers, one rule. AST::TypeChecker refuses both the same way, so "which storage may I move
-    // through" cannot come to two answers
-    //
-    // The index arm asks AST::IndexExprNode::indexed_base_type rather than looking at the base's node
-    // kind, because that is the sole owner of "is this a pointer index". `$a[$i]` on an `array<T>`
-    // reaches the element operator and is a place the array accounts for, while `$p:$[$i]` is raw
-    // storage and is not
-    //
-    // A member of that index is the same storage: `$buf:$[$i]->key` is a field of a slot the
-    // compiler is not walking, which is what lets a table keep `(K, V)` together. The walk peels
-    // members and implicit casts to the root; `$s->field` still ends at a local and stays refused.
-    // The member peel is place_anchor's, so the two cannot disagree about a base
+    // storage reached through a pointer (`$p:$`, `$p:$[$i]`), so no scope owes it an end. the two
+    // `mem::take` / `mem::init` seams. a member of that index is the same storage; `$s->field` is not
     bool is_unaccounted_storage(const ExprNode &expr);
 
     // a `T&` argument to `mem::take` / `mem::init`: an AddrOf of is_unaccounted_storage, **nothing else**.
     // a call returning `T&` (`$arr->at(0)`) is a slot its owner still counts, so taking from one double-frees
     bool is_unaccounted_address(const ExprNode &address);
 
-    // **is there anything here to mint storage for at all?** the half the two requesting arms - a member
-    // access's base and an `&`'s operand - genuinely share, so `$o->get()->tag` and `$o->get()->size()`
-    // cannot answer it differently.
-    //
-    // The place test comes first because it is the cheap one, and it is what almost every operand
-    // answers. Every compiler-inserted borrow - a receiver, a drop, a CallResolver coercion - is an
-    // address of a place, and a member base is a place in all but the shape this exists for. Deriving
-    // the type ahead of it would re-walk a whole `->` chain per link, once per fixpoint round, and throw
-    // the answer away
-    //
-    // a **pointer** operand needs nothing: a borrow-returning call already is the address
-    //
-    // **it asks the place half of storage_of and deliberately not the addressless half**, which is
-    // where the two questions come apart. can_bind_temporary answers "may the compiler *ask* for a
-    // slot for this shape", which an array literal and a bare `null` must refuse. this answers "does
-    // an operand somebody has already decided to address have anything to size a slot from". a
-    // TemporaryBind is materializable, so both questions admit it: the nested `$__lit` is its own
-    // request, and the body's value still needs a home for a borrow parameter. the type test below
-    // excludes the rest: a null and an array literal both answer unknown here
-    //
-    // answers *with the type it had to derive* rather than with a bool, so the two narrower questions
-    // below share the one derivation. MemberAccessNode::result_type() recurses the whole `->` chain, so a
-    // second call is quadratic in chain depth on a pass that runs once per fixpoint round
+    // does this operand need a slot minted: not a place, not already a pointer. returns the type so
+    // the two callers share one derivation (MemberAccessNode::result_type walks the whole `->` chain)
     inline std::optional<ValueType> storageless_operand_type(const ExprNode &operand)
     {
         if (is_place_expression(operand)) {

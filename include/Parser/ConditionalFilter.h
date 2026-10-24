@@ -11,35 +11,10 @@
 
 namespace Parser
 {
-    // **the sole owner of conditional compilation**, and the whole of it.
-    //
-    // runs between lexing and pass 1, on a file's tokens, and drops the regions whose condition does not
-    // hold:
-    //
-    //     #[if: os == darwin]  ...  #[elif: os == linux]  ...  #[else]  ...  #[end]
-    //
-    // A *token* filter rather than a rule in the parsers, and that is what makes the feature cheap. None
-    // of the three passes is touched. Pass 1 registers type names and does not read attributes at all.
-    // Passes 2 and 3 would each have to drop a declaration identically or `claim_declaration_site`
-    // breaks. And an `extern` block accepts nothing but `function` and has no attribute plumbing.
-    //
-    // A filter needs none of that, and it works uniformly at file level, inside a struct body, inside a
-    // function body, around an `extern` block and around a `namespace` statement.
-    //
-    // it is also the only mechanism that lets an excluded region name things that **do not exist here** -
-    // `_NSGetExecutablePath` on Linux, `GetModuleFileNameW` on Darwin. Nothing parses it, so nothing has
-    // to resolve it. The price is C's price: a typo inside a region for another platform is invisible on
-    // this one, which is what `--target-os` exists to let a test go looking for.
-    //
-    // locations survive, because tokens are dropped rather than text - each token already carries its own
-    // line, so a diagnostic after a filtered region still names the line the author sees in the file.
-    //
-    // **`test <name> { ... }` is the second thing it drops**, and it is here for the same reasons rather
-    // than as a second feature: a test block is a region this build may not compile, the question is
-    // answerable from Compiler::TargetFacts alone (`facts.tests`), and every alternative - a rule in each
-    // of the three passes - is the plumbing the paragraph above rejects. Attributes written above a test
-    // are dropped with it, which is what a lookahead from the `#` is for: a `#[group: "..."]` left behind
-    // attaches to whatever declaration follows it and does so in silence.
+    // conditional compilation, between lexing and pass 1. drops regions whose condition does
+    // not hold (`#[if:]` / `#[elif:]` / `#[else]` / `#[end]`) and, when `facts.tests` is false,
+    // `test <name> { ... }` with the attributes above it. a token filter so an excluded region
+    // may name a symbol this platform has not got; a leftover `#[group:]` would attach in silence
 
     // the directive names, spelled once.
     //
@@ -60,24 +35,8 @@ namespace Parser
         bool is_directive(const std::string &name);
     };
 
-    // rewrites the tokens from `from` onwards, keeping only what the conditions admit.
-    //
-    // A range rather than a whole collection, because **every file in a module shares one
-    // TokenCollection** and a `TokenizedFile` is a slice into it.
-    //
-    // `from` is always the index the file being lexed started at, so the range is the tail, and erasing
-    // inside it cannot move an earlier file's slice. It is measured *after* this runs - see
-    // AST::Module::tokenize, which is the one place that ordering is owned.
-    //
-    // false with a `line N: ...` sentence in `out_error` on any of: an unknown axis, an unknown value for
-    // a known axis, a malformed condition, `#[elif]` or `#[else]` after an `#[else]`, an `#[elif]` /
-    // `#[else]` / `#[end]` with no open `#[if]`, an `#[if]` left unterminated at end of file, or - when
-    // `facts.tests` is false - a `test` whose *header* is malformed, that being the only thing that says
-    // where the block it is about to drop ends.
-    //
-    // **every one of those is an error rather than a no-op**, for the reason the manifest reader refuses
-    // an unknown attribute: a region that silently vanishes is the one failure mode this feature could
-    // have that nothing else in the compiler would catch.
+    // keep tokens from `from` that the conditions admit. a range, because files share one
+    // TokenCollection. a malformed directive is an error, not a silent drop
     bool filter_conditional_tokens(
         TokenCollection &tokens,
         size_t from,

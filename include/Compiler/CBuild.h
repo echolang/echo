@@ -117,23 +117,10 @@ namespace Compiler
         uint64_t content_digest = 0;
     };
 
-    // compiles what changed and reuses what did not, one clang invocation per source.
-    //
-    // **`-fPIC` unconditionally**, so one object serves both the executable and the loadable library the
-    // JIT needs. The alternative is two objects per source under two keys, which doubles a cache to save
-    // an indirection nothing has measured.
-    //
-    // **headers are tracked through clang's own depfile.** `-MD -MF` writes what the translation unit
-    // actually included, and the *next* key folds those files' bytes in - so a first build always runs and
-    // from then on editing a header moves the key. Without it, editing `glad.h` is a stale object with
-    // nothing anywhere saying so, which is the module cache's one silent failure mode reproduced in a
-    // second store.
-    //
-    // both directories come from Compiler::BuildLayout, which is the one thing that decides where a build
-    // artifact goes - this store only names the files inside one. `cache_dir` empty means there is nowhere
-    // to keep anything and everything goes to `scratch_dir`: an unwritable store is a slower build and
-    // never a failed one, the rule the Echo object cache already follows. `out_explain` collects a line per
-    // source for `--explain-cache`
+    // compiles what changed, one clang per source. `-fPIC` always, so one object serves exe and JIT.
+    // headers come from clang's depfile (`-MD -MF`); without it a header edit is a stale object.
+    // empty `cache_dir` falls back to `scratch_dir`: an unwritable store is a slower build, never a
+    // failed one. `out_explain` is one line per source for `--explain-cache`
     bool build_c_sources(
         const CBuildSpec &spec,
         const CompilerOptions &options,

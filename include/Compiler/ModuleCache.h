@@ -49,27 +49,9 @@ namespace Compiler
         std::vector<std::pair<std::filesystem::path, uint64_t>> inputs;
     };
 
-    // a key per module, by module name. `manifests` must be in dependency order, which is what
-    // Parser::resolve_module_graph returns.
-    //
-    // a dependency contributes its whole *key* rather than its sources, which is what makes invalidation
-    // transitive for free: a key already folds in its own dependencies, so editing a leaf reaches everything
-    // above it without a second walk.
-    //
-    // conservative on purpose. With no visibility modifiers a module's entire source is its interface, so
-    // any edit to a dependency rebuilds its dependents - even one to a function body nothing else can name
-    //
-    // `modules_with_tests` names the modules that compiled their `test` blocks, which is the one input here
-    // that is genuinely **per module** rather than per build: an invocation compiles the tests of what it
-    // pointed at and not of the libraries below it. Passed rather than derived because that decision belongs
-    // to the driver, and folded through TargetFacts::cache_signature so there is still one answer to "what
-    // could the conditional filter see"
-    //
-    // `active_targets` is the second of those, and the one that made this key stop being per-*module*
-    // alone: a `#[target: ...] { ... }` scope adds sources to the module that declares it, for the program
-    // that opened it. What it contributes is read through Parser::module_contribution_for, the same
-    // function that hands the parser its file list - and a module with no active scope folds nothing
-    // extra, which is what keeps every key that ever existed exactly where it was
+    // a key per module, by name. `manifests` in dependency order. a dependency contributes its key,
+    // so a leaf edit invalidates everything above it. `modules_with_tests` is per module (only the
+    // roots this invocation pointed at). `active_targets` is read through module_contribution_for
     bool compute_module_keys(
         const std::vector<const Parser::ModuleManifest *> &manifests,
         const CompilerOptions &options,

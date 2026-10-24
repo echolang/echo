@@ -129,46 +129,14 @@ namespace AST
         TypeSubstitution bindings;
     };
 
-    // **the owner's type parameters, for a call that has no receiver to read them from.**
-    //
-    // a method binds `Box<T>`'s T by unifying `args[0]`'s declared `Box<T>&` against the receiver's
-    // type. a *static* has no args[0], and its owner's parameters may appear nowhere in its signature
-    // at all - `result<T, E>::ok(T $v)` says nothing about E - so the owner the call site named is the
-    // only thing that can say. without this the instantiation is undecidable, and undecidable is
-    // reported by nobody: the monomorphizer skips a still-generic decl and determine_type_args answers
-    // nullopt, both in silence, so the call is emitted nowhere and nothing explains it
-    //
-    // positional over the **inherited** prefix, which is exactly the owner's own parameter list -
-    // FuncDeclParser shares the owner's declarations rather than copying them, so this binds the same
-    // TypeParamDecl pointers the receiver path would have
-    //
-    // empty while `owner` still mentions a type parameter: a static call written inside an
-    // un-instantiated template has to stay a not-yet, not a decision
-    //
-    // constructors use the same seed. they share the struct's type parameters and have no receiver,
-    // so `T(...)` after substitution binds those from the constructed type - `box<YetAnotherOne>`
-    // names T, the argument does not. empty for anything that is neither a static nor a constructor
+    // the owner's type parameters for a static or constructor: no args[0] to unify against.
+    // `result<T, E>::ok(T $v)` binds E from the named owner. empty while `owner` still names a
+    // type parameter
     TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner);
 
-    // the question asked with argument types alone, plus whatever type arguments the call site
-    // spelled out. `explicit_type_args` empty means "infer everything"
-    //
-    // `static_owner` is the type a static call named, or the type a `T(...)` constructs - `unknown`
-    // for every other shape of call, which is what makes the seed above a no-op for them.
-    // constructors read `<...>` as the *type's* arguments (the inherited prefix), not as their own:
-    // `Box<int32>(5)` names Box
-    //
-    // **`argument_defers` says which arguments have no opinion about the instance's name.** an untyped
-    // number literal is one: its type is a default nobody chose, and letting it bind a parameter that
-    // another argument also mentions makes the argument that *knows* what it is fit the one that does
-    // not - `pick(0, $n)` over a `usize $n` named `pick<int32>` and truncated `$n`. positional and
-    // parallel to `argument_types`; empty means "every argument has an opinion", which is what the
-    // type-only callers get and is the pre-existing rule
-    //
-    // `registry` substitutes a constraint atom that names one of the template's parameters
-    // (`T : Cmp<T>`) before the atom is judged. it is not optional: without the substitution
-    // that atom still names `T` after `T` was bound, and admitting it instantiates a call
-    // whose constraint was never checked
+    // instantiate from argument types plus any explicit type args. `argument_defers` marks untyped
+    // literals so `pick(0, $n)` over a `usize $n` does not bind T=int32. `static_owner` seeds a
+    // static / constructor; unknown otherwise. constructors read `<...>` as the type's arguments
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,

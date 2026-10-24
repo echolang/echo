@@ -761,31 +761,9 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
                 header.spelling, header.spelling, header.spelling.substr(0, 1)));
     }
 
-    // **a declaration the built-in meaning would win over.** codegen lowers a whole matrix of operand
-    // types itself, and where it does, a declaration would register, mangle and be emitted, and then
-    // never fire. that is the class of silent no-op publish_implicit_conversion refuses seven shapes
-    // for
-    //
-    // asked of **the** predicate, AST::binary_has_builtin_meaning, which is also what the parser reads
-    // at a use site to decide whether to look for a declaration and what the type checker reads to
-    // report that none was found. re-deriving it here as "does any operand have a complex type" was a
-    // third answer to one question, and it differed: `==` over two class handles is an address
-    // comparison codegen *does* lower, so such a declaration was accepted and could never fire
-    //
-    // a custom symbol answers false for every operand, which is what keeps
-    // `operator (int32 $a)mm : Distance` - the point of the whole feature, over a primitive - declarable
-    // both index forms are exempt, and not by omission: `[` has no built-in meaning over a *complex*
-    // base at all - the language spells one only for a pointer, which the rewriter keeps for itself -
-    // so there is nothing for a declaration to be shadowed by. the write form would also index
-    // `operands[1]` on a two-operand append write, where the second operand is the value rather than
-    // anything the predicate is about
-    //
-    // **not asked of a requirement.** both this and the bare-type-parameter refusal inside it are about a
-    // declaration that would be *chosen* at a use site and then never fire. a requirement is chosen at no
-    // use site at all - it names the shape an implementor's own file-scope operator has to have, and that
-    // declaration is the one these refusals judge. `interface Comparable<T> { operator (T $a) < (T $b); }`
-    // is precisely the shape the bare-parameter arm exists to reject in a definition, and precisely the
-    // shape a requirement is for
+    // refuse a declaration codegen would never call: binary_has_builtin_meaning already lowers it.
+    // index forms are exempt (`[` has no built-in over a complex base). a requirement names a shape
+    // and is never chosen at a use site, so it is not asked here
     if (!AST::is_index_fixity(header.fixity) && interface_owner == nullptr) {
         const AST::Operator *op = payload.collector.operators.get_operator(header.spelling);
 

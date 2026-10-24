@@ -1,0 +1,35 @@
+// every occurrence, left to right
+echo str::replace('hello world', 'o', '0');
+echo str::replace('the cat sat on the mat', 'the', 'a');
+
+// a match never overlaps the one before it, so the trailing `a` is left alone
+echo str::replace('aaa', 'aa', 'b');
+
+// the replacement is not searched again, which is why this terminates
+echo str::replace('a', 'a', 'aa');
+
+// deleting is replacing with nothing
+echo str::replace('a-b-c', '-', '');
+
+// an empty search answers the text unchanged, split's rule for an empty separator
+echo str::replace('abc', '', 'x');
+
+// a needle longer than the text cannot match
+echo str::replace('ab', 'abc', 'x');
+
+// the first one only
+echo str::replace_first('one two one', 'one', '1');
+echo str::replace_first('none here', 'one!', '1');
+
+// nothing to replace is the same string: one more reference to its buffer, no new one
+$own = 'a long enough text, 32 bytes....'->clone();
+echo mem::refs($own->owner);
+$same = str::replace($own, 'zzz', 'y');
+echo mem::refs($own->owner);
+echo $same;
+
+// a replacement is a fresh buffer, leaving the original alone
+$changed = str::replace($own, 'long', 'short');
+echo mem::refs($own->owner);
+echo $changed;
+echo $own;

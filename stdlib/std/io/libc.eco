@@ -45,7 +45,169 @@ internal extern {
     function closedir as c_closedir(ptr<uint8> $dir) : int32;
     function mkdir as c_mkdir(ptr<const uint8> $path, uint32 $mode) : int32;
     function rmdir as c_rmdir(ptr<const uint8> $path) : int32;
+
+    // `mode_t` is 16 bits on Darwin and 32 elsewhere. a mode never has a bit above 07777, so a
+    // `uint32` holding one is the zero-extended value either ABI expects in the register
+    function chmod as c_chmod(ptr<const uint8> $path, uint32 $mode) : int32;
+    function fchmod as c_fchmod(int32 $fd, uint32 $mode) : int32;
+    function ftruncate as c_ftruncate(int32 $fd, int64 $length) : int32;
+
+    // the caller's buffer, never the malloc'd one a null second argument asks for: that one is
+    // libc's allocation, and this module frees through `mem::`
+    function realpath as c_realpath(ptr<const uint8> $path, ptr<uint8> $resolved) : ptr<uint8>;
 }
+#[end]
+
+// `struct stat` as Darwin's 64-bit-inode `stat`/`lstat`/`fstat` write it - the only layout those
+// symbols have on arm64, and the one `readdir`'s offsets below assume too. 144 bytes. libc writes
+// every byte of it, so every field is declared, the padding included
+#[if: family == darwin]
+internal struct stat_buf
+{
+    int32 $dev = 0;
+    uint16 $mode = 0;
+    uint16 $nlink = 0;
+    uint64 $ino = 0;
+    uint32 $uid = 0;
+    uint32 $gid = 0;
+    int32 $rdev = 0;
+    int32 $pad0 = 0;
+    int64 $atime_sec = 0;
+    int64 $atime_nsec = 0;
+    int64 $mtime_sec = 0;
+    int64 $mtime_nsec = 0;
+    int64 $ctime_sec = 0;
+    int64 $ctime_nsec = 0;
+    int64 $birthtime_sec = 0;
+    int64 $birthtime_nsec = 0;
+    int64 $size = 0;
+    int64 $blocks = 0;
+    int32 $blksize = 0;
+    uint32 $flags = 0;
+    uint32 $gen = 0;
+    int32 $lspare = 0;
+    int64[2] $qspare;
+
+    constructor()
+    {
+    }
+}
+#[elif: family == wasi]
+// wasi-libc `__struct_stat.h` on wasm32: `long` is 32 bits, so `st_blksize` and each `tv_nsec`
+// are an `int32` the next 8-byte field pads after. 144 bytes
+internal struct stat_buf
+{
+    uint64 $dev = 0;
+    uint64 $ino = 0;
+    uint64 $nlink = 0;
+    uint32 $mode = 0;
+    uint32 $uid = 0;
+    uint32 $gid = 0;
+    uint32 $pad0 = 0;
+    uint64 $rdev = 0;
+    int64 $size = 0;
+    int32 $blksize = 0;
+    int32 $pad1 = 0;
+    int64 $blocks = 0;
+    int64 $atime_sec = 0;
+    int32 $atime_nsec = 0;
+    int32 $atime_pad = 0;
+    int64 $mtime_sec = 0;
+    int32 $mtime_nsec = 0;
+    int32 $mtime_pad = 0;
+    int64 $ctime_sec = 0;
+    int32 $ctime_nsec = 0;
+    int32 $ctime_pad = 0;
+    int64[3] $reserved;
+
+    constructor()
+    {
+    }
+}
+#[end]
+
+#[if: family == darwin || family == wasi]
+internal extern {
+    function stat as c_stat(ptr<const uint8> $path, ptr<stat_buf> $out) : int32;
+    function lstat as c_lstat(ptr<const uint8> $path, ptr<stat_buf> $out) : int32;
+    function fstat as c_fstat(int32 $fd, ptr<stat_buf> $out) : int32;
+}
+#[end]
+
+#[if: family == darwin]
+internal extern {
+    // `copyfile_state_t` is an opaque pointer; null asks for none
+    function fcopyfile as c_fcopyfile(int32 $from, int32 $to, ptr<uint8> $state, uint32 $flags) : int32;
+}
+#[end]
+
+// Linux reads file info through `statx` rather than `stat`: `struct stat` is a different layout on
+// x86_64 and arm64, and glibc before 2.33 exports no `stat` symbol at all - it was an inline over
+// `__xstat`. `struct statx` is the kernel's, one layout on every arch, 256 bytes. The tail is
+// declared because the kernel writes it. Named `stat_buf` like the other families' so the code
+// that only passes one around is written once
+#[if: family == linux]
+internal struct stat_buf
+{
+    uint32 $mask = 0;
+    uint32 $blksize = 0;
+    uint64 $attributes = 0;
+    uint32 $nlink = 0;
+    uint32 $uid = 0;
+    uint32 $gid = 0;
+    uint16 $mode = 0;
+    uint16 $spare0 = 0;
+    uint64 $ino = 0;
+    uint64 $size = 0;
+    uint64 $blocks = 0;
+    uint64 $attributes_mask = 0;
+    int64 $atime_sec = 0;
+    uint32 $atime_nsec = 0;
+    int32 $atime_pad = 0;
+    int64 $btime_sec = 0;
+    uint32 $btime_nsec = 0;
+    int32 $btime_pad = 0;
+    int64 $ctime_sec = 0;
+    uint32 $ctime_nsec = 0;
+    int32 $ctime_pad = 0;
+    int64 $mtime_sec = 0;
+    uint32 $mtime_nsec = 0;
+    int32 $mtime_pad = 0;
+    uint32 $rdev_major = 0;
+    uint32 $rdev_minor = 0;
+    uint32 $dev_major = 0;
+    uint32 $dev_minor = 0;
+    uint64 $mnt_id = 0;
+    uint32 $dio_mem_align = 0;
+    uint32 $dio_offset_align = 0;
+    uint64[12] $spare;
+
+    constructor()
+    {
+    }
+}
+
+internal extern {
+    function statx as c_statx(
+        int32 $dirfd, ptr<const uint8> $path, int32 $flags, uint32 $mask, ptr<stat_buf> $out) : int32;
+    function copy_file_range as c_copy_file_range(
+        int32 $in, ptr<int64> $in_off, int32 $out, ptr<int64> $out_off, usize $len, uint32 $flags) : isize;
+}
+
+internal const int32 AT_FDCWD = -100;
+internal const int32 AT_SYMLINK_NOFOLLOW = 256;
+internal const int32 AT_EMPTY_PATH = 4096;
+
+// STATX_BASIC_STATS | STATX_BTIME. what the kernel actually filled comes back in `$mask`
+internal const uint32 STATX_WANTED = 4095;
+internal const uint32 STATX_BTIME = 2048;
+
+// the errors `copy_file_range` answers for "not between these two files", which is what sends
+// `copy` back to a read/write loop. Linux numbers - Darwin's ENOSYS is 78 - so they live here,
+// beside the one call that can return them
+internal const int32 EXDEV = 18;
+internal const int32 ENOSYS = 38;
+internal const int32 EOPNOTSUPP = 95;
 #[end]
 
 #[if: os == windows]
@@ -127,6 +289,78 @@ internal extern {
     function _waccess as c_waccess(ptr<uint16> $path, int32 $amode) : int32;
     function _wmkdir as c_wmkdir(ptr<uint16> $path) : int32;
     function _wrmdir as c_wrmdir(ptr<uint16> $path) : int32;
+
+    // file info, `realpath` and `copy`. kernel32, not the CRT, so none of these needs a JIT pin
+    function CreateFileW as c_CreateFileW(
+        ptr<uint16> $name,
+        uint32 $access,
+        uint32 $share,
+        ptr<uint8> $security,
+        uint32 $disposition,
+        uint32 $flags,
+        ptr<uint8> $template
+    ) : ptr<uint8>;
+    function CloseHandle as c_CloseHandle(ptr<uint8> $h) : int32;
+    function GetFileInformationByHandle as c_GetFileInformationByHandle(
+        ptr<uint8> $h, ptr<handle_info> $info) : int32;
+    function GetFileInformationByHandleEx as c_GetFileInformationByHandleEx(
+        ptr<uint8> $h, int32 $class, ptr<attribute_tag_info> $info, uint32 $size) : int32;
+    function GetFinalPathNameByHandleW as c_GetFinalPathNameByHandleW(
+        ptr<uint8> $h, ptr<uint16> $path, uint32 $count, uint32 $flags) : uint32;
+    function GetFullPathNameW as c_GetFullPathNameW(
+        ptr<uint16> $file, uint32 $count, ptr<uint16> $buf, ptr<uint8> $file_part) : uint32;
+    function SetFileInformationByHandle as c_SetFileInformationByHandle(
+        ptr<uint8> $h, int32 $class, ptr<basic_info> $info, uint32 $size) : int32;
+    function CopyFileW as c_CopyFileW(ptr<uint16> $from, ptr<uint16> $to, int32 $fail_if_exists) : int32;
+}
+
+// BY_HANDLE_FILE_INFORMATION. a FILETIME is two DWORDs and 4-byte aligned, so it is spelled as
+// two `uint32`s - a `uint64` would pad the struct out of shape. 52 bytes
+internal struct handle_info
+{
+    uint32 $attributes = 0;
+    uint32 $created_lo = 0;
+    uint32 $created_hi = 0;
+    uint32 $accessed_lo = 0;
+    uint32 $accessed_hi = 0;
+    uint32 $written_lo = 0;
+    uint32 $written_hi = 0;
+    uint32 $volume = 0;
+    uint32 $size_hi = 0;
+    uint32 $size_lo = 0;
+    uint32 $links = 0;
+    uint32 $index_hi = 0;
+    uint32 $index_lo = 0;
+
+    constructor()
+    {
+    }
+}
+
+// FILE_ATTRIBUTE_TAG_INFO: which kind of reparse point a handle opened without following one is
+internal struct attribute_tag_info
+{
+    uint32 $attributes = 0;
+    uint32 $tag = 0;
+
+    constructor()
+    {
+    }
+}
+
+// FILE_BASIC_INFO. times left 0 mean "do not change"; chmod writes only `$attributes`. 40 bytes
+internal struct basic_info
+{
+    int64 $created = 0;
+    int64 $accessed = 0;
+    int64 $written = 0;
+    int64 $changed = 0;
+    uint32 $attributes = 0;
+    uint32 $pad = 0;
+
+    constructor()
+    {
+    }
 }
 
 // a console is not `_write`. `console_write` answers the byte count it
@@ -221,6 +455,7 @@ internal const int32 ENOMEM = 48;
 internal const int32 EACCES = 2;
 internal const int32 EEXIST = 20;
 internal const int32 ENOTDIR = 54;
+internal const int32 EISDIR = 31;
 internal const int32 EINVAL = 28;
 #[else]
 internal const int32 EPERM = 1;
@@ -230,7 +465,33 @@ internal const int32 ENOMEM = 12;
 internal const int32 EACCES = 13;
 internal const int32 EEXIST = 17;
 internal const int32 ENOTDIR = 20;
+internal const int32 EISDIR = 21;
 internal const int32 EINVAL = 22;
+#[end]
+
+// the file-type half of a mode. the same numbers on Darwin, Linux and wasi-libc
+internal const uint32 S_IFMT = 61440;
+internal const uint32 S_IFDIR = 16384;
+internal const uint32 S_IFREG = 32768;
+internal const uint32 S_IFLNK = 40960;
+
+// the permission half: rwx for owner, group and other, then setuid, setgid and sticky
+internal const uint32 PERM_BITS = 4095;
+internal const uint32 S_IRUSR = 256;
+internal const uint32 S_IWUSR = 128;
+internal const uint32 S_IXUSR = 64;
+internal const uint32 S_IRGRP = 32;
+internal const uint32 S_IWGRP = 16;
+internal const uint32 S_IXGRP = 8;
+internal const uint32 S_IROTH = 4;
+internal const uint32 S_IWOTH = 2;
+internal const uint32 S_IXOTH = 1;
+
+#[if: family == darwin]
+internal const usize PATH_MAX = 1024;
+internal const uint32 COPYFILE_DATA = 8;
+#[elif: family == linux || family == wasi]
+internal const usize PATH_MAX = 4096;
 #[end]
 
 internal const int32 SEEK_SET = 0;
@@ -285,22 +546,42 @@ internal const usize DIRENT_NAME_OFF = 19;
 #[end]
 
 #[if: family == wasi]
-// wasi-libc `__header_dirent.h`: DT_DIR = 3, DT_REG = 4
+// wasi-libc `__header_dirent.h`: DT_DIR = 3, DT_REG = 4, DT_LNK = 7
 internal const uint8 DT_UNKNOWN = 0;
 internal const uint8 DT_DIR = 3;
 internal const uint8 DT_REG = 4;
+internal const uint8 DT_LNK = 7;
 #[elif: family != windows]
 internal const uint8 DT_UNKNOWN = 0;
 internal const uint8 DT_DIR = 4;
 internal const uint8 DT_REG = 8;
+internal const uint8 DT_LNK = 10;
 #[end]
 
 #[if: os == windows]
-// WIN32_FIND_DATAW without the `_MAC` tail. `cFileName` is WCHAR[260] at 44
+// WIN32_FIND_DATAW without the `_MAC` tail. `cFileName` is WCHAR[260] at 44. `dwReserved0` at 36
+// is the reparse tag, meaningful only when the attributes say reparse point
 internal const usize FIND_DATA_BYTES = 592;
 internal const usize FIND_NAME_OFF = 44;
+internal const usize FIND_TAG_OFF = 36;
+internal const uint32 FILE_ATTRIBUTE_READONLY = 1;
 internal const uint32 FILE_ATTRIBUTE_DIRECTORY = 16;
+internal const uint32 FILE_ATTRIBUTE_NORMAL = 128;
 internal const uint32 FILE_ATTRIBUTE_REPARSE_POINT = 1024;
+// the two reparse tags that are a link to somewhere else. every other tag - a cloud placeholder,
+// a deduplicated file - is the file itself, and answers as one
+internal const uint32 IO_REPARSE_TAG_MOUNT_POINT = 2684354563;
+internal const uint32 IO_REPARSE_TAG_SYMLINK = 2684354572;
+// FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE: asking about a file must not lock it
+internal const uint32 FILE_SHARE_ALL = 7;
+internal const uint32 OPEN_EXISTING = 3;
+// without it CreateFileW refuses a directory
+internal const uint32 FILE_FLAG_BACKUP_SEMANTICS = 33554432;
+internal const uint32 FILE_FLAG_OPEN_REPARSE_POINT = 2097152;
+internal const int32 FILE_ATTRIBUTE_TAG_INFO_CLASS = 9;
+internal const int32 FILE_BASIC_INFO_CLASS = 0;
+internal const uint32 FILE_WRITE_ATTRIBUTES = 256;
+internal const uint32 MAX_PATH = 260;
 internal const uint32 INVALID_FILE_ATTRIBUTES = 4294967295;
 internal const uint32 ERROR_FILE_NOT_FOUND = 2;
 internal const uint32 ERROR_PATH_NOT_FOUND = 3;
@@ -365,15 +646,21 @@ internal function wide_error() : ioerror
 
 internal function open_path(const string& $path, int32 $flags) : result<int32, ioerror>
 {
+    return open_path($path, $flags, OPEN_MODE);
+}
+
+// `$mode` is what a file O_CREAT makes starts with, before the umask
+internal function open_path(const string& $path, int32 $flags, uint32 $mode) : result<int32, ioerror>
+{
 #[if: os == windows]
     std::env::wide_string $wide = std::env::wide_string();
     if (!$wide->load_utf8($path)) {
         return .error(wide_error());
     }
 
-    int32 $fd = c_wopen($wide->data(), $flags, [OPEN_MODE]);
+    int32 $fd = c_wopen($wide->data(), $flags, [$mode]);
 #[else]
-    int32 $fd = c_open($path->cstr(), $flags, [OPEN_MODE]);
+    int32 $fd = c_open($path->cstr(), $flags, [$mode]);
 #[end]
 
     if ($fd < 0) {

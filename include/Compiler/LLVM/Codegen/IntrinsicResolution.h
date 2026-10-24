@@ -17,27 +17,8 @@ namespace llvm
 
 namespace Compiler::LLVM
 {
-    // the one owner of "which LLVM intrinsic does this name denote, and does a given signature fit
-    // it"
-    //
-    // a hand-written string -> ID table would answer only the first half, and the
-    // second half would be *guessed*: the whole argument list handed to getOrInsertDeclaration as
-    // the overload-type vector. that conflates two different counts. `llvm.pow` is
-    // `T @llvm.pow.T(T, T)` - two arguments, one overload type - so a two-argument declaration
-    // mangled a name LLVM never defined, and the same held for copysign, minnum, fma, ctlz, powi
-    // and ldexp. an intrinsic with more than one argument was effectively undeclarable, which is
-    // the real reason the math stdlib had three functions in it
-    //
-    // the return type was not consulted at all, so nothing caught a declaration whose Echo result
-    // type disagreed with the intrinsic's, and an unknown name became not_intrinsic and went
-    // straight into getOrInsertDeclaration to assert somewhere inside LLVM
-    //
-    // asking LLVM's own IIT tables answers all three at once, because that is what the IR verifier
-    // and the .ll parser ask
-    //
-    // this lives in the Compiler::LLVM layer rather than in AST on purpose. include/AST and src/AST
-    // contain no LLVM include at all, and an authoritative answer needs LLVM's intrinsic tables -
-    // pulling LLVM across that boundary to move one diagnostic earlier is not a trade worth making
+    // which LLVM intrinsic this name denotes, and whether the signature fits. asked of LLVM's IIT
+    // tables: argument count is not overload-type count (`llvm.pow` is two args, one T)
     struct IntrinsicResolution
     {
         llvm::Intrinsic::ID id = llvm::Intrinsic::not_intrinsic;

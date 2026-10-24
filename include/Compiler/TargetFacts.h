@@ -9,22 +9,8 @@
 
 namespace Compiler
 {
-    // **the sole answer to "what can a condition see".**
-    //
-    // what `#[if: os == darwin]` is evaluated against, and the whole of it: an operating system, the
-    // ABI family that os belongs to, an architecture, and the flags the invocation declared. Nothing
-    // else is visible to a condition and nothing else may become visible without passing through here
-    // - a second source of truth about what platform this is would let two files disagree about it
-    // inside one compile.
-    //
-    // deliberately **not** the LLVM triple objects are emitted for - that is Compiler::CodegenTarget,
-    // and folding them is what would make `--target-os` start choosing instruction sets. These read
-    // llvm::sys::getDefaultTargetTriple() only to map the host onto the closed vocabularies.
-    // Backend::init_target publishes `target_triple` long after the filter has already had to decide
-    // what to keep.
-    //
-    // an Echo `const` can never reach here, and that is architectural rather than an omission: the filter
-    // runs before pass 1, so no Echo declaration exists yet to read.
+    // what `#[if:]` can see: os, family, arch, `--define`. not the LLVM triple (that is CodegenTarget).
+    // closed vocabularies, so `#[if: os == darwn]` is a located error rather than a silent false
     struct TargetFacts
     {
         // the closed vocabularies. an unknown *value* in a condition is a located error rather than a

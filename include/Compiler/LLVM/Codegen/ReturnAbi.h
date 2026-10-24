@@ -10,32 +10,12 @@
 
 namespace Compiler::LLVM
 {
-    // **how does a function hand its answer back?** one question, one owner, and the reason it needs an
-    // owner rather than a line at the signature is that *four* places have to agree byte for byte or the
-    // program miscompiles in silence: the signature TypeLowering builds, the prologue that names the
-    // arguments, the `return` that fills it in, and every call site that reads it. A caller that thinks a
-    // struct comes back in registers while the callee wrote it through a pointer reads whatever was in
-    // those registers.
+    // how a function returns. four sites must agree (signature, prologue, `return`, call) or the
+    // program miscompiles in silence.
     //
-    // **why it is not simply "return the struct".** LLVM lets a function return a first-class aggregate and
-    // returning the struct as a first-class aggregate is correct and slow: a function with three `return`s of a struct
-    // becomes a phi of that struct, LLVM's if-conversion refuses to speculate a phi of an aggregate, and a
-    // loop calling it keeps a branch per return - so LoopVectorize cannot widen it. Measured at 4.7x against
-    // the same program in Rust, and 1.00x once the aggregate is out of the signature. Both clang and rustc
-    // do this, and for this reason.
-    //
-    // it is deliberately **not** the full C ABI. Echo emits both halves of every call it makes, so any
-    // consistent convention is a correct one; what it must not do is *claim* to match C for a type where it
-    // does not - a float aggregate goes back in vector registers on AArch64 and this says nothing about
-    // that. so `extern` declarations keep the shape they have always had, and the one place that is still
-    // wrong is still wrong. see the note in TypeLowering::get_function_type
-    // there are two answers and the aggregate is the whole of what tells them apart, so it is the
-    // whole of what is stored. **direct** is the value as written - every scalar and every pointer.
-    // **indirect** is the caller passing storage as a hidden *first* argument for a function that then
-    // returns `void`, the classic `sret`, and what takes the aggregate out of the signature.
-    //
-    // a kind beside the type would be two fields owing each other an invariant no reader states, and
-    // every reader already asks is_indirect() and then reads the type it points at
+    // sized aggregates come back through sret: a first-class aggregate return becomes a phi LLVM
+    // will not if-convert, so LoopVectorize cannot widen the caller. Echo emits both halves of
+    // every call, so this is Echo's convention, not the C ABI; `extern` keeps the shape it already has
     struct ReturnAbi
     {
         // the aggregate the hidden argument points at. null when the answer comes back directly
@@ -46,28 +26,15 @@ namespace Compiler::LLVM
         }
     };
 
-    // **every sized aggregate is indirect**, and the size is not part of the question. a one-field
-    // struct with two `return`s already becomes a phi of that struct; LLVM will not if-convert it, and
-    // LoopVectorize will not widen the loop that called it. the four-way table in notes/codegen.md is
-    // the proof: a scalar with two returns vectorises, a one-field struct with two does not, a
-    // three-field struct with one does. the packed `result<int64, E>` is 16 bytes - two registers -
-    // and that is why a two-register line was a trap rather than a feature. overlapping the enum
-    // dropped it from 24 onto that line and `bench/result_trivial` went from 1.00x Rust back to the
-    // 4.7x this file already recorded.
-    //
-    // asked of the **lowered** type rather than the ValueType, because `isAggregateType` is an LLVM
-    // fact. a `void` return and an opaque pointer both answer direct with no special case, neither
-    // being an aggregate. the size is not the question — `indirect_return_attributes` is what
-    // still needs the DataLayout
+    // every sized aggregate is sret. asked of the lowered LLVM type: void and pointers are direct.
+    // a size cut is a trap (a packed `result<int64, E>` is 16 bytes and still an aggregate)
     inline ReturnAbi return_abi_for(llvm::Type *lowered_return)
     {
         if (lowered_return == nullptr || !lowered_return->isAggregateType()) {
             return ReturnAbi{};
         }
 
-        // **sized, and asked before the slot is.** an unsized aggregate has no storage to hand the
-        // caller and reaching for a size asserts inside LLVM, so it keeps the shape it had rather
-        // than becoming a pointer to something whose size nothing knows
+        // unsized aggregates have no storage to hand the caller; LLVM asserts if we ask for a size
         if (!lowered_return->isSized()) {
             return ReturnAbi{};
         }
@@ -75,11 +42,8 @@ namespace Compiler::LLVM
         return ReturnAbi{ lowered_return };
     }
 
-    // **does this aggregate live in memory rather than as an SSA value?** a different question from
-    // return_abi_for. every sized aggregate already comes back through sret; this is about copies
-    // *inside* a function. a 16-byte cut is what walked `result<int64, E>` back onto a first-class
-    // phi (notes/codegen.md). 64 bytes is four pointers: `string`, a packed result, an interface
-    // pair and a `Vec4` stay SSA. `Vec4[512]` does not.
+    // copies *inside* a function. 64 bytes is four pointers: `string`, a packed result, `Vec4`
+    // stay SSA. `Vec4[512]` does not. do not fold this with return_abi_for
     constexpr uint64_t k_memory_aggregate_bytes = 64;
 
     inline bool aggregate_lives_in_memory(llvm::Type *type, const llvm::DataLayout &layout)
@@ -91,21 +55,9 @@ namespace Compiler::LLVM
         return layout.getTypeAllocSize(type) > k_memory_aggregate_bytes;
     }
 
-    // **the attributes argument zero carries, and they go on the *call* as well as on the function.**
-    // that is not belt and braces - it is the whole of what decides which register the hidden pointer
-    // travels in, and LLVM lets the two disagree in silence.
-    //
-    // a call whose argument zero is not marked `sret` is lowered as an ordinary pointer argument, so on
-    // AArch64 it goes in x0 and every real argument shifts one register up; a function whose parameter
-    // zero *is* marked reads it from x8. LLVM papers over a missing call-site attribute by falling back
-    // to `CallBase::getCalledFunction()`'s attributes - and that lookup answers **null** when the call's
-    // FunctionType is not the callee's. Which is exactly what a merged module produces: `llvm::Linker`
-    // brings in each unit's own named struct types, so `string` becomes `%string` and `%string.3`, two
-    // types of one shape and two identities, and a cross-unit call site's type stops matching its
-    // callee's. The attribute is dropped, the arguments shift, and a `string`'s size field arrives
-    // holding somebody's pointer - a memmove of a garbage length, faulting nowhere near the cause.
-    //
-    // so nothing may rely on the inheritance. one builder, applied to both, and neither site spells it
+    // sret / noalias / align go on the call *and* the function. LLVM does not inherit them across a
+    // merged module whose named structs have different identities (`%string` vs `%string.3`); a
+    // missing call-site sret shifts every argument one register on AArch64
     inline llvm::AttrBuilder indirect_return_attributes(
         llvm::LLVMContext &context,
         const ReturnAbi &abi,
@@ -116,9 +68,7 @@ namespace Compiler::LLVM
 
         attributes.addStructRetAttr(abi.indirect_type);
 
-        // `noalias` says what the C ABI says: nobody else names this storage. without it the pointer
-        // could alias anything and could escape, so SROA leaves the caller's slot in memory and the
-        // scalars the loop needed to if-convert never appear
+        // without noalias, SROA leaves the caller's slot in memory and the loop cannot if-convert
         attributes.addAttribute(llvm::Attribute::NoAlias);
         attributes.addAlignmentAttr(layout.getABITypeAlign(abi.indirect_type));
 

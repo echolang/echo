@@ -1,0 +1,13 @@
+# str::lines: \n and \r\n end a line, a trailing newline adds no empty line, and an empty text is none
+
+--- OUT --->
+2 [a|b]
+2 [a|b]
+3 [a|b|c]
+0 []
+1 []
+2 [|]
+2
+3
+0: first
+1: second

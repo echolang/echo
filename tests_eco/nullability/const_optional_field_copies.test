@@ -1,0 +1,7 @@
+# a const T? field or local copies into a plain T? - one interned optional, const on its level
+
+--- OUT --->
+3
+7
+0
+5

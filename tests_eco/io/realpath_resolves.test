@@ -1,0 +1,5 @@
+# realpath resolves .. against the filesystem and answers an absolute path
+
+--- OUT --->
+1
+1

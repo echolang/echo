@@ -46,25 +46,8 @@ namespace AST
     // per-statement half of scope_exit_kind. OwnershipPass uses it to ignore unreachable tails
     ExitKind statement_exit_kind(const NodeReference &statement);
 
-    // **does evaluating this expression never come back?** the expression half of the question above, and
-    // the reason it is worth naming separately is that a value can be written where a statement was
-    // expected and both readings have to agree: `die('...')` is the same call whether it stands alone or
-    // sits in a `match` arm, and both readings have to notice.
-    //
-    // AST::builtin_never_returns is what actually decides, through AST::BuiltinKind rather than by name,
-    // so nothing here can drift from what stops the program. this is the walk down to the call: an
-    // expression never returns iff it *is* one of those calls, which is deliberately narrower than "some
-    // subexpression of it does not return". an argument that dies takes the whole call with it, but the
-    // shapes that would reach - `f(die())` - are ones AST::TypeChecker refuses on the argument's `void`
-    // type first, so widening this would be answering for programs that do not exist
-    //
-    // three readers, and they are one rule: statement_exit_kind, so a bare `die('...')` ends its scope;
-    // AST::MatchResolution, so an arm that dies contributes no type to the arms' unification; and `??`,
-    // so a fallback that dies contributes no type and no incoming value to the join. without the second,
-    // the only thing a `match` arm could do with a case whose payload is the wrong type was produce a
-    // value it has not got - which is what stopped an enum from answering
-    // `contract::unwrappable<V>::unwrap() : V&`. without the third, `$n ?? die('gone')` popped an empty
-    // stack
+    // true when this expression is a never-returning builtin (`die`, `assert`, unwrap_abort).
+    // MatchResolution and `??` skip its type; a bare `die` ends its scope
     bool expression_never_returns(const ExprNode &expr);
 
     // **can control fall out of the bottom of this scope?** the scope-boundary question, and the one two of

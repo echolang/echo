@@ -145,27 +145,9 @@ namespace AST
     // up, which for a half-derived instantiation is a state a later round leaves behind
     std::optional<TemplateConformance> template_conformance_for(ComplexType *ct, const ValueType &applied);
 
-    // **what a conformance binds**: the interface's own type parameters, from the arguments the clause
-    // spelled, *and* its associated types, inferred from the members that answer the requirements
-    // mentioning them.
-    //
-    // one solve, because first_unmet_requirement and interface_implementations must read a requirement's
-    // signature through the same substitution - this header already promises the two cannot disagree
-    // about whether a conformance is met, and this is now half of that answer.
-    //
-    // **nothing is stored.** an inferred binding is knowable only once the implementor's methods exist,
-    // which is strictly later than TypeRegistry::get_or_create_instantiation's staleness test can notice
-    //. So it is derived on every ask, and an instantiation's answer is its template's,
-    // substituted through instantiation_args. That read-time redirect is the one conforms_to declines,
-    // and only because *its* readers have no TypeRegistry - which this one is handed.
-    //
-    // The inference itself is three steps. Unify each requirement's wanted signature against the members
-    // that could answer it. Keep **only** the associated bindings out of the result. Then re-check with
-    // the existing exact `==`.
-    //
-    // unify_type only proposes; ValueType::operator== still decides. Dropping the non-associated
-    // bindings is what stops unification from quietly rebinding the interface's own `V` to whatever an
-    // ill-fitting candidate happened to declare
+    // what a conformance binds: the interface's own parameters and its associated types, derived on
+    // every ask (nothing is stored). unify proposes; `==` decides. drop non-associated bindings so
+    // an ill-fitting candidate cannot rebind the interface's own `V`
     struct ConformanceBinding
     {
         enum class Failure
@@ -221,25 +203,9 @@ namespace AST
         std::string found_signature;
     };
 
-    // the first requirement of `interface` that `ct` does not satisfy, in declaration order.
-    //
-    // A candidate matches when its written parameters and its return type equal the
-    // requirement's, after substitution. `WantedSignature::parameter_offset` is
-    // `has_receiver() ? 1 : 0`: a receiver is `Drawable&` on the requirement and
-    // `Circle&` on the implementor by construction, so comparing it would make every
-    // conformance fail; an operator has no receiver, and its left operand is a
-    // parameter the author wrote.
-    //
-    // An **operator** requirement is not looked up on the type at all. An operator is registered in the
-    // root namespace under a decorated name, never on either operand's method table, so `functions` is
-    // asked instead. Passing null declines to check operator requirements, which is what a caller with
-    // no registry to hand wants - a unit test asking only about methods, say.
-    //
-    // `types` is the bundle's own registry, and it has to be that one. Substituting a requirement's
-    // `array<T>` into `array<int32>` re-interns, and interning through a second registry would mint a
-    // second ComplexType for one type, which would then compare unequal to the implementor's - since
-    // ValueType equality *is* pointer identity. Every such lookup here is a cache hit, because the
-    // interface and the conformance clause both interned what they mention when they were parsed
+    // first unanswered requirement, in declaration order. skip the receiver (`Drawable&` vs
+    // `Circle&`). operators live in the root namespace, so `functions` is asked; null skips them.
+    // `types` is the bundle's own registry: a second one would intern a second ComplexType
     std::optional<UnmetRequirement> first_unmet_requirement(
         const ComplexType *ct,
         const ValueType &interface,

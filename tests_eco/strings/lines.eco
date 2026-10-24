@@ -1,0 +1,25 @@
+function show(const str::parts& $p) : void
+{
+    string $j = str::join($p, '|');
+    echo "{$p->count()} [{$j}]";
+}
+
+// a newline ends the line in front of it, so a trailing one adds nothing
+show(str::lines("a\nb\n"));
+show(str::lines("a\nb"));
+
+// a \r before the \n goes with it
+show(str::lines("a\r\nb\r\nc"));
+
+// an empty text is no lines; a lone newline is one empty line
+show(str::lines(''));
+show(str::lines("\n"));
+show(str::lines("\n\n"));
+
+// a \r with no \n behind it is text
+echo str::lines("x\r")->at(0)->size;
+echo str::lines("x\ry\n")->at(0)->size;
+
+foreach (str::lines("first\nsecond\n") as $i => $line) {
+    echo "{$i}: {$line}";
+}

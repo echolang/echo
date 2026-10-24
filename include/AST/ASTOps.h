@@ -289,23 +289,9 @@ namespace AST
         static bool tokens_are_adjacent(const TokenReference &first, const TokenReference &second);
 
     private:
-        // **a node of the declared-symbol trie, keyed on token values.** the root's children are every
-        // token a declared symbol may start with, a path from the root spells one symbol's tokens in
-        // order, and `symbol` is set on the node where a symbol ends
-        //
-        // this is the structure rather than a list because match_at is asked at every operand and
-        // every operator position of every expression in the program: scanning the declared symbols
-        // there made parsing cost (symbols x positions), and measured, 64 declared operators put 57%
-        // on top of parsing a 670 KB file - a cost that grew with how much a program used the feature.
-        // a descent costs the length of the longest symbol that could match, whatever the program
-        // declared, and it is the same shape as the lexer's LexerFunction::TreeNode one level down
-        //
-        // it also *is* the longest-match rule rather than implementing it: descending past a match
-        // and keeping the deepest one is what makes `+++` not `++` then `+`
-        //
-        // the children are keyed on whole token *values*, which is what keeps a word operator from
-        // eating the head of an identifier - the trap the old prefix-matching lexer entry had, where
-        // `mm` matched the front of `mmap`
+        // declared-symbol trie, keyed on whole token values. longest match (`+++` is not `++` then
+        // `+`). a list would be scanned at every operand and operator of every expression; a word
+        // operator must not eat the head of an identifier (`mm` vs `mmap`)
         struct SymbolTrieNode
         {
             std::unordered_map<std::string, std::unique_ptr<SymbolTrieNode>> children;

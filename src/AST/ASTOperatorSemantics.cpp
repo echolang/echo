@@ -502,26 +502,9 @@ namespace AST
         if (lhs_facts.is_null != rhs_facts.is_null) {
             const ValueType &other = lhs_facts.is_null ? rhs : lhs;
 
-            // a class handle is itself the address, so it is compared directly - there is no slot to
-            // peel to and `:$` on it would ask about the variable rather than the object.
-            //
-            // and **anything nullable**, which is what generalising the flag added here: a `T?` is
-            // exactly the type that may be absent, whatever `T` is, so asking is always meaningful. for
-            // a wrapped one - `int32?`, a nullable struct - it is a tag test rather than an address
-            // comparison, and TypeLowering::gen_has_value is the one place that tells the two apart
-            //
-            // a weak too: it answers whether the reference was ever taken. **not** whether its object is
-            // still alive, which is `strong($w)` - so the refusal is worth keeping distinct from the
-            // ones above rather than folded into a single "cannot compare"
-            //
-            // asked of the two owners rather than enumerating them: a type that may be *absent* is
-            // AST::destination_admits_null's answer, and one that has a spare null value to be absent
-            // *as* is ValueType::has_null_representation's. a kind added to either reaches this refusal
-            // and binary_has_builtin_meaning's presence arm together, which is the whole point - one of
-            // them claiming a lowering the other refuses is a comparison with two meanings
-            //
-            // a non-nullable class has a spare null value (the handle) and still cannot be absent,
-            // so it joins the struct/enum sentence rather than slipping through on the representation
+            // a class handle is itself the address. a `T?` is a tag test (gen_has_value). a weak
+            // answers whether the reference was ever taken, not whether the object is still alive.
+            // destination_admits_null / has_null_representation, so a kind added to either reaches both
             if (!destination_admits_null(other)
                 && (!other.has_null_representation() || other.is_class())) {
                 // an enum is on the struct's side of this: both are values with a layout and no spare

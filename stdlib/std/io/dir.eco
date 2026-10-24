@@ -9,17 +9,19 @@
 namespace std::io;
 
 /**
- * What a directory listing already knew about a child.
+ * What kind of thing a path names.
  *
- * `unknown` is a filesystem that declined to say. `other` is something it did
- * name that is neither a regular file nor a directory: a symlink, a socket, a
- * device. Neither predicate is a guess, and neither is a `stat`.
+ * One answer for a directory listing and for `info`. `unknown` is a listing whose filesystem
+ * declined to say - `info` always knows, so it never answers it. `symlink` is the link itself,
+ * which only a listing and `linkinfo` can see: `info` follows it. `other` is something that is
+ * none of these: a socket, a pipe, a device.
  */
-public enum dirent_kind
+public enum filekind
 {
     case unknown;
     case file;
     case directory;
+    case symlink;
     case other;
 }
 
@@ -34,9 +36,9 @@ public struct dirent
 {
     private string $name;
     private string $path;
-    private dirent_kind $kind;
+    private filekind $kind;
 
-    internal constructor(string $name, string $path, dirent_kind $kind)
+    internal constructor(string $name, string $path, filekind $kind)
     {
         $this->name = $name;
         $this->path = $path;
@@ -53,14 +55,14 @@ public struct dirent
         return $this->path;
     }
 
-    const function kind() : dirent_kind
+    const function kind() : filekind
     {
         return $this->kind;
     }
 
     const function is_file() : bool
     {
-        if ($this->kind == dirent_kind::file) {
+        if ($this->kind == filekind::file) {
             return true;
         }
 
@@ -69,7 +71,7 @@ public struct dirent
 
     const function is_directory() : bool
     {
-        if ($this->kind == dirent_kind::directory) {
+        if ($this->kind == filekind::directory) {
             return true;
         }
 
@@ -91,36 +93,64 @@ internal function is_dot_name(const string& $name) : bool
 }
 
 #[if: os != windows]
-internal function kind_from_dtype(uint8 $dt) : dirent_kind
+internal function kind_from_dtype(uint8 $dt) : filekind
 {
     if ($dt == DT_REG) {
-        return dirent_kind::file;
+        return filekind::file;
     }
 
     if ($dt == DT_DIR) {
-        return dirent_kind::directory;
+        return filekind::directory;
+    }
+
+    if ($dt == DT_LNK) {
+        return filekind::symlink;
     }
 
     if ($dt == DT_UNKNOWN) {
-        return dirent_kind::unknown;
+        return filekind::unknown;
     }
 
-    return dirent_kind::other;
+    return filekind::other;
+}
+
+// the file-type half of a `stat` mode. `info`'s answer, so never `unknown`
+internal function kind_of_mode(uint32 $mode) : filekind
+{
+    uint32 $type = $mode & S_IFMT;
+
+    if ($type == S_IFREG) {
+        return filekind::file;
+    }
+
+    if ($type == S_IFDIR) {
+        return filekind::directory;
+    }
+
+    if ($type == S_IFLNK) {
+        return filekind::symlink;
+    }
+
+    return filekind::other;
 }
 #[end]
 
 #[if: os == windows]
-internal function kind_from_attributes(uint32 $attr) : dirent_kind
+// `$tag` is the reparse tag, read only when the attributes say reparse point. a link is a link; a
+// cloud placeholder or a deduplicated file is a reparse point that is still the file it stands for
+internal function kind_from_attributes(uint32 $attr, uint32 $tag) : filekind
 {
     if (($attr & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        return dirent_kind::other;
+        if ($tag == IO_REPARSE_TAG_SYMLINK || $tag == IO_REPARSE_TAG_MOUNT_POINT) {
+            return filekind::symlink;
+        }
     }
 
     if (($attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        return dirent_kind::directory;
+        return filekind::directory;
     }
 
-    return dirent_kind::file;
+    return filekind::file;
 }
 
 internal function invalid_handle(ptr<uint8> $h) : bool
@@ -281,6 +311,8 @@ public class dir : contract::iterable<dirent>
 
             ptr<uint32> $attrs = ptr<uint32>($this->find:$);
             uint32 $attr = $attrs:$[0];
+            ptr<uint32> $tags = ptr<uint32>($this->find:$ + FIND_TAG_OFF);
+            uint32 $tag = $tags:$[0];
             ptr<uint16> $wname = ptr<uint16>($this->find:$ + FIND_NAME_OFF);
             string $name = guard std::env::wide_to_utf8($wname) else {
                 $this->note_error(wide_error());
@@ -291,7 +323,7 @@ public class dir : contract::iterable<dirent>
                 continue;
             }
 
-            return dirent($name, std::env::join($this->root, $name), kind_from_attributes($attr));
+            return dirent($name, std::env::join($this->root, $name), kind_from_attributes($attr, $tag));
         }
 #[else]
         while (true) {
@@ -336,7 +368,7 @@ public struct dir_iterator : contract::iterator<dirent>
     constructor(dir $src)
     {
         $this->src = $src;
-        $this->current = dirent('', '', dirent_kind::unknown);
+        $this->current = dirent('', '', filekind::unknown);
         $this->done = false;
     }
 

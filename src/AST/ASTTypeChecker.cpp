@@ -995,26 +995,8 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
         }
     }
 
-    // **and a base that has no properties at all**, which is a different question from the unknown
-    // member above, and one that was answered nowhere. `$p->x` over a `ptr<int32>` reached codegen and
-    // died on gen_member_lvalue's contextless "Cannot access member 'x' of 'int32'". A borrow-returning
-    // call is one more spelling of the same shape, so it is worth a location either way.
-    //
-    // is_undetermined_type is what makes this safe to ask here. It is the one spelling of "no
-    // information", so a type parameter or an unresolved call passes through rather than earning a
-    // second diagnostic - such a call's result_type() is unknown, on top of the UnknownFunction already
-    // reported.
-    //
-    // An interface is excluded because the check above already covers it: it has a complex type and no
-    // properties, so a `->x` on one is already an UnknownMember
-    // **one chain, so a base earns exactly one message.** the three arms below are three different
-    // things that can be wrong with `E->x`, ordered by how specific the advice is.
-    //
-    // They were an `if` and a separate `if`/`else if` until a weak base collected two of them at once,
-    // which reads as two problems where there is one.
-    //
-    // A weak base comes first, because "has no members" is true of it but unhelpful. The object it
-    // names does have the member. What is missing is the upgrade that proves the object is still there
+    // one chain, so a base earns exactly one message. weak first: the object has the member, what is
+    // missing is the upgrade. is_undetermined_type passes through
     if (base_type.is_weak()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.get_member_name()),
@@ -1023,25 +1005,8 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
                 "already be gone. upgrade it first with 'strong(...)', or reach through it with '?->'",
                 base_type.get_type_desciption()));
     }
-    // **`->` through something that may not be there.** the member exists; what is not guaranteed is the
-    // value holding it, so the message names the three ways through rather than claiming the member is
-    // wrong. this is the check that makes `Foo?` worth having: without it a nullable would read exactly
-    // like a `Foo` right up until the one execution where it was absent
-    //
-    // **a pointer is excluded**, and that is deliberate rather than an oversight. `ptr<T>` carries this
-    // same flag, but `->` through one is the language's established auto-deref and
-    // null-checking the *address* is the established pointer rule instead. changing that
-    // is a separate decision about pointers, not part of introducing `T?`
-    //
-    // **a property the optional itself declares is not a reach *through* it.** a tagged `T?` is a layout
-    // with two of them, `__has` and `__value`, and the teardown, the copy and a guard's payload read that
-    // AST::OwnershipPass writes all reach `__value` as the field it is. What this rule protects is the
-    // *payload's* members, and those are not properties of the optional - `$maybe->x` still lands here,
-    // because the optional has no `x`.
-    //
-    // it does mean a program that names `__value` itself is read as the compiler's own access and admitted -
-    // the two are not `private`, and cannot be until a guard's payload copy is minted inside a body the
-    // type owns. see AST::TypeRegistry::get_or_create_optional, where trying it is written down
+    // `->` through a `T?` (not a `ptr<T>`: that auto-derefs). a property of the optional itself
+    // (`__has`, `__value`) is a field of the layout, not a reach through it
     else if (base_type.is_nullable() && !base_type.is_pointer() && !names_own_property) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.get_member_name()),
@@ -1224,33 +1189,9 @@ void TypeChecker::visit_optional_chain(OptionalChainExprNode &node)
     }
 }
 
-// **an address of something that has no address.**
-//
-// By the time this pass runs, every legitimate borrow of a value with no storage has been reseated
-// onto a temporary's varref by AST::OwnershipPass. So an operand that is still neither a place nor
-// pointer-typed means two gates disagreed: AST::argument_fit ranked t_borrow_temporary where the
-// ownership pass declined to mint a slot.
-//
-// This is a *guard rail*, not a user diagnostic. Nothing a program can be written to say reaches it.
-// It exists because the alternative failure is the worst kind this compiler has: ExprCodegen::
-// gen_addr_of hands the operand to gen_lvalue, which throws "Expression is not addressable" with no
-// source location at all, far from whichever rule was wrong. One visitor arm turns every future
-// divergence between those two gates into a located error.
-//
-// is_undetermined_type passes through for the reason it does everywhere else: an unsettled call
-// already has its own issue and does not need a second one stacked on top.
-//
-// **and so does a program that has already failed.** AST::OwnershipPass *refuses* some requests
-// rather than binding them - a write through a temporary's element is the shape that reaches here -
-// and a refusal deliberately leaves the tree exactly as it was written, so the unbacked `&` survives
-// to this arm.
-//
-// The two gates did not disagree there. One of them declined, out loud, with a located reason the
-// author can act on. Stacking "this is a compiler bug" on top of that would bury the real message,
-// and run_semantic_passes fails the compile on the first one either way.
-//
-// The cost is that the rail is blind in a program that is already broken - which is the one program
-// where it was never the interesting diagnostic
+// an `&` of something that still has no storage. OwnershipPass reseats every legitimate temporary
+// borrow first, so reaching here with a non-place means argument_fit ranked t_borrow_temporary and
+// the ownership pass declined. skip when the compile already failed: a refusal leaves the `&` as written
 void TypeChecker::visit_addr_of_expr(AddrOfExprNode &node)
 {
     // **the same predicate AST::OwnershipPass mints slots from, not a second spelling of it.** a guard
@@ -1451,26 +1392,8 @@ void TypeChecker::check_value_is_produced(ExprNode *expr)
         no_value_reason(*expr));
 }
 
-// `mem::take<T>(T& $place)` hands the value at a place over and writes nothing back, so the storage it
-// read from is no longer an owner - and *nothing in the compiler knows that*. That is deliberate. The
-// only thing that can say so is whatever manages the storage, which for `array<T>` is the array's `len`.
-//
-// So the rule is about **which storage the compiler is already accounting for**, and it is narrow on
-// purpose. A local gets a scope-exit drop, a temporary gets one from the frame it was bound to, and a
-// property gets one from its owner's teardown. `take` tells none of them otherwise, so emptying any of
-// them destroys the value twice, silently and far from here.
-//
-// What is left is storage reached *through a pointer* - `$p:$[$i]`, `$p:$` - which is exactly the
-// storage nothing walks, because a pointer is not an owner. That is the same line `mem::free` sits on,
-// which is why both live in `mem::`.
-//
-// Reported at this pass rather than in codegen for check_ref_count_argument's reason: the call has a
-// token to point at, where ExprCodegen's failure is an internal compiler error naming only the
-// enclosing function
-// `mem::init<T>(T& $place, T $value)` is the mirror and is judged by the same rule, so the two share one
-// check rather than one predicate spelled twice. Only the sentence differs, because the two ways of
-// getting it wrong are opposites: taking from accounted storage destroys the value twice, initializing it
-// leaks what was already there
+// `mem::take` / `mem::init` only over is_unaccounted_storage. taking from a local double-frees;
+// initializing one leaks what was already there
 void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
 {
     if (!node.decl->is_builtin()) {

@@ -12,8 +12,8 @@
 
 namespace AST
 {
-    // 1-based on both axes, because Token::char_offset already is and clang, gcc and rustc all report
-    // that way. An editor protocol that wants 0-based converts at its own boundary - doing it here would
+    // 1-based on both axes, because Token::char_offset already is and that is how compilers
+    // conventionally report. An editor protocol that wants 0-based converts at its own boundary - doing it here would
     // make every number the compiler prints disagree with every number it stores
     struct Location
     {

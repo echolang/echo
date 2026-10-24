@@ -11,25 +11,8 @@
 
 namespace AST
 {
-    // **the set of attribute names the compiler reads**, and the one place it is spelled.
-    //
-    // three spellings, and the tier is in the spelling so the parser can refuse the wrong medium
-    // without a second table:
-    //
-    //   #[export]                 the language - anyone, closed set
-    //   #[echoc::builtin: size_of] compiler <-> stdlib - a compiler-supplied module, or any
-    //                             module of a --no-stdlib build
-    //   #[web::js_name: "x"]      a tool - anyone, carried, never read
-    //
-    // it exists because until it did, an attribute nobody read was accepted and silently ignored:
-    // `#[intrinsc: "llvm.sqrt"]`, `#[bultin: "size_of"]` and `#[implict]` all parsed, attached to the
-    // declaration and then did nothing at all - leaving a bodyless function with no implementation, or a
-    // conversion that quietly was not one. What was validated was only an attribute's *payload*, once a
-    // consumer had already found it by name.
-    //
-    // the second silence this closed: `#[depends: "../x"]` on a function in an ordinary `.eco` file
-    // compiled and did nothing, because the known-name check was the union of the declaration and
-    // manifest sets. `attribute_admission` is one question, one owner, and the medium is part of it
+    // attribute names the compiler reads. three spellings: `#[export]` (language), `#[echoc::builtin:]`
+    // (compiler/stdlib), `#[web::js_name:]` (tool, carried). unknown names are refused, not ignored
 
     namespace compiler_attribute
     {

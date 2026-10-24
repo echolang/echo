@@ -38,29 +38,8 @@ namespace AST
     ArrayLiteralLookup array_literal_type_for(
         const ArrayLiteralExprNode &literal, const CoreTypes &core, TypeRegistry &types);
 
-    // **the third way a literal is typed: a destination said so.** answers whether `expr` is an array
-    // literal this call typed, and records the type on it if so - the shape AST::bind_null_to has, for
-    // the same reason it has it. an argument's destination lives on a declaration nobody has chosen
-    // while the expression is being parsed, so AST::CallResolver is the only thing that can say, and
-    // it says it here rather than reaching into the node
-    //
-    // `destination` is the parameter as written, and a **borrow** parameter is answered by the
-    // collection it borrows - AST::implicit_conversion_target's peel, for the same reason: the literal
-    // builds a value, and the borrow of that value is somebody else's step. what actually reaches the
-    // parameter is a place, because AST::OperatorRewriter hoists the built collection into a
-    // declaration and puts its name here
-    //
-    // refuses an undetermined destination rather than recording one: a literal typed `unknown` is
-    // indistinguishable from one nothing has typed, and the expansion would then be decided against a
-    // type the next round was going to replace
-    //
-    // **`#[echoc::core: variadic_args]` is the one destination that does not want a collection at all.** the
-    // brackets are C's variadic tail there, so the literal is marked as a pack and left otherwise
-    // untouched: its elements keep their own types instead of being unified into one `E`, nothing
-    // expands it, and this answers *false* - the call is not waiting on anything
-    //
-    // nested collection literals are bound from collection_fill_of's element, so
-    // `array<map<string, int32>> $a = [['a' => 1]]` dest-types the inner map here rather than in expansion
+    // dest-type an array literal from a parameter. a borrow peels to the collection. refuses unknown.
+    // `variadic_args` is a pack, not a collection: answers false, elements keep their own types
     bool bind_array_literal_to(ExprNode *expr, const ValueType &destination, Collector &collector);
 };
 

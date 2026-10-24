@@ -18,49 +18,9 @@ namespace llvm
 
 namespace Compiler::LLVM
 {
-    // **the type-based alias tree, one per compilation unit.**
-    //
-    // a TBAA tag is a claim: an access at this type cannot reach storage last written at that one.
-    // Aliasing against it is undefined at the IR level, so every node here is a promise the compiler
-    // has to keep.
-    //
-    // In C that promise is a type rule, and it is famously a lie. Here it is not a type rule at all.
-    // Two other things make it true instead:
-    //
-    //   1. **an access reached through a raw pointer is never tagged.** an untagged instruction may
-    //      alias anything, which is exactly the conservative answer a `ptr<T>` deserves. It is also
-    //      what keeps `mem::copy`'s byte traffic and every FFI pointer outside the system entirely.
-    //   2. **a reinterpretation needs `unsafe`.** `ptr<uint32>(&$a_float)` is the one operation that
-    //      can put two differently-typed accesses over one address, and it is a word the author
-    //      writes rather than something that happens by accident (AST::cast_reinterprets_pointee).
-    //
-    // Drop (1) and this is C's strict aliasing over a language with unrestricted pointer casts. Keep
-    // it and what is left is the part that is actually true: two *typed places*, each reached without
-    // ever leaving the compiler's own accounting, cannot overlap unless their types agree.
-    //
-    // **`byte` is the ancestor of every typed leaf, not their sibling.** that is what makes a `uint8`
-    // access alias everything below it, which is the shape a byte-wise view of memory needs. The
-    // other way round is the classic TBAA bug: an unrelated sibling would let a byte write be
-    // reordered past a typed one.
-    //
-    //     root
-    //      +-- byte            <-- int8, uint8, bool answer this node itself
-    //           +-- integer16
-    //           +-- integer32
-    //           +-- integer64
-    //           +-- float32
-    //           +-- float64
-    //           +-- address     --> every pointer, borrow, class handle, weak, callable
-    //           +-- runtime.*   --> the compiler's own structures, which no Echo type can name
-    //
-    // **the shape of this graph is not decided here.** `AST::access_family_of` is the one table, and
-    // it is a *language* rule before it is metadata.
-    //
-    // Here is why that ordering matters. An `unsafe` promotion asks the author to assert that
-    // accessing storage as `T` is compatible with every other typed access that may alias it. That
-    // obligation is only statable if the relation the optimizer acts on is the one the language
-    // documents. So there is deliberately no second switch in this file to drift from the first: it
-    // turns families into nodes and knows nothing about which type is in which family.
+    // TBAA tree, one per LLVMContext. a raw-pointer access is never tagged; `byte` is the ancestor
+    // of every typed leaf (a sibling would let a byte write reorder past a typed one). families
+    // come from AST::access_family_of: this file turns them into nodes and nothing else
     class TbaaTree
     {
     public:

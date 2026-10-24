@@ -10,6 +10,6 @@ echo str::lower("Α\u{301}Σ");
 // a cased letter after the sigma, even with a mark in between, is not final
 echo str::lower("Σ\u{301}Α");
 
-// the whole-word case rustc quotes
+// the whole-word case
 echo str::lower('ὈΔΥΣΣΕΎΣ');
 echo str::upper('ὀδυσσεύς');

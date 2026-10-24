@@ -169,24 +169,8 @@ namespace AST
     // share one wording
     std::string enum_case_construction_refusal(const ValueType &owner, const std::string &name);
 
-    // which of the five storage classes a named type was declared as. the distinction is one tag and
-    // nearly everything else about them is identical - one parser, one declaration node, one member
-    // store - so it is a tag rather than separate types. carried on ComplexType, since that is the
-    // only thing a generic instantiation has
-    //
-    // t_interface is the odd one and deliberately sits here rather than in a node of its own: an
-    // interface is declared, named, namespaced, generic and mangled exactly as the other two are, and
-    // its requirements live in the same `_methods` list a struct's methods do. what it does *not* have
-    // is properties or a layout, which is a refusal at its declaration rather than a different shape
-    //
-    // t_enum is the fourth for that same argument read forwards: it is declared, named, namespaced,
-    // generic and mangled identically, its methods and statics live in the same two lists, and what it
-    // adds is a case table beside them plus a set of refusals at its declaration. what it does *not*
-    // add is a second declaration parser or a second answer to any member-lookup question
-    //
-    // t_opaque is the fifth, and the incomplete half of t_interface's "no layout": `extern struct`
-    // is a name so two C handles stay two types. it has no members of any kind. AST::type_completeness
-    // is the one owner of "a value of this cannot exist"
+    // how a named type was declared. one tag: one parser, one declaration node, one member store.
+    // t_opaque is `extern struct`: a name so two C handles stay two types, no members, no layout
     enum class ComplexTypeKind
     {
         t_struct,
@@ -1548,27 +1532,8 @@ namespace AST
             return _deinit;
         }
 
-        // the methods that declare an implicit conversion involving this type - the ones the user
-        // marked `#[implicit]`. outbound is a parameterless method *from* this type; inbound is a
-        // static of this type whose one parameter is the source. same list, distinguished by
-        // `has_receiver()`.
-        //
-        // A value handed to a parameter of the conversion's return type is converted by a call to it,
-        // with nothing written at the call site. AST::find_implicit_conversion is the lookup, source
-        // walk first, and AST::argument_fit ranks the result last of the real ranks - below even a
-        // borrow of a temporary, so an overload taking the owning type always beats one taking the
-        // window.
-        //
-        // **declarations only, never the target type.** the declaration's return type already *is* the
-        // target. A second copy of it here would be a member field on ComplexType carrying a type, which
-        // TypeRegistry::derive_instantiation does not fill - so `array<int32>` would keep saying
-        // `slice<T>`. Holding the declaration means this slot behaves exactly like _methods, which an
-        // instantiation reaches through the template_or_self redirect rather than owning a copy of.
-        //
-        // A list, rather than the single slot the destructor and the copy constructor get. A type may
-        // offer a window over itself in more than one shape, and a list puts the duplicate check on the
-        // right question: not "is the slot taken" but "is there already one to *this* target", which is
-        // what the user needs told. Only valid declarations are ever pushed, so no reader re-filters
+        // `#[implicit]` methods involving this type. outbound is a parameterless method; inbound is
+        // a static. declarations only: an instantiation reaches them through template_or_self
         void add_implicit_conversion(FunctionDeclNode *decl) {
             _implicit_conversions.push_back(decl);
         }
@@ -2036,28 +2001,9 @@ namespace AST
     //   - a non-nullable borrow T& widens to a nullable ptr<T>, never the reverse
     bool is_implicitly_convertible(const ValueType &from, const ValueType &to);
 
-    // **may a hint for this type be handed down into an expression before it is parsed?** a
-    // *parse-time* question, and deliberately not the same one AST::type_literal_at answers - that one
-    // is the rule, this one is whether the rule may be applied to an operand nobody has seen yet.
-    //
-    // only a concrete, non-void primitive that is not a `bool` can. every other kind reaches a literal
-    // as a hint that says nothing about it:
-    //   - a pointer hint belongs to the expression as a whole, not to the operand - in
-    //     `ptr<int> $q = $p:$ + 1` the literal is only the element offset;
-    //   - a type parameter says nothing until it is substituted;
-    //   - a struct or class has no conversion from a literal at all
-    // in all of those the literal is typed on its own (int32 unless the value needs int64) and
-    // fitted at its destination by TypeLowering::coerce_value after monomorphization, the same way
-    // a `return` in a generic body is. treating them as hints instead made the autocast helpers
-    // report a bogus "unexpected token" at the literal
-    //
-    // **`bool` is on that list and the reason is the parser's shape.** the shunting yard hands every
-    // operand the same hint and cannot know the operator yet, so a `bool` destination reached the `3`
-    // and the `4` of `bool $x = 3 < 4;` and retyped both - a comparison decided on garbage. the
-    // destination is applied *once, to the finished expression*, in Parser::parse_expr_ref, which is
-    // where `bool $a = 1;` becomes `true` and `bool $a = 3;` is refused. a bool is not a width, so
-    // there is nothing for the hint to decide about an *operand* even when the finished literal
-    // would have been 0 or 1
+    // may a destination type a literal before the operand is parsed. concrete non-void primitives
+    // only, and not `bool`: the shunting yard has not read the operator yet, so `bool $x = 3 < 4`
+    // would retype both operands. type_literal_at is the post-parse rule
     bool can_type_a_literal(const ValueType &type);
 
 };

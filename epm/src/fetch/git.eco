@@ -8,6 +8,7 @@ namespace epm::fetch;
 use epm::manifest;
 use epm::resolve;
 use epm::sys;
+use std::io;
 
 public class Git : Source
 {
@@ -243,6 +244,12 @@ private function fetch_into(
         return "git init failed in {$tmp}:\n{$ran->err}";
     }
 
+    string $pinned = pin_checkout_bytes($tmp);
+
+    if (!$pinned->empty()) {
+        return $pinned;
+    }
+
     array<string> $remote = array<string>();
     $remote[] = 'git';
     $remote[] = '-C';
@@ -297,6 +304,30 @@ private function fetch_into(
 
     if (!$ran->ok()) {
         return "git checkout failed in {$tmp}:\n{$ran->err}";
+    }
+
+    return '';
+}
+
+/**
+ * Makes the checkout write each file exactly as committed. The tree is hashed against
+ * epm.lock.json, and that hash has to come out the same on every machine, so neither the
+ * host's git config (core.autocrlf, an installed lfs filter) nor the package's own
+ * .gitattributes may rewrite a byte. info/attributes outranks every other attributes source.
+ */
+private function pin_checkout_bytes(const string& $tmp) : string
+{
+    string $info = sys::join($tmp, '.git/info');
+
+    if (!sys::mkdir_p($info)) {
+        return "cannot create {$info}";
+    }
+
+    string $path = sys::join($info, 'attributes');
+    result<usize, io::ioerror> $wrote = io::writefile($path, "* -text -eol -filter -ident -working-tree-encoding\n");
+
+    if ($wrote->failed()) {
+        return "cannot write {$path}";
     }
 
     return '';

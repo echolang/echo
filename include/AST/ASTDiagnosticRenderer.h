@@ -37,25 +37,9 @@ namespace AST
         static DiagnosticTheme ascii();
     };
 
-    // **the sole answer to "how does a diagnostic reach a human or a tool".**
-    //
-    // one object, constructed once from the command line, passed to everything that reports. It replaced
-    // three renderers that each knew a different amount: `AST::print_issue` (a message and a miscounted
-    // caret), `report_compiler_exception` (that plus a prefix), and `print_critical_error` (a bold title
-    // and no location at all, which is why a manifest error still shows no source excerpt).
-    //
-    // the format is a field rather than a subclass, because `json` is not a different *layout* of the
-    // same thing - it is the same Diagnostic serialised instead of drawn, and a virtual `render` split
-    // across two classes would have put the "which fields exist" question in two places again.
-    //
-    // **everything goes to the stream given at construction, which is stderr.** stdout under `run`
-    // belongs to the program being executed, and a compiler that writes into it is a compiler whose
-    // output cannot be piped.
-    //
-    // it is not the only thing that writes there: Compiler::ProgressReporter draws a row on the same
-    // stream, so each of the three entry points below suspends it first. **That duty is this class's for
-    // the reason this class exists** - it is the one place every diagnostic in the compiler passes
-    // through, and a rule spread over ~203 reporting sites is a rule with a hole in it
+    // how a diagnostic reaches a human or a tool. constructed once, passed to everything that
+    // reports. writes stderr (stdout under `run` is the program's). `json` is a format, not a
+    // subclass. each entry point suspends ProgressReporter first
     class DiagnosticRenderer
     {
     public:

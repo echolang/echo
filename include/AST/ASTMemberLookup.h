@@ -33,25 +33,9 @@ namespace AST
     // TypeRegistry::get_or_create_instantiation needs to know nothing about members
     std::vector<FunctionDeclNode *> find_member_functions(const ComplexType *ct, const std::string &name);
 
-    // the candidate **static** functions a name denotes on `ct` - the same overload set the lookup
-    // above answers, over ComplexType::static_methods, with the same template_ref redirect.
-    //
-    // **why this is not AST::member_surface_namespace**, which CLAUDE.md names as the owner of "which
-    // namespace holds a type's member surface" and which already carries a type's nested types and its
-    // compile-time constants. Three reasons, and the first is decisive:
-    //
-    //  - TypeRegistry names an instantiation `result<int32, string>`, so a member surface for one would
-    //    be a namespace *called* that. the surface route cannot express a generic owner at all, and a
-    //    static on a generic type is the whole motivating case
-    //  - FunctionRegistry::overloads walks *outward* from the namespace it is given. a member lookup
-    //    does not, and must not: `Foo::f()` finding an enclosing free `f` is a bug, not a fallback
-    //  - the shorthand `.f(...)` has no namespace token to name. its owner arrives as a *type*, from
-    //    the destination, so an owner-keyed lookup is needed regardless - and two lookups for one
-    //    concept is the recurring bug "one question, one owner" exists to stop
-    //
-    // so the split is by what the name denotes: the surface keeps what is arity-free, non-overloadable
-    // and takes no type arguments (a nested type, a constant); this takes overload sets declared with
-    // the owner's type parameters in scope
+    // statics on `ct`, with the same template_ref redirect. not member_surface_namespace:
+    // TypeRegistry names an instantiation `result<int32, string>`, and FunctionRegistry::overloads
+    // walks outward (`Foo::f()` must not find a free `f`)
     std::vector<FunctionDeclNode *> find_static_functions(const ComplexType *ct, const std::string &name);
 
     // the closed static search for an owner type: ComplexType statics, or T::min()/T::max()
@@ -124,32 +108,9 @@ namespace AST
     // would have to grow - it substitutes an instantiation's properties and conformances and knows
     // nothing about member types
 
-    // the method that implicitly converts a `from` into a `to`, or null when neither type declares one.
-    //
-    // **the one rule** for "does this type convert to that one", two arms, source first:
-    //
-    //   1. outbound - `from` is a declared type whose owner marked a parameterless method `#[implicit]`,
-    //      return type exactly `to`
-    //   2. inbound  - `to` is a declared type whose owner marked a static `#[implicit]`,
-    //      sole parameter exactly `from`
-    //
-    // Exact rather than convertible on purpose, so a chain of conversions can never be searched for.
-    // The source walk wins when both exist for the same pair, so a type that already knows how to
-    // become another is not overridden by that other's inbound.
-    //
-    // Everything else about a candidate - arity, method vs static, the return type being the owner or
-    // not, whether an outbound target may own something, that an inbound source is by value - was
-    // decided at the declaration by Parser's publish_implicit_conversion. That is what lets this be
-    // a comparison rather than a filter.
-    //
-    // an implicit conversion is inserted at an argument position where the user wrote nothing, so
-    // it is not an `operator` - every form that grammar has is operand syntax. the spelling is
-    // `#[implicit]`, and it is declared. `$a[$i]` *is* operand syntax and is a declared
-    // `operator []`
-    //
-    // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as
-    // t_declared_conversion, below every built-in conversion, so an overload taking the owning type
-    // always wins), TypeChecker accepts it, and AST::CallResolver is the one that inserts the call
+    // the `#[implicit]` method that converts `from` to `to`, or null. source first: outbound method
+    // on `from` (parameterless, return exactly `to`), then inbound static on `to` (sole parameter
+    // exactly `from`). exact match, no chains. ranked t_declared_conversion, below every built-in
     FunctionDeclNode *find_implicit_conversion(const ValueType &from, const ValueType &to);
 
     // the outbound conversion `owner` already published to `to`, or null. the half of the lookup

@@ -21,40 +21,9 @@ namespace AST
     class ScopeNode;
     class VarDeclNode;
 
-    // rewrites every `foreach` into the iterator declaration and the `while` a hand-written loop would
-    // have been:
-    //
-    //     {                                   // a scope of its own, so $__it dies at loop exit
-    //         $__it = <source>->iterate();
-    //         while ($__it->advance()) {
-    //             K  $k  = $__it->key();      // keyed form only
-    //             V& $el = $__it->current();  // or a copy, per the binding mode
-    //             <the user's body>
-    //         }
-    //     }
-    //
-    // **inside AST::Monomorphizer's fixpoint**, between the operator rewriter and the re-derivation
-    // sweep. after the rewriter because `foreach ($grid[0] as $row)`'s source has no type until the
-    // bracket has become an `operator []` call; before the re-derivation because `$__it` is declared
-    // untyped and that sweep is what types it; before the ownership pass because a body is walked
-    // exactly once, ever, and it must not be walked while a foreach is still in it.
-    //
-    // its own pass rather than one more rule in AST::OperatorRewriter: that class's header states it is
-    // one walk over rules sharing a predicate and an operand normalizer, and a foreach shares neither.
-    // the cost is a fifth tree walk per round, which belongs in the fixpoint's own budget rather than being paid
-    // for with a false claim in a header.
-    //
-    // the tree is walked through scope children and **never** through nodes.of_type<ForeachNode>():
-    // NodeCollection owns a detached node forever, so an of_type sweep would re-process one that has
-    // already been lowered away
-    //
-    // **built on AST::RecursiveVisitor rather than on a switch of its own** - through
-    // AST::FixpointLowering, which is the chassis every pass in the fixpoint shares. a hand-rolled
-    // statement walk is a second answer to "what are this node's owned children", and the way it fails
-    // is by omission: a missing arm silently never reaches the loops under it, and a `foreach` that is
-    // never lowered surfaces as the InternalCompilerException the monomorphizer throws for a survivor.
-    // the visitor is total by construction - a node kind added without a visit method does not compile -
-    // so only the one edge this pass treats differently is overridden below
+    // `foreach` becomes `$__it = <src>->iterate(); while ($__it->advance()) { ... }`.
+    // inside the fixpoint: after OperatorRewriter (the source may still be a bracket), before
+    // ownership (a body is walked once). walk scope children, never `of_type<ForeachNode>`
     class ForeachLowering : private FixpointLowering
     {
     public:

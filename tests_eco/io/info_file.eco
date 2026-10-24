@@ -1,0 +1,62 @@
+// what `info` answers for a file and a directory, and `chmod` writing the bits it reads back
+string $dir = str::from(std::env::tmp());
+string $pid = str::from(std::env::pid());
+string $path = std::env::join($dir, "echo-io-info-{$pid}.txt");
+
+std::time::timestamp $before = std::time::timestamp::now();
+
+usize $w = guard std::io::writefile($path, 'hello') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+std::io::fileinfo $i = guard std::io::info($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $i->size;
+echo $i->kind == std::io::filekind::file;
+
+// a filesystem's clock can be coarser than the wall clock's, so a second of slack
+std::time::timestamp $modified = $i->modified;
+echo $modified->unix_secs() >= $before->unix_secs() - 1;
+
+// rw------- : 0600. mode() itself is POSIX-shaped; Windows reconstructs 0666 from the one
+// read-only bit, so the portable questions are writable and readonly
+bool $set = guard std::io::chmod($path, std::io::fileperms(0x180)) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+std::io::fileinfo $j = guard std::io::info($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $j->perms->owner_writable();
+echo $j->perms->is_readonly();
+
+// r--r--r-- : 0444
+bool $ro = guard std::io::chmod($path, std::io::fileperms(0x124)) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+std::io::fileinfo $k = guard std::io::info($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $k->perms->is_readonly();
+echo $k->perms->other_readable();
+
+// a directory is one, and has a size of its own that this does not pin
+std::io::fileinfo $d = guard std::io::info($dir) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $d->kind == std::io::filekind::directory;
+
+std::io::remove($path);

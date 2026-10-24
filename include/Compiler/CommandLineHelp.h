@@ -29,35 +29,10 @@ namespace Compiler
         static HelpTheme ascii();
     };
 
-    // **the sole answer to "how is an option spelled back to a human".**
-    //
-    // one object, four things it draws: a page, one option in full, a usage line and a refusal. It
-    // replaced the vendored parser's stream operator, which produced a single four-hundred-character
-    // usage line, an ungrouped flat list in registration order and no wrapping at all - so the widest
-    // terminal made it unreadable and the narrowest made it unusable.
-    //
-    // **the page is short and the prose is one command away.** Every option gets one line: its spelling,
-    // its `summary`, and its accepted values as a tree beneath it. `--help <option>` prints that option's
-    // `description` in full. Inlining every paragraph on the page was tried first and made
-    // `echoc build --help` two hundred and fifty lines - complete, correct, and nothing anybody reads,
-    // which is the failure the flat list had too, from the other direction.
-    //
-    // there is deliberately no `--all` beside it. A page that is *complete* is the thing that did not
-    // work; what a reader wants is the one option they are looking at, and asking by name is both shorter
-    // to type and shorter to read than paging through everything.
-    //
-    // **a value a subcommand cannot write is shown and marked, never hidden.** `build --help` lists
-    // `prune` with a `(run only)` marker rather than omitting it, because a reader who cannot see it
-    // cannot learn it exists; writing it is still the refusal that names `run`.
-    //
-    // **AST::DiagnosticRenderer cannot draw a refusal from here and must not be made to.** It needs a
-    // TerminalCapabilities, which needs --color and --diagnostics, which come from the command line being
-    // parsed - so routing a CLI refusal through it for free json output is a cycle, not a saving.
-    //
-    // it owes Compiler::ProgressReporter::instance().suspend() **nothing**, and that is a property of the
-    // ordering rather than a discipline: the reporter is enabled in main after the command line is
-    // settled, so no row can be live while this writes. Anything that ever makes usage reachable after a
-    // build has started owes the call
+    // how an option is spelled back: a page, one option in full, a usage line, a refusal.
+    // the page is one line per option; `--help <option>` prints the prose. a value a
+    // subcommand cannot write is shown and marked, never hidden. DiagnosticRenderer cannot
+    // draw a refusal from here: it needs --color / --diagnostics, which this is parsing
     class CommandLineHelp
     {
     public:

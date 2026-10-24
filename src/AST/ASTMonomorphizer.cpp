@@ -689,27 +689,8 @@ namespace AST
 
     bool Monomorphizer::decide()
     {
-        // **everything the language asked the compiler to decide, decided before anything else looks
-        // at it.** three constraints pin this position and all three are load-bearing.
-        //
-        // *after bind*, because that is what binds `decl->instantiation_args[0]` on
-        // `mem::is_trivially_copyable<T>()`. AST::classify_copy and AST::needs_destruction both
-        // answer "no" for an unsettled type parameter on purpose - a not-yet rather than a refusal -
-        // so folding either against a `T` the monomorphizer has not bound yet is silently the wrong
-        // answer in the one direction that compiles. the same sentence ExprCodegen has always carried.
-        //
-        // *ahead of desugar*, and this is the point rather than tidiness. The rewriters do not merely
-        // waste work on a subtree about to vanish, they **create call sites in it**.
-        //
-        // An `array<T>`'s untaken copy arm is `$this[] = $other[$i]` - two bare IndexExprNodes at
-        // clone time - and AST::OperatorRewriter is what turns them into `operator []` calls that the
-        // next round instantiates and codegen emits. A `foreach` in an untaken arm is the same story
-        // one level up: AST::ForeachLowering mints its `iterate()`. Discarding first is the only way
-        // not to pay for either.
-        //
-        // *before own*, which walks a body **exactly once, ever**. A `T $doomed` in an untaken arm is
-        // a local that pass gives a drop, and a drop of an owning `T` is one more generic call site.
-        // AST::body_is_concrete answers false while a ConstIfNode or a ConstExprNode is in the body
+        // after bind (type queries need instantiation_args), ahead of desugar (rewriters mint calls
+        // in arms about to vanish), before own (OwnershipPass walks a body once)
         return _const_folding.run_round();
     }
 

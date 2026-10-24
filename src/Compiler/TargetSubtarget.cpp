@@ -28,14 +28,7 @@ namespace
     // what a person writes to ask for this machine rather than the baseline
     constexpr const char *k_native_cpu = "native";
 
-    // **the baseline table.** one row, and the narrowness is deliberate: a row is a claim that every
-    // machine running that triple has that CPU, and the only one this compiler has measured is the
-    // Apple Silicon Mac the vectorizer numbers were taken on. Anything unlisted keeps `generic`, which
-    // is what it had before this table existed - so adding a platform is adding a row and cannot
-    // regress one that is not here.
-    //
-    // it matches what rustc defaults to for the same triple, which is what makes
-    // `rustc -O -C target-cpu=generic` a control column rather than a coincidence
+    // a row is a claim that every machine of that triple has that CPU. unlisted stays `generic`
     std::string baseline_cpu_of(const llvm::Triple &triple)
     {
         // every Apple Silicon Mac is an M1 or later - the triple *is* the guarantee here, because

@@ -16,17 +16,8 @@
 
 namespace Compiler
 {
-    // **the sole answer to "what does this build need linked".**
-    //
-    // one native library, framework, search directory or prebuilt object, as a module's manifest declared
-    // it - `#[link: "lib:GL"]` - or as the command line did. Shaped like Compiler::TargetFacts: settled
-    // facts with a closed vocabulary, resolved once and read afterwards.
-    //
-    // **typed rather than a flag string**, and that is not tidiness. `echoc run` has to make the same
-    // libraries resolvable inside the JIT, which means dlopen'ing them - and a `-lGL` recovered from a flag
-    // string means re-parsing linker syntax, while `-framework OpenGL` is two argv words meaning one thing
-    // with no dlopen spelling at all. The vocabulary below is what makes both paths answerable from one
-    // declaration; a passthrough would make `run` unimplementable rather than merely inelegant
+    // one native library, framework, search directory or prebuilt object. typed, so `run` can
+    // dlopen the same declaration `build` links
     enum class LinkScheme
     {
         // `lib:GL` - a library by name, resolved by the linker's usual rules

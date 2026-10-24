@@ -81,34 +81,11 @@ namespace AST
     // and body_is_pending share this so the continuation cannot resolve against `chainbase<const T?&>`
     ValueType chain_base_type_of(const ExprNode &base);
 
-    // **the mirror of the above is not here**: `T` -> `T?` is AST::TypeRegistry::get_or_create_optional,
-    // and it takes a registry rather than being a static on ValueType because a tagged optional is a *type*
-    // and a type has to be interned. That function is the one place the two spellings of a nullable are
-    // chosen between, so nothing else has to know that a `T?` is a flag over an address and an interned
-    // pair over anything else - and a second name in front of it would be a second answer to grep for
-    //
-    // **does a value arriving at `to` have to be wrapped into an absence?** the one question five
-    // sites ask, and they have to agree or a program is accepted by resolution and mis-lowered by
-    // codegen: AST::argument_fit peels the destination to rank the arrival,
-    // AST::TypeChecker::check_destination_fits peels it to accept one, AST::CallResolver mints the cast and
-    // TypeLowering::coerce_value emits the two `insertvalue`s.
-    //
-    // an argument that is *already* nullable is excluded: there it is the pair itself that arrives, which
-    // an equality answers, and peeling would compare an absence against a payload.
-    //
-    // shaped like AST::implicit_conversion_target - its own rule with readers, rather than a peel spelled
-    // at each - and here rather than in ASTArgumentFit.h because codegen reads it too and must not depend
-    // on the overload ranking to do so
+    // true when a non-nullable `from` arriving at a tagged `to` must be wrapped. argument_fit,
+    // TypeChecker, CallResolver and coerce_value all ask. an already-nullable argument is the pair
     bool arrival_wraps_optional(const ValueType &from, const ValueType &to);
 
-    // **the type the value itself arrives at**, which is the payload wherever the answer above is yes.
-    //
-    // the peel, and not only the predicate. sharing the question and respelling the answer is what let a
-    // reader forget it: AST::OwnershipPass classified the *copy* against the pair rather than the
-    // payload, built a copy constructor whose parameter is `const T?&`, and reported "cannot implicitly
-    // convert 'string&' to 'const string?&'" at a `return` - a sentence about a type nobody wrote. that
-    // is the shape AST::implicit_conversion_target has for the same reason, and having it here means a
-    // fifth reader cannot ask the question and then get the answer wrong
+    // the payload wherever arrival_wraps_optional is true, else `to`. OwnershipPass copies against this
     ValueType arrival_destination_of(const ValueType &from, const ValueType &to);
 
     // **what `echo` prints when handed a `T?`** - the payload, and only when the payload is a primitive.

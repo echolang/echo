@@ -82,42 +82,13 @@ namespace Compiler
         static ProgressTheme ascii();
     };
 
-    // **the sole answer to "what is the compiler doing right now, and is a partial line on the terminal
-    // because of it".**
+    // one mutable trailing line. vocabulary is `\r` and erase-to-end-of-line: cursor-up addresses a
+    // line by count, and a clang subprocess can insert a newline nobody sees.
     //
-    // one mutable trailing line; everything above it is committed and is never rewritten. The whole
-    // vocabulary is a carriage return and an erase-to-end-of-line - no cursor-up, no alternate screen -
-    // because cursor-up addresses a line by *count*, and a foreign newline from a clang subprocess
-    // changes the count with nothing to detect it. Erase-to-end-of-line is wrong only about the line the
-    // cursor is already on.
-    //
-    // two invariants hold the model up:
-    //
-    //   1. it always leaves the cursor at column 0 of a line it is free to overwrite. That is what makes
-    //      a foreign writer composable - whoever writes next starts on a blank line, exactly as if
-    //      nothing had drawn.
-    //   2. a rendered row never exceeds `width - 1` columns. The erase clears to the end of the
-    //      *physical* line, so a row that wrapped occupies two and the carriage return lands at the start
-    //      of the second - leaving the first half of the previous frame on screen permanently. `width` of
-    //      0 falls back to 80 here rather than meaning "do not wrap": a line that cannot be measured must
-    //      still be short.
-    //
-    // **the spinner is a thread. the compile is not.** `enable(..., true)` starts a clock that overwrites
-    // the glyph and elapsed field of the row already on screen. The constructor the unit tests use does
-    // not animate. Join before `fork` and before any other writer takes this stream: `suspend()` joins
-    // then erases, `close()` joins, `ClockPause` is what a `fork` that does not go through `suspend`
-    // owes. The rest is notes/progress.md.
-    //
-    // **process-wide, for Compiler::PhaseTimings' reason.** The rows are driven from the driver, which
-    // could hold a reference - but the *obligation* is not the driver's: Compiler::run_tool hands its
-    // stderr to a child and AST::DiagnosticRenderer writes to the same stream from inside the AST layer.
-    // Threading a UI reference into HostTool and into the renderer to discharge it would put this
-    // question in three objects; a singleton puts it in one and costs those two call sites a line each.
-    //
-    // **`commit` and `close` still take milliseconds as a parameter.** Compiler::ProgressStep holds the
-    // steady_clock that becomes the committed number, which is what lets a test hand this a literal 182
-    // and compare bytes. The live field the clock paints is a different paint of the same start: `open`
-    // records it so the thread can write digits without asking ProgressStep, which lives on the driver.
+    // leaves the cursor at column 0 of a line it may overwrite. a row never exceeds `width - 1`
+    // columns, or a wrap leaves the previous frame's first half on screen. spinner is a thread:
+    // join before fork (`suspend` / `ClockPause`). process-wide, because run_tool and the
+    // diagnostic renderer write this stream too
     class ProgressReporter
     {
     public:

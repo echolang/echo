@@ -22,12 +22,7 @@ namespace AST
     class Namespace;
     class NamespaceManager;
 
-    // **what a constant's name denotes**, and the one place it is answered: the exact-namespace find_symbol
-    // for a name written with a prefix, the outward-walking find_symbol_in_scope for a bare one. That split
-    // is the mirror rule types already follow - a qualified `geometry::Point` must not silently resolve to
-    // the root's `Point`, and an unqualified name means the nearest declaration of it.
-    //
-    // null when nothing of that name is a constant, which includes the name being a type
+    // a constant's name: exact-namespace when qualified, outward when bare. null if the name is not one
     ConstDeclNode *find_constant(
         NamespaceManager &namespaces,
         const std::string &name,
@@ -35,22 +30,8 @@ namespace AST
         bool qualified
     );
 
-    // replaces every reference to a compile-time constant with **a clone of the constant's value**.
-    //
-    // that is the whole semantics of a constant, and it is why there is no evaluator here: a constant does
-    // not have a value, it has an expression, and each use site gets its own copy of it. Nothing in Echo
-    // structurally requires a constant expression - no fixed-size arrays, no value generics, no case labels -
-    // so there is nothing that would need a number rather than a tree.
-    //
-    // **runs before the monomorphizer's fixpoint, not inside it.** AST::OwnershipPass walks a body exactly
-    // once, ever, so a reference still in a body when it gets there makes that walk's answer permanent and
-    // wrong. And an expansion depends on nothing the fixpoint produces, so it converges in one pass and has
-    // no business being a round of one.
-    //
-    // there is deliberately **no finalize()**. "Not decided yet" is not representable: this runs once over a
-    // complete program, and every reference leaves it either expanded or replaced by a void after a refusal.
-    // The two rewriters inside the fixpoint need that exit because being out of rounds is their proof that
-    // nothing was going to answer - here, one pass *is* the proof
+    // each use of a constant becomes a clone of its initializer. before the fixpoint: OwnershipPass
+    // walks a body once, so a leftover reference makes that walk's answer permanent. no finalize()
     class ConstantExpander : public RecursiveVisitor
     {
     public:
