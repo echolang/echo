@@ -45,6 +45,7 @@ namespace Compiler
         t_get_proc_address,
         t_dlopen,
         t_dlsym,
+        t_setmode,
         t_count
     };
 

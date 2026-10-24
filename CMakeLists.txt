@@ -108,6 +108,11 @@ list(FILTER LIB_SOURCES EXCLUDE REGEX "[\\/]main\\.cpp$")
 add_executable(${APPNAME} ${SOURCES})
 add_library(${LIBNAME} STATIC ${LIB_SOURCES})
 
+if(WIN32)
+    set(ECO_UTF8_MANIFEST "${CMAKE_SOURCE_DIR}/tools/windows/utf8.manifest")
+    target_link_options(${APPNAME} PRIVATE "LINKER:/manifest:embed" "LINKER:/manifestinput:${ECO_UTF8_MANIFEST}")
+endif()
+
 # where the stdlib sources live. PRIVATE on each target that needs it rather than PUBLIC on the
 # library, because a consumer of echoc_lib is not thereby a consumer of the source tree - so the three
 # targets that do need it name it, and this variable is the one place the path is spelled
@@ -300,6 +305,9 @@ FetchContent_MakeAvailable(Catch2)
 file(GLOB TEST_SOURCES "tests/*.cpp")
 
 add_executable(tests ${TEST_SOURCES})
+if(WIN32)
+    target_link_options(tests PRIVATE "LINKER:/manifest:embed" "LINKER:/manifestinput:${ECO_UTF8_MANIFEST}")
+endif()
 # Catch2, not Catch2WithMain: tests/test_main.cpp owns main so it can add `--dev`
 target_link_libraries(tests PRIVATE Catch2::Catch2)
 target_link_libraries(tests PRIVATE ${LIBNAME})

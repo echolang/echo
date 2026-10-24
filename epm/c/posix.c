@@ -111,6 +111,15 @@ int32_t epm_rmdir(const char *path)
     return rmdir(path) == 0 ? 0 : -1;
 }
 
+int32_t epm_unlink(const char *path)
+{
+    if (path == NULL) {
+        return -1;
+    }
+
+    return unlink(path) == 0 ? 0 : -1;
+}
+
 int32_t epm_rename(const char *from, const char *to)
 {
     if (from == NULL || to == NULL) {

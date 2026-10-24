@@ -213,6 +213,8 @@ bool Backend::prepare_execution()
     pin("unlink", _unlink);
     pin("access", _access);
     pin("isatty", _isatty);
+    pin("_isatty", _isatty);
+    pin("_setmode", _setmode);
     pin("strcmp", strcmp);
     pin("strlen", strlen);
     pin("memcpy", memcpy);
@@ -400,6 +402,38 @@ std::filesystem::path windows_link_implib(
     return std::filesystem::path(executable_name).replace_extension(".lib");
 }
 
+constexpr std::string_view k_windows_utf8_manifest =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+    "<assembly manifestVersion=\"1.0\" xmlns=\"urn:schemas-microsoft-com:asm.v1\">\n"
+    "  <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">\n"
+    "    <windowsSettings>\n"
+    "      <activeCodePage xmlns=\"http://schemas.microsoft.com/SMI/2019/WindowsSettings\">UTF-8</activeCodePage>\n"
+    "    </windowsSettings>\n"
+    "  </application>\n"
+    "</assembly>\n";
+
+std::optional<std::filesystem::path> windows_utf8_manifest()
+{
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
+
+    if (ec || dir.empty()) {
+        return std::nullopt;
+    }
+
+    const std::filesystem::path path = dir / "echo-utf8.manifest";
+
+    if (Compiler::read_whole_file(path) == k_windows_utf8_manifest) {
+        return path;
+    }
+
+    if (!Compiler::write_artifact_file(path, k_windows_utf8_manifest)) {
+        return std::nullopt;
+    }
+
+    return path;
+}
+
 #if defined(__APPLE__)
 struct DarwinPlatformVersion
 {
@@ -508,6 +542,11 @@ std::optional<std::vector<std::string>> host_linker_command(
         // without this, lld-link writes `out.lib` next to `-o`
         "/implib:" + windows_link_implib(executable_name, objects).string(),
     };
+
+    if (const std::optional<std::filesystem::path> manifest = windows_utf8_manifest()) {
+        command.push_back("/manifest:embed");
+        command.push_back("/manifestinput:" + manifest->string());
+    }
 
     if (!sysroot.empty()) {
         command.push_back("/libpath:" + (sysroot / "lib").string());
@@ -755,6 +794,11 @@ bool Backend::link_program(
         Compiler::cc_driver(_ctx.options.codegen), "-o", executable_name };
     if (_ctx.options.codegen.is_windows() && !_ctx.options.codegen.is_native_library()) {
         fallback.push_back("-Wl,/IMPLIB:" + windows_link_implib(executable_name, objects).string());
+
+        if (const std::optional<std::filesystem::path> manifest = windows_utf8_manifest()) {
+            fallback.push_back("-Wl,/manifest:embed");
+            fallback.push_back("-Wl,/manifestinput:" + manifest->string());
+        }
     }
     std::string target_error;
     if (!Compiler::append_codegen_link_args(

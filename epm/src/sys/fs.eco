@@ -115,9 +115,7 @@ public function remove_all(const string& $path) : bool
     // **the link, never what it points at.** epm_kind follows one, and a directory reached through it
     // would be emptied: a vendored `home -> $HOME` made `epm update` delete a home directory
     if (is_link($path)) {
-        result<bool, std::io::ioerror> $unlinked = std::io::remove($path);
-
-        if (!$unlinked->failed()) {
+        if (epm_unlink($path->cstr()) == 0) {
             return true;
         }
 
@@ -132,13 +130,7 @@ public function remove_all(const string& $path) : bool
     }
 
     if ($k == 1) {
-        result<bool, std::io::ioerror> $gone = std::io::remove($path);
-
-        if ($gone->failed()) {
-            return false;
-        }
-
-        return true;
+        return epm_unlink($path->cstr()) == 0;
     }
 
     array<string> $kids = readdir($path);

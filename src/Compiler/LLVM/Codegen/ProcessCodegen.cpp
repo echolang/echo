@@ -27,6 +27,8 @@ namespace
     // `_IONBF` as each C runtime spells it. the two disagree
     constexpr uint64_t k_ucrt_ionbf = 4;
     constexpr uint64_t k_wasi_libc_ionbf = 2;
+
+    constexpr uint64_t k_ucrt_o_binary = 0x8000;
 };
 
 llvm::GlobalVariable *ProcessCodegen::get_or_create_argc()
@@ -237,6 +239,7 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
     gen_seed_hash();
 
     unbuffer_stdio();
+    binary_stdio();
 }
 
 llvm::Value *ProcessCodegen::load_platform_envp()
@@ -295,6 +298,21 @@ void ProcessCodegen::unbuffer_stdio()
     }
 
     assert(false && "unhandled StdioUnbuffering in unbuffer_stdio");
+}
+
+void ProcessCodegen::binary_stdio()
+{
+    if (!_ctx.options.codegen.is_windows()) {
+        return;
+    }
+
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::FunctionCallee setmode = _ctx.libc_callee(Compiler::RuntimeSymbol::t_setmode, i32, { i32, i32 });
+
+    for (unsigned fd : { 0u, 1u, 2u }) {
+        _ctx.builder->CreateCall(
+            setmode, { llvm::ConstantInt::get(i32, fd), llvm::ConstantInt::get(i32, k_ucrt_o_binary) });
+    }
 }
 
 void ProcessCodegen::unbuffer_ucrt(llvm::Type *i32, llvm::Type *ptr)

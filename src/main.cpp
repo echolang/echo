@@ -51,6 +51,8 @@
 #include <llvm/TargetParser/Host.h>
 
 #if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
 #include <stdio.h>
 #else
@@ -2866,6 +2868,10 @@ static int main_lsp(const Compiler::DriverOptions &driver)
     // stdout is the LSP stream; nothing else may write it. unitbuf so each frame
     // leaves before the next read, rather than sitting in a buffer the client is
     // waiting on
+#if defined(_WIN32)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     std::cout << std::unitbuf;
     Compiler::Lsp::Server server(std::cin, std::cout, driver);
     return server.run();

@@ -102,11 +102,13 @@ namespace
         return best;
     }
 
+#if !defined(_WIN32)
     const std::filesystem::path k_sdk_prefixes[] = {
         "/opt/wasi-sdk",
         "/opt/homebrew/opt/wasi-sdk",
         "/usr/local/opt/wasi-sdk",
     };
+#endif
 
     Compiler::WasiSdk sdk_from_prefix(const std::filesystem::path &prefix)
     {
@@ -122,6 +124,7 @@ namespace
         return !sdk.sysroot.empty() && !sdk.clang.empty();
     }
 
+#if !defined(_WIN32)
     void fill_split_install(Compiler::WasiSdk &out)
     {
         if (out.sysroot.empty()) {
@@ -152,6 +155,7 @@ namespace
             }
         }
     }
+#endif
 
     void seat_wasm_ld(Compiler::WasiSdk &out, bool closed)
     {
@@ -164,9 +168,8 @@ namespace
             return;
         }
 
-        auto found = llvm::sys::findProgramByName("wasm-ld");
-        if (found) {
-            out.wasm_ld = found.get();
+        if (const std::optional<std::string> found = Compiler::find_program_on_path("wasm-ld")) {
+            out.wasm_ld = found.value();
         }
     }
 
@@ -180,13 +183,15 @@ namespace
             closed = true;
         }
         else {
-            std::vector<std::filesystem::path> prefixes(
-                std::begin(k_sdk_prefixes), std::end(k_sdk_prefixes));
-
 #if defined(_WIN32)
             const std::filesystem::path dir = Compiler::process_directory();
-            prefixes.insert(prefixes.begin(), dir.parent_path() / "wasi-sdk");
-            prefixes.insert(prefixes.begin(), dir / "wasi-sdk");
+            const std::vector<std::filesystem::path> prefixes = {
+                dir / "wasi-sdk",
+                dir.parent_path() / "wasi-sdk",
+            };
+#else
+            const std::vector<std::filesystem::path> prefixes(
+                std::begin(k_sdk_prefixes), std::end(k_sdk_prefixes));
 #endif
 
             for (const std::filesystem::path &prefix : prefixes) {
@@ -198,9 +203,11 @@ namespace
             }
         }
 
+#if !defined(_WIN32)
         if (!closed) {
             fill_split_install(out);
         }
+#endif
 
         seat_wasm_ld(out, closed);
         return out;

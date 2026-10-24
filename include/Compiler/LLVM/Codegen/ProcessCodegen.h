@@ -87,6 +87,8 @@ namespace Compiler::LLVM
         // Windows UCRT (stdout and stderr) and wasi-libc (stdout). one owner so
         // gen_capture and gen_startup cannot each remember a different pair
         void unbuffer_stdio();
+
+        void binary_stdio();
     };
 };
 

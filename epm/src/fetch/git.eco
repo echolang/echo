@@ -156,8 +156,9 @@ public class Git : Source
             return .error("cannot clear build directories out of {$tmp}");
         }
 
-        if (sys::exists($dest)) {
-            sys::remove_all($dest);
+        if (sys::exists($dest) && !sys::remove_all($dest)) {
+            sys::remove_all($tmp);
+            return .error("cannot remove the old {$dest}");
         }
 
         if (!sys::rename($tmp, $dest)) {
@@ -226,6 +227,24 @@ private function take_remote_tag(
     $tags[] = RemoteTag($name, $sha);
 }
 
+private function set_local_config(const string& $tmp, const string& $key, const string& $value) : string
+{
+    array<string> $argv = array<string>();
+    $argv[] = 'git';
+    $argv[] = '-C';
+    $argv[] = $tmp;
+    $argv[] = 'config';
+    $argv[] = $key;
+    $argv[] = $value;
+    sys::Run $ran = sys::run($argv);
+
+    if (!$ran->ok()) {
+        return "git config {$key} failed in {$tmp}:\n{$ran->err}";
+    }
+
+    return '';
+}
+
 private function fetch_into(
     const string& $url,
     const string& $rev,
@@ -241,6 +260,16 @@ private function fetch_into(
 
     if (!$ran->ok()) {
         return "git init failed in {$tmp}:\n{$ran->err}";
+    }
+
+    string $configured = set_local_config($tmp, 'core.autocrlf', 'false');
+
+    if ($configured->empty()) {
+        $configured = set_local_config($tmp, 'core.eol', 'lf');
+    }
+
+    if (!$configured->empty()) {
+        return $configured;
     }
 
     array<string> $remote = array<string>();

@@ -267,8 +267,14 @@ private function apply_lock(
             }
 
             if ($check != $e->sha256) {
-                sys::remove_all($dest);
+                bool $removed = sys::remove_all($dest);
                 $bar->fail();
+
+                if (!$removed) {
+                    $ctx->printError("{$e->name}@{$e->version} does not match epm.lock.json: the tree at {$got->rev} hashes to {$check}, the lock says {$e->sha256}. {$dest} could not be removed and must not be built - delete it by hand");
+                    return 1;
+                }
+
                 $ctx->printError("{$e->name}@{$e->version} does not match epm.lock.json: the tree at {$got->rev} hashes to {$check}, the lock says {$e->sha256}. Nothing was installed for it - run `epm update` if this change is expected");
                 return 1;
             }

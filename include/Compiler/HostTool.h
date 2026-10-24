@@ -4,6 +4,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -42,6 +43,8 @@ namespace Compiler
     // the clang this echoc was built with, so a GNU-ABI `clang` sitting first
     // on PATH (llvm-mingw) cannot link the MSVC objects we emit. empty if none
     std::string host_clang();
+
+    std::optional<std::string> find_program_on_path(const std::string &name);
 
     // this process's executable. a hook's tool is a child `echoc build`: progress and pointer width
     // are process-wide. empty when the platform would not say

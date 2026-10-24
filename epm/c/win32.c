@@ -490,6 +490,17 @@ int32_t epm_mkdir(const char *path)
     return GetLastError() == ERROR_ALREADY_EXISTS ? 0 : -1;
 }
 
+static int clear_readonly(const wchar_t *wide)
+{
+    DWORD attrs = GetFileAttributesW(wide);
+
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_READONLY) == 0) {
+        return 0;
+    }
+
+    return SetFileAttributesW(wide, attrs & ~(DWORD)FILE_ATTRIBUTE_READONLY) != 0;
+}
+
 int32_t epm_rmdir(const char *path)
 {
     wchar_t *wide;
@@ -505,6 +516,31 @@ int32_t epm_rmdir(const char *path)
     }
 
     ok = RemoveDirectoryW(wide);
+    if (!ok && GetLastError() == ERROR_ACCESS_DENIED && clear_readonly(wide)) {
+        ok = RemoveDirectoryW(wide);
+    }
+    free(wide);
+    return ok ? 0 : -1;
+}
+
+int32_t epm_unlink(const char *path)
+{
+    wchar_t *wide;
+    BOOL ok;
+
+    if (path == NULL) {
+        return -1;
+    }
+
+    wide = wide_ntpath(path);
+    if (wide == NULL) {
+        return -1;
+    }
+
+    ok = DeleteFileW(wide);
+    if (!ok && GetLastError() == ERROR_ACCESS_DENIED && clear_readonly(wide)) {
+        ok = DeleteFileW(wide);
+    }
     free(wide);
     return ok ? 0 : -1;
 }
@@ -738,9 +774,95 @@ static int read_available(HANDLE pipe, char **buf, size_t *cap, size_t *len)
     return 1;
 }
 
+static int is_absolute_dir(const wchar_t *dir, size_t n)
+{
+    if (n >= 3 && dir[1] == L':' && (dir[2] == L'\\' || dir[2] == L'/')) {
+        return 1;
+    }
+
+    return n >= 2 && (dir[0] == L'\\' || dir[0] == L'/') && (dir[1] == L'\\' || dir[1] == L'/');
+}
+
+static wchar_t *path_lookup(const char *argv0)
+{
+    wchar_t *name;
+    wchar_t *path;
+    const wchar_t *ext;
+    const wchar_t *start;
+    wchar_t *found = NULL;
+    size_t name_len;
+    DWORD path_len;
+
+    name = utf8_to_wide(argv0);
+    if (name == NULL) {
+        return NULL;
+    }
+
+    path_len = GetEnvironmentVariableW(L"PATH", NULL, 0);
+    if (path_len == 0) {
+        free(name);
+        return NULL;
+    }
+
+    path = malloc((size_t)path_len * sizeof(wchar_t));
+    if (path == NULL || GetEnvironmentVariableW(L"PATH", path, path_len) == 0) {
+        free(path);
+        free(name);
+        return NULL;
+    }
+
+    ext = wcschr(name, L'.') != NULL ? L"" : L".exe";
+    name_len = wcslen(name);
+    start = path;
+
+    while (found == NULL && *start != L'\0') {
+        const wchar_t *end = wcschr(start, L';');
+        const wchar_t *dir = start;
+        size_t dir_len = end == NULL ? wcslen(start) : (size_t)(end - start);
+
+        if (dir_len >= 2 && dir[0] == L'"' && dir[dir_len - 1] == L'"') {
+            dir++;
+            dir_len -= 2;
+        }
+
+        if (is_absolute_dir(dir, dir_len)) {
+            size_t o = dir_len;
+            wchar_t *candidate = malloc((dir_len + 1 + name_len + wcslen(ext) + 1) * sizeof(wchar_t));
+
+            if (candidate != NULL) {
+                DWORD attrs;
+
+                memcpy(candidate, dir, dir_len * sizeof(wchar_t));
+                if (candidate[o - 1] != L'\\' && candidate[o - 1] != L'/') {
+                    candidate[o++] = L'\\';
+                }
+                memcpy(candidate + o, name, name_len * sizeof(wchar_t));
+                memcpy(candidate + o + name_len, ext, (wcslen(ext) + 1) * sizeof(wchar_t));
+
+                attrs = GetFileAttributesW(candidate);
+                if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+                    found = candidate;
+                }
+                else {
+                    free(candidate);
+                }
+            }
+        }
+
+        if (end == NULL) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    free(path);
+    free(name);
+    return found;
+}
+
 /*
  * The application name CreateProcessW is handed: argv[0] itself when it
- * names a path, NULL when it is a bare name for the search to find.
+ * names a path, otherwise its match in an absolute PATH directory.
  */
 static wchar_t *explicit_app(const char *argv0)
 {
@@ -749,7 +871,7 @@ static wchar_t *explicit_app(const char *argv0)
         return wide_ntpath(argv0);
     }
 
-    return NULL;
+    return path_lookup(argv0);
 }
 
 static void close_pipes(HANDLE out_r, HANDLE out_w, HANDLE err_r, HANDLE err_w)
@@ -808,6 +930,11 @@ int32_t epm_run(
     }
 
     app = explicit_app(a->v[0]);
+    if (app == NULL) {
+        free(cmdline);
+        close_pipes(out_r, out_w, err_r, err_w);
+        return -1;
+    }
 
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
@@ -904,6 +1031,10 @@ int32_t epm_spawn_wait(void *handle, int32_t *code)
     }
 
     app = explicit_app(a->v[0]);
+    if (app == NULL) {
+        free(cmdline);
+        return -1;
+    }
 
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));

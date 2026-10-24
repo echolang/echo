@@ -69,6 +69,7 @@ const char *Compiler::runtime_symbol_name(RuntimeSymbol symbol)
         case RuntimeSymbol::t_get_proc_address: return "GetProcAddress";
         case RuntimeSymbol::t_dlopen: return "dlopen";
         case RuntimeSymbol::t_dlsym: return "dlsym";
+        case RuntimeSymbol::t_setmode: return "_setmode";
         case RuntimeSymbol::t_count: break;
     }
 

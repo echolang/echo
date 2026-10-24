@@ -9,9 +9,12 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(_WIN32)
@@ -78,13 +81,21 @@ namespace
         }
 #endif
 
-        llvm::ErrorOr<std::string> program = llvm::sys::findProgramByName(name);
-
-        if (!program) {
-            return name;
+        if (const std::optional<std::string> found = Compiler::find_program_on_path(name)) {
+            return found.value();
         }
 
-        return program.get();
+        return name;
+    }
+
+    bool is_unresolved_bare_name(const std::string &program)
+    {
+#if defined(_WIN32)
+        return !std::filesystem::path(program).has_parent_path();
+#else
+        (void)program;
+        return false;
+#endif
     }
 
 #if defined(_WIN32)
@@ -381,6 +392,50 @@ namespace
 #endif
 };
 
+std::optional<std::string> Compiler::find_program_on_path(const std::string &name)
+{
+#if defined(_WIN32)
+    if (name.find_first_of("/\\") != std::string::npos) {
+        return name;
+    }
+
+    std::vector<std::string> dirs;
+
+    if (const char *path = std::getenv("PATH"); path != nullptr) {
+        std::string_view rest(path);
+
+        while (!rest.empty()) {
+            const size_t end = rest.find(';');
+            std::string_view entry = rest.substr(0, end);
+            rest = end == std::string_view::npos ? std::string_view() : rest.substr(end + 1);
+
+            if (entry.size() >= 2 && entry.front() == '"' && entry.back() == '"') {
+                entry = entry.substr(1, entry.size() - 2);
+            }
+
+            if (!entry.empty() && std::filesystem::path(entry).is_absolute()) {
+                dirs.emplace_back(entry);
+            }
+        }
+    }
+
+    if (dirs.empty()) {
+        return std::nullopt;
+    }
+
+    const std::vector<llvm::StringRef> paths(dirs.begin(), dirs.end());
+    llvm::ErrorOr<std::string> program = llvm::sys::findProgramByName(name, paths);
+#else
+    llvm::ErrorOr<std::string> program = llvm::sys::findProgramByName(name);
+#endif
+
+    if (!program) {
+        return std::nullopt;
+    }
+
+    return program.get();
+}
+
 std::string Compiler::host_clang()
 {
     return resolve_program("clang");
@@ -394,7 +449,7 @@ int Compiler::run_wait(const std::string &program, const std::vector<std::string
 
     std::error_code ec;
 
-    if (!std::filesystem::is_regular_file(program, ec)) {
+    if (is_unresolved_bare_name(program) || !std::filesystem::is_regular_file(program, ec)) {
         return 127;
     }
 
@@ -477,6 +532,12 @@ Compiler::CapturedProcess run_child(
     std::vector<std::string> resolved = argv;
     resolved.front() = program;
     const bool capture = stdio == ChildStdio::t_capture;
+
+    if (is_unresolved_bare_name(program)) {
+        result.exit_code = 127;
+        result.output = "could not find '" + program + "' on PATH.\n";
+        return result;
+    }
 
 #if defined(_WIN32)
     SECURITY_ATTRIBUTES inherit{};

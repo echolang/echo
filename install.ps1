@@ -20,11 +20,64 @@ if ($env:ECHO_UNINSTALL -eq "1") {
     $Uninstall = $true
 }
 
+$ManifestName = ".echo-install-manifest"
+
 function Get-EchoInstallRoot {
+    $root = Join-Path $env:LOCALAPPDATA "echo"
     if ($env:ECHO_INSTALL_DIR -and $env:ECHO_INSTALL_DIR.Trim().Length -gt 0) {
-        return $env:ECHO_INSTALL_DIR.TrimEnd("\", "/")
+        $root = $env:ECHO_INSTALL_DIR.Trim()
     }
-    return Join-Path $env:LOCALAPPDATA "echo"
+    $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($root)
+    $trimmed = $full.TrimEnd("\", "/")
+    $driveRoot = [System.IO.Path]::GetPathRoot($full)
+    if ($trimmed.Length -eq 0 -or ($driveRoot -and $driveRoot.TrimEnd("\", "/") -eq $trimmed)) {
+        Write-Error "echo: refusing to use the drive root $full - set ECHO_INSTALL_DIR to a directory of its own."
+        exit 1
+    }
+    return $trimmed
+}
+
+function Get-InstallManifest([string]$Root) {
+    $path = Join-Path $Root $ManifestName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $null
+    }
+    return @(Get-Content -LiteralPath $path | Where-Object { $_ -and $_.Trim().Length -gt 0 })
+}
+
+function Test-ManifestEntry([string]$Entry) {
+    if ([System.IO.Path]::IsPathRooted($Entry)) {
+        return $false
+    }
+    foreach ($part in $Entry.Split([char[]]@("\", "/"))) {
+        if ($part -eq "..") {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Remove-ManifestFiles([string]$Root, [string[]]$Entries) {
+    $dirs = @{}
+    foreach ($entry in $Entries) {
+        if (-not (Test-ManifestEntry $entry)) {
+            continue
+        }
+        $path = Join-Path $Root $entry
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Remove-Item -LiteralPath $path -Force
+        }
+        $dir = Split-Path -Parent $path
+        while ($dir.Length -gt $Root.Length) {
+            $dirs[$dir] = $true
+            $dir = Split-Path -Parent $dir
+        }
+    }
+    foreach ($dir in ($dirs.Keys | Sort-Object { $_.Length } -Descending)) {
+        if ((Test-Path -LiteralPath $dir -PathType Container) -and -not (Get-ChildItem -LiteralPath $dir -Force | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $dir -Force
+        }
+    }
 }
 
 function Get-EchoBinDir([string]$Root) {
@@ -107,8 +160,19 @@ $InstallRoot = Get-EchoInstallRoot
 $BinDir = Get-EchoBinDir $InstallRoot
 
 if ($Uninstall) {
-    if (Test-Path -LiteralPath $InstallRoot) {
-        Remove-Item -LiteralPath $InstallRoot -Recurse -Force
+    $entries = Get-InstallManifest $InstallRoot
+    if ($null -eq $entries) {
+        if (Test-Path -LiteralPath $InstallRoot) {
+            Write-Error "echo: $InstallRoot has no $ManifestName, so there is no record of what this script installed there. Nothing was removed. Re-run the installer once to record it, use Apps & Features for a setup-wizard install, or delete the directory by hand."
+            exit 1
+        }
+    }
+    else {
+        Remove-ManifestFiles $InstallRoot $entries
+        Remove-Item -LiteralPath (Join-Path $InstallRoot $ManifestName) -Force
+        if (-not (Get-ChildItem -LiteralPath $InstallRoot -Force | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $InstallRoot -Force
+        }
     }
     Remove-UserPath $BinDir
     Write-Host "uninstalled Echo from $InstallRoot"
@@ -228,22 +292,38 @@ try {
     }
 
     New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+    $previous = Get-InstallManifest $InstallRoot
+    $installed = @()
     foreach ($name in @("bin", "lib", "sysroot")) {
         $src = Join-Path $tmp $name
         if (Test-Path -LiteralPath $src) {
-            $dest = Join-Path $InstallRoot $name
-            if (Test-Path -LiteralPath $dest) {
-                Remove-Item -LiteralPath $dest -Recurse -Force
+            $srcFull = (Get-Item -LiteralPath $src).FullName.TrimEnd("\", "/")
+            foreach ($file in Get-ChildItem -LiteralPath $srcFull -Recurse -File -Force) {
+                $relative = $name + "\" + $file.FullName.Substring($srcFull.Length).TrimStart("\", "/")
+                $dest = Join-Path $InstallRoot $relative
+                New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force | Out-Null
+                Copy-Item -LiteralPath $file.FullName -Destination $dest -Force
+                $installed += $relative
             }
-            Copy-Item -LiteralPath $src -Destination $dest -Recurse -Force
         }
     }
     foreach ($name in @("README.md", "LICENSE")) {
         $src = Join-Path $tmp $name
         if (Test-Path -LiteralPath $src) {
             Copy-Item -LiteralPath $src -Destination (Join-Path $InstallRoot $name) -Force
+            $installed += $name
         }
     }
+
+    if ($null -ne $previous) {
+        $current = @{}
+        foreach ($entry in $installed) {
+            $current[$entry.ToLowerInvariant()] = $true
+        }
+        $stale = @($previous | Where-Object { -not $current.ContainsKey($_.ToLowerInvariant()) })
+        Remove-ManifestFiles $InstallRoot $stale
+    }
+    Set-Content -LiteralPath (Join-Path $InstallRoot $ManifestName) -Value $installed -Encoding UTF8
 
     Add-UserPath $BinDir
 
