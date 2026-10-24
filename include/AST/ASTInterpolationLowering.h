@@ -17,9 +17,10 @@ namespace AST
     class Namespace;
     class StringInterpolationExprNode;
 
-    // `"a{$x}b"` becomes a fold of `str::concat` over `str::from`. a hole is a unary call, so
-    // match_function's arity rule is untouched. inside the fixpoint, before ownership. no
-    // pending state, so no `finalize()`
+    // `"a{$x}b"` becomes one local and a sequence of `append`s over `str::from`. a hole is a
+    // unary call, so match_function's arity rule is untouched. a single piece stays the
+    // expression it is. inside the fixpoint, before ownership. no pending state, so no
+    // `finalize()`
     class InterpolationLowering : private FixpointLowering
     {
     public:
@@ -29,7 +30,7 @@ namespace AST
 
     private:
         // the one edge this pass treats differently. the base's descent runs **first**, so a hole
-        // holding an interpolation of its own is already lowered by the time this one folds - which
+        // holding an interpolation of its own is already lowered by the time this one appends - which
         // is what makes `"{$a}{$b}"` inside `"{$c}"` terminate
         ExprNode *rewrite_value_edge(ExprNode *expr) override;
 
@@ -52,9 +53,8 @@ namespace AST
         );
 
         // a free call in namespace `str`, left unresolved for the fixpoint's own settle_calls to
-        // finish. free rather than a member call on `string` deliberately: a receiver has to be
-        // addressed, and every operand here is a temporary that would then need a slot - where two
-        // by-borrow arguments are what AST::CallResolver already knows how to fit
+        // finish. named `from` rather than a member so a user's own `str::from(MyType)` overload
+        // wins, which is the `hash::of` bargain
         ExprNode &str_call(
             const std::string &name,
             const TokenReference &at,

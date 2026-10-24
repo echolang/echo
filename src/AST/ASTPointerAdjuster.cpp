@@ -393,11 +393,11 @@ void PointerAdjuster::visit_const_expr(ConstExprNode &node)
 void PointerAdjuster::visit_string_interpolation(StringInterpolationExprNode &node)
 {
     // a transient node AST::InterpolationLowering was supposed to have erased - by lowering it into
-    // the concatenation it stands for, or by discarding it after a refusal. ForeachNode's contract,
+    // `str::from` and `append`, or by discarding it after a refusal. ForeachNode's contract,
     // and for its reason: every deref inside a hole would be silently skipped otherwise
     throw std::runtime_error(
         "a string interpolation survived the monomorphizer's fixpoint - it should have been lowered "
-        "into a concatenation, or discarded after a refusal");
+        "into str::from and append, or discarded after a refusal");
 }
 
 void PointerAdjuster::visit_foreach(ForeachNode &node)

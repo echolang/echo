@@ -694,12 +694,12 @@ void LLVMCompiler::visit_foreach(AST::ForeachNode &node)
 }
 
 // the same bargain for the other lowered-away literal shape: AST::InterpolationLowering replaces every
-// interpolation with the `str::from` calls and the concatenation it stands for, so there is no such
+// interpolation with `str::from` and `append` into one buffer, so there is no such
 // thing to emit here and answering with the chunks alone would silently print the holes away
 void LLVMCompiler::visit_string_interpolation(AST::StringInterpolationExprNode &node)
 {
     throw _ctx.error("a string interpolation survived the monomorphizer's fixpoint - it should have "
-        "been lowered into a concatenation " + _ctx.function_context());
+        "been lowered into str::from and append " + _ctx.function_context());
 }
 
 // **both unreachable in practice, and written for that reason.** AST::PointerAdjuster throws for either

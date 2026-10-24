@@ -28,3 +28,7 @@ echo $a->contains('zzz');
 // and the found offset feeds straight back into sub, with no adjustment
 $found = $a->sub($a->find('world'), 5);
 echo $found;
+
+// last-byte of the needle hits before a real match, and last-byte hits that are not the start
+echo 'abxabc'->find('abc');
+echo 'xbcabc'->find('abc');

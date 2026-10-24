@@ -66,7 +66,7 @@ namespace AST
         ~StringInterpolationExprNode() {};
 
         // **an interpolated literal is a `string`, exactly as a plain one is.** with no stdlib there
-        // is no such type and no way to concatenate anything either, so this answers unknown and
+        // is no such type and no `str::from` to render a hole through, so this answers unknown and
         // AST::InterpolationLowering refuses the literal with a sentence naming the standard library
         ValueType result_type() const override {
             if (core_string_type.has_value()) {

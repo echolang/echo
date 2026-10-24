@@ -600,9 +600,9 @@ namespace AST
 
         case FunctionMatch::Outcome::t_no_viable:
         case FunctionMatch::Outcome::t_no_candidates:
-            // final: argument_fit never answers t_none for an untyped argument. an operator with an
-            // empty `match.tied` is its own wording: listing every root-namespace `==` is the same
-            // list in every program. a non-empty tie is worth naming
+            // final: a written `null` at a determined destination that refuses absence is t_none.
+            // an operator with an empty `match.tied` is its own wording: listing every root-namespace
+            // `==` is the same list in every program. a non-empty tie is worth naming
             if (!candidates.empty() && candidates.front()->is_operator()) {
                 const std::string spelling = candidates.front()->operator_spelling();
                 const Operator *op = _collector.operators.get_operator(spelling);
@@ -625,10 +625,9 @@ namespace AST
                     }
                 }
 
-                // **a written `null` is its own refusal, whatever the tie says.** an unbound null has no
-                // type, so argument_fit answers t_undetermined for it against every candidate - the tie
-                // it produces is an artifact of the operand nobody could rank rather than a set of near
-                // misses, and the list would be the whole root namespace either way. the wording is
+                // **a written `null` is its own refusal, whatever the tie says.** a determined
+                // parameter that cannot hold one is t_none, so those candidates are already gone;
+                // this arm is the operator whose remaining overloads all missed too. the wording is
                 // AST::null_operand_refusal's, shared with the type checker, which reaches this same
                 // refusal from the other direction: one overload, taken by the matcher without
                 // consulting types at all, and refused by the coercion afterwards

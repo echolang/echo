@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  null_no_nullable_overload.eco:5:6
+
+  No overload of 'f' accepts these arguments. Candidates are:
+    f(int64)
+    f(string)
+
+  4 | 
+  5 | echo f(null);
+    :      ^
+  6 | 
+
+1 error, nothing was compiled.

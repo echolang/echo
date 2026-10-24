@@ -4,13 +4,21 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTNamespace.h"
+#include "AST/ASTNode.h"
 #include "AST/ExprNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/StringInterpolationNode.h"
+#include "AST/TemporaryBindExprNode.h"
+#include "AST/TypeNode.h"
+#include "AST/VarDeclNode.h"
+#include "AST/VarRefNode.h"
 
 #include <fmt/core.h>
+#include <utility>
+#include <vector>
 
 namespace AST
 {
@@ -23,7 +31,7 @@ InterpolationLowering::InterpolationLowering(Bundle &bundle)
 ExprNode *InterpolationLowering::rewrite_value_edge(ExprNode *expr)
 {
     // the descent first, so the holes - and any interpolation inside one - are settled before this
-    // literal folds them in
+    // literal appends them
     ExprNode *walked = RecursiveVisitor::rewrite_value_edge(expr);
 
     if (walked == nullptr || walked->get_node_type() != NodeType::n_string_interpolation) {
@@ -101,7 +109,7 @@ ExprNode *InterpolationLowering::refuse(StringInterpolationExprNode &node, std::
 ExprNode *InterpolationLowering::lower(StringInterpolationExprNode &node)
 {
     // **`--no-stdlib` is legitimate**, and there is nothing to lower to there: no `string` to
-    // concatenate and no `str` to render through. refused with a sentence naming the standard library
+    // append into and no `str` to render through. refused with a sentence naming the standard library
     // rather than reported as three missing functions
     if (!node.core_string_type.has_value() || _collector.namespaces.get("str") == nullptr) {
         return refuse(node,
@@ -109,17 +117,13 @@ ExprNode *InterpolationLowering::lower(StringInterpolationExprNode &node)
             "Write the value out with a single quoted string and 'echo' instead.");
     }
 
-    // the fold. an empty chunk contributes nothing - which is how "two holes with nothing between
-    // them" spells itself - so `acc` stays null until the first thing that does
-    ExprNode *acc = nullptr;
-
-    auto append = [this, &acc](ExprNode &next, const TokenReference &at) {
-        acc = acc == nullptr ? &next : &str_call("concat", at, { acc, &next });
-    };
+    // pieces in written order. an empty chunk contributes nothing - which is how "two holes with
+    // nothing between them" spells itself
+    std::vector<std::pair<ExprNode *, TokenReference>> pieces;
 
     for (size_t i = 0; i < node.chunks.size(); i++) {
         if (!node.chunks[i].empty()) {
-            append(literal_for(node, node.chunks[i]), node.token_string);
+            pieces.push_back({ &literal_for(node, node.chunks[i]), node.token_string });
         }
 
         if (i >= node.holes.size()) {
@@ -144,13 +148,42 @@ ExprNode *InterpolationLowering::lower(StringInterpolationExprNode &node)
             operands.push_back(&literal_for(node, hole.spec.value(), &hole.token));
         }
 
-        append(str_call("from", hole.token, std::move(operands)), hole.token);
+        pieces.push_back({ &str_call("from", hole.token, std::move(operands)), hole.token });
     }
 
-    // every chunk empty and every hole missing its expression: `""` is the honest answer, and it keeps
-    // this total rather than handing a null back up a value edge
-    if (acc == nullptr) {
+    ExprNode *acc = nullptr;
+
+    if (pieces.empty()) {
+        // every chunk empty and every hole missing its expression: `""` is the honest answer, and it
+        // keeps this total rather than handing a null back up a value edge
         acc = &literal_for(node, std::string());
+    } else if (pieces.size() == 1) {
+        acc = pieces[0].first;
+    } else {
+        // first piece is the buffer, the rest append. an empty `""` init is a .rodata literal, and
+        // the first append would clone it - empty_inline()'s tax, paid here for nothing
+        auto &decl = _current_module->nodes.emplace_back<VarDeclNode>(
+            _current_module->make_virtual_token(
+                fmt::format("$__interp{}", next_hoist_index()),
+                Token::Type::t_varname,
+                node.token_string),
+            &_current_module->nodes.emplace_back<TypeNode>(*node.core_string_type));
+
+        decl.init_expr = pieces[0].first;
+
+        auto &bind = _current_module->nodes.emplace_back<TemporaryBindExprNode>(
+            &local_place(*_current_module, decl), node.token_string);
+
+        bind.temporaries.push_back(&decl);
+
+        for (size_t i = 1; i < pieces.size(); i++) {
+            auto &call = make_unresolved_member_call(*_current_module, decl, "append", pieces[i].second);
+
+            call.arguments.push_back(pieces[i].first);
+            bind.statements.push_back(make_ref(call));
+        }
+
+        acc = &bind;
     }
 
     // the holes moved into the calls above, so only the node itself left the tree

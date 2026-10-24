@@ -747,9 +747,10 @@ namespace AST
         progressed |= _casts.run_round();
 
         // beside the loop lowering, and for two of its three reasons. **before settle**, because the
-        // `str::from` and `str::concat` calls it mints are exactly what that has to finish. **before
-        // own**, because every one of those calls returns an owning `string` and a body is walked
-        // exactly once; AST::body_is_concrete answers false while an unlowered literal is in it
+        // `str::from` and `append` calls it mints are exactly what that has to finish. **before
+        // own**, because `str::from` returns an owning `string` and the buffer local is one, and a
+        // body is walked exactly once; AST::body_is_concrete answers false while an unlowered
+        // literal is in it
         progressed |= _interpolation.run_round();
 
         return progressed;

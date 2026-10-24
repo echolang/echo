@@ -1,0 +1,5 @@
+// no overload admits absence, so the refusal is about the null, not a tie
+function f(int64 $v) : string { return 'int'; }
+function f(string $v) : string { return 'string'; }
+
+echo f(null);

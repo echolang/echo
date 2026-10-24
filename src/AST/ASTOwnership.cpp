@@ -1878,7 +1878,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         // named here rather than left to `default:` for the reason the arms above are: that one walks
         // nothing, so a subtree reached only through this node would never be walked at all - which is
         // exactly what left an interpolation inside an arm with no scope to materialize its
-        // concatenations into, reported as this pass and argument_fit disagreeing
+        // pieces into, reported as this pass and argument_fit disagreeing
         //
         // the order is the order it runs in: the subject, then each arm's bindings and body, then that
         // arm's value. **the value goes through walk_value_edge**, which opens a MaterializationScope of

@@ -1,0 +1,13 @@
+# a null argument picks the one overload that can hold it, in a call, a subscript assignment
+# and a map literal filling a user type; the other arguments resolve as before
+
+--- OUT --->
+nullable
+string
+value
+value
+term
+a=value -1
+b=value -1
+c=value 3
+d=term e

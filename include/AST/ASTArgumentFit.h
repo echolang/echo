@@ -111,9 +111,9 @@ namespace AST
         // way it moves the rank decides nothing; the matcher has already chosen the candidate by then
         t_declared_conversion,
 
-        // the argument's type says nothing yet: a string literal, an unbound `null`, a member of
-        // an incomplete struct, a mixed-operand binary expression, or anything still mentioning a
-        // type parameter. neutral - it neither qualifies nor disqualifies a candidate
+        // the argument's type says nothing yet: a string literal, a `null` at a `T?` or a bare `T`,
+        // a member of an incomplete struct, a mixed-operand binary, or a still-open type parameter.
+        // a determined destination that refuses absence is t_none, above. neutral, not a mismatch
         t_undetermined,
 
         // no conversion exists
@@ -377,6 +377,15 @@ namespace AST
         // void produces no value. a concrete destination is a mismatch; an unbound T stays
         // undetermined below so the call waits and rewrite_value_edge names the void call
         if (from.is_void() && !to.is_void() && !is_undetermined_type(to)) {
+            return ArgumentFit::t_none;
+        }
+
+        // **a written `null` is untyped, but it is not unconstrained.** it can only ever land in a
+        // destination that admits absence, so a determined parameter that does not is a mismatch
+        // now, not a question for a later round. without this, `f(int64?)` beside `f(string)` was
+        // undecidable for `f(null)` - the `string` overload "remained possible" for a value it can
+        // never hold. an undetermined parameter (a bare `T`) still waits below
+        if (is_written_null(expr) && type_is_determined_for_fit(to) && !destination_admits_null(to)) {
             return ArgumentFit::t_none;
         }
 

@@ -1,0 +1,16 @@
+expect: fail
+
+--- OUT --->
+[error] AmbiguousCall  null_two_nullable_overloads.eco:5:6
+
+  The call to 'f' cannot be resolved: the types of its arguments are not known here, and these overloads all remain possible:
+    f(int64?)
+    f(string?)
+  An explicit cast on the argument picks one.
+
+  4 | 
+  5 | echo f(null);
+    :      ^
+  6 | 
+
+1 error, nothing was compiled.

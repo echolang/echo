@@ -6,8 +6,8 @@ str::parts $parts = str::split('a::b::c', '::');
 echo $parts->count();
 echo str::join($parts, '|');
 
-// and an interpolation, which is a fold of `str::concat` over `str::from` - the second aggregate-returning
-// callee, reached from the unit that already brought the first one in
+// and an interpolation, which lowers to `str::from` and `append` into one buffer - another
+// aggregate-returning path, reached from the unit that already brought the first one in
 string $joined = str::join($parts, '-');
 
 echo "[{$joined}]";

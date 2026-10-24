@@ -1,0 +1,45 @@
+// a written `null` can only land in a destination that admits absence, so an overload that
+// cannot hold one is out of the running. it used to stay "possible" and leave every such
+// call ambiguous, which is why `f(int64?)` beside `f(string)` refused `f(null)`
+struct Term
+{
+    string $name;
+}
+
+struct Row
+{
+    array<string> $parts = array<string>();
+
+    constructor()
+    {
+    }
+}
+
+function f(int64? $v) : string { return 'nullable'; }
+function f(string $v) : string { return 'string'; }
+
+function g(int64? $v) : string { return 'value'; }
+function g(Term $v) : string { return 'term'; }
+
+// the shape a typed column map needs: one key, a value or an expression
+operator (Row& $r)[Term $k] = (int64? $v) : void { $r->parts[] = "{$k->name}=value {$v ?? -1}"; }
+operator (Row& $r)[Term $k] = (Term $v) : void { $r->parts[] = "{$k->name}=term {$v->name}"; }
+
+function show(Row $r) : void
+{
+    foreach ($r->parts as const &$p) {
+        echo $p;
+    }
+}
+
+echo f(null);
+echo f('a');
+echo g(null);
+echo g(7);
+echo g(Term('x'));
+
+Row $direct = Row();
+$direct[Term('a')] = null;
+show($direct);
+
+show([Term('b') => null, Term('c') => 3, Term('d') => Term('e')]);

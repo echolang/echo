@@ -104,6 +104,10 @@ public struct string : contract::comparable<string>
 
         /**
          * Byte-for-byte equality. No normalization, no case folding, no encoding check.
+         *
+         * Length, then `memcmp` of that many bytes. `<` already went through
+         * `mem::compare_bytes`; this is the same bytes with a zero test, so `==` and
+         * `starts` are not a scalar walk of a kilobyte haystack.
          */
         #[inline]
         const function equals(string::view $other) : bool
@@ -112,19 +116,11 @@ public struct string : contract::comparable<string>
                 return false;
             }
 
-            bool $same = true;
-            usize $i = 0;
-
-            while ($i < $this->size) {
-                if ($this->bytes:$[$i] != $other->bytes:$[$i]) {
-                    $same = false;
-                    break;
-                }
-
-                $i = $i + 1;
+            if ($this->size == 0) {
+                return true;
             }
 
-            return $same;
+            return mem::compare_bytes($this->bytes, $other->bytes, $this->size) == 0;
         }
 
         /**
@@ -161,9 +157,11 @@ public struct string : contract::comparable<string>
          * needle is found at 0; in an empty window that is the sentinel, and `contains` says
          * false.
          *
-         * Scan for the first byte, then compare the rest. A candidate view per offset was the
-         * same comparison with a temporary on every step.
+         * `memchr` the last byte, reject on the first, then `memcmp`. A first-byte walk
+         * calls `memchr` once per common prefix; the last byte is the one a miss can
+         * prove in a single scan. A handful of bytes still walks in `str::find_byte`.
          */
+        #[inline]
         const function find(string::view $needle) : usize
         {
             usize $n = $needle->size;
@@ -180,27 +178,26 @@ public struct string : contract::comparable<string>
             ptr<const uint8> $hay = $this->bytes;
             ptr<const uint8> $nd = $needle->bytes;
             uint8 $first = $nd:$[0];
-            usize $last = $m - $n;
-            usize $at = 0;
+            uint8 $lastb = $nd:$[$n - 1];
+            usize $from = $n - 1;
 
-            while ($at <= $last) {
+            while ($from < $m) {
+                usize $left = $m - $from;
+                usize $hit = mem::find_byte($hay:$ + $from, $lastb, $left);
+
+                if ($hit == $left) {
+                    return $m;
+                }
+
+                usize $at = $from + $hit - ($n - 1);
+
                 if ($hay:$[$at] == $first) {
-                    usize $k = 1;
-
-                    while ($k < $n) {
-                        if ($hay:$[$at + $k] != $nd:$[$k]) {
-                            break;
-                        }
-
-                        $k = $k + 1;
-                    }
-
-                    if ($k == $n) {
+                    if ($n == 1 || mem::compare_bytes($hay:$ + $at + 1, $nd:$ + 1, $n - 1) == 0) {
                         return $at;
                     }
                 }
 
-                $at = $at + 1;
+                $from = $from + $hit + 1;
             }
 
             return $m;
@@ -841,8 +838,8 @@ public struct string : contract::comparable<string>
 
         // uniquely owned heap with room: a refs-load and a memcpy. calling
         // `str::buf::append` here inlines `grow_for` and the body stops
-        // fitting a tight loop. the clone, the inline store, and growth
-        // live in `append_slow`
+        // fitting a tight loop. an SSO arm here is the same trap. the clone,
+        // the inline store, and growth live in `append_slow`
         if ($this->uniquely_owned()) {
             if ($this->owner != null) {
                 usize $n = $this->window->size;
@@ -1012,7 +1009,7 @@ public struct string : contract::comparable<string>
  * is a primitive and to a declared operator when it is a struct - there is no `equals` on `int32` to call
  * instead, and no interface a primitive could conform to. `map<string, V>` is what needs it.
  *
- * Written through `string::view::equals`, which is the same byte loop `string::equals` delegates to - so
+ * Written through `string::view::equals`, which is length then `memcmp` - so
  * there is one implementation of "are these the same text" and nothing to drift.
  *
  * **Both operands are borrows**, so comparing two strings costs no reference count at all. By value it
@@ -1084,6 +1081,10 @@ operator (const string::view& $a) < (const string::view& $b) : bool
         $n = $b->size;
     }
 
+    if ($n == 0) {
+        return $a->size < $b->size;
+    }
+
     int32 $c = mem::compare_bytes($a->bytes, $b->bytes, $n);
 
     if ($c != 0) {
@@ -1106,14 +1107,16 @@ operator (const string::view& $a) <=> (const string::view& $b) : ordering
         $n = $b->size;
     }
 
-    int32 $c = mem::compare_bytes($a->bytes, $b->bytes, $n);
+    if ($n != 0) {
+        int32 $c = mem::compare_bytes($a->bytes, $b->bytes, $n);
 
-    if ($c < 0) {
-        return ordering::less;
-    }
+        if ($c < 0) {
+            return ordering::less;
+        }
 
-    if ($c > 0) {
-        return ordering::greater;
+        if ($c > 0) {
+            return ordering::greater;
+        }
     }
 
     if ($a->size < $b->size) {

@@ -330,12 +330,10 @@ public function from(ptr<const uint8> $b, usize $count) : string
 /**
  * `$a` followed by `$b`, as a new string.
  *
- * The free-function spelling of `string::concat`, and the one **string interpolation lowers to**:
- * `"a{$x}b"` becomes `str::concat(str::concat("a", str::from($x)), "b")`. A free function rather
- * than the method because the compiler mints these, and a method call needs its receiver
- * addressed - where two borrowed arguments are what call resolution already knows how to fit.
- *
- * Neither operand is touched, and the result is a fresh buffer sized for both.
+ * The free-function spelling of `string::concat`. Neither operand is touched, and the result
+ * is a fresh buffer sized for both. A fold of this copies the prefix every time; building one
+ * string out of many pieces is `$acc->append($piece)` into one buffer. Interpolation already
+ * does that.
  */
 #[inline]
 public function concat(const string& $a, const string& $b) : string

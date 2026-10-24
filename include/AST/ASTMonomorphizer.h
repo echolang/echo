@@ -88,9 +88,9 @@ namespace AST
         // the ownership pass reaches the body - see its header for the ordering the round depends on
         ForeachLowering _foreach;
 
-        // an interpolated string literal, rewritten into the `str::from` calls and the concatenation
-        // it stands for. driven from inside here because a call it mints may name a user's own
-        // overload, and because every one of them returns an owning `string` the ownership pass has
+        // an interpolated string literal, rewritten into `str::from` and `append` into one buffer.
+        // driven from inside here because a call it mints may name a user's own
+        // overload, and because `str::from` returns an owning `string` the ownership pass has
         // to see before it walks the body - see its header
         InterpolationLowering _interpolation;
 

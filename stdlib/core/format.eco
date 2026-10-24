@@ -63,8 +63,8 @@ public struct spec
     // **the four fields stay reachable, and that is deliberate rather than an omission.** Everything that
     // reads them - `align_to`, `base_of`, `float_to_string`, the `from` overloads - is a free function in
     // this file rather than a method here, so `private` would refuse all of them; and a `str::from` of your
-    // own is written the same way and needs the same reading. Those six functions are the ones that are
-    // `private`. The field-wise constructor is part of it too: `spec(0, 0, 0, -1)` is how every overload
+    // own is written the same way and needs the same reading. The padding and digit helpers are the
+    // ones that are `private`. The field-wise constructor is part of it too: `spec(0, 0, 0, -1)` is how every overload
     // below spells "no spec was written"
     //
     // `<`, `>`, `^`, or 0 for "whatever the type prefers"
@@ -158,7 +158,7 @@ public function spec_of(const string& $text) : spec
  * One function, so every overload below pads the same way - and so the "wider text is never
  * truncated" promise lives in one place.
  *
- * **The six functions from here down to `float_to_string` are `private`**, and that is the file's own
+ * **The functions from here down to `float_to_string` are `private`**, and that is the file's own
  * shape said out loud: `spec`, `spec_of` and the `from` overloads are the surface, and everything
  * between them is how a spec becomes bytes. `str::lpad` and `str::rpad` are the public
  * spellings of what this one does.
@@ -166,7 +166,7 @@ public function spec_of(const string& $text) : spec
 private function align_to(const string& $text, const spec& $s, uint8 $default_align) : string
 {
     if ($text->size() >= $s->width) {
-        return $text->sub(0, $text->size());
+        return $text;
     }
 
     uint8 $align = $s->align;
@@ -192,6 +192,31 @@ private function align_to(const string& $text, const spec& $s, uint8 $default_al
 }
 
 /**
+ * An empty SSO string, so `spare()` writes the inline store.
+ *
+ * `''` is a literal over `.rodata`; `make_unique` would clone it first.
+ */
+private function empty_inline() : string
+{
+    return string(string::view(null, 0));
+}
+
+/**
+ * Hand `$text` over when the spec pads nothing.
+ *
+ * `align_to` borrows and copies out. This is the `"{$n}"` path, so that copy is the whole of
+ * what a plain interpolation would pay after the digits already exist.
+ */
+private function with_spec(mv string $text, const spec& $s, uint8 $default_align) : string
+{
+    if ($s->align == 0 && $s->kind == 0 && $s->width == 0 && $s->precision < 0) {
+        return $text;
+    }
+
+    return align_to($text, $s, $default_align);
+}
+
+/**
  * The digits of `$value` in `$base`, with no sign and no padding.
  *
  * `$value` is a `uint64` and the sign is the caller's, which is what makes this correct for
@@ -206,7 +231,7 @@ private function digits_of(uint64 $value, uint64 $base, bool $upper) : string
 
     // count, then write backwards into the spare. a scratch array was a
     // heap block on every `"{$n}"`. the digit count of a uint64 in base
-    // 10 is at most 20, so the result stays inline
+    // 10 is at most 20, so the result stays inline when it fits
     usize $n = 0;
     uint64 $rest = $value;
 
@@ -215,7 +240,7 @@ private function digits_of(uint64 $value, uint64 $base, bool $upper) : string
         $rest = $rest / $base;
     }
 
-    string $out = '';
+    string $out = empty_inline();
     $out->reserve($n);
     ptr<uint8> $p = $out->spare();
 
@@ -274,7 +299,9 @@ private function signed_to_string(int64 $value, const spec& $s) : string
 {
     if ($value >= 0) {
         uint64 $positive = $value;
-        return align_to(digits_of($positive, base_of($s), $s->kind == CH_UPPER_X), $s, CH_GT);
+        string $digits = digits_of($positive, base_of($s), $s->kind == CH_UPPER_X);
+
+        return with_spec(mv $digits, $s, CH_GT);
     }
 
     // negated in *unsigned* space, so `int64`'s minimum survives: negating it as an int64 wraps
@@ -282,11 +309,13 @@ private function signed_to_string(int64 $value, const spec& $s) : string
     // magnitude. `mem::bit_cast` rather than an assignment, so the reinterpretation is written down
     uint64 $bits = mem::bit_cast<uint64, int64>($value);
     uint64 $magnitude = 0 - $bits;
+    string $digits = digits_of($magnitude, base_of($s), $s->kind == CH_UPPER_X);
 
-    string $out = '-';
-    $out->append(digits_of($magnitude, base_of($s), $s->kind == CH_UPPER_X));
+    string $out = empty_inline();
+    $out->append('-');
+    $out->append($digits);
 
-    return align_to($out, $s, CH_GT);
+    return with_spec(mv $out, $s, CH_GT);
 }
 
 /**
@@ -294,7 +323,9 @@ private function signed_to_string(int64 $value, const spec& $s) : string
  */
 private function unsigned_to_string(uint64 $value, const spec& $s) : string
 {
-    return align_to(digits_of($value, base_of($s), $s->kind == CH_UPPER_X), $s, CH_GT);
+    string $digits = digits_of($value, base_of($s), $s->kind == CH_UPPER_X);
+
+    return with_spec(mv $digits, $s, CH_GT);
 }
 
 /**
@@ -327,30 +358,35 @@ private function float_to_string(float64 $value, const spec& $s, int32 $default_
         $format = '%.*e';
     }
 
-    // `snprintf` answers how much room it needed, so the first call sizes the second. asking for one
-    // byte on the first pass would be cheaper and is not worth the second call in the common case
-    usize $capacity = 32;
+    // a short result sits in the string. `"{$x:.3f}"` is a handful of bytes, and a
+    // `str::buf` per hole was two heap blocks every time
+    string $out = empty_inline();
+    usize $room = $out->room();
+    int32 $needed = c_snprintf($out->spare(), $room + 1, $format->cstr(), [$precision, $value]);
 
-    while (true) {
-        buf $owner = buf($capacity, 0, text_block($capacity));
-
-        int32 $needed = c_snprintf($owner->bytes, $capacity + 1, $format->cstr(), [$precision, $value]);
-
-        if ($needed < 0) {
-            return align_to('', $s, CH_GT);
-        }
-
-        usize $written = $needed;
-
-        if ($written <= $capacity) {
-            $owner->used = $written;
-            return align_to(string(string::view($owner->bytes, $written), $owner), $s, CH_GT);
-        }
-
-        $capacity = $written;
+    if ($needed < 0) {
+        return align_to('', $s, CH_GT);
     }
 
-    return '';
+    usize $written = $needed;
+
+    if ($written <= $room) {
+        $out->commit($written);
+
+        return with_spec(mv $out, $s, CH_GT);
+    }
+
+    buf $owner = buf($written, 0, text_block($written));
+    int32 $again = c_snprintf($owner->bytes, $written + 1, $format->cstr(), [$precision, $value]);
+
+    if ($again < 0) {
+        return align_to('', $s, CH_GT);
+    }
+
+    $owner->used = $again;
+    string $heap = string(string::view($owner->bytes, $again), $owner);
+
+    return with_spec(mv $heap, $s, CH_GT);
 }
 
 /*

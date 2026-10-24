@@ -230,11 +230,10 @@ namespace AST
     // the requirement in the interface's own `_methods`, and ExprCodegen::gen_function_call routes on
     // FunctionDeclNode::is_interface_requirement().
     //
-    // **one reader, AST::ForeachLowering**, for the three calls a cursor's own protocol declares -
-    // `advance`, `current`, `key`. AST::GuardLowering was the second and is not any more: its callees
-    // come off AST::UnwrapPlan now, which is the rule IterationPlan::iterate already stated. so a name
-    // reaching this function is a name a *plan* did not answer, and `IterationPlan` carries only
-    // `iterate`
+    // **two readers.** AST::ForeachLowering, for the three calls a cursor's own protocol declares -
+    // `advance`, `current`, `key`. AST::InterpolationLowering, for `append` into the one buffer a
+    // multi-piece `"..."` becomes. AST::GuardLowering was a third and is not any more: its callees
+    // come off AST::UnwrapPlan now, which is the rule IterationPlan::iterate already stated
     FunctionCallExprNode &make_unresolved_member_call(
         Module &module,
         VarDeclNode &local,

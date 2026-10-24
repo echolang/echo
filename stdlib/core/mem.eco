@@ -82,6 +82,7 @@ private extern {
     function memmove as move_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
     function memset as set_bytes(ptr<uint8> $p, int32 $value, usize $bytes) : ptr<uint8>;
     function memcmp as compare_bytes_raw(ptr<const uint8> $a, ptr<const uint8> $b, usize $bytes) : int32;
+    function memchr as find_byte_raw(ptr<const uint8> $p, int32 $byte, usize $bytes) : ptr<uint8>;
 }
 
 /**
@@ -328,6 +329,28 @@ public function fill_bytes(ptr<uint8> $p, uint8 $byte, usize $bytes) : void
 public function compare_bytes(ptr<const uint8> $a, ptr<const uint8> $b, usize $bytes) : int32
 {
     return compare_bytes_raw($a:$, $b:$, $bytes);
+}
+
+/**
+ * Offset of the first `$byte` in `$bytes` at `$p`, or `$bytes` when it is not there.
+ *
+ * libc `memchr`. The same sentinel `string::view::find` uses, so a miss is never a valid
+ * index into the run. A call per handful of bytes is slower than a walk; this is for a
+ * haystack that has to run to the end.
+ */
+#[inline]
+public function find_byte(ptr<const uint8> $p, uint8 $byte, usize $bytes) : usize
+{
+    ptr<uint8> $hit = find_byte_raw($p:$, $byte as int32, $bytes);
+
+    if ($hit:$ == null) {
+        return $bytes;
+    }
+
+    usize $at = bit_cast<usize, ptr<uint8>>($hit:$);
+    usize $base = bit_cast<usize, ptr<const uint8>>($p:$);
+
+    return $at - $base;
 }
 
 /**

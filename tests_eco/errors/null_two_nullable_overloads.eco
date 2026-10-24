@@ -1,0 +1,5 @@
+// two overloads that both admit absence are still a real tie for a written `null`
+function f(int64? $v) : string { return 'int'; }
+function f(string? $v) : string { return 'string'; }
+
+echo f(null);
