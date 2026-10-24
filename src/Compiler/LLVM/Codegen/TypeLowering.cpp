@@ -5,6 +5,7 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
+#include "Compiler/LLVM/Codegen/ArgumentAbi.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/StructureLayout.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
@@ -348,6 +349,115 @@ void TypeLowering::emit_returned_value(const CodegenValue &value)
     _ctx.builder->CreateRet(value.scalar());
 }
 
+ArgumentAbi TypeLowering::argument_abi_of(
+    const AST::ValueType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit,
+    FunctionCallingShape shape
+)
+{
+    if (shape == FunctionCallingShape::t_c) {
+        return ArgumentAbi{};
+    }
+
+    return argument_abi_for(get_llvm_type(type, cmp_unit), _ctx.layout());
+}
+
+llvm::Type *TypeLowering::parameter_llvm_type(
+    const AST::ValueType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit,
+    FunctionCallingShape shape
+)
+{
+    llvm::Type *natural = get_llvm_type(type, cmp_unit);
+    return argument_llvm_type(argument_abi_of(type, cmp_unit, shape), natural);
+}
+
+llvm::Value *TypeLowering::outgoing_argument(
+    const CodegenValue &value,
+    const AST::ValueType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit,
+    FunctionCallingShape shape
+)
+{
+    llvm::Type *natural = get_llvm_type(type, cmp_unit);
+    const ArgumentAbi abi = argument_abi_of(type, cmp_unit, shape);
+
+    if (abi.is_direct()) {
+        return _ctx.materialize(value, "agg.arg");
+    }
+
+    // one slot of the natural type: SROA splits an integer load of those bytes, and a
+    // pad-plus-memcpy of the same 16 is what a hot string::view parameter injects into
+    // every inlined caller
+    const llvm::Align natural_align = _ctx.layout().getABITypeAlign(natural);
+    llvm::Align slot_align = _ctx.layout().getABITypeAlign(abi.coerce_type);
+
+    if (natural_align > slot_align) {
+        slot_align = natural_align;
+    }
+
+    if (value.is_aggregate()) {
+        return _ctx.builder->CreateAlignedLoad(
+            abi.coerce_type, value.value, natural_align, "arg.coerce");
+    }
+
+    llvm::AllocaInst *slot = _ctx.entry_alloca(natural, "arg.slot");
+    slot->setAlignment(slot_align);
+    store_aggregate_fieldwise(value.scalar(), slot, natural);
+    return _ctx.builder->CreateAlignedLoad(abi.coerce_type, slot, slot_align, "arg.coerce");
+}
+
+llvm::AllocaInst *TypeLowering::incoming_argument(
+    llvm::Argument &arg,
+    const AST::ValueType &type,
+    FunctionCallingShape shape
+)
+{
+    llvm::Type *natural = get_llvm_type(type, *_ctx.current_cmp_unit);
+    const ArgumentAbi abi = argument_abi_of(type, *_ctx.current_cmp_unit, shape);
+    llvm::AllocaInst *slot = _ctx.entry_alloca(natural, arg.getName());
+
+    if (abi.is_direct()) {
+        _ctx.builder->CreateStore(&arg, slot);
+        return slot;
+    }
+
+    llvm::Align align = _ctx.layout().getABITypeAlign(natural);
+    const llvm::Align coerce_align = _ctx.layout().getABITypeAlign(abi.coerce_type);
+
+    if (coerce_align > align) {
+        align = coerce_align;
+    }
+
+    slot->setAlignment(align);
+    _ctx.builder->CreateAlignedStore(&arg, slot, align);
+    return slot;
+}
+
+llvm::Value *TypeLowering::adapt_argument(
+    llvm::Argument &arg,
+    const AST::ValueType &type,
+    FunctionCallingShape from,
+    FunctionCallingShape to
+)
+{
+    const Compiler::LLVM::CmpUnit &cmp_unit = *_ctx.current_cmp_unit;
+    const ArgumentAbi from_abi = argument_abi_of(type, cmp_unit, from);
+    const ArgumentAbi to_abi = argument_abi_of(type, cmp_unit, to);
+
+    if (from_abi.coerce_type == to_abi.coerce_type) {
+        return &arg;
+    }
+
+    llvm::AllocaInst *slot = incoming_argument(arg, type, from);
+    return outgoing_argument(
+        CodegenValue::aggregate(slot, get_llvm_type(type, cmp_unit), Provenance::t_typed),
+        type,
+        cmp_unit,
+        to
+    );
+}
+
 void TypeLowering::apply_function_attributes(
     const AST::FunctionDeclNode *node,
     llvm::Function *func,
@@ -556,6 +666,16 @@ llvm::Function *TypeLowering::ensure_function_adapt(
         }
     }
 
+    const FunctionCallingShape target_shape = calling_shape_of(*decl);
+
+    for (const auto &param : signature.parameter_types) {
+        if (i >= adapt->arg_size()) {
+            break;
+        }
+
+        forwarded.push_back(adapt_argument(*adapt->getArg(i++), param, shape, target_shape));
+    }
+
     for (; i < adapt->arg_size(); i++) {
         forwarded.push_back(adapt->getArg(i));
     }
@@ -614,14 +734,12 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     const bool is_c_variadic = AST::has_variadic_tail(*node, _ctx.core_types());
     const size_t fixed_count = is_c_variadic ? node->args.size() - 1 : node->args.size();
 
-    // function arguments
-    // @TODO support complex types
+    // function arguments. aggregates take the argument ABI, not the natural struct type:
+    // a first-class `{ i16, i8, i8 }` is the SelectionDAG copy-elision miscompile
     std::vector<llvm::Type *> arg_types;
+    const FunctionCallingShape shape = calling_shape_of(*node);
     for (size_t i = 0; i < fixed_count; i++) {
-        // one lowering path for every parameter shape: get_llvm_type already handles structs,
-        // primitives and pointers. the old split called get_primitive_type() on anything
-        // non-struct, which for a pointer would answer t_void and then assert inside LLVM
-        arg_types.push_back(get_llvm_type(node->args[i]->type_node()->type, cmp_unit));
+        arg_types.push_back(parameter_llvm_type(node->args[i]->type_node()->type, cmp_unit, shape));
     }
 
     // **an aggregate too big for registers comes back through a hidden first argument.**
@@ -1585,7 +1703,7 @@ llvm::FunctionType *TypeLowering::get_llvm_function_type(
     }
 
     for (const auto &param : signature.parameter_types) {
-        param_types.push_back(get_llvm_type(param, cmp_unit));
+        param_types.push_back(parameter_llvm_type(param, cmp_unit, shape));
     }
 
     // **the same return ABI a declaration gets, or the two shapes of one call disagree.** this builds the

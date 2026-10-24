@@ -3,6 +3,7 @@
 # is the claim: the compiler binds the type by the attribute and never by the name, so a program
 # may declare its own and everything below still holds
 stdlib: off
+flags: --optimize none
 
 --- OUT --->
 3
@@ -10,6 +11,14 @@ stdlib: off
 --- IR --->
 # the cost model, which is the whole reason `string::view` is a public type: handing a `string` to a
 # view parameter touches no reference count, while handing it by value takes exactly one retain
+#
+# --optimize none so the prologue stays: whole-program O3 SROAs the i128 into a shift and inlines
+# `show`, which is the win and not the lowering this case pins
+
+CHECK: define void @_showZZMLCN6string4viewE(i128
+CHECK: alloca %view
+CHECK-NOT: llvm.memcpy
+CHECK: store i128
 
 CHECK: define i32 @main(
 
@@ -18,9 +27,9 @@ CHECK: store %string { %view { ptr @str, i64 3 }, ptr null }
 
 # show(string::view) - the conversion is a call to the `#[implicit]` method the type declared, taking
 # the address of the place. the view is a two-word aggregate so it comes back through sret, then
-# travels into `show` as a first-class argument
+# travels into `show` as i128 (argument_abi_for, 16 bytes)
 CHECK: call void @_M6string_viewZZMRBMLC6string(ptr noalias sret(%view)
-CHECK: call void @_showZZMLCN6string4viewE
+CHECK: call void @_showZZMLCN6string4viewE(i128
 
 # ...and no reference count moved to get there. this is the claim that would silently regress if the
 # declared conversion ever went through the copy path

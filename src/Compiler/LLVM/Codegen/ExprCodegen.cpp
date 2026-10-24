@@ -766,7 +766,11 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         // Monomorphizer), so accepting them leaves the variable's address on the stack,
         // so no per-argument kind sniffing is needed here
         std::vector<llvm::Value *> args;
-        for (auto &arg : node.arguments) {
+        const TypeLowering::FunctionCallingShape shape =
+            TypeLowering::calling_shape_of(*node.decl);
+        for (size_t i = 0; i < node.arguments.size(); i++) {
+            AST::ExprNode *arg = node.arguments[i];
+
             // **a variadic pack is not one argument, it is the tail.** the list written at the call
             // site becomes the arguments after the fixed ones, in order. every element already
             // carries the C promotion AST::CallResolver applied, so there is nothing to decide here -
@@ -781,7 +785,8 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             }
 
             arg->accept(*_ctx.visitor);
-            args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
+            args.push_back(_ctx.types->outgoing_argument(
+                _ctx.pop_value(), node.decl->args[i]->type(), *_ctx.current_cmp_unit, shape));
         }
 
         _ctx.emit_call(func, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
@@ -839,7 +844,11 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
 
     for (size_t i = 1; i < node.arguments.size(); i++) {
         node.arguments[i]->accept(*_ctx.visitor);
-        args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
+        args.push_back(_ctx.types->outgoing_argument(
+            _ctx.pop_value(),
+            node.decl->args[i]->type(),
+            *_ctx.current_cmp_unit,
+            TypeLowering::FunctionCallingShape::t_echo));
     }
 
     // the signature comes off the *requirement*, which is the whole reason this needed no new node: it
@@ -954,11 +963,16 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
 
     const auto &signature = callee_type.signature();
 
+    const TypeLowering::FunctionCallingShape call_shape = c_function
+        ? TypeLowering::FunctionCallingShape::t_c
+        : TypeLowering::FunctionCallingShape::t_echo;
+
     for (size_t i = 0; i < node.arguments.size(); i++) {
         AST::ExprNode *arg = node.arguments[i];
 
         arg->accept(*_ctx.visitor);
-        args.push_back(_ctx.materialize(_ctx.pop_value(), "agg.arg"));
+        args.push_back(_ctx.types->outgoing_argument(
+            _ctx.pop_value(), signature.parameter_types[i], *_ctx.current_cmp_unit, call_shape));
     }
 
     llvm::FunctionType *fn_type = _ctx.types->get_llvm_function_type(

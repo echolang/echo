@@ -1,0 +1,119 @@
+// a 4-byte struct passed by value after eight integer registers have been filled.
+// LLVM's SelectionDAG argument-copy elision mapped the callee's local onto the first
+// field's stack slot and dropped the rest, so month and day arrived as 0. the argument
+// ABI now passes it as one i32, which is one slot
+
+struct Date
+{
+    uint16 $year = 0;
+    uint8 $month = 0;
+    uint8 $day = 0;
+}
+
+struct Quad
+{
+    uint8 $a = 0;
+    uint8 $b = 0;
+    uint8 $c = 0;
+    uint8 $d = 0;
+}
+
+struct Pair
+{
+    uint16 $lo = 0;
+    uint16 $hi = 0;
+}
+
+struct Wide
+{
+    uint64 $lo = 0;
+    uint64 $hi = 0;
+}
+
+function showDate(int64 $a, int64 $b, int64 $c, int64 $d, int64 $e, int64 $f, int64 $g, int64 $h, Date $x) : string
+{
+    return "{$x->year}-{$x->month}-{$x->day}";
+}
+
+function showQuad(int64 $a, int64 $b, int64 $c, int64 $d, int64 $e, int64 $f, int64 $g, int64 $h, Quad $x) : string
+{
+    return "{$x->a}-{$x->b}-{$x->c}-{$x->d}";
+}
+
+function showPair(int64 $a, int64 $b, int64 $c, int64 $d, int64 $e, int64 $f, int64 $g, int64 $h, Pair $x) : string
+{
+    return "{$x->lo}-{$x->hi}";
+}
+
+function showTwo(int64 $a, int64 $b, int64 $c, int64 $d, int64 $e, int64 $f, int64 $g, int64 $h, Date $x, Date $y) : string
+{
+    return "{$x->year}-{$x->month}-{$x->day} {$y->year}-{$y->month}-{$y->day}";
+}
+
+function showWide(int64 $a, int64 $b, int64 $c, int64 $d, int64 $e, int64 $f, int64 $g, int64 $h, Wide $x) : string
+{
+    return "{$x->lo}-{$x->hi}";
+}
+
+function showTwoWide(int64 $a, int64 $b, int64 $c, int64 $d, int64 $e, int64 $f, int64 $g, int64 $h, Wide $x, Wide $y) : string
+{
+    return "{$x->lo}-{$x->hi} {$y->lo}-{$y->hi}";
+}
+
+function fromHelper() : string
+{
+    return showDate(1, 2, 3, 4, 5, 6, 7, 8, Date(2024, 2, 29));
+}
+
+function fromWideHelper() : string
+{
+    return showWide(1, 2, 3, 4, 5, 6, 7, 8, Wide(2024, 29));
+}
+
+test stackDate
+{
+    string $s = showDate(1, 2, 3, 4, 5, 6, 7, 8, Date(2024, 2, 29));
+    assert($s == '2024-2-29');
+}
+
+test stackQuad
+{
+    string $s = showQuad(1, 2, 3, 4, 5, 6, 7, 8, Quad(1, 2, 3, 4));
+    assert($s == '1-2-3-4');
+}
+
+test stackPair
+{
+    string $s = showPair(1, 2, 3, 4, 5, 6, 7, 8, Pair(2024, 29));
+    assert($s == '2024-29');
+}
+
+test twoDates
+{
+    string $s = showTwo(1, 2, 3, 4, 5, 6, 7, 8, Date(2024, 2, 29), Date(1999, 7, 9));
+    assert($s == '2024-2-29 1999-7-9');
+}
+
+test fromAHelper
+{
+    string $s = fromHelper();
+    assert($s == '2024-2-29');
+}
+
+test stackWide
+{
+    string $s = showWide(1, 2, 3, 4, 5, 6, 7, 8, Wide(2024, 29));
+    assert($s == '2024-29');
+}
+
+test twoWides
+{
+    string $s = showTwoWide(1, 2, 3, 4, 5, 6, 7, 8, Wide(2024, 29), Wide(1999, 7));
+    assert($s == '2024-29 1999-7');
+}
+
+test fromAWideHelper
+{
+    string $s = fromWideHelper();
+    assert($s == '2024-29');
+}

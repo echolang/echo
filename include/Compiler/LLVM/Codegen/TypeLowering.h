@@ -7,13 +7,16 @@
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/CodegenValue.h"
+#include "Compiler/LLVM/Codegen/ArgumentAbi.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Alignment.h>
 
 #include <functional>
 #include <set>
@@ -109,9 +112,10 @@ namespace Compiler::LLVM
         static FunctionCallingShape calling_shape_of(const AST::FunctionDeclNode &node);
 
         // `&name` as an Echo callable or as a C function pointer, and an ABI
-        // table slot. one chassis: look up, mint, forward, return. t_echo is
-        // linkonce_odr and skips the environment; t_c is unit-local InternalLinkage
-        // with integer-ext and a tail call, so an `#[inline]` body defined in every
+        // table slot. one chassis: look up, mint, coerce each argument from this
+        // shape to calling_shape_of(*decl), return. t_echo is linkonce_odr and
+        // skips the environment; t_c is unit-local InternalLinkage with
+        // integer-ext and a tail call, so an `#[inline]` body defined in every
         // unit stays ODR-identical
         llvm::Function *ensure_function_adapt(
             AST::FunctionDeclNode *decl,
@@ -136,6 +140,35 @@ namespace Compiler::LLVM
         // aggregate is memcpy into sret, a small SSA one is stored fieldwise, and a constructor's
         // `$this` that *is* sret stores nothing
         void emit_returned_value(const CodegenValue &value);
+
+        // **how this parameter travels in IR.** Compiler::LLVM::argument_abi_for owns the
+        // aggregate rule; this is that plus the one thing it cannot see: whether the
+        // declaration uses Echo's convention at all. t_c is identity. the signature, the
+        // prologue, every call site and the adapter all ask, the same split return_abi_of
+        // already has
+        llvm::Type *parameter_llvm_type(
+            const AST::ValueType &type,
+            const Compiler::LLVM::CmpUnit &cmp_unit,
+            FunctionCallingShape shape
+        );
+
+        // the llvm::Value a call site passes. identity for a scalar, for t_c, and for an
+        // aggregate larger than k_integer_argument_bytes; a coerce load from the natural slot
+        // for a small Echo aggregate — one alloca, never a pad plus memcpy
+        llvm::Value *outgoing_argument(
+            const CodegenValue &value,
+            const AST::ValueType &type,
+            const Compiler::LLVM::CmpUnit &cmp_unit,
+            FunctionCallingShape shape
+        );
+
+        // seat an incoming argument in a slot of the *natural* type, so GEPs and debug
+        // info never see the coerce type. the prologue stores the result in var_map
+        llvm::AllocaInst *incoming_argument(
+            llvm::Argument &arg,
+            const AST::ValueType &type,
+            FunctionCallingShape shape
+        );
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property
@@ -311,6 +344,21 @@ namespace Compiler::LLVM
         // aggregate this ABI exists to remove. large aggregates never reach here: they arrive as
         // CodegenValue::aggregate and memcpy into sret
         void store_aggregate_fieldwise(llvm::Value *value, llvm::Value *slot, llvm::Type *type);
+
+        ArgumentAbi argument_abi_of(
+            const AST::ValueType &type,
+            const Compiler::LLVM::CmpUnit &cmp_unit,
+            FunctionCallingShape shape
+        );
+
+        // adapter parameter in `from`'s ABI, as the target wants it in `to`'s.
+        // identity when they match; otherwise incoming_argument then outgoing_argument
+        llvm::Value *adapt_argument(
+            llvm::Argument &arg,
+            const AST::ValueType &type,
+            FunctionCallingShape from,
+            FunctionCallingShape to
+        );
 
         // wraps an already-lowered payload in its heap block and mints the class's typeinfo global
         // idempotent - a second call over a structure that already has a box does nothing

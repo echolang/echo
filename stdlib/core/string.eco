@@ -829,7 +829,8 @@ public struct string : contract::comparable<string>
      * Appends `$count` bytes at `$src`.
      *
      * The same work `append` does, for a pointer and a length C already has. Copy-on-write first,
-     * then through `str::buf::append`, so the terminator stays this file's invariant.
+     * then the bytes and the terminator. Growth, a clone, and the inline store live in
+     * `append_slow`, so the uniquely-owned heap path stays a refs-load and a memcpy.
      */
     #[inline]
     function append(ptr<const uint8> $src, usize $count) : void
@@ -838,15 +839,24 @@ public struct string : contract::comparable<string>
             return;
         }
 
-        // uniquely owned heap: a refs-load and a memcpy. the clone
-        // and the inline store live in `append_slow` so this body
-        // stays small enough to inline into a tight loop
+        // uniquely owned heap with room: a refs-load and a memcpy. calling
+        // `str::buf::append` here inlines `grow_for` and the body stops
+        // fitting a tight loop. the clone, the inline store, and growth
+        // live in `append_slow`
         if ($this->uniquely_owned()) {
             if ($this->owner != null) {
-                $this->owner?->append($src, $count);
-                $this->reseat();
+                usize $n = $this->window->size;
+                usize $cap = $this->owner?->capacity ?? mem::cold_die('string has no buffer');
 
-                return;
+                if ($count <= $cap - $n) {
+                    ptr<uint8> $dst = $this->owner?->data() ?? mem::cold_die('string has no buffer');
+                    mem::copy<uint8>($dst:$ + $n, ptr<uint8>($src:$), $count);
+                    usize $end = $n + $count;
+                    $this->owner?->set_used($end);
+                    $dst:$[$end] = 0;
+                    $this->window = string::view($dst, $end);
+                    return;
+                }
             }
         }
 
@@ -866,7 +876,15 @@ public struct string : contract::comparable<string>
                 mem::out_of_memory();
             }
 
-            $this->promote($n + $count);
+            // already on the heap: double through the buffer. promote is exact-fit
+            // and is the SSO/literal → heap step; using it here copied the whole
+            // string on every growth
+            if ($this->owner != null) {
+                $this->owner?->grow_for($count);
+                $this->reseat();
+            } else {
+                $this->promote($n + $count);
+            }
         }
 
         ptr<uint8> $dst = $this->dest();

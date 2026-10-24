@@ -1,0 +1,15 @@
+modules: structs/lib_show_date
+flags: --optimize none
+
+--- OUT --->
+2024-2-29
+--- IR --->
+# Echo callable around an extern that takes a 4-byte struct: the adapter's
+# parameter is i32, stored into the natural Date slot, then loaded for C
+CHECK: define linkonce_odr void @__eco_adapt.eco_show_date(ptr
+CHECK: i32
+CHECK: alloca %Date
+CHECK: store i32
+CHECK-NOT: llvm.memcpy
+CHECK: load %Date
+CHECK: call void @eco_show_date(%Date

@@ -1,0 +1,17 @@
+// `&extern` at a function<void(SmallStruct)> destination. the adapter is Echo's
+// integer coerce; the callee is C's first-class struct. identity-forwarding
+// those disagrees about the parameter. holding the ref mints the adapter;
+// the Echo twin below is the runtime that the fields arrived
+
+function showEcho(showdate::Date $d) : void
+{
+    echo "{$d->year}-{$d->month}-{$d->day}";
+}
+
+function apply(function<void(showdate::Date)> $f, showdate::Date $d) : void
+{
+    $f($d);
+}
+
+function<void(showdate::Date)> $held = &showdate::show;
+apply(&showEcho, showdate::Date(2024, 2, 29));

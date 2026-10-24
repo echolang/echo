@@ -1,0 +1,12 @@
+namespace showdate;
+
+public struct Date
+{
+    uint16 $year = 0;
+    uint8 $month = 0;
+    uint8 $day = 0;
+}
+
+public extern {
+    function eco_show_date as show(Date $d) : void;
+}

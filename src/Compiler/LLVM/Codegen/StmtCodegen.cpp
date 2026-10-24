@@ -365,8 +365,8 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         AST::VarDeclNode *declared = node.args[arg.getArgNo() - abi_offset];
 
         arg.setName(declared->name());
-        llvm::AllocaInst *alloca = _ctx.entry_alloca(arg.getType(), arg.getName());
-        _ctx.builder->CreateStore(&arg, alloca);
+        llvm::AllocaInst *alloca = _ctx.types->incoming_argument(
+            arg, declared->type(), TypeLowering::calling_shape_of(node));
         _ctx.var_map[declared] = alloca;
 
         // 1-based, which is the whole of what distinguishes a parameter from a local in DWARF

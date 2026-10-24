@@ -574,8 +574,10 @@ namespace Compiler::LLVM
             return pop_value().scalar();
         }
 
-        // an SSA value for a destination that cannot take an aggregate address: a by-value
-        // argument, a phi, a comparison. a large aggregate is loaded here and nowhere else
+        // an SSA value for a destination that cannot take an aggregate address: a phi, a
+        // comparison, a C-ABI argument. Echo by-value aggregates go through
+        // TypeLowering::outgoing_argument, which asks ArgumentAbi rather than loading the
+        // struct as a first-class value. a large aggregate is loaded here and nowhere else
         llvm::Value *materialize(const CodegenValue &value, const char *name);
 
         // the module whose file-scope statements become the C `main`. Defaults to ECO_MAIN_MODULE_NAME,

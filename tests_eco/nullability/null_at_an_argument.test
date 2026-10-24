@@ -1,3 +1,5 @@
+flags: --optimize none
+
 --- OUT --->
 -1
 -2
@@ -9,19 +11,27 @@
 4
 1
 --- IR --->
-// the empty value of each shape, at an argument the parser could not type. a wrapped `T?` is a cleared
-// tag - `zeroinitializer` over `{ i1 __has, T }` - and the free shape is a null handle. before the binding
-// the null had no type at all and every one of these was a `ptr null`, which for the two wrapped
-// parameters is not even the right *width*, let alone the right value
+// the empty value of each shape, at an argument the parser could not type. a wrapped `T?` is a
+// cleared tag, then argument_abi_for's integer of the alloc size rather than a first-class
+// `{ i1, T }`. the free shape is a null handle. before the binding the null had no type at
+// all and every one of these was a `ptr null`, which for the two wrapped parameters is not
+// even the right *width*, let alone the right value
+//
+// the integer is loaded from the natural slot (fieldwise store, then `load i64` / `load i96`).
+// a pad-plus-memcpy of those bytes is the shape that blocked SROA on every inlined caller
 //
 // `MQ` is the nullable level and what follows it is the payload's own mangling, so a wrapped one reads
 // `MQMLPi` where a class handle - whose `?` is a flag on one address rather than a pair - reads `MQLC4Node`
 CHECK: define i32 @main(
-CHECK: call i32 @_tag_ofZZMQMLPi(%eco.optional.MLPi zeroinitializer)
-CHECK: call i32 @_x_ofZZMQMLC5Point(%eco.optional.MLC5Point zeroinitializer)
+CHECK: load i64, ptr %arg.slot
+CHECK: call i32 @_tag_ofZZMQMLPi(i64
+CHECK: load i96, ptr %arg.slot1
+CHECK: call i32 @_x_ofZZMQMLC5Point(i96
 CHECK: call i32 @_node_tagZZMQLC4Node(ptr null)
 // a member call's written null is argument 1, behind the receiver, and takes the same route
-CHECK: call i32 @_M5Store_readingZZMRBMLC5StoreZMQMLPi(ptr %s, %eco.optional.MLPi zeroinitializer)
+CHECK: load i64, ptr %arg.slot10
+CHECK: call i32 @_M5Store_readingZZMRBMLC5StoreZMQMLPi(ptr %s, i64
 // and a constructor's, which is where this was first seen to crash
+CHECK: load i64, ptr %arg.slot12
 CHECK: call void @_RowZZMQMLPi(ptr noalias sret(%Row)
-CHECK: %eco.optional.MLPi zeroinitializer)
+CHECK: i64
