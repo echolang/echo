@@ -119,6 +119,84 @@ bool binding_arm_may_write(MatchExprNode &node, ExprNode *place, Collector &coll
     return false;
 }
 
+// a place whose value cannot be written: `const T&`, or a const value. copying it so a
+// binding arm cannot alias a mutation is a no-op that still costs the copy - hydrahon's
+// `match ($n)` of a `const Node&` inside a generic, and a local `const&` whose arm only
+// *calls* something. the payload bindings already carry the subject's const
+bool place_is_const(ExprNode &place)
+{
+    const ValueType ty = place.result_type();
+
+    if (is_undetermined_type(ty) && !ty.is_pointer()) {
+        return false;
+    }
+
+    return value_type_of(ty).is_const();
+}
+
+// `$__match`'s type when the subject names storage. a computed value is owned by this
+// declaration (the caller leaves it alone). a place is borrowed, except a *mutable*
+// place a binding arm may write: then a const copy, so `$x` does not alias `$e = ...`
+//
+// re-asked every round: a generic instance used to inherit a peeled value type from
+// the template/`infer_declaration_type` sweep, and `has_type()` then skipped the wrap.
+// a const place that `is_never_written` could not prove (unsettled calls, this pass
+// runs before settle) used to take the copy arm and stick
+bool seat_place_subject(
+    MatchExprNode &node,
+    VarDeclNode &subject,
+    Module &module,
+    Collector &collector
+)
+{
+    ExprNode *init = subject.init_expr;
+
+    if (init == nullptr || !is_place_expression(*init)) {
+        return false;
+    }
+
+    const bool already_address = init->result_type().is_pointer();
+    const bool as_const = place_is_const(*init);
+    const bool copy = !as_const && binding_arm_may_write(node, init, collector);
+
+    ValueType seated;
+
+    if (copy) {
+        const ValueType derived = already_address
+            ? value_type_of(init->result_type())
+            : infer_declaration_type(*init, false);
+
+        if (is_undetermined_type(derived)) {
+            return false;
+        }
+
+        seated = ValueType::make_const(derived);
+    } else if (already_address) {
+        seated = init->result_type();
+
+        if (is_undetermined_type(value_type_of(seated))) {
+            return false;
+        }
+    } else {
+        const ValueType derived = infer_declaration_type(*init, false);
+
+        if (is_undetermined_type(derived)) {
+            return false;
+        }
+
+        subject.init_expr = receiver_for_member_call(module, init);
+        seated = subject.init_expr->result_type();
+    }
+
+    if (subject.has_type() && subject.type() == seated) {
+        return false;
+    }
+
+    auto &type_node = module.nodes.emplace_back<TypeNode>(seated);
+    subject.set_type_node(&type_node);
+    return true;
+}
+
 }
 
 MatchResolution::MatchResolution(Bundle &bundle)
@@ -171,30 +249,23 @@ void MatchResolution::resolve(MatchExprNode &node)
     // first round that reaches it, with no pending state and no finalize, so a binding that is still
     // untyped when it gets there is a `str::from` overload chosen against nothing.
     //
-    // the sweep would answer identically - this calls the same AST::infer_declaration_type it does - so
-    // the two cannot disagree, and whichever reaches the declaration first settles it. the precedent is
-    // beside it: a guard's binding is not that sweep's to derive either
-    if (subject != nullptr && subject->init_expr != nullptr
-        && (!subject->has_type() || is_undetermined_type(subject->type()))) {
-        const ValueType derived = infer_declaration_type(*subject->init_expr, false);
-
-        if (!is_undetermined_type(derived)) {
-            // a place subject is borrowed; a computed value is owned by this declaration. no second
-            // address when the subject already is one (`match ($this)` is already `Foo&`)
-            ValueType seated = derived;
-
-            if (is_place_expression(*subject->init_expr)
-                && binding_arm_may_write(node, subject->init_expr, _collector)) {
-                seated = ValueType::make_const(derived);
-            }
-            else if (is_place_expression(*subject->init_expr)) {
-                subject->init_expr = receiver_for_member_call(*_current_module, subject->init_expr);
-                seated = subject->init_expr->result_type();
-            }
-
-            auto &type_node = _current_module->nodes.emplace_back<TypeNode>(seated);
-            subject->set_type_node(&type_node);
+    // a place is a borrow (`seat_place_subject`); the sweep peels, so it must not win. this pass
+    // runs in desugar, before retype. a computed value is inferred here, the same
+    // AST::infer_declaration_type the sweep would have used. a guard's binding is the precedent
+    // for "not the sweep's to derive"
+    if (subject != nullptr && subject->init_expr != nullptr) {
+        if (seat_place_subject(node, *subject, *_current_module, _collector)) {
             _changed = true;
+        } else if (!subject->has_type() || is_undetermined_type(subject->type())) {
+            // a computed value is owned by this declaration. a place still pending (bare `T`
+            // on a template, an unresolved call) waits; the instance seats it
+            const ValueType derived = infer_declaration_type(*subject->init_expr, false);
+
+            if (!is_undetermined_type(derived) && !is_place_expression(*subject->init_expr)) {
+                auto &type_node = _current_module->nodes.emplace_back<TypeNode>(derived);
+                subject->set_type_node(&type_node);
+                _changed = true;
+            }
         }
     }
 

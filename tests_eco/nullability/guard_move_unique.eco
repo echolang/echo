@@ -1,0 +1,19 @@
+// `guard mv $maybe` of a unique T?: the move marker is not a place, so the payload
+// is not copied. libhttp `appendDate` (`thread::locked<DateLine>`) is the cut
+#[unique]
+struct Token
+{
+    int32 $n;
+}
+
+function present() : Token?
+{
+    return Token(7);
+}
+
+Token? $maybe = present();
+Token $held = guard mv $maybe else {
+    echo 0;
+    die('absent');
+};
+echo $held->n;

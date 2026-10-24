@@ -23,7 +23,8 @@ namespace Compiler
     );
 
     // empty, or the sentence refusing one `#[cc: flag]` a dependency wrote.
-    // **an allow-list**: clang's dangerous half is open-ended (plugins, response files, path-valued `-f`)
+    // **a deny-list**: plugins, response files, path-valued flags, outputs. how a library compiles
+    // its own C is otherwise the author's
     std::optional<std::string> dependency_cc_flag_refusal(const std::string &flag);
 
     // the same for one `#[cc: define]`. only the name is checked: argv reaches clang with no shell

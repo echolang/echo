@@ -613,8 +613,7 @@ namespace Compiler::LLVM
         bool test_mode = false;
 
         // `main` dispatches on `ECO_INTERNAL_RUN_TEST`. only a linked runner wants that ladder;
-        // the JIT path calls each test by address and must not emit it, or a leftover env var
-        // would run a test inside the prologue
+        // a leftover env var must not run a test inside a `run` prologue
         bool emit_native_test_runner = false;
 
         // mangled names `echoc test` will call. empty on a `run`/`build`. a native runner's

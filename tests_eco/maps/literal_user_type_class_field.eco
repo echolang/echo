@@ -1,0 +1,27 @@
+// a map literal at a user-type parameter, the dest declaring `[]=` and a class-field default.
+// used to ICE `Variable '__litN' has no allocation in scope` with or without a loop
+class Box
+{
+    int32 $n = 0;
+}
+
+struct Bag
+{
+    Box $inner = Box();
+}
+
+operator (Bag& $s)[const string& $k] = (int32 $v) : void
+{
+    $s->inner = Box($v);
+}
+
+function take(Bag $p) : void
+{
+    echo $p->inner->n;
+}
+
+take(['a' => 1]);
+
+for (int32 $i = 0; $i < 2; $i++) {
+    take(['a' => $i]);
+}

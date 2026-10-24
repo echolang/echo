@@ -218,9 +218,8 @@ void LLVMCompiler::emit_entry_point(Compiler::LLVM::CmpUnit &main_cmp_unit, cons
             // `printf` calls, which must carry a location like every other call here
             _debug_info.set_function_scope_location();
 
-            // a linked test runner cannot share the parent's JIT, so `main` itself looks the
-            // test up and calls it. the JIT path does not emit this, so a leftover
-            // `ECO_INTERNAL_RUN_TEST` cannot hijack the prologue
+            // a linked test runner looks the test up and calls it. off unless this compile
+            // asked for a runner, so a leftover `ECO_INTERNAL_RUN_TEST` cannot hijack a `run`
             emit_test_dispatch();
 
             // **before the report, and that ordering is the whole reason teardown is not `atexit`.**

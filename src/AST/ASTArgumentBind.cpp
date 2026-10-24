@@ -243,7 +243,9 @@ void AST::apply_argument_binding(
 
         AST::TypeSubstitution subst;
         AST::CloneContext cc(nodes, subst, registry);
-        filled.push_back(AST::clone_sharing_closures(slot.value, cc));
+        ExprNode *cloned = AST::clone_sharing_closures(slot.value, cc);
+        cloned->from_parameter_default = true;
+        filled.push_back(cloned);
     }
 
     call.arguments = std::move(filled);

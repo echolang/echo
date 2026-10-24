@@ -323,14 +323,25 @@ namespace AST
         }
 
         // an address, reached through `:$` - the six comparisons, and offsetting by an element count.
-        // two addresses subtract to a distance and cannot be added
+        // two addresses subtract to a distance and cannot be added. two borrows (`$r:$ == $again:$`,
+        // `&$p:$[0] == $p:$`) are two addresses. a borrow against a *value* (`const Foo& == 1`) is
+        // not: that looks for a declared operator
         if (lhs.type.is_pointer() || rhs.type.is_pointer()) {
-            if (op->is_comparison() || op->type == Token::Type::t_op_sub) {
+            const bool both = lhs.type.is_pointer() && rhs.type.is_pointer();
+
+            if (both && (op->is_comparison() || op->type == Token::Type::t_op_sub)) {
                 return true;
             }
 
-            return op->type == Token::Type::t_op_add
-                && !(lhs.type.is_pointer() && rhs.type.is_pointer());
+            if (!both && (is_address_operand(lhs.type) || is_address_operand(rhs.type))) {
+                if (op->is_comparison() || op->type == Token::Type::t_op_sub) {
+                    return true;
+                }
+
+                return op->type == Token::Type::t_op_add;
+            }
+
+            return false;
         }
 
         // **a vector, elementwise.** after the pointer arm and before the integer one, matching
@@ -543,9 +554,11 @@ namespace AST
         // no location at all
         //
         // scoped to comparisons: `$p:$ + 1` mixes a pointer and an int legitimately, because arithmetic
-        // on an address is offsetting rather than comparing
+        // on an address is offsetting rather than comparing. a borrow against a value is not this
+        // sentence: that looks for a declared operator. a `ptr<T>` against a value still is
         if (lhs.is_pointer() != rhs.is_pointer() && !lhs.is_void() && !rhs.is_void()
-            && op->is_comparison()) {
+            && op->is_comparison()
+            && (is_address_operand(lhs) || is_address_operand(rhs))) {
             return fmt::format(
                 "cannot compare '{}' against '{}' - an address only compares against another address",
                 lhs.get_type_desciption(), rhs.get_type_desciption());

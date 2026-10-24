@@ -90,7 +90,7 @@ fs::path only_object_in(const fs::path &directory)
 
 };
 
-TEST_CASE("a dependency's C flags are held to the allow-list", "[trust]")
+TEST_CASE("a dependency's C flags are held to the deny-list", "[trust]")
 {
     REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-Wall").has_value());
     REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-Wno-unused-function").has_value());
@@ -103,8 +103,13 @@ TEST_CASE("a dependency's C flags are held to the allow-list", "[trust]")
     REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-fno-strict-aliasing").has_value());
     REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-fvisibility=hidden").has_value());
     REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-DFOO=1").has_value());
+    REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-fobjc-arc").has_value());
+    REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-fobjc-arc-exceptions").has_value());
+    REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-flto").has_value());
+    REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-ObjC").has_value());
+    REQUIRE_FALSE(Compiler::dependency_cc_flag_refusal("-fopenmp").has_value());
 
-    // everything that loads code, reads a response file, or names a file to read or write
+    // plugins, response files, path-valued flags, outputs. `-fobjc-arc` is not `-F`
     REQUIRE(Compiler::dependency_cc_flag_refusal("-fplugin=/tmp/evil.so").has_value());
     REQUIRE(Compiler::dependency_cc_flag_refusal("-fpass-plugin=/tmp/evil.so").has_value());
     REQUIRE(Compiler::dependency_cc_flag_refusal("-Xclang").has_value());
@@ -123,7 +128,6 @@ TEST_CASE("a dependency's C flags are held to the allow-list", "[trust]")
     REQUIRE(Compiler::dependency_cc_flag_refusal("-fsanitize-ignorelist=/tmp/x").has_value());
     REQUIRE(Compiler::dependency_cc_flag_refusal("-load").has_value());
     REQUIRE(Compiler::dependency_cc_flag_refusal("-working-directory=/tmp").has_value());
-    REQUIRE(Compiler::dependency_cc_flag_refusal("-ObjC").has_value());
     REQUIRE(Compiler::dependency_cc_flag_refusal("-gen-reproducer").has_value());
 
     REQUIRE_FALSE(Compiler::dependency_cc_define_refusal("FOO").has_value());
@@ -183,6 +187,20 @@ TEST_CASE("a dependency's ordinary flags still build", "[trust]")
     const ProcessResult built = project.echoc("build -o out", project.root() / "app");
 
     REQUIRE(built.exit_code == 0);
+}
+
+TEST_CASE("a dependency's include flag is still refused", "[trust]")
+{
+    ScopedProject project("include_flag");
+    write_project(project.root(),
+        "#[cc: sources \"c/*.c\"]\n"
+        "#[cc: flag \"-I/etc\"]\n");
+
+    const ProcessResult built = project.echoc("build -o out", project.root() / "app");
+
+    REQUIRE(built.exit_code != 0);
+    REQUIRE(built.output.find("Dependency Refused") != std::string::npos);
+    REQUIRE(built.output.find("-I/etc") != std::string::npos);
 }
 
 TEST_CASE("a root's own flags are its business", "[trust]")

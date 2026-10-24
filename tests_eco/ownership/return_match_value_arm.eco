@@ -1,0 +1,43 @@
+// `return match { => $a }` hands `$a` over the way `return $a` does. consuming is the arm
+// value itself, not only a by-value call argument
+struct Buffer
+{
+    usize $tag;
+
+    constructor(usize $tag)
+    {
+        $this->tag = $tag;
+    }
+
+    constructor(const Buffer& $other)
+    {
+        echo 500;
+        $this->tag = $other->tag;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+enum Kind
+{
+    case go;
+    case stop;
+}
+
+function via_value() : Buffer
+{
+    Buffer $a = Buffer(7);
+
+    return match (Kind::go) {
+        Kind::go   => $a,
+        Kind::stop => {
+            die('no');
+        },
+    };
+}
+
+Buffer $b = via_value();
+echo $b->tag;

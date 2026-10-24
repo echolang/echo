@@ -1,0 +1,4 @@
+--- OUT --->
+3
+--- IR --->
+CHECK: define dso_local i32 @_addZZMLPiZMLPi

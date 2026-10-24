@@ -1,0 +1,68 @@
+// a declared `==` with a const-borrow left and a value right. the pointer arm used to claim
+// every `T&` as an address, so `$b == 1` never looked for the operator below
+
+struct Box
+{
+    int32 $n;
+}
+
+operator (const Box& $a) == (int32 $b) : int32
+{
+    if ($a->n == $b) {
+        return 1;
+    }
+
+    return 0;
+}
+
+operator (const Box& $a) == (int32? $b) : int32
+{
+    if ($b == null) {
+        return 2;
+    }
+
+    int32 $v = $b ?? 0;
+
+    if ($a->n == $v) {
+        return 1;
+    }
+
+    return 0;
+}
+
+operator (const Box& $a) > (int32 $b) : int32
+{
+    if ($a->n > $b) {
+        return 1;
+    }
+
+    return 0;
+}
+
+function through_borrow(const Box& $b) : int32
+{
+    return $b == 7;
+}
+
+class Holder
+{
+    public const Box $field;
+
+    constructor(Box $b)
+    {
+        $this->field = $b;
+    }
+}
+
+Box $box = Box(7);
+echo $box == 7;
+echo through_borrow($box);
+echo $box > 3;
+
+int32? $present = 7;
+int32? $absent = null;
+echo $box == $present;
+echo $box == $absent;
+
+Holder $h = Holder(Box(7));
+echo $h->field == 7;

@@ -58,6 +58,12 @@ ExprNode *place_anchor(ExprNode *expr)
                 expr = static_cast<AddrOfExprNode *>(expr)->operand;
                 break;
 
+            // a transfer of the same place. the spine has to follow it or `mv $x` at a
+            // borrow dest looks like it names no storage
+            case NodeType::n_expr_move:
+                expr = static_cast<MoveExprNode *>(expr)->operand;
+                break;
+
             case NodeType::n_expr_deref:
                 expr = static_cast<DerefExprNode *>(expr)->operand;
                 break;

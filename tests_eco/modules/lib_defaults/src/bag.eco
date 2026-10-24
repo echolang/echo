@@ -1,0 +1,16 @@
+namespace moddefaults;
+
+internal class Box
+{
+    int32 $n = 0;
+}
+
+public struct Bag
+{
+    internal Box $inner = Box();
+}
+
+public function n_of(const Bag& $b) : int32
+{
+    return $b->inner->n;
+}

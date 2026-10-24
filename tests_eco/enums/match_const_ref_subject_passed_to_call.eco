@@ -1,0 +1,56 @@
+// a local const& used as the match subject was copied when an arm passed it (or a binding)
+// on to a function: seating ran before settle_calls, empty candidates counted as a write,
+// and the const copy stuck. a const place cannot be written, so it stays a borrow
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        $this->n = $other->n;
+        echo 'copy';
+    }
+}
+
+enum Wrap
+{
+    case n(Item $x);
+    case empty;
+}
+
+function look(const Item& $item) : int32
+{
+    return $item->n;
+}
+
+function inspect(const Wrap& $w) : int32
+{
+    return 1;
+}
+
+function from_binding(const Wrap& $w) : int32
+{
+    return match ($w) {
+        Wrap::n($x)   => look($x),
+        Wrap::empty   => 0,
+    };
+}
+
+function from_subject(const Wrap& $w) : int32
+{
+    return match ($w) {
+        Wrap::n($x)   => inspect($w),
+        Wrap::empty   => 0,
+    };
+}
+
+Item $i = Item(7);
+Wrap $w = Wrap::n(mv $i);
+echo from_binding($w);
+echo from_subject($w);
+echo from_binding(Wrap::empty());

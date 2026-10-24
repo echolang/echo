@@ -1,0 +1,42 @@
+// a match over a const& parameter inside a generic used to copy the subject: MatchResolution
+// skips templates, and the instance froze `$__match` as a value. a copy ctor on the payload
+// is the observable; a borrow prints nothing
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        $this->n = $other->n;
+        echo 'copy';
+    }
+}
+
+enum Slot<T>
+{
+    case filled(T $v);
+    case empty;
+}
+
+function look(const Item& $item) : int32
+{
+    return $item->n;
+}
+
+function walk<T>(const Slot<T>& $s) : int32
+{
+    return match ($s) {
+        .filled($v) => look($v),
+        .empty      => 0,
+    };
+}
+
+Item $i = Item(7);
+Slot<Item> $s = Slot<Item>::filled(mv $i);
+echo walk($s);
+echo walk(Slot<Item>::empty());

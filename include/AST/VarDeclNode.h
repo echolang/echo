@@ -102,6 +102,10 @@ namespace AST
         // declaration*, not a distinction two types could be told apart by
         bool binds_unwrapped = false;
 
+        // a collection-literal hoist `$__litN`. last mention is a handover even off `return`:
+        // the temp dies with the statement, so a by-value argument takes it rather than a copy
+        bool statement_temp = false;
+
         // written `forEvent: string $name`: the call site must use `forEvent:`, not `$name:` and not
         // a positional. empty means the parameter may be positional or `$name:`.
         //

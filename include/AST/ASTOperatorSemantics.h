@@ -121,6 +121,14 @@ namespace AST
     // pointer arithmetic be emitted for a struct
     OperandFacts adjusted_operand(const ExprNode *expr);
 
+    // **a `ptr<T>`, whose identity is the address.** `T&` is the other pointer spelling: two of
+    // those still compare as addresses (`$r:$ == $again:$`), but a borrow against a value
+    // (`const Foo& == 1`) looks for a declared operator. `ptr<T>` vs `T&` is only `t_nullable`
+    inline bool is_address_operand(const ValueType &type)
+    {
+        return type.is_pointer() && type.is_nullable();
+    }
+
     // **does codegen lower this operator directly for these operands?**
     //
     // false is what makes a use site look for a declared `operator`, and it is also what the type

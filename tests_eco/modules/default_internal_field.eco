@@ -1,0 +1,4 @@
+// a field default that names an internal type is evaluated at the type, so a
+// caller in another module can write Bag() without naming Box
+moddefaults::Bag $b = moddefaults::Bag();
+echo moddefaults::n_of($b);

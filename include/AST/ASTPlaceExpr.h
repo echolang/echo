@@ -80,8 +80,9 @@ namespace AST
             // already values that *mean* an address; giving one storage hands out a ptr<ptr<T>>
             case NodeType::n_expr_addrof:
             case NodeType::n_expr_peel:
-            // a transient marker saying a *place* is being handed over. the storage question is about
-            // its operand, and a `mv` that survives to codegen is a compiler defect either way
+            // a transient marker saying a *place* is being handed over. the tag cannot see the
+            // operand, so this is addressless; storage_of(const ExprNode&) peels and asks it.
+            // a `mv` that survives to codegen is a compiler defect either way
             case NodeType::n_expr_move:
             // likewise transient: a constant reference is replaced by a clone of the constant's
             // initializer before anything asks about storage, and whatever *that* is answers for it. one
@@ -119,6 +120,24 @@ namespace AST
             default:
                 return StorageClass::t_materializable;
         }
+    }
+
+    // a `mv` is a transfer of whatever the operand is. the tag cannot see that operand, so
+    // storage_of is addressless; argument_fit peels before asking is_place_expression so a
+    // borrow dest still ranks `mv $x`. peeling in storage_of made `guard mv $maybe` look like
+    // a T? place and copy a unique payload
+    inline ExprNode *peel_move(ExprNode *expr)
+    {
+        while (expr != nullptr && expr->get_node_type() == NodeType::n_expr_move) {
+            expr = static_cast<MoveExprNode *>(expr)->operand;
+        }
+
+        return expr;
+    }
+
+    inline const ExprNode *peel_move(const ExprNode *expr)
+    {
+        return peel_move(const_cast<ExprNode *>(expr));
     }
 
     inline StorageClass storage_of(const ExprNode &expr)

@@ -1,0 +1,11 @@
+// a one-field class's memberwise constructor takes the field, so `Bag([7, 9])` dest-types
+// as `array<int32>`, not as a fill of Bag itself (bound_type is not claimed when fill is none)
+class Bag
+{
+    array<int32> $items;
+}
+
+$b = Bag([7, 9]);
+echo $b->items->count();
+echo $b->items[0];
+echo $b->items[1];

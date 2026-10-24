@@ -1,0 +1,20 @@
+// rc's constructor takes the payload by value and seats it; that seating is a move
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        $this->n = $other->n;
+        echo 'copy';
+    }
+}
+
+Item $i = Item(7);
+rc<Item> $r = rc<Item>(mv $i);
+echo $r->value->n;

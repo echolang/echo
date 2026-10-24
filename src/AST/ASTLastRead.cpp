@@ -7,6 +7,7 @@
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ExprNode.h"
 #include "AST/ForStatementNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/MatchExprNode.h"
 #include "AST/OperatorNode.h"
@@ -35,6 +36,16 @@ namespace
         }
     };
 
+    bool argument_takes_value(const AST::FunctionCallExprNode &node, size_t i)
+    {
+        if (node.decl == nullptr || i >= node.decl->args.size()) {
+            return false;
+        }
+
+        const AST::VarDeclNode *param = node.decl->args[i];
+        return param != nullptr && param->has_type() && !param->type().is_pointer();
+    }
+
     // one appearance of a declaration in the body. every way a place can name one bottoms out at a
     // VarRefNode - a read, an assignment's target, the operand of an `&`, a member or index base - so
     // that is the whole of what the walk has to record, and the node is kept because it is what
@@ -45,6 +56,12 @@ namespace
         const AST::ExprNode *node = nullptr;
         size_t statement = 0;
         bool returning = false;
+        // 0: not in a returning match. sibling arms of one returning match share a group so
+        // each arm's last mention of a decl can all be handovers (`return match { => f($x) }`)
+        size_t match_group = 0;
+        // a by-value destination: the arm value of a `return match`, or a by-value argument.
+        // a borrow (`label($sys)`, `$x->tag`) is a last mention that does not consume
+        bool consuming = false;
         Position at;
     };
 
@@ -63,8 +80,15 @@ namespace
 
         // did any mention at all sit under a `return`? a hand-over is one by definition, so a body
         // where this stayed false has an empty answer and owes none of the work below - which is
-        // every void function, every constructor and every file root
+        // every void function, every constructor and every file root. a statement-temp mention is
+        // the other reason to keep going: `f([1, 2])` on a file root has no return
         bool saw_returning = false;
+        bool saw_statement_temp = false;
+
+        // completing arms of a returning match, keyed by match_group. a group hands `$x` over
+        // only when every completing arm consumes it; mixed take/read copies, it does not
+        // ConditionalMove (libtcp `failure()`)
+        std::unordered_map<size_t, size_t> completing_arms;
 
         void seed_parameter(const AST::VarDeclNode *decl)
         {
@@ -110,11 +134,34 @@ namespace
         void visitVarRef(AST::VarRefNode &node) override
         {
             if (const AST::VarDeclNode *decl = AST::place_root_of(&node)) {
-                mentions.push_back(Mention{decl, &node, _statement, _returning, _position});
+                mentions.push_back(Mention{
+                    decl, &node, _statement, _returning, _match_group, _consuming, _position});
                 saw_returning |= _returning;
+                saw_statement_temp |= decl->statement_temp;
             }
 
             AST::RecursiveVisitor::visitVarRef(node);
+        }
+
+        AST::ExprNode *rewrite_place_edge(AST::ExprNode *expr) override
+        {
+            const bool was = _consuming;
+            _consuming = false;
+            AST::ExprNode *out = AST::RecursiveVisitor::rewrite_place_edge(expr);
+            _consuming = was;
+            return out;
+        }
+
+        void visitFunctionCallExpr(AST::FunctionCallExprNode &node) override
+        {
+            type_edges(node.explicit_type_args);
+
+            for (size_t i = 0; i < node.arguments.size(); i++) {
+                const bool was = _consuming;
+                _consuming = argument_takes_value(node, i);
+                value_edge(node.arguments[i]);
+                _consuming = was;
+            }
         }
 
         void visitWhileStatement(AST::WhileStatementNode &node) override
@@ -144,27 +191,41 @@ namespace
         {
             statement_edge(node.subject);
 
+            // a match that *is* the operand of a `return` ends the function on every completing
+            // arm, the same way `if { return f($x); }` does. incrementing branches made
+            // `return match { => f($x) }` copy. sibling arms share a group so each arm's
+            // last mention can all be handovers; a later mention after the match replaces them
+            const size_t enclosing_stmt = _statement;
+            const size_t group = _returning ? ++_match_groups : 0;
+            const size_t saved_group = _match_group;
+
             for (AST::MatchExprNode::Arm &arm : node.arms) {
-                // **the same walk_arm an `if` gets.** an arm that always leaves does not rejoin,
-                // and a match that *is* the operand of a `return` does not rejoin with later uses
-                // of a local either - the function is over. incrementing unconditionally made
-                // `return match { => .ok($out) }` copy where `if { return .ok($out); }` handed over
                 const bool leaves =
                     (arm.scope != nullptr && AST::scope_always_exits(*arm.scope))
                     || (arm.value != nullptr && AST::expression_never_returns(*arm.value));
 
-                // `_returning` is not a reason to skip the increment: a match used as a
-                // return value still joins its arms at a phi, and handing over on one arm
-                // only is the conditional move OwnershipPass reports. skip only when the
-                // arm itself always leaves, the same walk_arm an `if` gets
-                const bool rejoins = !leaves;
+                if (group != 0 && !leaves) {
+                    completing_arms[group]++;
+                }
+
+                const bool rejoins = !leaves && !_returning;
 
                 if (rejoins) {
                     _position.branches++;
                 }
 
+                _match_group = group;
+                _statement = ++_statements;
+
                 statement_edge(arm.scope);
+
+                const bool was_consuming = _consuming;
+                _consuming = group != 0;
                 value_edge(arm.value);
+                _consuming = was_consuming;
+
+                _statement = enclosing_stmt;
+                _match_group = saved_group;
 
                 if (rejoins) {
                     _position.branches--;
@@ -261,9 +322,13 @@ namespace
         Position _position;
 
         bool _returning = false;
+        bool _consuming = false;
 
         size_t _statements = 0;
         size_t _statement = 0;
+
+        size_t _match_groups = 0;
+        size_t _match_group = 0;
     };
 }
 
@@ -280,9 +345,9 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
 
     body.accept(collector);
 
-    // **nothing under a `return` means nothing to hand over**, and saying so here is what keeps the two
-    // maps below off every body that could never have an answer
-    if (!collector.saw_returning) {
+    // **nothing under a `return` and no statement-temp means nothing to hand over**, and saying
+    // so here is what keeps the two maps below off every body that could never have an answer
+    if (!collector.saw_returning && !collector.saw_statement_temp) {
         return {};
     }
 
@@ -290,8 +355,7 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
     // over the list, since a later mention simply replaces the candidate an earlier one left
     struct Candidate
     {
-        size_t index = 0;
-        bool seen = false;
+        std::vector<size_t> indices;
         bool shared_statement = false;
     };
 
@@ -302,16 +366,35 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
 
         Candidate &candidate = last[mention.decl];
 
-        // a second mention in the statement the candidate sits in **disqualifies that candidate**
-        // rather than replacing it, which is the whole of the aliasing rule: a statement naming the
-        // declaration twice has one of the two handing the value over while the other still reads it
-        if (candidate.seen && collector.mentions[candidate.index].statement == mention.statement) {
-            candidate.shared_statement = true;
-            continue;
+        if (!candidate.indices.empty()) {
+            bool sibling = false;
+
+            for (size_t prev_i : candidate.indices) {
+                const Mention &prev = collector.mentions[prev_i];
+
+                if (prev.statement == mention.statement) {
+                    candidate.shared_statement = true;
+                    sibling = true;
+                    break;
+                }
+
+                if (prev.match_group != 0 && prev.match_group == mention.match_group) {
+                    sibling = true;
+                    break;
+                }
+            }
+
+            if (candidate.shared_statement) {
+                continue;
+            }
+
+            if (sibling) {
+                candidate.indices.push_back(i);
+                continue;
+            }
         }
 
-        candidate.index = i;
-        candidate.seen = true;
+        candidate.indices = {i};
         candidate.shared_statement = false;
     }
 
@@ -322,21 +405,48 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
             continue;
         }
 
-        // a declaration this walk never reached is not the body's to hand over - a capture read back
-        // off a closure's environment, or a place whose root resolved to somewhere else entirely
         const auto declared = collector.declared.find(decl);
 
         if (declared == collector.declared.end()) {
             continue;
         }
 
-        const Mention &mention = collector.mentions[candidate.index];
+        const Mention &head = collector.mentions[candidate.indices.front()];
 
-        if (!mention.returning || !(mention.at == declared->second)) {
-            continue;
+        if (head.match_group != 0) {
+            const size_t completing = collector.completing_arms[head.match_group];
+            size_t consuming_arms = 0;
+            bool all_consume = true;
+
+            for (size_t index : candidate.indices) {
+                if (!collector.mentions[index].consuming) {
+                    all_consume = false;
+                    break;
+                }
+
+                consuming_arms++;
+            }
+
+            // mixed take/read, or a completing arm that never names the decl: copy, do not
+            // ConditionalMove. every completing arm consuming is `return f($x)` / `=> $x`
+            if (!all_consume || consuming_arms != completing) {
+                continue;
+            }
         }
 
-        reads.insert(mention.node);
+        const bool hoist_temp = decl->statement_temp;
+
+        for (size_t index : candidate.indices) {
+            const Mention &mention = collector.mentions[index];
+
+            if (!(mention.at == declared->second)) {
+                continue;
+            }
+
+            if (hoist_temp || mention.returning) {
+                reads.insert(mention.node);
+            }
+        }
     }
 
     return reads;

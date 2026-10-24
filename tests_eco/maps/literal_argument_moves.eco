@@ -1,0 +1,30 @@
+// a map-literal argument used to copy `$__lit` into the parameter. last mention of the
+// statement temp takes it
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        $this->n = $other->n;
+        echo 'copy';
+    }
+}
+
+function take(map<string, Item> $m) : int32
+{
+    return $m['a']->n;
+}
+
+function borrow(const map<string, Item>& $m) : int32
+{
+    return $m['a']->n;
+}
+
+echo take(['a' => Item(7)]);
+echo borrow(['a' => Item(8)]);

@@ -485,6 +485,7 @@ ExprNode *CollectionLiteralExpansion::hoist(
         _module.make_virtual_token(
             fmt::format("$__lit{}", ++_hoist_count), Token::Type::t_varname, literal.token_bracket),
         &_module.nodes.emplace_back<TypeNode>(*literal.bound_type));
+    decl.statement_temp = true;
 
     std::vector<NodeReference> appends;
 

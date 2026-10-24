@@ -469,6 +469,17 @@ void TypeLowering::apply_function_attributes(
     // promise the optimizer has to keep", so `inlinehint` fits that wording where `alwaysinline` would
     // contradict it. the attribute is what makes the placement `#[inline]` already buys worth something -
     // the body was being copied into every referencing unit and then judged on cost alone
+    // Echo functions of one program live in one image. without dso_local they are
+    // interposable: Darwin/ELF emit stubs and LLVM will not inline, even after
+    // `--optimize whole` merges units. extern and `#[export]` stay the ABI
+    const AST::FunctionEmission kind = AST::function_emission_kind(node);
+
+    if (kind != AST::FunctionEmission::t_extern_symbol
+        && kind != AST::FunctionEmission::t_no_symbol
+        && !node->export_name) {
+        func->setDSOLocal(true);
+    }
+
     if (node->is_inline) {
         func->addFnAttr(llvm::Attribute::InlineHint);
     }

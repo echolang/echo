@@ -59,13 +59,20 @@ bool AST::bind_array_literal_to(
         return false;
     }
 
+    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
+
+    // a dest that cannot fill this shape (a one-field class, a struct with no `[]=`) must not
+    // claim bound_type: it is idempotent, so a first bind against the constructed type would
+    // poison the memberwise constructor's array parameter. empty `[]` at a map is t_keyed
+    if (fill.kind == CollectionFill::Kind::t_none) {
+        return false;
+    }
+
     // idempotent, so the round that binds it and every round after read the same answer. the expansion
     // is decided against this type, and a second opinion arriving later would decide it twice
     if (!literal->bound_type.has_value()) {
         literal->bound_type = wanted;
     }
-
-    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
 
     if (fill.kind == CollectionFill::Kind::t_inline
         || fill.kind == CollectionFill::Kind::t_append

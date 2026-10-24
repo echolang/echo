@@ -47,21 +47,23 @@ bool AST::bind_map_literal_to(
         return false;
     }
 
+    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
+
+    if (fill.kind != CollectionFill::Kind::t_keyed) {
+        return false;
+    }
+
     if (!literal->bound_type.has_value()) {
         literal->bound_type = wanted;
     }
 
-    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
+    for (MapLiteralExprNode::Entry &entry : literal->entries) {
+        if (!is_undetermined_type(fill.key)) {
+            bind_collection_literal_to(entry.key, fill.key, collector);
+        }
 
-    if (fill.kind == CollectionFill::Kind::t_keyed) {
-        for (MapLiteralExprNode::Entry &entry : literal->entries) {
-            if (!is_undetermined_type(fill.key)) {
-                bind_collection_literal_to(entry.key, fill.key, collector);
-            }
-
-            if (!is_undetermined_type(fill.value)) {
-                bind_collection_literal_to(entry.value, fill.value, collector);
-            }
+        if (!is_undetermined_type(fill.value)) {
+            bind_collection_literal_to(entry.value, fill.value, collector);
         }
     }
 

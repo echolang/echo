@@ -33,6 +33,6 @@ public class rc<T>
 
     public constructor(T $value)
     {
-        $this->value = $value;
+        $this->value = mv $value;
     }
 }

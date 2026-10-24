@@ -7,9 +7,12 @@
 # declaration is its local, so the ordinary reverse-order frame drop destroys it where the statement
 # ends rather than where the enclosing block does. a declaration is the one statement that is *not*
 # wrapped - that is B33, and a different case
+#
+# by value takes the hoist (last mention of the statement temp): no copy constructor, and no
+# drop of `$__lit1` - the parameter owns it
 CHECK: vardecl<type<array<int32>>>($__lit1) = call array()
-CHECK: call echo(call total(call array(addrof<array<int32>&>(varref<array<int32>>(var($__lit1)))
-CHECK: call $deinit(addrof<array<int32>&>(varref<array<int32>>(var($__lit1))))
+CHECK: call echo(call total(varref<array<int32>>(var($__lit1)))
+CHECK-NOT: $__lit1
 
 # a borrow parameter takes the hoisted declaration as an ordinary place - t_borrow, not a temporary
 CHECK: call echo(call totalb(addrof<array<int32>&>(varref<array<int32>>(var($__lit2))))

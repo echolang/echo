@@ -12,7 +12,7 @@ CHECK: [unit main]
 # `nonnull` is the type system's own claim about a borrow, finally said out loud - `T&` differs from
 # `ptr<T>` by one bit on ValueType and both used to lower to a bare `ptr`. `nocapture` and `readonly` are
 # LLVM's, derived from a body it can now reason about
-CHECK: define i32 @_totalZZMRBCLC5arrayIMLPiE(ptr
+CHECK: define dso_local i32 @_totalZZMRBCLC5arrayIMLPiE(ptr
 CHECK: nonnull
 CHECK: readonly
 

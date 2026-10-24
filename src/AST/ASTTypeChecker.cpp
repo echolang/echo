@@ -1356,6 +1356,12 @@ void TypeChecker::check_abi_slot_symbol(FunctionCallExprNode &node)
 
 ExprNode *TypeChecker::rewrite_value_edge(ExprNode *expr)
 {
+    // a cloned parameter default was already checked at the declaration, at the callee's
+    // origin. walking it here would judge `internal` names at the caller's module
+    if (expr != nullptr && expr->from_parameter_default) {
+        return expr;
+    }
+
     ExprNode *walked = RecursiveVisitor::rewrite_value_edge(expr);
     check_value_is_produced(walked);
     return walked;

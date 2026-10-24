@@ -31,6 +31,7 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/TypeNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
@@ -629,7 +630,10 @@ void OperatorRewriter::visitScope(ScopeNode &node)
         std::vector<NodeReference> outer;
         outer.swap(_hoisted);
 
+        const bool was_in_statement = _in_scope_statement;
+        _in_scope_statement = true;
         statement_edge(node.children[i].node());
+        _in_scope_statement = was_in_statement;
 
         if (!_hoisted.empty()) {
             assert_region_accepts_mutation(_current_function, _current_file);
@@ -661,7 +665,12 @@ void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
 
     FunctionDeclNode *enclosing = _current_function;
     _current_function = &node;
+    // param defaults are not a visitScope child: a hoist left in `_hoisted` would plant on the
+    // file root, and the function would read a `$__lit` it never allocated
+    const bool was_in_statement = _in_scope_statement;
+    _in_scope_statement = false;
     RecursiveVisitor::visitFunctionDecl(node);
+    _in_scope_statement = was_in_statement;
     _current_function = enclosing;
 
     if (settled) {
@@ -669,6 +678,16 @@ void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
     }
 
     _changed = _changed || changed_before;
+}
+
+void OperatorRewriter::visit_type_decl(TypeDeclNode &node)
+{
+    // property defaults are the same hole as param defaults: walked from the type declaration,
+    // not from a scope child
+    const bool was_in_statement = _in_scope_statement;
+    _in_scope_statement = false;
+    RecursiveVisitor::visit_type_decl(node);
+    _in_scope_statement = was_in_statement;
 }
 
 void OperatorRewriter::visitVarDecl(VarDeclNode &node)
@@ -925,16 +944,39 @@ void OperatorRewriter::value_edges_except_untyped_collections(std::vector<ExprNo
     }
 }
 
+void OperatorRewriter::bind_call_arguments(
+    std::vector<ExprNode *> &arguments,
+    const TokenReference &at
+)
+{
+    // a statement child leaves `$__lit` in `_hoisted` for visitScope
+    if (_in_scope_statement) {
+        value_edges_except_untyped_collections(arguments);
+        return;
+    }
+
+    for (ExprNode *&arg : arguments) {
+        CollectionLiteralExprNode *literal = collection_literal_of(arg);
+
+        if (literal != nullptr && !literal->bound_type.has_value() && !_finalizing) {
+            continue;
+        }
+
+        // a constructor init, a cloned default, and a TemporaryBind body have no sibling slot
+        bind_value_if_hoisted(arg, at);
+    }
+}
+
 void OperatorRewriter::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
     type_edges(node.explicit_type_args);
-    value_edges_except_untyped_collections(node.arguments);
+    bind_call_arguments(node.arguments, node.token_function_name);
 }
 
 void OperatorRewriter::visit_indirect_call_expr(IndirectCallExprNode &node)
 {
     value_edge(node.callee);
-    value_edges_except_untyped_collections(node.arguments);
+    bind_call_arguments(node.arguments, node.token);
 }
 
 void OperatorRewriter::visit_index_expr(IndexExprNode &node)

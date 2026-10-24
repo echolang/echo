@@ -290,6 +290,25 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
     }
 }
 
+TEST_CASE("storage_of of a move is addressless; place_root_of follows it", "[AST][pointer]")
+{
+    // the tag cannot see the operand. argument_fit peels before ranking a borrow;
+    // place_anchor follows so `mv $x` still names the local
+    auto bundle = EchoTests::tests_make_parsed_bundle("$a = 1;\necho $a;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *var_ref = first_of<VarRefNode>(*bundle);
+    REQUIRE(var_ref != nullptr);
+    REQUIRE(storage_of(*var_ref) == StorageClass::t_place);
+    REQUIRE(storage_of(NodeType::n_expr_move) == StorageClass::t_addressless);
+
+    auto &move = bundle->modules.find_module("test").nodes.emplace_back<MoveExprNode>(
+        var_ref, var_ref->get_var().use_token());
+    REQUIRE(storage_of(move) == StorageClass::t_addressless);
+    REQUIRE_FALSE(is_place_expression(move));
+    REQUIRE(place_root_of(&move) == place_root_of(var_ref));
+}
+
 TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
 {
     // is_assignable_target is deliberately one wider than is_place_expression: `$p:$ = &$b`

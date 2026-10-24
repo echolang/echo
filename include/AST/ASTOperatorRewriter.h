@@ -25,6 +25,7 @@ namespace AST
     class IndexExprNode;
     class MatchExprNode;
     class ScopeNode;
+    class TypeDeclNode;
     class WhileStatementNode;
     class ForStatementNode;
 
@@ -50,6 +51,7 @@ namespace AST
         // the arms whose work is not the base's descent. everything else inherits it
         void visitScope(ScopeNode &node) override;
         void visitFunctionDecl(FunctionDeclNode &node) override;
+        void visit_type_decl(TypeDeclNode &node) override;
         void visitVarDecl(VarDeclNode &node) override;
         void visit_assign(AssignNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
@@ -150,6 +152,14 @@ namespace AST
         // bound_type is idempotent; CallResolver types call arguments after this pass
         void value_edges_except_untyped_collections(std::vector<ExprNode *> &arguments);
 
+        // the same skip. a statement child leaves `$__lit` in `_hoisted` for visitScope to plant;
+        // a constructor init, a cloned default, and a TemporaryBind body have no sibling slot, so
+        // those wrap the argument themselves
+        void bind_call_arguments(
+            std::vector<ExprNode *> &arguments,
+            const TokenReference &at
+        );
+
         // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.
         // AST::CollectionLiteralExpansion is the rewrite; this walk places what it returns. a statement
         // whose type is not concrete yet is left for a later round, exactly as an index is
@@ -162,6 +172,11 @@ namespace AST
         // not an index) are a refusal. a loop condition wraps the same way, or the
         // array would be built once above the loop
         std::vector<NodeReference> _hoisted;
+
+        // true while visitScope is inside statement_edge of one of its children, so a call argument
+        // can leave `$__lit` in `_hoisted` for that plant. param and property defaults clear it:
+        // those walks are not a scope child, and a leftover hoist lands on the file root
+        bool _in_scope_statement = false;
 
         // **the statements rule 6 discarded, batched.** AST::forget_subtree hands its walk to
         // NodeCollection::forget, which is an erase-remove over every bucket of every module - so one call

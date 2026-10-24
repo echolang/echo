@@ -1,0 +1,49 @@
+// the legal twin of `errors/return_match_mixed_move`: the read arm returns first, then every
+// remaining arm takes `$sys`. libtcp `failure()` after the split
+struct Sys
+{
+    string $message;
+}
+
+enum Kind
+{
+    case take;
+    case read;
+    case other;
+}
+
+enum Error
+{
+    case boxed(Sys $sys);
+    case text(string $why);
+}
+
+function label(const Sys& $s) : string
+{
+    return $s->message;
+}
+
+function failure(Kind $kind) : Error
+{
+    Sys $sys = Sys('os');
+    if ($kind == Kind::read) {
+        return .text(label($sys));
+    }
+
+    return match ($kind) {
+        Kind::take => .boxed($sys),
+        else => .boxed($sys),
+    };
+}
+
+function describe(Error $e) : string
+{
+    return match ($e) {
+        Error::boxed($s) => $s->message,
+        Error::text($w) => $w,
+    };
+}
+
+echo describe(failure(.take));
+echo describe(failure(.read));
+echo describe(failure(.other));

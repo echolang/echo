@@ -415,6 +415,7 @@ namespace
         default_ctor.ast_namespace = type.ast_namespace;
         default_ctor.type_parameters = type.type_parameters();
         default_ctor.inherited_type_param_count = default_ctor.type_parameters.size();
+        default_ctor.declared_in = type.complex_type().declared_in;
 
         type.set_synthesized_constructor(&default_ctor);
 

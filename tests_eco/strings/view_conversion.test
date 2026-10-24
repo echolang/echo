@@ -15,7 +15,7 @@ flags: --optimize none
 # --optimize none so the prologue stays: whole-program O3 SROAs the i128 into a shift and inlines
 # `show`, which is the win and not the lowering this case pins
 
-CHECK: define void @_showZZMLCN6string4viewE(i128
+CHECK: define dso_local void @_showZZMLCN6string4viewE(i128
 CHECK: alloca %view
 CHECK-NOT: llvm.memcpy
 CHECK: store i128

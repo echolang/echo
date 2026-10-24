@@ -44,8 +44,10 @@ namespace
         // than from a static: wrapping a payload with no null value of its own is a type, not a flag
         ValueType wrapped_i32;
         ValueType address = ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), true);
+        ValueType borrow = ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), false);
 
         ValueType structure;
+        ValueType struct_borrow;
         ValueType handle;
         ValueType nullable_handle;
         ValueType weak_handle;
@@ -66,6 +68,7 @@ namespace
         auto &module = out.bundle->modules.find_module("test");
 
         out.structure = EchoTests::type_named(module, "P")->value_type();
+        out.struct_borrow = ValueType::make_pointer(out.structure, false);
         out.handle = EchoTests::type_named(module, "C")->value_type();
         out.nullable_handle = ValueType::make_nullable(out.handle);
         out.weak_handle = ValueType::make_weak(out.handle);
@@ -154,6 +157,18 @@ TEST_CASE("binary_has_builtin_meaning keeps a BinaryExprNode when the parser sho
         { Token::Type::t_op_add, value(s.address), value(s.address), false, "two addresses cannot be added" },
         { Token::Type::t_op_add, value(s.address), value(s.i32), true, "an address offsets by an element count" },
         { Token::Type::t_op_mul, value(s.address), value(s.i32), false, "and is not scaled" },
+        { Token::Type::t_logical_eq, value(s.address), value(s.i32), true, "a ptr against a number is still an address comparison" },
+        { Token::Type::t_logical_eq, value(s.borrow), value(s.borrow), true, "two borrows compare as addresses" },
+        { Token::Type::t_logical_eq, value(s.address), value(s.borrow), true, "ptr vs T& is two addresses" },
+
+        // **a borrow against a value is not an address comparison.** `T&` vs `ptr<T>` is only
+        // t_nullable, and treating both as addresses made `const Foo& == 1` never look for an operator
+        { Token::Type::t_logical_eq, value(s.borrow), value(s.i32), false, "a borrow against a value looks for an operator" },
+        { Token::Type::t_logical_neq, value(s.borrow), value(s.i32), false, "nor !=" },
+        { Token::Type::t_open_angle, value(s.borrow), value(s.i32), false, "nor ordering" },
+        { Token::Type::t_op_add, value(s.borrow), value(s.i32), false, "and is not offset" },
+        { Token::Type::t_logical_eq, value(s.struct_borrow), value(s.i32), false, "a struct borrow looks for a declaration" },
+        { Token::Type::t_logical_eq, value(s.struct_borrow), value(s.wrapped_i32), false, "and so does one against a T?" },
 
         // **a value that may be absent has no arithmetic.** the one row here that pins a wrong *answer*
         // rather than a missing one: is_integer_type() is true for an `int32?`, so two of them used to
@@ -273,6 +288,17 @@ TEST_CASE("binary_has_builtin_meaning keeps a BinaryExprNode when the parser sho
     const auto struct_null = binary_operand_refusal(eq, value(s.structure), written_null());
     REQUIRE(struct_null.has_value());
     REQUIRE(*struct_null == "cannot compare 'P' against null - it is always there, write 'P?' if it may be absent");
+
+    const Operator *lt = op_for(registry, Token::Type::t_open_angle);
+    REQUIRE(lt != nullptr);
+    REQUIRE_FALSE(binary_operand_refusal(eq, value(s.struct_borrow), value(s.i32)).has_value());
+    REQUIRE_FALSE(binary_operand_refusal(eq, value(s.struct_borrow), value(s.wrapped_i32)).has_value());
+    REQUIRE_FALSE(binary_operand_refusal(lt, value(s.borrow), value(s.i32)).has_value());
+    REQUIRE_FALSE(binary_operand_refusal(eq, value(s.borrow), value(s.borrow)).has_value());
+    REQUIRE_FALSE(binary_operand_refusal(eq, value(s.address), value(s.borrow)).has_value());
+    const auto address_vs_value = binary_operand_refusal(eq, value(s.address), value(s.i32));
+    REQUIRE(address_vs_value.has_value());
+    REQUIRE(*address_vs_value == "cannot compare 'ptr<int32>' against 'int32' - an address only compares against another address");
 }
 
 TEST_CASE("a vector operator the language owns is refused in one place", "[AST][operators][simd]")

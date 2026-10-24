@@ -8,7 +8,7 @@
 balanced
 --- IR --->
 # `Box<array<int32>>` owns its item, so it has a teardown, and the element type is in the symbol
-CHECK: define linkonce_odr void @"_M3BoxIMLC5arrayIMLPiEE_$deinit
+CHECK: define linkonce_odr dso_local void @"_M3BoxIMLC5arrayIMLPiEE_$deinit
 
 # and `Box<int32>` owes nothing, so nothing was written for it. the `I..E` between the owner segment and
 # `_$deinit` is where its argument would be

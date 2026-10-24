@@ -1921,14 +1921,9 @@ static std::optional<int> compile_and_link_program(
     return std::nullopt;
 }
 
-// **everything between a parsed bundle and a JIT that can be asked for an address**, shared by the two
-// Unix subcommands that run one: the cache plan, the link requirements, the C modules, the native
-// libraries the JIT must have open before it resolves a symbol, then codegen and the whole-program
-// optimizer.
-//
-// `run` and `test` do the same work here and differ only in what they do with the compiler afterwards - one
-// runs the program, the other calls one definition at a time - so this is one function rather than the two
-// copies it was, which is what keeps a change to the JIT path from having to be remembered twice.
+// **everything between a parsed bundle and a JIT that can be asked for an address.** `run` takes this
+// path when it cannot exec a host binary (`--explain prune`, a foreign `--target-os`). `echoc test`
+// links a runner instead.
 //
 // nullopt is success; anything else is the exit status the subcommand owes its caller
 static std::optional<int> prepare_jit(
@@ -1936,7 +1931,6 @@ static std::optional<int> prepare_jit(
     const AST::DiagnosticRenderer &diagnostics,
     FrontEnd &front,
     AST::Bundle &bundle,
-    bool test_mode,
     LLVMCompiler &compiler
 )
 {
@@ -1966,10 +1960,6 @@ static std::optional<int> prepare_jit(
     }
 
     compiler.set_entry(front.entry_module(), front.entry_file());
-
-    // **no file root becomes the program.** Whatever application this module is does not run: a test asked
-    // for is a test, not a test after the program it sits beside
-    compiler.set_test_mode(test_mode);
 
     try {
         Compiler::ScopedPhase phase("codegen");
@@ -2100,7 +2090,7 @@ int main_run(
         (void)environment;
     } else {
         if (const std::optional<int> failed = prepare_jit(
-                driver, diagnostics, front, bundle, /*test_mode=*/false, compiler)) {
+                driver, diagnostics, front, bundle, compiler)) {
             return failed.value();
         }
 
@@ -2214,9 +2204,9 @@ static bool resolve_test_selection(
 
 // **compiles the module and runs its tests, each in a process of its own.**
 //
-// Unix shares prepare_jit with `run` so the two cannot drift. Windows (no fork into a JIT) compiles
-// a linked runner through compile_and_link_program - the same function `build` uses - and spawns
-// it once per test. Isolation is "one process per test"; fork vs. spawn is TestRunner's question.
+// links a runner through compile_and_link_program - the same function `build` uses - and spawns
+// it once per test. Isolation is one process per test; the runner's `main` dispatches on
+// ECO_INTERNAL_RUN_TEST. a runtime that cannot survive fork-without-exec initialises in the child
 int main_test(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
@@ -2282,13 +2272,11 @@ int main_test(
 
     compiler.set_test_symbols(roots);
 
-    std::filesystem::path runner;
-
-#if defined(_WIN32)
     (void)environment;
 
-    // no fork into this process's JIT: compile a runner through the same emit+link
-    // `build` uses, whose `main` dispatches on ECO_INTERNAL_RUN_TEST
+    // a linked runner through the same emit+link `build` uses, whose `main` dispatches on
+    // ECO_INTERNAL_RUN_TEST. spawning it is a fresh process image, so a framework that
+    // cannot survive fork-without-exec initialises in the child
     compiler.set_entry(front.entry_module(), front.entry_file());
     compiler.set_test_mode(true);
     compiler.set_native_test_runner(true);
@@ -2297,42 +2285,14 @@ int main_test(
         driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
         /*bypassed=*/true);
 
-    runner = Compiler::CodegenTarget{}.output_path(front.layout().scratch_dir() / "eco_tests");
+    const std::filesystem::path runner =
+        Compiler::CodegenTarget{}.output_path(front.layout().scratch_dir() / "eco_tests");
 
     if (const std::optional<int> failed = compile_and_link_program(
             driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
             driver.whole_program)) {
         return failed.value();
     }
-#else
-    if (const std::optional<int> failed = prepare_jit(
-            driver, diagnostics, front, bundle, /*test_mode=*/true, compiler)) {
-        return failed.value();
-    }
-
-    // **the selected tests are the prune's roots**, beside `main`. Without this the JIT deletes every one of
-    // them - nothing reaches a test from the entry point, that being the whole of what a test is - and
-    // function_address answers 0 for each. It also means `--filter` narrows the machine code and not only
-    // the run
-    compiler.set_jit_roots(std::move(roots));
-
-    if (!compiler.prepare_execution()) {
-        return 1;
-    }
-
-    // the prologue, once, so `std::env::args()` inside a test reads the process the tests were started from.
-    // `main` in test mode is that capture and a `ret 0`, so this runs no statement anybody wrote
-    {
-        Compiler::ScopedPhase running("program");
-
-        std::vector<std::string> argv = { program_name(driver, program) };
-
-        if (compiler.run_main(argv, environment) != 0) {
-            diagnostics.render_untyped("Test Prologue Failed", "the compiled entry point did not return 0, so the tests were not started.");
-            return 1;
-        }
-    }
-#endif
 
     // **the facts main() settled, never a second resolve.** Two places deciding independently whether to
     // emit an escape sequence is how a redirected stream ends up with half of them in it - and these are
@@ -2346,32 +2306,11 @@ int main_test(
     reporter.begin(selected.size());
 
     for (const Compiler::TestCase &test : selected) {
-#if defined(_WIN32)
         reporter.result(Compiler::run_test_isolated(
             test, { runner.string() }, driver.timeout_ms));
-#else
-        const uint64_t address = compiler.function_address(test.symbol);
-
-        // **loud rather than a call through null.** A test the prune dropped is a mistake in the root set
-        // above, and there is no version of it that reads as a test failing
-        if (address == 0) {
-            diagnostics.render_untyped("Test Not Emitted", fmt::format(
-                "internal: '{}' has no compiled body under '{}', so it cannot be run.",
-                Compiler::test_display_name(test), test.symbol));
-            return 1;
-        }
-
-        reporter.result(Compiler::run_test_isolated(test, [address]() {
-            reinterpret_cast<void (*)()>(address)();
-        }, driver.timeout_ms));
-#endif
     }
 
     const bool passed = reporter.finish();
-
-    if (driver.explains(Compiler::ExplainKind::t_prune)) {
-        std::cout << compiler.prune_report();
-    }
 
     std::cout << Compiler::PhaseTimings::instance().report();
 

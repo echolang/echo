@@ -1,0 +1,7 @@
+// non-exported functions are dso_local so intra-image calls are direct and inlinable
+function add(int32 $a, int32 $b) : int32
+{
+    return $a + $b;
+}
+
+echo add(1, 2);

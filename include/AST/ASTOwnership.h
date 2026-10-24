@@ -47,7 +47,8 @@ namespace AST
     //   - t_return: the local's scope ends here, so it moves with no `mv`
     //   - t_initialization: the synthesized field-wise constructor (a user ctor writes `mv`)
     //   - t_argument: only when handover_reads_in proves the enclosing `return` was about to
-    //     destroy it anyway (`return f($x)`). everywhere else an argument is a copy
+    //     destroy it anyway (`return f($x)`), or the argument is a collection-literal hoist.
+    //     everywhere else an argument is a copy
     enum class ValueDestination
     {
         t_declaration,

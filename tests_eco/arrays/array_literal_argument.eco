@@ -8,7 +8,7 @@
 function total(array<int32> $a) : int32 { return $a[0] + $a[1] + $a[2]; }
 function totalb(array<int32>& $a) : int32 { return $a[0] + $a[1] + $a[2]; }
 
-// by value: the hoisted declaration is copied into the parameter, through the copy constructor
+// by value: last mention of the statement temp, so the parameter takes it rather than copying it
 echo total([1, 2, 3]);
 
 // by borrow: an ordinary place, so an ordinary t_borrow - none of the temporary machinery is involved

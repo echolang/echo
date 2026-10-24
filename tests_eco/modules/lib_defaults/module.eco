@@ -1,0 +1,4 @@
+#[module: "moddefaults"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

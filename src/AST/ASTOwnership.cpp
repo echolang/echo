@@ -74,13 +74,57 @@ namespace
     // variable can be moved out of today: moving one field (`mv $doc->body`) leaves a partly-moved
     // struct whose destructor has no defined behaviour, and moving an element (`mv $items[0]`) has a
     // runtime index with nothing static to mark unset. both are refused rather than half-supported.
+    // a place `match` whose completing arms are that same local (`return match { => $a }`) is the
+    // same read: the phi is an address of `$a`, and t_return moves it
     VarDeclNode *whole_variable_moved(ExprNode *operand)
     {
-        if (operand == nullptr || operand->get_node_type() != NodeType::n_varref) {
+        operand = strip_implicit_casts(operand);
+
+        if (operand == nullptr) {
             return nullptr;
         }
 
-        return place_root_of(operand);
+        if (operand->get_node_type() == NodeType::n_varref) {
+            return place_root_of(operand);
+        }
+
+        if (!value_is_an_address(*operand)) {
+            return nullptr;
+        }
+
+        auto *match = static_cast<MatchExprNode *>(operand);
+        VarDeclNode *root = nullptr;
+
+        for (MatchExprNode::Arm &arm : match->arms) {
+            if (arm.scope != nullptr && scope_always_exits(*arm.scope)) {
+                continue;
+            }
+
+            if (arm.value == nullptr || expression_never_returns(*arm.value)
+                || expression_produces_no_value(*arm.value)) {
+                continue;
+            }
+
+            ExprNode *value = strip_implicit_casts(arm.value);
+
+            if (value == nullptr || value->get_node_type() != NodeType::n_varref) {
+                return nullptr;
+            }
+
+            VarDeclNode *arm_root = place_root_of(value);
+
+            if (arm_root == nullptr) {
+                return nullptr;
+            }
+
+            if (root == nullptr) {
+                root = arm_root;
+            } else if (root != arm_root) {
+                return nullptr;
+            }
+        }
+
+        return root;
     }
 
     // the declaration a place ultimately addresses, plus the member names between the two in
@@ -1491,13 +1535,17 @@ ExprNode *OwnershipPass::arrive_computed_place(ExprNode *expr)
     // t_materializable form, so arrive_value of it never inserts the copy. hang the
     // copy on the producing place. read_reaches_storage so a T&-returning call is
     // copied too; resolve_value_arrival so walking that call first would not arrive
-    // its arguments twice
+    // its arguments twice. a handover (`=> $x` of a `return match`) initializes the
+    // result rather than copying: t_declaration would copy
     if (read_reaches_storage(*expr)) {
         const ValueType target = ValueType::make_mutable(value_result_type(*expr));
 
         if (copy_needs_constructor(target)) {
-            return resolve_value_arrival(
-                expr, target, nullptr, ValueDestination::t_declaration);
+            const ValueDestination dest = _handover_reads.count(expr) > 0
+                ? ValueDestination::t_initialization
+                : ValueDestination::t_declaration;
+
+            return resolve_value_arrival(expr, target, nullptr, dest);
         }
     }
 

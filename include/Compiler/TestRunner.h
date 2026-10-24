@@ -5,9 +5,6 @@
 
 #include "Compiler/TestSelection.h"
 
-#if defined(__unix__) || defined(__APPLE__)
-#include <functional>
-#endif
 #include <string>
 #include <vector>
 
@@ -71,17 +68,8 @@ namespace Compiler
     // `--timeout` stays `t_timed_out`. a signal stays `t_signalled`. v1 does not distinguish `die`
     // from a failed `assert` - both are `__eco_abort` - and does not match the abort message.
     //
-    // two ways to start the child, one result shape. the JIT path forks and calls `call` in the
-    // child. a linked runner is spawned as `argv` with `ECO_INTERNAL_RUN_TEST` naming this test.
-    // `timeout_ms` is `--timeout`. zero waits forever. a fired deadline is `t_timed_out`
-
-#if defined(__unix__) || defined(__APPLE__)
-    TestResult run_test_isolated(
-        const TestCase &test,
-        const std::function<void()> &call,
-        unsigned timeout_ms = 0);
-#endif
-
+    // the child is the linked runner spawned as `argv` with `ECO_INTERNAL_RUN_TEST` naming this
+    // test. `timeout_ms` is `--timeout`. zero waits forever. a fired deadline is `t_timed_out`
     TestResult run_test_isolated(
         const TestCase &test,
         const std::vector<std::string> &argv,

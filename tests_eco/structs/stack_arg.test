@@ -15,16 +15,16 @@ ok   8/8  main/stack_arg.eco::fromAWideHelper
 # the SelectionDAG bug's types, not only its runtime. Date/Quad/Pair are one
 # i32; Wide is i128. a revert to first-class `{ i16, i8, i8 }` would still
 # pass the eight tests on a host that does not miscompile the old IR
-CHECK: define void @_showDate
+CHECK: define dso_local void @_showDate
 CHECK: i32 %x)
-CHECK: define void @_showQuad
+CHECK: define dso_local void @_showQuad
 CHECK: i32 %x)
-CHECK: define void @_showPair
+CHECK: define dso_local void @_showPair
 CHECK: i32 %x)
-CHECK: define void @_showTwo
+CHECK: define dso_local void @_showTwo
 CHECK: i32 %x, i32 %y)
-CHECK: define void @_showWide
+CHECK: define dso_local void @_showWide
 CHECK: i128 %x)
-CHECK: define void @_showTwoWide
+CHECK: define dso_local void @_showTwoWide
 CHECK: i128 %x, i128 %y)
 

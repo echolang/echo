@@ -271,6 +271,11 @@ namespace AST
         }
 
         assert(arg != nullptr && "borrow_place_if_wanted of a missing argument");
+
+        // taking the address is a borrow, so a transfer marker on the operand has nothing to do.
+        // AddrOf(mv $x) would leave `mv` on a dest that does not take the value
+        arg = peel_move(arg);
+        assert(arg != nullptr && "borrow_place_if_wanted of a peeled-empty move");
         return &nodes.emplace_back<AddrOfExprNode>(arg);
     }
 
@@ -445,7 +450,8 @@ namespace AST
             // included, which costs this arm nothing it wanted: a `const weak<Foo>` place handed to a
             // `weak<Foo>&` is the laundering borrow_preserves_const exists to refuse, and refusing it
             // here is the arm agreeing with its two mirrors rather than an exception to them
-            if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)
+            const ExprNode *inner = peel_move(expr);
+            if (parameter_auto_borrows(to) && inner != nullptr && is_place_expression(*inner)
                 && borrow_type_matches(from, to)) {
                 return ArgumentFit::t_borrow;
             }
@@ -463,7 +469,8 @@ namespace AST
 
         // a borrow parameter takes the address of any place - which parameters those are is
         // parameter_auto_borrows, shared with the inference that has to predict this
-        if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)
+        const ExprNode *place = peel_move(expr);
+        if (parameter_auto_borrows(to) && place != nullptr && is_place_expression(*place)
             && borrow_type_matches(from, to)) {
             return borrow_rank(from, to, ArgumentFit::t_borrow, ArgumentFit::t_borrow_const);
         }

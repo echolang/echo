@@ -1,0 +1,46 @@
+// mixed take/read in `return match` copies. implicit move is a proof that every completing
+// arm consumes the local; libtcp `failure()` takes `$sys` on most arms and only reads it on
+// `.invalid`. a failed proof is a copy, not ConditionalMove
+struct Sys
+{
+    string $message;
+
+    constructor(string $message)
+    {
+        $this->message = $message;
+    }
+
+    constructor(const Sys& $other)
+    {
+        echo 'copy';
+        $this->message = $other->message;
+    }
+}
+
+enum Kind
+{
+    case take;
+    case read;
+}
+
+function take_message(Sys $s) : string
+{
+    return $s->message;
+}
+
+function label(const Sys& $s) : string
+{
+    return $s->message;
+}
+
+function failure(Kind $kind) : string
+{
+    Sys $sys = Sys('os');
+    return match ($kind) {
+        Kind::take => take_message($sys),
+        Kind::read => label($sys),
+    };
+}
+
+echo failure(.take);
+echo failure(.read);

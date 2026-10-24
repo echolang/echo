@@ -1,0 +1,17 @@
+// a collection literal is a foreach source, not a call argument. iterate() borrows the hoist;
+// a stray `mv` on that edge is "'mv' needs somewhere to move". libmysql `options.eco` was the cut
+int32 $n = 0;
+
+foreach (['ab', 'c'] as $url) {
+    $n = $n + $url->size();
+}
+
+echo $n;
+
+int32 $sum = 0;
+
+foreach (['x' => 7, 'y' => 1] as $k => $v) {
+    $sum = $sum + $v;
+}
+
+echo $sum;

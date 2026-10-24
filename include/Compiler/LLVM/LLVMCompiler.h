@@ -58,8 +58,8 @@ public:
     // compile_bundle - see CodegenContext::test_mode
     void set_test_mode(bool test_mode);
 
-    // `main` itself looks up `ECO_INTERNAL_RUN_TEST` and calls that test. only a linked runner
-    // needs this; the JIT path calls each test by address and must not emit the ladder
+    // `main` itself looks up `ECO_INTERNAL_RUN_TEST` and calls that test. `echoc test` always
+    // links a runner; without this a leftover env var would run a test inside a `run` prologue
     void set_native_test_runner(bool enabled);
 
     // the tests this compile will run, as mangled symbols. must be set before compile_bundle

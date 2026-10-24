@@ -32,6 +32,10 @@ namespace AST
 
         bool is_implcit = false;
 
+        // cloned into a call from a parameter default. TypeChecker skips it: the declaration
+        // already checked those names, at the callee's origin
+        bool from_parameter_default = false;
+
         ExprNode() {};
         ExprNode(bool implicit) : is_implcit(implicit) {};
         virtual ~ExprNode() {};

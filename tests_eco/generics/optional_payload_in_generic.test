@@ -10,7 +10,7 @@
 done
 --- IR --->
 # the payload is in the symbol, so the two instances are two teardowns and cannot share one
-CHECK: define linkonce_odr void @"_M5arrayIMLPiE_$deinitZZMRBMLC5arrayIMLPiE
+CHECK: define linkonce_odr dso_local void @"_M5arrayIMLPiE_$deinitZZMRBMLC5arrayIMLPiE
 
 # and `Box<int32>` needs none at all - a tag and an int own nothing
 CHECK-NOT: _M3BoxIMLPiE_$deinit

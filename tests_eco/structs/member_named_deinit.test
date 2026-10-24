@@ -8,7 +8,7 @@
 balanced
 --- IR --->
 # the author's, under its own name
-CHECK: define i64 @_M7Journal_deinitZZ
+CHECK: define dso_local i64 @_M7Journal_deinitZZ
 
 # and the compiler's, in a namespace no member can be written into
-CHECK: define linkonce_odr void @"_M7Journal_$deinitZZ
+CHECK: define linkonce_odr dso_local void @"_M7Journal_$deinitZZ
