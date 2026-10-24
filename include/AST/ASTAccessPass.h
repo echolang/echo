@@ -13,26 +13,9 @@ namespace AST
     class Module;
     class File;
 
-    // **enforces the exclusivity half of the access rule: addresses may alias, accesses may not
-    // conflict.**
-    //
-    // an argument list is where two accesses to one region are visible at once and where the caller
-    // is still the one who can do something about it, so that is where this asks. for each call it
-    // builds an AST::AccessPath per argument and an AST::AccessEffect per parameter, and refuses the
-    // pairs that both overlap and conflict.
-    //
-    // **only `t_overlap` is refused, never `t_unknown`.** the rule may cost a program that was legal
-    // nothing it did not ask for, so a path this cannot see through is left alone - which is also why
-    // the pass is honest about what it does not license: it proves nothing about what a *callee*
-    // reaches, and a callee can reach the same storage through a class handle it holds or a pointer
-    // it stored. two arguments being disjoint here is not a `noalias`, and nothing downstream may
-    // read it as one
-    //
-    // runs in run_semantic_passes **after AST::PointerAdjuster**, for two reasons that are really one:
-    // by then every call carries a `decl` and every deref is a node, so a path walk sees the tree the
-    // program actually means rather than the one it was written as. deliberately *not* inside the
-    // monomorphizer's fixpoint - it mints no calls and needs no round, so it is also free of the
-    // walk-a-body-once constraint AST::OwnershipPass lives under
+    // addresses may alias; accesses in one argument list may not conflict. only `t_overlap` is
+    // refused, never `t_unknown`: this is not a `noalias` license. after PointerAdjuster, outside
+    // the fixpoint (it mints no calls)
     class AccessPass : public RecursiveVisitor
     {
     public:

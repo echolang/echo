@@ -22,6 +22,13 @@ namespace std::io;
 #[if: os == windows]
 internal const uint32 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4;
 
+internal function is_console(int32 $fd) : bool
+{
+    uint32 $mode = 0;
+
+    return c_GetConsoleMode(c_get_osfhandle($fd), &$mode) != 0;
+}
+
 /**
  * `$count` bytes of UTF-8 at `$buf`, drawn on the console `$fd` names, or -1
  * when `$fd` is not a console.

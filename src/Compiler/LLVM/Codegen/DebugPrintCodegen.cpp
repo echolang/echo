@@ -51,7 +51,7 @@ void DebugPrintCodegen::gen_dprint(const LValue &value)
     _path.clear();
 
     render(value, "", 0);
-    text("\n");
+    text(_ctx.options.codegen.line_ending());
     flush();
 }
 
@@ -222,7 +222,7 @@ void DebugPrintCodegen::render_property(
 
     text(indent_for(depth));
     render(slot, fmt::format("${} = ", property.name), depth);
-    text("\n");
+    text(_ctx.options.codegen.line_ending());
 }
 
 void DebugPrintCodegen::render_enum(

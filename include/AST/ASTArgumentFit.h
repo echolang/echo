@@ -73,39 +73,9 @@ namespace AST
         // instead of being ambiguous
         t_promotion,
 
-        // the parameter is a borrow and the argument is a value with no storage at all - a literal, a
-        // call result, an arithmetic result - so a temporary is materialised to hold it and *its*
-        // address is passed.
-        //
-        // AST::OwnershipPass binds the temporary and destroys it once the call has returned
-        // (AST::TemporaryBindExprNode). AST::CallResolver writes the same AddrOfExprNode t_borrow gets,
-        // because the difference between the two is a question about the operand's shape and not one
-        // codegen should be able to see
-        //
-        // **below every rank above it and above every rank below it**, and the two halves have
-        // different reasons.
-        //
-        // Below, because this is the only rank that adds a *declaration* to the program - an alloca, a
-        // lifetime, possibly a destructor call - where every rank above only reads or adjusts a value
-        // that already exists. So `w(int64)` beats `w(int32&)` for `w(42)`: a free numeric promotion is
-        // not out-ranked by fabricating storage. And t_borrow several ranks up means a borrow of real
-        // storage always beats a borrow of a value the compiler had to invent.
-        //
-        // Above, because every rank below *changes the type* and this one does not. Binding a
-        // temporary of exactly the parameter's own type does less to a value than converting it to a
-        // different type does. The cost argument that puts this under a promotion therefore has
-        // nothing to say against a conversion, which pays that same materialisation cost anyway - its
-        // result needs somewhere to live too.
-        //
-        // The arm order inside argument_fit is **not** this order. The declared-conversion arm is
-        // asked first, so an argument that can convert is scored a conversion even though this rank
-        // sits above that one.
-        //
-        // One thing this does not protect you from: the compiler cannot tell a mutating callee from a
-        // reading one, so a write through a `T&` bound to a literal lands in storage nobody will read
-        // again. Echo already has the spelling that says which - `const T&` - and gating this rank on
-        // it instead would refuse `f('hello')` against the stdlib, whose borrow parameters are written
-        // bare
+        // borrow of a value with no storage: a temporary is minted and its address is passed.
+        // below every rank that only reads, above every rank that changes the type. the enum's
+        // order is not the arm order inside argument_fit
         t_borrow_temporary,
 
         // and the read-only form of that one, t_borrow_const's mirror. both borrow arms owe the
@@ -540,50 +510,14 @@ namespace AST
             return ArgumentFit::t_interface_widening;
         }
 
-        // a value converts to another type when either type declared how - an outbound method
-        // marked `#[implicit]` on the source, or an inbound static on the destination, found by
-        // AST::find_implicit_conversion.
-        //
-        // Last, and its own rank, so CallResolver can tell this case apart from the primitive
-        // conversions above by the rank alone rather than by asking the lookup a second time.
-        //
-        // **asked of implicit_conversion_target rather than of `to`**, so a borrow parameter is
-        // answered by a conversion to what it borrows. Without that peel this arm could never fire for
-        // one at all - the return type `string::view` never equals the parameter type `string::view&` -
-        // so the compose t_borrow_temporary's comment describes was unreachable rather than merely
-        // ungated.
-        //
-        // **any operand, place or not.** the conversion is a call whose receiver is `$this`, so it
-        // needs an address, and a non-place argument gets one the same way every other borrow argument
-        // does: from the temporary AST::OwnershipPass mints for the `&` CallResolver writes around it.
-        //
-        // So `f('hello')` composes. The literal is bound, the conversion reads it, and the borrow of
-        // *that* is scored by the arm below when coerce_arguments re-asks.
-        //
-        // **and through implicit_conversion_for rather than the bare lookup**, so an argument that
-        // arrived as a borrow declares what the value behind it declares - and so a `const` one cannot
-        // reach a conversion that would write through it
+        // `#[implicit]` conversion, last of the real ranks. asked of implicit_conversion_target so a
+        // borrow peels to what it borrows. a non-place gets a slot the same way every other borrow does
         if (expr != nullptr && implicit_conversion_for(from, expr, to) != nullptr) {
             return ArgumentFit::t_declared_conversion;
         }
 
-        // and the same borrow parameter filled by a value that has no storage at all, which the
-        // compiler answers by materialising a slot for it.
-        //
-        // The type test is the borrow arm's, through borrow_type_matches rather than spelled again, so
-        // the two cannot come to different answers about which pointee a borrow accepts. Only the
-        // expression test differs - is_place_expression there, can_bind_temporary here - and
-        // AST::storage_of makes those two mutually exclusive.
-        //
-        // **the last arm**, which is not the same as the last rank. It out-ranks the three conversions
-        // above it and is still asked after them, so an argument that can convert is scored a
-        // conversion and never reaches here. That is what keeps the arm order free of the ranking: a
-        // place reaches t_borrow far above and returns there, never seeing this one either.
-        //
-        // **`from` must not itself be a pointer.** a `ptr<ptr<T>>` parameter would otherwise take a
-        // pointer-typed non-place and ask AST::OwnershipPass for a slot it refuses to hand out - "a
-        // pointer read out of a temporary is an address into it" - and the AddrOf CallResolver already
-        // wrote would then reach gen_lvalue with nothing to address
+        // a borrow parameter filled by a value with no storage: mint a slot. last arm, not last rank
+        // (it still out-ranks the conversions above). `from` must not itself be a pointer
         if (parameter_auto_borrows(to) && expr != nullptr && !from.is_pointer()
             && can_bind_temporary(*expr) && borrow_type_matches(from, to)) {
             return borrow_rank(

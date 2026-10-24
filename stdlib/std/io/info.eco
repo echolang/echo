@@ -1,0 +1,181 @@
+/**
+ * What a path is, and the verbs that need to know: `info`, `linkinfo`, `chmod`, `realpath`, `copy`.
+ *
+ * One `fileinfo` shape on every platform. Darwin and wasi read it out of `stat`, Linux out of
+ * `statx`, Windows out of a handle's `BY_HANDLE_FILE_INFORMATION` - libc.eco holds each layout.
+ * What a platform cannot say is said once, on the field: a creation time is `null` where there is
+ * none, and Windows permissions are the read-only bit and nothing more.
+ */
+
+namespace std::io;
+
+/**
+ * A file's permission bits: read, write and execute for its owner, its group and everyone else.
+ *
+ * One `uint32` and nothing else, so it costs what the mode costs; every question below is a bit
+ * test. `fileperms(0x1a4)` is `0644` - there is no octal literal to spell it with.
+ *
+ * Windows has one permission, read-only, so a Windows mode is made up the way the C runtime's
+ * `_wstat64` makes it up: readable always, writable unless read-only, executable for a directory
+ * and for a `.exe`, `.cmd`, `.bat` or `.com`, and the same for owner, group and other. `chmod`
+ * there reads only whether the owner may write.
+ */
+public struct fileperms
+{
+    uint32 $mode;
+
+    /**
+     * The permission bits, without the file-type bits a raw `st_mode` carries.
+     */
+    #[inline]
+    const function mode() : uint32
+    {
+        return $this->mode & PERM_BITS;
+    }
+
+    #[inline]
+    const function owner_readable() : bool
+    {
+        return ($this->mode & S_IRUSR) != 0;
+    }
+
+    #[inline]
+    const function owner_writable() : bool
+    {
+        return ($this->mode & S_IWUSR) != 0;
+    }
+
+    #[inline]
+    const function owner_executable() : bool
+    {
+        return ($this->mode & S_IXUSR) != 0;
+    }
+
+    #[inline]
+    const function group_readable() : bool
+    {
+        return ($this->mode & S_IRGRP) != 0;
+    }
+
+    #[inline]
+    const function group_writable() : bool
+    {
+        return ($this->mode & S_IWGRP) != 0;
+    }
+
+    #[inline]
+    const function group_executable() : bool
+    {
+        return ($this->mode & S_IXGRP) != 0;
+    }
+
+    #[inline]
+    const function other_readable() : bool
+    {
+        return ($this->mode & S_IROTH) != 0;
+    }
+
+    #[inline]
+    const function other_writable() : bool
+    {
+        return ($this->mode & S_IWOTH) != 0;
+    }
+
+    #[inline]
+    const function other_executable() : bool
+    {
+        return ($this->mode & S_IXOTH) != 0;
+    }
+
+    /**
+     * Nobody may write it. Windows' read-only attribute, and on POSIX no `w` anywhere.
+     */
+    #[inline]
+    const function is_readonly() : bool
+    {
+        return ($this->mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0;
+    }
+}
+
+/**
+ * What `info` found out about a path, as of the moment it asked.
+ *
+ * Facts, not a handle: nothing here follows the file after the call. `$size` is in bytes and is
+ * the size of the link itself when `linkinfo` read a symlink. `$created` is `null` where the
+ * platform or the filesystem does not record a birth time - wasi never does, Linux only on a
+ * filesystem that keeps one.
+ */
+public struct fileinfo
+{
+    const filekind $kind;
+    const int64 $size;
+    const fileperms $perms;
+    const std::time::timestamp $modified;
+    const std::time::timestamp $accessed;
+    const std::time::timestamp? $created;
+}
+
+/**
+ * What `$path` is. A symlink is followed, so the answer is about what it points at.
+ */
+public function info(const string& $path) : result<fileinfo, ioerror>
+{
+    return stat_path($path, true);
+}
+
+/**
+ * What `$path` is, without following a symlink. The only way to see `filekind::symlink`.
+ */
+public function linkinfo(const string& $path) : result<fileinfo, ioerror>
+{
+    return stat_path($path, false);
+}
+
+/**
+ * Sets `$path`'s permission bits to `$perms`. A symlink is followed.
+ */
+public function chmod(const string& $path, fileperms $perms) : result<bool, ioerror>
+{
+    return chmod_path($path, $perms);
+}
+
+/**
+ * The absolute path `$path` names, with every symlink, `.` and `..` resolved.
+ *
+ * The path has to exist - this asks the filesystem, it does not rewrite the string. On Windows
+ * the `\\?\` the system puts in front of a resolved path is taken back off.
+ */
+public function realpath(const string& $path) : result<string, ioerror>
+{
+    return realpath_of($path);
+}
+
+/**
+ * Copies the file at `$from` to `$to`, replacing whatever `$to` was, and gives it `$from`'s
+ * permissions. Times are not copied.
+ *
+ * Regular files only: a directory is `EISDIR`, a socket, fifo or device is `EINVAL`, and copying
+ * a tree is `opendir` and a loop. A symlink is followed, so the bytes that land are the target's.
+ * A file copied onto itself is refused rather than truncated to nothing. Where the kernel can
+ * copy without the bytes passing through this process - `fcopyfile`, `copy_file_range`,
+ * `CopyFileW` - it does.
+ */
+public function copy(const string& $from, const string& $to) : result<bool, ioerror>
+{
+    return copy_file($from, $to);
+}
+
+// a directory is EISDIR so `copy($dir)` reads as the other directory errors; anything else that
+// is not a regular file is EINVAL
+internal function require_regular_file(filekind $kind) : result<bool, ioerror>
+{
+    if ($kind == filekind::directory) {
+        return .error(ioerror(EISDIR));
+    }
+
+    if ($kind != filekind::file) {
+        return .error(ioerror(EINVAL));
+    }
+
+    return .ok(true);
+}

@@ -81,15 +81,19 @@ namespace AST
         // IndirectCallExprNode::settlement
         void coerce_arguments(IndirectCallExprNode &call, NodeCollection &nodes);
 
-    private:
-        Collector &_collector;
-
         // the candidates the call's name denotes, re-derived rather than stored: from
         // `lookup_namespace` for a free call, from the receiver's type for a member one. empty when
         // the name is declared nowhere, which `settle` hands back as t_unknown_name for the caller
         // to word - "no such function" and "no such member" are different errors, both located at
         // the token their caller read
+        //
+        // public because AST::is_never_written asks the *set* without scoring it: an argument
+        // prevents elision when any bound candidate's slot writes, is not V, or a by-value slot sits
+        // next to a borrow. it must not call settle
         std::vector<FunctionDeclNode *> candidates_for(const FunctionCallExprNode &call) const;
+
+    private:
+        Collector &_collector;
 
         // run the overload match and record its answer on the call. `candidates` is passed in
         // because `settle` has just derived the set for its own empty-set test

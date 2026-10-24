@@ -184,47 +184,11 @@ namespace AST
             residual_cast(slot, expected, nodes);
         }
 
-        // **a written `null` argument takes the parameter's type**, which is the one thing about an
-        // argument that has to be decided here rather than in the parser.
-        //
-        // Every other position that admits a null hands the destination down to parse_expr, and the
-        // null arm binds it there. A *direct* call cannot. Its parameter types are on a declaration
-        // nobody has chosen yet, so Parser::parse_call_arguments passes no expected type at all and the
-        // null is parsed untyped. An indirect call reads them off the callee's signature and does bind,
-        // which is why `$fn(null)` worked and `f(null)` did not.
-        //
-        // This is the first point in the pipeline holding both the argument node and a resolved
-        // parameter, so it is where the binding belongs. Two things went wrong without it, and one call
-        // fixes both. An unbound null reached codegen with no type, where a wrapped `T?` destination has
-        // no null address to be and TypeLowering::coerce_value refused it. And before that, it stayed
-        // permanently undetermined, so arguments_are_determined below could never let the call settle.
-        //
-        // A parameter that does *not* admit a null is left alone on purpose. AST::bind_null_to declines
-        // it, the call stays pending, and AST::TypeChecker reports it against the destination through
-        // AST::null_rejection_reason - which is the diagnostic that names `Foo?`.
-        //
-        // **an array literal is the second thing an argument position has to type**, for the same reason
-        // spelled the same way. It has no type of its own, its destination is on a declaration nobody
-        // had chosen at parse time, and this is the first point holding both. One loop, two rules - each
-        // still its own function, so neither grew an arm about the other.
-        //
-        // The question asked is whether an argument is an array literal still waiting to be *expanded*,
-        // which is not the same as being typed. AST::OperatorRewriter turns the literal into a
-        // declaration plus one append per element and puts the declaration's name here, so coercing
-        // against the literal would fit the wrong node - it is `t_addressless`, and a borrow parameter
-        // would get a cast where an address belongs. So the call waits a round, exactly as an
-        // undetermined argument does
-        // **and a number literal is the fourth**, for the third time the same reason. `$a[] = 2.5` on
-        // an `array<int32>` reaches its destination as an operand of a synthesized `operator []` call,
-        // and the ordinary argument conversion narrowed it - correct for a variable, and silent data
-        // loss for a literal, which is the one thing every *written* destination refuses. So the check
-        // that refuses `int32 $x = 2.5;` is asked here too, at the first point holding both the
-        // argument node and a resolved parameter.
-        //
-        // it also completes the other half of a bound type parameter: `can_instantiate` no longer lets
-        // an untyped literal decide what `T` is, and this is what then types it *at* whatever the
-        // concrete arguments decided. so `pick(0, $n)` over a `usize $n` binds `usize` and the `0` is
-        // written at it, rather than binding `int32` and truncating `$n`
+        // a direct call's parameter types are unknown at parse time, so `null`, an array literal,
+        // and a number literal are typed here: this is the first point holding both the argument
+        // and a resolved parameter. a parameter that does not admit `null` is left for TypeChecker.
+        // an unexpanded array literal waits a round (the rewriter replaces it with a name). a
+        // number literal is typed at the parameter so `int32 $x = 2.5` and `$a[] = 2.5` refuse alike
         template <typename ExpectedAt>
         bool bind_destination_typed_arguments(
             std::vector<ExprNode *> &arguments,
@@ -636,30 +600,9 @@ namespace AST
 
         case FunctionMatch::Outcome::t_no_viable:
         case FunctionMatch::Outcome::t_no_candidates:
-            // also final, and for the mirror reason: argument_fit answers t_undetermined and never
-            // t_none for an argument with no type, so nothing viable was rejected for being unknown
-            //
-            // t_no_candidates here means generic instantiation filtered every candidate out, so
-            // nothing reached the matcher for it to have tied - the declarations that were tried are
-            // what the user needs to see either way
-            //
-            // **an operator with nothing to list says it in its own words.** the third place that rule
-            // is applied, for the same reason as the two in AST::TypeChecker: every `operator`
-            // declaration in the program shares the root namespace, so a program carries every
-            // operator's overload set whether it uses those types or not.
-            //
-            // `$s[] = 2;` on a slice was answered with nine candidates naming `map<K,V>` and
-            // `ordered_map<K,V>`, and `$p == null` on a struct with a list naming `const string&`.
-            //
-            // **gated on `match.tied` being empty**, and that gate is the whole of the distinction. A tie
-            // is made of candidates that nearly matched, so those *are* worth naming - indexing an
-            // `array<int32>` with a string is best answered by showing that the parameter is a `usize`.
-            // An empty tie is the fallback below reaching for every declaration in the root namespace,
-            // and that list is the same in every program whatever it was written about.
-            //
-            // match rule 2 takes a lone candidate without consulting types at all, so a one-declaration
-            // set would reach the type checker's wording by accident. a second `==` pair makes it a
-            // real choice, and the message has to stay an operator refusal rather than degrade with it
+            // final: argument_fit never answers t_none for an untyped argument. an operator with an
+            // empty `match.tied` is its own wording: listing every root-namespace `==` is the same
+            // list in every program. a non-empty tie is worth naming
             if (!candidates.empty() && candidates.front()->is_operator()) {
                 const std::string spelling = candidates.front()->operator_spelling();
                 const Operator *op = _collector.operators.get_operator(spelling);

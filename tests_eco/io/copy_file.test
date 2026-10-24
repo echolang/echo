@@ -1,0 +1,8 @@
+# copy: overwrite, permissions carried, a directory refused, a file onto itself refused and left whole
+
+--- OUT --->
+the new contents
+1
+1
+1
+the new contents

@@ -31,25 +31,9 @@ namespace Compiler
         t_listing
     };
 
-    // **the sole answer to "what does a test run say while it runs, and what does it say at the end".**
-    //
-    // one owner and two renderings, which is the split AST::DiagnosticRenderer already makes between its two
-    // themes - and for a sharper reason here, because the two channels are not decorations of each other:
-    //
-    //   on a terminal   a live counter row that redraws, a committed row per failure above it, one closing
-    //                   summary line, then every failure's captured output in full
-    //   otherwise       one plain line per test, then the same summary and the same failure blocks
-    //
-    // the second is not a fallback. Compiler::ProgressReporter writes **nothing at all** when stderr is not
-    // an interactive terminal - that gate is what keeps the e2e corpus intact - so a test run reporting only
-    // through it would tell a CI log that nothing happened. Results are the answer this subcommand was asked
-    // for, so they cannot live only in a decoration.
-    //
-    // it drives the progress reporter rather than writing beside it, because that object is the only thing
-    // in this compiler allowed to move the cursor on its stream.
-    //
-    // **results go to stdout and refusals to stderr**, which is the rule the help page already follows: what
-    // was asked for is an answer, and something going wrong is not
+    // what a test run says. terminal: a live counter, a row per failure, a summary, then captured
+    // output. otherwise: one plain line per test, then the same summary. ProgressReporter writes
+    // nothing off a terminal, so results cannot live only there. results to stdout, refusals to stderr
     class TestReporter
     {
     public:

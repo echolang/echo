@@ -7,7 +7,9 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTMutation.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/ExprNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/ScopeNode.h"
@@ -17,6 +19,75 @@
 #include "AST/WhileStatementNode.h"
 
 #include <fmt/core.h>
+#include <unordered_set>
+
+namespace
+{
+    // OperatorRewriter's marker assignment, one round early: V is only now seated, and
+    // candidates_for reads the marker. a const `$el?->trace()` can elide. nested `?->` through
+    // the same decl is the same walk WriteFinder uses for identity, so the two cannot disagree
+    class SeatChainBases : public AST::RecursiveVisitor
+    {
+    public:
+        explicit SeatChainBases(const AST::VarDeclNode &decl)
+            : _decl(&decl)
+        {}
+
+        void visit_optional_chain(AST::OptionalChainExprNode &node) override
+        {
+            const bool through =
+                AST::place_root_of(node.base) == _decl || is_active_chain_base(node.base);
+
+            if (through && node.chain_base != nullptr) {
+                if (node.base != nullptr) {
+                    node.chain_base->type = AST::chain_base_type_of(*node.base);
+                }
+
+                _chain_bases.insert(node.chain_base);
+            }
+
+            AST::RecursiveVisitor::visit_optional_chain(node);
+
+            if (through && node.chain_base != nullptr) {
+                _chain_bases.erase(node.chain_base);
+            }
+        }
+
+    private:
+        bool is_active_chain_base(AST::ExprNode *expr) const
+        {
+            const AST::ChainBaseNode *base = AST::chain_base_of(expr);
+
+            return base != nullptr && _chain_bases.count(base) != 0;
+        }
+
+        const AST::VarDeclNode *_decl = nullptr;
+        std::unordered_set<const AST::ChainBaseNode *> _chain_bases;
+    };
+
+    // eliding to `const V&` after parse: `$el->m()` is still AddrOf($el). reseat through the one
+    // owner; a written `&$el` is not a member-lookup argument 0
+    class ReseatElidedReceivers : public AST::RecursiveVisitor
+    {
+    public:
+        ReseatElidedReceivers(AST::Module &module, const AST::VarDeclNode &decl)
+            : _module(&module), _decl(&decl)
+        {}
+
+        void visitFunctionCallExpr(AST::FunctionCallExprNode &node) override
+        {
+            if (AST::AddrOfExprNode *addrof = AST::parser_receiver_addrof(node, *_decl)) {
+                node.arguments[0] = AST::receiver_for_member_call(*_module, addrof->operand);
+            }
+
+            AST::RecursiveVisitor::visitFunctionCallExpr(node);
+        }
+
+    private:
+        AST::Module *_module = nullptr;
+        const AST::VarDeclNode *_decl = nullptr;
+    };
+}
 
 namespace AST
 {
@@ -145,10 +216,31 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     // **the copy elision.** a by-value binding nothing writes is bound `const V&` instead, which is
     // indistinguishable for any program that keeps the "do not mutate while iterating" contract - see
     // asked here, exactly once, on a body still shaped as it was parsed
+    //
+    // V is seated first so `$el->trace()` can see the receiver's type: candidates_for reads
+    // result_type(), and an untyped `$el` would hand back an empty set and refuse to elide a const
+    // method. the `?->` markers through `$el` are typed here too, one round before OperatorRewriter
+    // would, so `$el?->trace()` sees the set. OperatorRewriter already ran this round, so a
+    // `$el[$k]` is still an IndexExprNode
     ForeachNode::Binding effective = loop->binding;
 
-    if (effective == ForeachNode::Binding::t_value && is_never_written(*loop->element, *loop->body)) {
-        effective = ForeachNode::Binding::t_const_borrow;
+    if (effective == ForeachNode::Binding::t_value) {
+        loop->element->set_type_node(
+            &_current_module->nodes.emplace_back<TypeNode>(
+                ValueType::make_mutable(plan.element_type)));
+        SeatChainBases seat(*loop->element);
+        loop->body->accept(seat);
+
+        if (is_never_written(*loop->element, *loop->body, _collector)) {
+            effective = ForeachNode::Binding::t_const_borrow;
+            // seat the const borrow first: receiver_for_member_call asks the type, and a value
+            // `$el` would be wrapped again. a written `as const &$el` never had this AddrOf
+            loop->element->set_type_node(
+                &_current_module->nodes.emplace_back<TypeNode>(
+                    ValueType::make_pointer(ValueType::make_const(plan.element_type), false)));
+            ReseatElidedReceivers reseat(*_current_module, *loop->element);
+            loop->body->accept(reseat);
+        }
     }
 
     // a scope of its own, so `$__it` dies at loop exit rather than at the end of whatever block the

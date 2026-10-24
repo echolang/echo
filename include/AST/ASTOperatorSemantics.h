@@ -55,30 +55,8 @@ namespace AST
     // caller gets an answer that matches nothing rather than a special case to remember
     ValueType operator_receiver_type(const FunctionDeclNode &decl);
 
-    // **does `receiver` declare an element-*write* contract for `index_count` indices?** the one question
-    // behind whether `$c[...] = v` is a single call that owns the whole write, or an ordinary write
-    // through the place the borrowing bracket hands back.
-    //
-    // **asked of the declarations and never of the fit**, and that is the decision rather than an
-    // implementation detail. Answered yes, an argument that does not fit is an ordinary NoMatchingOverload
-    // against that one operator - which says more than a fallback would. Decided by *fit* instead, a
-    // container declaring both brackets would have `$m[$absent] = $v` insert or assert depending on which
-    // candidate AST::argument_fit happened to score higher, so what a program *means* would rest on a
-    // ranking.
-    //
-    // **the arity is part of the question.** one set holds the append write `$c[] = v` (receiver plus
-    // value) and the element write (receiver, indices, value), exactly as `operator []` holds the append
-    // and the element forms.
-    //
-    // So a type may declare one and not the other, and `$a[3] = v` beside a declared `$a[] = v` stays a
-    // write through a place. It is also what keeps the appends AST::OperatorRewriter's literal
-    // expansion synthesizes out of this question entirely.
-    //
-    // The `template_or_self` redirect on both sides is what lets a `map<int32, string>` find the
-    // `map<K, V>` template's declaration. That is AST::find_member_functions' idiom, which cannot be
-    // reused directly here, because it walks an owner's methods and an operator is never one
-    // the declaration `declares_index_write` found, or null. collection_fill_of reads its
-    // parameter types for nested bind; the bool spelling stays the gate
+    // does `receiver` declare `$c[...] = v` as a call, for this arity. asked of the declarations, never
+    // of the fit, or what a program means would rest on a ranking. array append is arity 0
     const FunctionDeclNode *find_index_write(Collector &collector, const ValueType &receiver, size_t index_count);
 
     // the borrowing bracket of the same arity: `operator []` with `index_count` indices.
@@ -176,23 +154,8 @@ namespace AST
     // short-circuit lowering is type-blind. unary `-` `!` `~` ask the same matrix
     bool simd_lane_op_lowers(Token::Type op, const ValueType &lane);
 
-    // **why these two operands cannot answer this operator - said about the operands, not about a
-    // candidate's parameters.** nullopt when there is nothing operand-level to say.
-    //
-    // One owner, because there are three moments that refuse an operator. `TypeChecker::visitBinaryExpr`
-    // holds the built-in path. `AST::CallResolver` holds an
-    // operator *call* nothing matched. The type checker's argument coercion holds the case where the
-    // matcher took a lone candidate without consulting types.
-    //
-    // Which of the three a use site reaches depends on whether *anybody, anywhere in the program*
-    // declared an infix form of the symbol. The parser's gate is `has_fixity`, so one `operator ==` in
-    // the standard library moved every non-built-in `==` in every program from the first to the other
-    // two - and the advice that made the message actionable went with it
-    //
-    // **a fallback rather than a pre-gate.** identity comparison against a written `null` is decided
-    // by `binary_has_builtin_meaning` instead, so `$p == null` is never a call. for every other
-    // operator a declaration a user may write still has to be able to match, so this is only ever
-    // asked at a site that has already decided to refuse - never to decide *whether* to
+    // why these operands cannot answer this operator. asked after a refuse, not to decide whether
+    // to. `$p == null` is binary_has_builtin_meaning instead
     std::optional<std::string> binary_operand_refusal(
         const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs);
 
@@ -203,61 +166,16 @@ namespace AST
     std::string binary_unsupported_operands(
         const Operator *op, const OperandFacts &lhs, const OperandFacts &rhs);
 
-    // **the type two mismatched numeric operands reconcile to.** an integer meeting a float becomes the
-    // float, whatever the widths; otherwise the wider wins. nullopt when there is nothing to reconcile -
-    // one of them is not a number, or they already agree - which is every operand pair but a few.
-    //
-    // One owner, for build_operator_call_node's reason: there are two *moments* that ask, and only one
-    // rule.
-    //
-    // Parser::parse_binary_expr and AST::OperatorRewriter both ask AST::reconcile_binary_operands,
-    // which retypes a literal and only then falls back to a TypeCastNode on a typed loser.
-    // OperatorRewriter is the second moment - `foreach ($a as $i => $x) { if ($i == 0) ... }`,
-    // where `$i` has no type until the loop lowers and the literal has long since defaulted to int32.
-    //
-    // The insertion is each caller's. The decision is not. Two answers here means one program means two
-    // things depending on which pass got to type an operand first, and the way that surfaces is codegen
-    // asserting on "Both operands to ICmp instruction are not of the same type"
+    // integer meeting a float becomes the float; otherwise the wider wins. nullopt when they already
+    // agree or one is not a number. parser and OperatorRewriter both ask
     std::optional<ValueType> common_numeric_type(const ValueType &lhs, const ValueType &rhs);
 
-    // **do these two operands meet at one type at all?** the gate every reconciliation site asks before
-    // it reaches for the rule above, and false for exactly the two shifts.
-    //
-    // `<<` and `>>` take a value and a *count*. The count is not a second operand, so there is nothing
-    // for it to meet - and reconciling anyway hands it a vote it must not have: `int32 -16 >> uint32 2`
-    // reconciled to `uint32` and came out **1073741820**, because the *count's* type made an arithmetic
-    // shift logical, while the same shift by an `int32 2` answered -4. `uint8 200 << int64 40` left
-    // `uint8` entirely and answered 219902325555200. The operand's type is the operation's type, whole,
-    // and the count only says how far.
-    //
-    // Four readers, and they have to agree or the answer depends on which pass typed an operand first:
-    //
-    //  - Parser::parse_binary_expr and OperatorRewriter::widen_binary_operands, which insert the cast
-    //    that must not be inserted here
-    //  - BinaryExprNode::result_type, which would otherwise answer void for a mismatched pair and
-    //    invite one
-    //  - AST::const_fold, which folds at the type this names
+    // false for `<<` / `>>`: the rhs is a count, not a second value. reconciling anyway lets the
+    // count's type flip an arithmetic shift to logical
     bool binary_reconciles_operands(const Operator *op);
 
-    // **the type a binary numeric operation is performed at** - what the two operands were reconciled
-    // to. the rule above's, read the other way round: a nullopt there means there was nothing to
-    // reconcile, and for this question that is the operands already agreeing, so the lhs is the answer.
-    //
-    // What needs it is signedness, and that cannot be taken from one side alone. `int64 < uint32`
-    // reconciles to int64 and is therefore a *signed* comparison, so "either operand is unsigned" is a
-    // second answer that differs from this one in exactly that case.
-    //
-    // ExprCodegen::gen_binary_expr reads it for `/ % ** >> < > <= >=`, and AST::const_fold folds the
-    // same operators at the same type. Two answers there is a program whose `const if` takes one arm
-    // and whose `if` takes the other.
-    //
-    // **the operator is part of the question**, for binary_reconciles_operands' reason: a shift is
-    // performed at its left operand's type whatever the count is written as. It was `(lhs, rhs)` for as
-    // long as every operator was symmetric, and `>>` is the one that reads this to pick between two
-    // *instructions* rather than between two spellings of one.
-    //
-    // AST::ConstFold still calls common_numeric_type itself, because it has to tell "no common type"
-    // from "already agree" to report the first. one rule, and only one of its callers needs the failure
+    // the type a binary numeric operation is performed at. signedness cannot be taken from one side:
+    // `int64 < uint32` is a signed comparison. a shift is performed at the left operand's type
     ValueType binary_operation_type(const Operator *op, const ValueType &lhs, const ValueType &rhs);
 
     // **the value a builtin operator produces for these peeled operands.** one owner, asked
@@ -269,18 +187,7 @@ namespace AST
     ValueType builtin_unary_result(Token::Type op, const ValueType &operand);
     ValueType builtin_binary_result(const Operator *op, const ValueType &lhs, const ValueType &rhs);
 
-    // **why this shift count has no answer**, or nullopt when it has one.
-    //
-    // at or above the shifted type's width LLVM's `shl`/`lshr`/`ashr` are **poison** rather than a
-    // defined value, so there is nothing for a fold to agree with and nothing for a program to mean. A
-    // *negative* count is the same case arriving differently: a ConstFoldResult is sign-extended, so it
-    // reaches here as a huge unsigned and the one comparison catches both.
-    //
-    // two readers, and the split is the point. AST::const_fold refuses `const(1 << 32)` because it was
-    // asked to produce a value; TypeChecker::visitBinaryExpr refuses the plain `1 << 32` beside it,
-    // which would otherwise compile to poison in silence. refusing in one place only is the shape
-    // this file warns about everywhere else - a `const if` and the `if` beside it disagreeing -
-    // and here the runtime half would have no diagnostic at all
+    // a shift count at or above the width is poison. const_fold and visitBinaryExpr both ask
     std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count);
 };
 

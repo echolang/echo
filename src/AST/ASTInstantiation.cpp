@@ -390,29 +390,8 @@ namespace AST
 
         if (infer_from_arguments) {
 
-            // **what argument 0 bound is authoritative.** `TypeSubstitution::bind` lets a later
-            // inference replace an earlier one, which is right between two arguments of equal standing
-            // - but argument 0 is not one of those. It is the receiver of a member-shaped call, and a
-            // receiver's type is *declared*: `map<string, int64> $m` says what V is, while the `5` in
-            // `$m[$k] = 5` is a literal whose type its destination decides.
-            //
-            // without this, a parameter mentioned by both binds from the later argument and the
-            // receiver becomes the operand that "does not fit" - so `$m[$k] = 5` on a
-            // `map<string, int64>` instantiates `V = int32` and is then refused, and so is
-            // `$a->push(5)` on an `array<int64>`. Every widening and every nullable wrap through a
-            // parameter the receiver also mentions was unreachable.
-            //
-            // narrow on purpose: two arguments that are *not* the receiver keep the old rule, so
-            // `f<T>(T $a, T $b)` over an int32 and an int64 still reconciles the way it did. What
-            // remains wrong is the general case of one parameter bound from several arguments, which
-            // is still open
-            //
-            // **asked of has_receiver(), never of is_member() or of a list of kinds** - this is an
-            // argument *index*, which is the reading a static silently breaks. a static and a closure
-            // are both the shape where args[0] is not a receiver: a static's seed is already in
-            // `result.bindings` and survives argument 0 by starting at 0, which is the same rule for
-            // the same reason - the owner was *declared* at the call site, and an argument must not
-            // rename the instance - and a closure's args[0] is the environment its captures live in
+            // a receiver's type is declared: `map<string, int64> $m` says V, the `5` in `$m[$k] = 5`
+            // does not. later inference must not replace it. asked of has_receiver()
             const size_t authoritative = (tmpl->has_receiver() && !tmpl->args.empty()) ? 1 : 0;
 
             // **two passes, and the second one is the arguments with no opinion.**

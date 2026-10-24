@@ -4,9 +4,19 @@
 $a = array<int32>();
 $a[] = 1;
 
+function ident(int32 $x) : int32
+{
+    return $x;
+}
+
 // never written -> elided to a borrow
 foreach ($a as $reader) {
     echo $reader;
+}
+
+// a by-value parameter of a type that copies from const: still a read of $viaIdent
+foreach ($a as $viaIdent) {
+    echo ident($viaIdent);
 }
 
 // written -> a real copy, and the array is left alone

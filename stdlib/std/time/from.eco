@@ -1,5 +1,5 @@
 /**
- * `str::from` for `duration`, so `"{$d}"` is Go-style (`1h2m3.5s`).
+ * `str::from` for `duration`, so `"{$d}"` reads `1h2m3.5s`.
  *
  * A file of its own because a namespace is a property of the file: duration.eco is `std::time`
  * and cannot also be `str`. Spec-less only: `"{$d:>8}"` fails by name, which is intended.

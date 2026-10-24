@@ -19,33 +19,9 @@ namespace Compiler::LLVM
 {
     struct CodegenContext;
 
-    // **the one owner of where a static property's storage comes from, when it is filled, and when it
-    // is torn down.** a sibling of ProcessCodegen and MemoryCodegen, and an *emitted* runtime like
-    // both: everything here is `linkonce_odr` in whichever unit references it, so a module's object
-    // never depends on its consumers.
-    //
-    // three facts, and each of them is a language rule rather than an implementation detail - they are
-    // stated in docs/language/ for that reason:
-    //
-    // **initialization is lazy and first-use.** every read and every write goes through a call to a
-    // self-guarding init function, which runs the initializer once. the alternative was
-    // `llvm.global_ctors`, and it is not merely worse here - `Backend::run_code` never calls
-    // `runStaticConstructorsDestructors`, so `echoc build` would initialize statics and `echoc run`
-    // would silently not. the corpus is overwhelmingly `mode: run`, so that divergence would have been
-    // pinned as golden. the consequence to document is that a static nothing ever names is never
-    // initialized, so its initializer's side effects never run
-    //
-    // **teardown is reverse-of-initialization, from `main`'s epilogue.** the init function pushes a
-    // node onto an intrusive chain after seating the value, so the walk is LIFO for free. `atexit`
-    // was the obvious alternative and is a use-after-free here: under `echoc run` the JIT'd program
-    // would register handlers, and `~LLVMCompiler` deletes the execution engine - unmapping the code -
-    // while `LLVMCompiler` is still a stack local of `main_run`. it would also run *after*
-    // `MemoryCodegen::gen_report`, so every owning static would read as a leak under
-    // `--track-allocations`, which every corpus case passes
-    //
-    // **`die`, a failed `assert` and `std::env::exit` skip teardown**, because they leave `main`'s
-    // block terminated. that is the same thing module-scope releases already do, so it is not a new
-    // rule to learn
+    // static property storage. lazy first-use through a self-guarding init (`llvm.global_ctors`
+    // is a no-op under `echoc run`). teardown is LIFO from `main`'s epilogue (`atexit` unmaps
+    // under the JIT, and runs after the allocation report). `die` / `assert` / `exit` skip it
     class StaticStorageCodegen
     {
     public:

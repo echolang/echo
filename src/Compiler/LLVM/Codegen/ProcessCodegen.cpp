@@ -386,6 +386,7 @@ void ProcessCodegen::gen_startup()
     // at `dlopen`, DLL attach or `_initialize`, before any export can run
     gen_seed_hash();
     unbuffer_stdio();
+    binary_stdio();
     _ctx.builder->CreateRetVoid();
 
     llvm::appendToGlobalCtors(*module, fn, 65535);

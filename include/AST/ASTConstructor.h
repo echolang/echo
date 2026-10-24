@@ -52,29 +52,8 @@ namespace AST
     // being constructed from being destroyed on the way out of the constructor
     VarDeclNode &declare_constructor_this(Module &module, TypeNode &self_type, const TokenReference &at);
 
-    // appends the implicit `return $this` that ends a constructor - unless control already leaves the
-    // body on every path
-    //
-    // **AST::scope_always_leaves_function, not scope_always_exits.** a `break` leaves a scope without
-    // leaving the constructor, so a body that only breaks still owes `$this`, and without one
-    // gen_function_decl synthesizes `ret undef`. the parser refuses a `break` with no enclosing loop and
-    // builds no node for it, so the two predicates cannot disagree here today - the boundary is named
-    // while it is still free to name
-    //
-    // And not "does a child return" either. A body ending in `die`, or in an `if` whose arms all leave,
-    // is already done, and a return appended behind it is written where nothing reaches.
-    //
-    // It never reaches the binary - StmtCodegen::gen_scope stops at the first terminated block - but the
-    // ownership pass sees a ReturnNode and hangs a full unwind drop set on it. Dead drops that are still
-    // type checked, and that still mint a generic call site for a generic local.
-    //
-    // Mints its own read, never sharing one node with a field write. A node that sits in the tree twice
-    // has two parents, so every pass that rewrites a child in place rewrites it once per parent - and a
-    // clone that answers "already cloned" collapses both parents onto the one clone
-    //
-    // the **explicit** `return;` written inside a constructor is not this one. Parser::parse_return
-    // rewrites that where it is read, off Context::ctor_this_ptr, long before the body scope this takes
-    // exists - a different moment, and the only thing the two share is the shape of the node
+    // implicit `return $this` unless the body already leaves the function (scope_always_leaves_function:
+    // a `break` still owes `$this`). mint a fresh read, never share a node with a field write
     void close_constructor_body(Module &module, FunctionDeclNode &decl, VarDeclNode &this_decl);
 
     // `$<local>-><name>`, as a place - one step of a synthesized path, and one read of the local per
@@ -123,25 +102,9 @@ namespace AST
         const TokenReference &at
     );
 
-    // **clones each property's `init_expr` into `ctor` as an initialization of `$this`, in declaration
-    // order, immediately after the `$this` declaration and ahead of whatever the author wrote.**
-    //
-    // the recipe stays on the property until consume_property_defaults, so one initializer feeds
-    // every constructor that wants it - a move would steal the tree from the next one, the
-    // static-property trap on N constructors rather than N instantiations.
-    //
-    // a copy constructor is skipped here rather than at the caller: it fills from `$other`, and
-    // seating the defaults first is a throwaway allocation on every copy of an owning field. `$this`
-    // is `body->children.front()` by construction; inserting at the front would write through a class
-    // handle that is still null.
-    //
-    // a field the constructor assigns on every completing path is skipped the same way derived
-    // fields are: the body's write is the one initialization, so cloning the default would be a
-    // second one. an owning field then leaked the recipe (both writes claimed the slot was fresh)
-    //
-    // body pass only: the declaration pass has no file root, so a clone then cannot publish a nested
-    // closure. `declaration_scope` is that root, and a clone that contains a closure is published
-    // onto it the way parse_closure_literal publishes the original
+    // clone each property's `init_expr` into `ctor` after `$this`, ahead of the author's body. the
+    // recipe stays on the property (a move would steal it from the next constructor). skip a copy
+    // constructor and any field the body already assigns
     void prepend_property_defaults(
         Module &module,
         TypeDeclNode &type,

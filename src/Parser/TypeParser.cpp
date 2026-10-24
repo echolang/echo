@@ -102,33 +102,8 @@ bool Parser::can_parse_type(Parser::Payload &payload)
         || starts_callable_type(payload.cursor, offset);
 }
 
-// advances past one type if the tokens at the cursor form one, and answers whether they did
-//
-// shape only - no symbol lookup, no diagnostics, no nodes - because this runs at a statement head,
-// where the answer decides which parser is called at all. a type name is not necessarily resolvable
-// there either: the type-name pass may not have reached it, and an unresolved name is `unknown`
-// here. TypeChecker asks AST::unresolved_type_name_refusal of the TypeNode that lands in the tree
-//
-// the grammar it walks mirrors parse_value_type:
-//   type      := 'const'? ( 'ptr' '<' arg '>' | 'weak' '<' arg '>' | qualified ) array* nullable? ref?
-//   qualified := ( identifier '::' )* identifier ( '<' arg ( ',' arg )* '>' )?
-//   arg       := integer | type
-//   array     := '[' ( integer | identifier ) ']'
-//   nullable  := '?'
-//   ref       := '&'
-// it consumes its closing angle brackets through the cursor's own '>>' split rather than counting
-// them, so `Box<Box<int32>>` cannot end in a different place here than it does in
-// parse_generic_application - two notions of "where does this argument list end" would desync
-//
-// only the bounds-safe cursor accessors are used (never current(), which asserts), so a truncated
-// type runs out of tokens and answers false instead of aborting
-// **the one place a `?` suffix is consumed.** two walks reach it - skip_type_shape, which only decides
-// *which parser runs*, and parse_nullable_suffix, which builds the type - and they have to agree on how
-// many `?`s a type ends with. when they did not, `Foo? $x` scanned as a declaration in one and not the
-// other, and the disagreement was silent because neither reports anything about the suffix
-//
-// idempotent: `T??` is `T?`. there is one `null` in the language, so a second level of absence has
-// nothing to mean - deliberately the opposite of `ptr<ptr<T>>`, where a second level is a different type
+// consumes every trailing `?`. skip_type_shape and parse_nullable_suffix both call this, so `Foo? $x`
+// cannot scan as a declaration in one walk and not the other. `T??` is `T?`
 static bool skip_nullable_suffix(Parser::Cursor &cursor)
 {
     bool seen = false;
@@ -171,6 +146,8 @@ static bool skip_type_list(Parser::Cursor &cursor, IsEnd is_end)
     return true;
 }
 
+// advances past one type if the tokens form one. shape only: no lookup, no nodes. mirrors
+// parse_value_type, including the cursor's `>>` split, so `Box<Box<int32>>` ends in one place
 static bool skip_type_shape(Parser::Cursor &cursor)
 {
     if (cursor.is_type(Token::Type::t_const)) {
@@ -996,26 +973,8 @@ static void append_constraint_spelling(Parser::ParsedTypeParam &param, const std
     param.constraint_spelling += spelling;
 }
 
-// **the constraint grammar**, `: atom (| atom)*`, as one function.
-//
-// `class` is an atom too — a keyword, not an identifier, which is why the walk claims
-// `t_class` ahead of the identifier arm. `numeric` is an identifier alias; this one is not.
-//
-// three callers: a type parameter's constraint in parse_type_param_list, an interface's
-// associated type in parse_typedecl, and a `where` clause. one grammar, so the `>>` split,
-// the deferred resolution in the type-name pass and the bare-generic refusal cannot drift
-// between the spellings
-//
-// hands back false when it reported and gave up, so the caller can abandon whatever list it was
-// building. does nothing and answers true when the cursor is not on a ':'
-//
-// `resolve_atoms` false stores nothing and still consumes the clause. two of the callers
-// need that, for different reasons: the type-name pass has not registered the types an atom
-// names, and the parameter-list scan has not declared the names the clause itself mentions
-// (`T : Cmp<T>`). both re-read later — the declaration pass, through install_type_parameters
-// — through this same function with resolution on. a `where` clause resolves on the first
-// read: the names are already in scope. a second shape walk would be a second answer to
-// where `contract::iterable<Box<int32>>` ends
+// `: atom (| atom)*`. `class` is a keyword atom. `resolve_atoms` false still consumes, for the
+// type-name pass and a parameter list that has not declared `T` yet (`T : Cmp<T>`)
 bool Parser::parse_constraint_atoms(
     Parser::Payload &payload,
     ParsedTypeParam &param,

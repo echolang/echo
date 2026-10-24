@@ -1,0 +1,38 @@
+// `$el?->items[0]->bump()` walks through an index on the chain marker. the spine is
+// place_anchor's, so that is a write (the copy's bump does not reach the next loop); a
+// field read through the same index elides
+struct Cell
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+struct Bag
+{
+    array<Cell> $items = [];
+}
+
+$bags = array<Bag?>();
+$first = Bag();
+$first->items[] = Cell(1);
+$bags[] = $first;
+
+echo 'opt-index-write';
+foreach ($bags as $viaBump) {
+    $viaBump?->items[0]->bump();
+    echo $viaBump?->items[0]->n ?? 0;
+}
+
+echo 'opt-index-read';
+foreach ($bags as $viaRead) {
+    echo $viaRead?->items[0]->n ?? 0;
+}

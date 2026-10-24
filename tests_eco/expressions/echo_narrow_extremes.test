@@ -16,12 +16,24 @@ stdlib: off
 
 # the six formats, in the order the echoes appear. `%u` for the unsigned pair rather than `%d` is the
 # half of the table that says a promotion follows the *source's* signedness
-CHECK: c"%d\0A\00"
-CHECK: c"%d\0A\00"
-CHECK: c"%u\0A\00"
-CHECK: c"%u\0A\00"
-CHECK: c"%d\0A\00"
-CHECK: c"%f\0A\00"
+CHECK-LINUX: c"%d\0A\00"
+CHECK-LINUX: c"%d\0A\00"
+CHECK-LINUX: c"%u\0A\00"
+CHECK-LINUX: c"%u\0A\00"
+CHECK-LINUX: c"%d\0A\00"
+CHECK-LINUX: c"%f\0A\00"
+CHECK-DARWIN: c"%d\0A\00"
+CHECK-DARWIN: c"%d\0A\00"
+CHECK-DARWIN: c"%u\0A\00"
+CHECK-DARWIN: c"%u\0A\00"
+CHECK-DARWIN: c"%d\0A\00"
+CHECK-DARWIN: c"%f\0A\00"
+CHECK-WINDOWS: c"%d\0D\0A\00"
+CHECK-WINDOWS: c"%d\0D\0A\00"
+CHECK-WINDOWS: c"%u\0D\0A\00"
+CHECK-WINDOWS: c"%u\0D\0A\00"
+CHECK-WINDOWS: c"%d\0D\0A\00"
+CHECK-WINDOWS: c"%f\0D\0A\00"
 
 CHECK: define i32 @main(
 

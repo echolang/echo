@@ -1,0 +1,11 @@
+// the darwin arm of `std::io`'s file info, copy, chmod and realpath, lowered on whatever machine runs
+// the suite. pin_fs is never called, so a host that is not darwin never has to resolve these symbols
+function pin_fs(std::io::file $f) : void
+{
+    result<std::io::fileinfo, std::io::ioerror> $a = std::io::info('a');
+    result<std::io::fileinfo, std::io::ioerror> $b = std::io::linkinfo('a');
+    result<std::io::fileinfo, std::io::ioerror> $c = $f->info();
+    result<bool, std::io::ioerror> $d = std::io::chmod('a', std::io::fileperms(420));
+    result<string, std::io::ioerror> $e = std::io::realpath('a');
+    result<bool, std::io::ioerror> $g = std::io::copy('a', 'b');
+}

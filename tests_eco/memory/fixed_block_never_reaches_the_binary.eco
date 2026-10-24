@@ -5,7 +5,7 @@
 //
 // **what used to stand in the way was the copy.** `return .ok($out)` duplicated the array into the
 // argument, so the loop held `malloc(16)`, a `memcpy` into `malloc(12)`, and two `free`s - two blocks,
-// each read by the other, and neither of them dead. rustc's binary for the same program contained no
+// each read by the other, and neither of them dead. the reference build of the same program held no
 // allocation in the loop at all, which read as 22x and was blamed on the seam. With the argument handed
 // over rather than copied (ownership/return_argument_hands_over) there is one block, it is dead, and
 // what is left of the function is arithmetic.

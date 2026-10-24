@@ -1,0 +1,11 @@
+# str::split with a limit: at most that many parts, the last one the rest of the text
+
+--- OUT --->
+2 [a|b,c,d]
+3 [a|b|c,d]
+2 [a|b::c]
+1 [a,b,c]
+1 [a,b,c]
+2 [a|b]
+1 [abc]
+,a,,b,

@@ -1,0 +1,14 @@
+--- OUT --->
+mixed-value-const
+1
+2
+unique-by-value
+1
+2
+named-write
+2
+3
+--- RAST --->
+CHECK: vardecl<type<Point>>($viaShow)
+CHECK: vardecl<type<const Point&>>($viaOnly)
+CHECK: vardecl<type<Point>>($viaPoke)

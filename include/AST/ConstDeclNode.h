@@ -25,29 +25,9 @@ namespace AST
         t_refused,
     };
 
-    // a **compile-time constant**: `const usize MAX_CAPACITY = 100;`, declared at file scope, in a
-    // namespace, or in a struct body. Not a variable, and deliberately not a VarDeclNode with a bit set.
-    //
-    // the difference is the whole feature. A `const` *variable* carries a `$`, has storage, and lives in
-    // the scope it was written in - a block, if that is where it was written. A constant has no storage at
-    // all: AST::ConstantExpander replaces every reference to it with a **clone of this initializer**, so
-    // what a use site gets is the expression, not a value. That is what lets one live in a library module,
-    // where a file-scope variable is silently dropped for want of anywhere to put it, and it is why the
-    // name has no `$`: `$` is how this language spells a value with storage.
-    //
-    // the initializer may be any expression, which follows from copying it rather than evaluating it - and
-    // so does the cost, since a call in one runs once per use site. Two shapes are refused at the
-    // declaration: one naming a variable, because `$x` does not exist where the copy lands, and a closure
-    // literal, because a closure captures where it is *written* and a constant is copied to where it is
-    // *used*.
-    //
-    // **this node is a child of nothing.** The arena owns it and no file root holds it, which is what keeps
-    // it out of AST::OwnershipPass's once-only walk, out of AST::PointerAdjuster, out of AST::TypeChecker
-    // and out of codegen - none of which has anything to say about a declaration with no storage. The
-    // consequence to know is that the monomorphizer's arena-wide sweeps over FunctionCallExprNode still see
-    // an *unused* constant's initializer, so a misspelled function in one is still reported. That is
-    // harmless, and it is the reason a closure literal is refused rather than merely discouraged: a
-    // FunctionDeclNode in the arena becomes a real symbol with a body request.
+    // `const usize MAX = 100;`. no storage: ConstantExpander clones the initializer at each use.
+    // a `const` variable has a `$` and a slot. child of nothing, so ownership / adjuster /
+    // typecheck / codegen never see it. a closure is refused: it would capture the declaration site
     class ConstDeclNode : public Node
     {
         // null when the declaration wrote no type - `const MAX = 100;` - in which case the initializer's

@@ -242,8 +242,8 @@ void DebugInfoCodegen::begin_function(const AST::FunctionDeclNode &node, llvm::F
 
     llvm::DIFile *di_file = file_for(*unit, file);
 
-    // an instantiation shares its template's line, because the code really was written there - the same
-    // thing C++ template debug info does. What tells two instances apart is the linkage name
+    // an instantiation shares its template's line, because the code really was written there. What tells
+    // two instances apart is the linkage name
     const unsigned line = token != nullptr ? token->line() : 1;
 
     llvm::DISubprogram::DISPFlags flags = llvm::DISubprogram::SPFlagDefinition;

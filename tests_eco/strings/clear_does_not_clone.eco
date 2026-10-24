@@ -1,0 +1,83 @@
+// `clear` must not go through `make_unique`. that gate clones the live text, and clear is about
+// to throw that text away. unique storage is emptied in place and keeps its allocation; a
+// shared or literal string detaches to empty SSO and does not allocate
+
+// unique heap: sixteen bytes paid for a buf, clear keeps both allocations and the capacity
+{
+    string $s = '';
+    $s->append('0123456789abcdef');
+
+    assert(mem::live_allocations() == 2, 'one buf and its bytes');
+
+    usize $cap = $s->capacity();
+    $s->clear();
+
+    assert($s->empty(), 'cleared');
+    assert(mem::live_allocations() == 2, 'the buf stayed');
+    assert($s->capacity() == $cap, 'capacity kept');
+
+    $s->append('again');
+    echo $s;
+    assert(mem::live_allocations() == 2, 'append reused the buf');
+}
+
+assert(mem::live_allocations() == 0, 'unique heap released');
+
+// shared heap: clearing one name must not clone, and must not touch the other
+{
+    string $a = '';
+    $a->append('0123456789abcdef');
+    string $b = $a;
+
+    assert(mem::live_allocations() == 2, 'one buf, two strings');
+    assert(mem::refs($a->owner) == 2, 'shared');
+
+    $b->clear();
+
+    echo $a;
+    echo $b->size();
+    assert($b->empty(), 'b is empty');
+    assert(mem::live_allocations() == 2, 'no clone');
+    assert(mem::refs($a->owner) == 1, 'b dropped its retain');
+}
+
+assert(mem::live_allocations() == 0, 'shared heap released');
+
+// a long literal has no allocation. cloning it just to empty the clone would pay for one
+{
+    string $lit = '0123456789abcdef';
+    assert(mem::live_allocations() == 0, 'a literal is a window');
+
+    $lit->clear();
+
+    echo $lit->size();
+    assert($lit->empty(), 'literal cleared');
+    assert(mem::live_allocations() == 0, 'clear did not clone onto the heap');
+}
+
+// unique substring: refs is 1 but the window is not the whole buffer. finish(0) still
+// owns that buf, so capacity stays rather than cloning three bytes into SSO
+{
+    string $part = '';
+
+    {
+        string $whole = '';
+        $whole->append('0123456789abcdef');
+        $part = $whole->sub(0, 3);
+        assert(mem::live_allocations() == 2, 'substring shares the buf');
+    }
+
+    assert(mem::refs($part->owner) == 1, 'parent dropped');
+    assert($part->size() == 3, 'still a slice');
+
+    usize $cap = $part->capacity();
+    $part->clear();
+
+    echo $part->size();
+    assert($part->empty(), 'slice cleared');
+    assert(mem::live_allocations() == 2, 'the unique buf stayed');
+    assert($part->capacity() == $cap, 'substring capacity kept');
+}
+
+assert(mem::live_allocations() == 0, 'substring buf released');
+echo 'balanced';

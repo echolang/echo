@@ -20,60 +20,10 @@ namespace AST
     class ScopeNode;
     class VarDeclNode;
 
-    // **what a `guard` over a type of the author's own becomes.**
-    //
-    // a `T?` with a binding never reaches this pass at all: Parser::parse_guard decides that one,
-    // because a nullable's payload is a property of the type and nothing later can change it.
-    // statement-form `T?` does reach it, but only to hoist a subject whose storage does not
-    // already live into `$__guardN` so the frame owns it - no protocol calls, codegen still
-    // tests with gen_has_value. what is left for the protocol path is a subject that declares
-    // `contract::unwrappable<V>` or `contract::checkable`, which no parse could have answered -
-    // so this pass asks AST::unwrap_plan_for once the fixpoint has settled the subject's type,
-    // and mints the calls the plan named. **const is refused here**, and only for a callee this
-    // form would actually mint: `has_value()` is const, `unwrap()` / `failure()` are not.
-    //
-    //     <subject hoisted into an ordinary declaration ahead of the statement>
-    //     guard  <decl>->init_expr = deref($__guard0->unwrap())
-    //            presence_test     = $__guard0->has_value()
-    //            failure           = deref($__guard0->failure())    // only for `else ($e)`
-    //
-    // **the unwrap goes on the declaration's own `init_expr` and never on `GuardNode::bound_value`**, and
-    // that is the whole of what this pass owes the binding: AST::OwnershipPass::resolve_value_arrival then
-    // sees a value arriving at a declaration and covers it with no arm at all. writing it onto
-    // `bound_value` gave that edge two producers with two rules, and the pass that owns "what does an
-    // arriving value owe" knew about one - so the payload was byte-copied out of storage the subject still
-    // owned. AST::ForeachLowering lowers `$el` into exactly this shape for exactly this reason.
-    //
-    // **the callees come off AST::UnwrapPlan, never by name.** the conformance already chose which
-    // declaration answers each requirement, and asking the matcher again is a second answer to that -
-    // reachable, since `has_value()` is const and `unwrap()` is not, so the two differ in the axis
-    // AST::argument_fit ranks on. AST::IterationPlan states the rule and carries its `iterate` for it.
-    //
-    // **its own pass rather than one more rule in AST::OperatorRewriter**, and that class's own header
-    // says why: it holds "no second rule, only a second moment" of a decision the parser already made.
-    // the protocol decision is not a second moment of anything - the parser cannot read a conformance,
-    // which is the entire reason AST::unwrap_plan_for exists. AST::ForeachLowering ruled on this exact
-    // question the same way for the same reason. mechanically it does not fit either: this pass splices a
-    // declaration into the **enclosing** scope, and the rewriter's only splice wraps the statement in a
-    // new scope - which is precisely the shape that would break the binding's lifetime.
-    //
-    // **inside the monomorphizer's fixpoint**, between the operator rewriter and the loop lowering:
-    //   - *after* the rewriter, because it performs the weak upgrade that turns a substituted
-    //     `weak<Node>` into a `Node?` (so the plan's nullable arm answers it), and because
-    //     `$v = guard $slots[$i] else {...}` has no subject type until the bracket has become an
-    //     `operator []` call
-    //   - *before* the loop lowering, so a `foreach` over a guard's binding sees a typed binding in the
-    //     same round
-    //   - *before* the ownership pass, which walks a body exactly once ever - safe rather than merely
-    //     early, because `body_is_concrete` answers false while `GuardNode::plan_decided` is false
-    //
-    // **the walk, the exit obligation and the generic-body skip are AST::FixpointLowering's**, which is
-    // also where the three invariants they rest on are written. what is left here is the two things that
-    // are genuinely this pass's: which edge it hooks, and what a guard lowers to.
-    //
-    // **not a `run_semantic_passes` pass**, so CLAUDE.md's mirror trap does not apply here: it is a
-    // member of AST::Monomorphizer, and both the real pipeline and tests/helpers.cpp get it by
-    // construction rather than by remembering to register it twice.
+    // `guard` over `contract::unwrappable` / `checkable`. a binding `T?` is decided in the parser;
+    // statement-form `T?` only hoists a short-lived subject. unwrap lands on the binding's
+    // `init_expr`, never `bound_value` (that double-frees an owning payload). callees come off
+    // UnwrapPlan, never by name. inside the fixpoint: after OperatorRewriter, before ForeachLowering
     class GuardLowering : private FixpointLowering
     {
     public:

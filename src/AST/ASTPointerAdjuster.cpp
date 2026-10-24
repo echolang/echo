@@ -232,6 +232,17 @@ void PointerAdjuster::visitVarDecl(VarDeclNode &node)
         node.init_expr, node.has_type() ? node.type() : ValueType::make_unknown());
 }
 
+bool PointerAdjuster::binds_pointer_slot(const AssignNode &node) const
+{
+    if (!node.is_initialization || node.target == nullptr || node.value_expr == nullptr) {
+        return false;
+    }
+
+    const ValueType slot = node.target->result_type();
+
+    return slot.is_pointer() && is_implicitly_convertible(node.value_expr->result_type(), slot);
+}
+
 void PointerAdjuster::visit_assign(AssignNode &node)
 {
     // the bind first: its initializer is `&$rows[$at]`, and adjust_place has to rewrite that index
@@ -242,7 +253,7 @@ void PointerAdjuster::visit_assign(AssignNode &node)
     // the target goes through as_value like any other read: a plain pointer target gains the deref
     // that write-through means, while `$p:$` keeps the slot it names - that is the whole difference
     // between writing through a pointer and re-seating it
-    node.target = as_value(node.target);
+    node.target = binds_pointer_slot(node) ? adjust_place(node.target) : as_value(node.target);
 
     // the value is then read to fit whatever storage the target turned out to name. for
     // `ptr<ptr<int>> $out`, `$out = $target` writes the caller's *pointer*, so the value keeps its

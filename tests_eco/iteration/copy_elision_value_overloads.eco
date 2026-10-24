@@ -1,0 +1,47 @@
+// a by-value / const-borrow mixed set still copies: eliding would flip the winner. a unique
+// by-value parameter of a type that copies from const still elides. a labeled `$p: $el` is a
+// write when that slot is `T&`, even if the written index would have seen a by-value `int32`
+struct Point
+{
+    int32 $x;
+}
+
+function show(Point $p) : int32
+{
+    return $p->x;
+}
+
+function show(const Point& $p) : int32
+{
+    return $p->x;
+}
+
+function only(Point $p) : int32
+{
+    return $p->x;
+}
+
+function poke(int32 $n, Point& $p) : void
+{
+    $p->x = $p->x + $n;
+}
+
+$points = array<Point>();
+$points[] = Point(1);
+$points[] = Point(2);
+
+echo 'mixed-value-const';
+foreach ($points as $viaShow) {
+    echo show($viaShow);
+}
+
+echo 'unique-by-value';
+foreach ($points as $viaOnly) {
+    echo only($viaOnly);
+}
+
+echo 'named-write';
+foreach ($points as $viaPoke) {
+    poke($p: $viaPoke, $n: 1);
+    echo $viaPoke->x;
+}

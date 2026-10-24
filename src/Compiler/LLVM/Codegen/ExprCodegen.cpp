@@ -736,7 +736,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             // `dprint`, which ends a line once per *value* and not once per leaf it prints
             std::vector<llvm::Value *> ArgsV = {
                 _ctx.builder->CreateGlobalStringPtr(
-                    std::string(conversion.format) + (_ctx.options.codegen.is_windows() ? "\r\n" : "\n")),
+                    std::string(conversion.format) + std::string(_ctx.options.codegen.line_ending())),
                 arg_value
             };
 
@@ -1208,12 +1208,12 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
     // the trailing newline every other `echo` conversion carries, so one statement behaves one way
     // whatever it is handed. writing it separately rather than copying the bytes to append it: the
     // bytes may be a shared substring, and there is nowhere to put a longer copy
-    const bool crlf = _ctx.options.codegen.is_windows();
+    const std::string_view newline = _ctx.options.codegen.line_ending();
 
     _ctx.emit_libc_write(
         1,
-        _ctx.builder->CreateGlobalStringPtr(crlf ? "\r\n" : "\n", "echo.nl"),
-        llvm::ConstantInt::get(_ctx.size_int_ty(), crlf ? 2 : 1));
+        _ctx.builder->CreateGlobalStringPtr(newline, "echo.nl"),
+        llvm::ConstantInt::get(_ctx.size_int_ty(), newline.size()));
 }
 
 void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)

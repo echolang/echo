@@ -11,20 +11,8 @@
 
 namespace Compiler
 {
-    // **the sole answer to "what did this invocation say".**
-    //
-    // a value, produced by Compiler::parse_command_line and read by nothing but
-    // Compiler::resolve_driver_options. Everything on it is *stated* - what the words were - and nothing
-    // on it is settled: '-g' does not set the optimize mode here, '--explain memory' does not imply
-    // '--track-allocations' here, and 'run' does not default to '--debug' here. Those are what an
-    // invocation *means*, which is Compiler::DriverOptions' question, and folding the two is what made
-    // "was --optimize written, or did it default" unanswerable in the version this replaced.
-    //
-    // **--help and --version are answers, not exits.** The library this replaced handled both inside its
-    // parse call, printed to std::cout and called std::exit(0) - which is why help could never be routed
-    // to a stream the driver chose, why it could not be drawn by anything but that library, and why
-    // `echoc` with no subcommand printed usage to stderr while `echoc -h` printed it to stdout with
-    // nobody having decided either
+    // stated argv: what the words were. DriverOptions is what they mean. `--help` and `--version`
+    // are answers, not exits
     class CommandLine
     {
     public:
@@ -105,15 +93,7 @@ namespace Compiler
             std::string &out_error);
     };
 
-    // **the sole answer to "how is argv turned into values".**
-    //
-    // false with a sentence in `out_error`, which is the shape Compiler::parse_color_choice,
-    // Compiler::TargetFacts::resolve, Compiler::resolve_subtarget and Compiler::parse_link_requirement
-    // all already have - so a command-line refusal reads like every other refusal in this compiler and no
-    // caller has to learn a second convention.
-    //
-    // **`out` is filled as far as it got, even on a refusal.** `out.subcommand` is what a usage line is
-    // drawn for, and the two rendering answers above are what it is drawn with
+    // argv into values. false with a sentence. `out` is filled as far as it got, even on a refusal
     bool parse_command_line(
         int argc,
         const char *const *argv,

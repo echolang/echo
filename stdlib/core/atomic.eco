@@ -4,7 +4,7 @@
  * `atomic<int32> $hits` is the spelling you write on a field. The raw verbs live in
  * `mem::atomic::` and this type is the discipline over them: the slot is private, so the
  * only way in is a method that is an RMW. `$hits = $hits + 1` cannot be written, which is
- * the whole point - that would be a load, an add and a store, Java's `volatile++`.
+ * the whole point - that would be a load, an add and a store, three steps another thread can land between.
  *
  * `#[unique]` so a struct copy cannot memcpy the word. That copy would be a non-atomic
  * access. Moving transfers the slot; two live `atomic<T>` values are two words.

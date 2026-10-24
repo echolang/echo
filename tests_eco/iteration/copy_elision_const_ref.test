@@ -1,0 +1,76 @@
+--- OUT --->
+field
+1
+2
+const-ref
+1
+2
+default-read
+1
+2
+explicit
+1
+2
+const-method
+1
+2
+mut-method
+copy
+2
+copy
+3
+mutate-param
+copy
+2
+copy
+3
+by-value-param
+copy
+copy
+1
+copy
+copy
+2
+mixed-overloads
+copy
+1
+copy
+2
+addr-of-arg
+copy
+1
+copy
+2
+stored-addr
+copy
+1
+copy
+2
+borrow-mut
+opt-const-method
+1
+2
+opt-mut-method
+copy
+2
+copy
+3
+after
+2
+3
+--- RAST --->
+CHECK: vardecl<type<const Item&>>($field)
+CHECK: vardecl<type<const Item&>>($viaLook)
+CHECK: vardecl<type<const Item&>>($viaGlance)
+CHECK: vardecl<type<const Item&>>($explicit)
+CHECK: vardecl<type<const Item&>>($viaTrace)
+CHECK: vardecl<type<Item>>($viaBump)
+CHECK: vardecl<type<Item>>($viaMutate)
+CHECK: vardecl<type<Item>>($viaTake)
+CHECK: vardecl<type<Item>>($viaPeek)
+CHECK: vardecl<type<Item>>($viaAddrLook)
+CHECK: vardecl<type<Item>>($viaStored)
+CHECK: vardecl<type<Item&>>($borrowed)
+CHECK: vardecl<type<const Item?&>>($viaOptTrace)
+CHECK: vardecl<type<Item?>>($viaOptBump)
+CHECK: vardecl<type<const Item&>>($after)

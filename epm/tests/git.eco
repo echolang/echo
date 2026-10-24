@@ -56,6 +56,24 @@ test checkout_checks_out_the_tag
     scratch::gone(sys::dirname($dest));
 }
 
+test checkout_writes_the_committed_bytes
+{
+    // eol=crlf converts on every host, so this is the windows autocrlf checkout reproduced anywhere
+    string $src = scratch::dir('git-eol');
+    scratch::write(sys::join($src, '.gitattributes'), "* text eol=crlf\n");
+    scratch::git_module($src, 'lib', '1.0.0', '');
+    string $dest = sys::join(scratch::dir('git-eol-dest'), 'lib');
+
+    fetch::Source $remote = fetch::source_for(manifest::Origin::git($src));
+    string $rev = guard $remote->checkout('v1.0.0', $dest);
+    assert(!$rev->empty());
+    string $body = scratch::read(sys::join($dest, 'src/lib.eco'));
+    assert(!$body->contains("\r"));
+    assert(sys::tree_sha256($dest) == sys::tree_sha256($src));
+    scratch::gone($src);
+    scratch::gone(sys::dirname($dest));
+}
+
 test fill_world_walks_a_local_requires
 {
     string $b = scratch::dir('git-b');

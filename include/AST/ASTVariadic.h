@@ -48,25 +48,10 @@ namespace AST
     // parameter cases, instead of by whichever parser happened to have an arm
     std::optional<std::string> variadic_args_refusal(const FunctionDeclNode &decl, const CoreTypes &core);
 
-    // **C's default argument promotions, and the one place they are written.**
-    //
-    //   float                        -> float64
-    //   bool, int8, int16            -> int32
-    //   uint8, uint16                -> uint32
-    //   everything else              -> unchanged
-    //
-    // asked by AST::CallResolver, which is the only thing that coerces an argument, so codegen
-    // promotes nothing of its own.
-    //
-    // C requires these of any argument that has no parameter to match it, and Clang emits them in the
-    // **frontend** - `sext i16 to i32`, `fpext float to double` - so doing them here is what makes the
-    // IR say what the ABI needs rather than leaving it to per-target vararg lowering.
-    //
-    // **and program output does not catch a missing one.** measured, not assumed: with this call
-    // removed, `tests_eco/functions/variadic_args_extern` still printed the right answer on ARM64
-    // Darwin, LLVM's backend promoting the variadic tail itself. that is a courtesy of one target's
-    // lowering and not a contract - Clang never generates IR that relies on it - which is why that
-    // case asserts the `fpext` in the IR rather than trusting what the program wrote
+    // C's default argument promotions. CallResolver is the only thing that coerces an argument.
+    // float -> float64; bool / int8 / int16 -> int32; uint8 / uint16 -> uint32. the IR must show
+    // the `fpext` / `sext`: a target's backend may promote the tail itself, so program output
+    // does not catch a missing one
     ValueType variadic_promotion_of(const ValueType &type);
 
     // **may this value be a member of a variadic tail?** nullopt when it may.

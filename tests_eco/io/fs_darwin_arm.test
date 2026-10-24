@@ -1,0 +1,13 @@
+flags: --target-os darwin
+# Darwin reads file info with stat/lstat/fstat and copies with fcopyfile
+
+--- OUT --->
+--- IR --->
+CHECK: declare i32 @fstat(
+CHECK: declare i32 @stat(
+CHECK: declare i32 @lstat(
+CHECK: declare i32 @chmod(
+CHECK: declare ptr @realpath(
+CHECK: declare i32 @ftruncate(
+CHECK: declare i32 @fchmod(
+CHECK: declare i32 @fcopyfile(

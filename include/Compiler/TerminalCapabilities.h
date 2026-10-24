@@ -39,23 +39,8 @@ namespace Compiler
         t_stdout
     };
 
-    // **the sole answer to "what can this terminal do".**
-    //
-    // four facts - colour, unicode, width, interactive - resolved once from the command line and the
-    // environment, and read by everything that writes to a terminal. Shaped like Compiler::TargetFacts on
-    // purpose: a small
-    // struct of settled facts rather than a helper each caller asks its own way, because the failure mode
-    // is the same one. Two places deciding independently whether to emit an escape sequence is how a
-    // redirected stream ends up with half of them in it.
-    //
-    // it replaced exactly that: a cached `isatty(fileno(stdout))` in main.cpp read by one function, beside
-    // a set of `SH_COLOR_*` token-pasting macros that only worked on string literals, beside a renderer
-    // that emitted no colour at all because reaching those macros from src/AST/ was not possible.
-    //
-    // **stderr is the stream that matters**, because that is where diagnostics go. stdout under `run`
-    // belongs to the program being executed, and asking whether *it* is a terminal answers a question
-    // almost nobody here has - Compiler::CommandLineHelp is the single exception, and it is an exception
-    // precisely because a help page is not a report.
+    // colour, unicode, width, interactive. asked of stderr (diagnostics); stdout under `run` is the
+    // program's. CommandLineHelp is the one stdout exception
     struct TerminalCapabilities
     {
         // may an escape sequence be written. false whenever the answer is in doubt - a stray `\x1b[31m` in

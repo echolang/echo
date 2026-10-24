@@ -15,11 +15,8 @@ namespace AST
     class FunctionDeclNode;
     class NodeCollection;
 
-    // **what a written `$x as T` (or `T(...)`) means.** the sole answer, modelled on
-    // AST::unwrap_plan_for: three results and not a bool, reports nothing itself.
-    //
-    // asked only of an explicit TypeCastNode. an implicit one the compiler inserted is
-    // TypeChecker::implicit_conversion_is_legal / AST::argument_fit - two questions
+    // what a written `$x as T` (or `T(...)`) means. three results, reports nothing. asked of an
+    // explicit TypeCastNode only
     enum class CastKind
     {
         // same type after dropping top-level const. a no-op
@@ -96,10 +93,7 @@ namespace AST
         }
     };
 
-    // **the sole answer to "what does this written cast mean".** arm order is the content - see
-    // the .cpp. asked of the operand, not of a pair of types: the declared arm is
-    // AST::implicit_conversion_for, and that peel needs the expression. a new built-in kind is a
-    // new arm here and a reader that switches on it
+    // what this written cast means. asked of the operand: the declared arm is implicit_conversion_for
     CastLookup cast_plan_for(const ExprNode &from, const ValueType &to);
 
     // **the one mint for an #[implicit] conversion call.** CallResolver::convert_if_wanted,

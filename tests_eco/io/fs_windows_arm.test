@@ -1,0 +1,11 @@
+flags: --target-os windows
+# Windows reads file info from a handle and copies with CopyFileW - kernel32 only, so no JIT pin
+
+--- OUT --->
+--- IR --->
+CHECK: declare i32 @GetFileInformationByHandle(
+CHECK: declare i32 @GetFileInformationByHandleEx(
+CHECK: declare ptr @CreateFileW(
+CHECK: declare i32 @SetFileInformationByHandle(
+CHECK: declare i32 @GetFinalPathNameByHandleW(
+CHECK: declare i32 @CopyFileW(

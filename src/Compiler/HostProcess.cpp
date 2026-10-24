@@ -90,12 +90,7 @@ namespace
 
     bool is_unresolved_bare_name(const std::string &program)
     {
-#if defined(_WIN32)
         return !std::filesystem::path(program).has_parent_path();
-#else
-        (void)program;
-        return false;
-#endif
     }
 
 #if defined(_WIN32)

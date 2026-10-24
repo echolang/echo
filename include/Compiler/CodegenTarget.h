@@ -139,6 +139,10 @@ namespace Compiler
             return _os == TargetOs::t_darwin || _os == TargetOs::t_ios;
         }
 
+        std::string_view line_ending() const {
+            return is_windows() ? "\r\n" : "\n";
+        }
+
         // `main`, or `__main_argc_argv` on wasi. a library has none
         std::optional<const char *> entry_symbol() const;
 

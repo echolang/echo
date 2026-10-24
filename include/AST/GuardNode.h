@@ -10,27 +10,9 @@
 
 namespace AST
 {
-    // `T $x = guard <nullable> else { ... }` - bind the value if it is there, and leave otherwise
-    // `guard <expr> else { ... }` - the same, with nothing to bind
-    //
-    // one of the three forms that read through a `T?`, and the only one that is a *statement*. it is what
-    // the other two are compared against: `??` supplies a replacement and `?->` skips the work, while this
-    // one says the rest of the scope has no meaning without the value - which is usually the truth.
-    // the statement form is that sentence when success carries nothing to name
-    //
-    // **a nullability feature, not a weak one.** the initializer may be any `T?` whatever `T` is - a
-    // nullable primitive, struct, class, interface or callable, or a `ptr<T>`, which is the same flag on a
-    // pointer level. a `weak<T>` is *also* accepted, by being upgraded first, and that acceptance is
-    // decided in one place for all three forms (AST::optional_operand_of)
-    //
-    // the declaration lands in the **enclosing** scope, holding the non-null type. so it is an ordinary
-    // local from that point on: the existing frame machinery drops it at scope end, and no new lifetime
-    // rule appears anywhere. that is the whole reason this is a statement and not an expression
-    //
-    // the else block **must not fall through** - it has to return, break, continue or stop the program. a
-    // guard whose else arm ran on and rejoined would leave `$x` bound to a value that is not there, which
-    // is the one thing this form exists to prevent. AST::scope_always_exits is the rule, checked at the
-    // declaration rather than left to codegen
+    // `T $x = guard <v> else { ... }` binds; `guard <v> else { ... }` does not.
+    // the declaration is an ordinary local of the enclosing scope. the else arm must leave
+    // (scope_always_exits): falling through would leave `$x` bound to a value that is not there
     class GuardNode : public Node
     {
     public:
@@ -52,47 +34,12 @@ namespace AST
         // where control goes when the value is absent
         ScopeNode *else_scope = nullptr;
 
-        // **what the binding is given on the path that enters**, when unwrapping the tested value is not
-        // the whole of it.
-        //
-        // null is the common case and the whole no-regression story: a payload that copies as bytes, a
-        // class handle, a weak - every nullable in the tree before tagged optionals owned anything - leaves
-        // this unset and codegen stores the unwrapped value exactly as it always did.
-        //
-        // it is set for one shape: a tagged optional whose payload needs a real copy, read out of a
-        // *place*. There the binding and the optional are two owners of two values, so the payload has to
-        // be copied rather than moved out from under a value somebody else still holds - and the copy
-        // cannot live on `decl->init_expr`, because on that form that edge is also the value being tested.
-        //
-        // **written by AST::OwnershipPass and by nothing else.** a lowering that handed the binding
-        // its value on an edge of its own would skip the copy constructor: the payload would be
-        // byte-copied out of storage somebody else still owns, and both ends would then be
-        // destroyed. the protocol form puts its `deref(unwrap())` on `decl->init_expr` instead,
-        // where the ordinary arrival machinery covers it with no arm at all
+        // written by OwnershipPass only. a lowering that seats the payload here skips the copy
+        // constructor and double-frees an owning one. protocol form writes `decl->init_expr` instead
         ExprNode *bound_value = nullptr;
 
-        // **the presence question, when the type answers it rather than the machine.**
-        //
-        // null is the common case and the whole no-regression story: a `T?` is tested with one
-        // extractvalue or one null compare, which is TypeLowering::gen_has_value, and nothing about that
-        // path moves.
-        //
-        // non-null for a subject declaring `contract::unwrappable<V>`: it is the `has_value()` call
-        // AST::GuardLowering minted, and it is the value codegen branches on. there is no optional left
-        // to evaluate there, the subject having been hoisted into an ordinary declaration ahead of this
-        // statement - so `decl->init_expr` holds the protocol's `deref(unwrap())` and is an ordinary
-        // declaration initializer in every sense the rest of the compiler cares about.
-        //
-        // **this pointer is therefore which form the statement is**, and three places read it as that:
-        // AST::OwnershipPass keys its arm on it, AST::TypeChecker asks "is this certainly present"
-        // only for the other form, and StmtCodegen::gen_guard branches on it twice.
-        //
-        // the invariant, stated once: **`presence_test` if set is the value evaluated before the
-        // branch; with a binding, `decl->init_expr` is then the unwrap, evaluated inside the bound
-        // block. with none, `tested()` is the optional evaluated before the branch, once, for both
-        // the test and (when there is a binding) the unwrap. the statement form on the T? path still
-        // evaluates `tested()` for the condition and stores nothing. either way nothing is evaluated
-        // twice and nothing on the absent path is evaluated at all**
+        // which form the statement is. null: a `T?`, tested by gen_has_value. set: the protocol
+        // `has_value()` call, branched on before `decl->init_expr` unwraps inside the bound block
         ExprNode *presence_test = nullptr;
 
         // `else ($e)` - the reason the subject was not holding a value, when it declares

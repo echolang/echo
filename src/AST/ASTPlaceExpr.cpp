@@ -39,15 +39,19 @@ ExprNode *member_base(ExprNode *expr)
     return base.has() && base.is_expression_node() ? base.unsafe_ptr<ExprNode>() : nullptr;
 }
 
-// the last node of a place that only re-addresses existing storage: a variable or a static
-// property. null when the expression names no lasting storage at all - a call result, a
-// field of one (`Box()->n`)
+// the last node of a place that only re-addresses existing storage: a variable, a static
+// property, or a `?->` marker. null when the expression names no lasting storage at all -
+// a call result, a field of one (`Box()->n`)
 ExprNode *place_anchor(ExprNode *expr)
 {
     while (expr != nullptr) {
         switch (expr->get_node_type()) {
             case NodeType::n_varref:
             case NodeType::n_expr_static_property:
+            // the unwrapped base of a `?->`: a place, and the leaf `chain_base_of` asks for.
+            // place_root_of still answers null (not a frame local); place_outlives_statement
+            // answers no (the continuation's temp)
+            case NodeType::n_expr_chain_base:
                 return expr;
 
             case NodeType::n_expr_addrof:
@@ -150,6 +154,17 @@ VarDeclNode *place_root_of(ExprNode *expr)
     return var_ref->is_var() ? &var_ref->get_var().decl() : nullptr;
 }
 
+ChainBaseNode *chain_base_of(ExprNode *expr)
+{
+    ExprNode *anchor = place_anchor(expr);
+
+    if (anchor == nullptr || anchor->get_node_type() != NodeType::n_expr_chain_base) {
+        return nullptr;
+    }
+
+    return static_cast<ChainBaseNode *>(anchor);
+}
+
 bool place_outlives_statement(ExprNode *expr)
 {
     ExprNode *anchor = place_anchor(expr);
@@ -160,6 +175,10 @@ bool place_outlives_statement(ExprNode *expr)
 
     if (anchor->get_node_type() == NodeType::n_expr_static_property) {
         return true;
+    }
+
+    if (anchor->get_node_type() != NodeType::n_varref) {
+        return false;
     }
 
     auto *var_ref = static_cast<VarRefNode *>(anchor);

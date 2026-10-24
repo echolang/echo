@@ -81,6 +81,13 @@ namespace Compiler
     // bytes of an embedded `stdlib:` path, or nothing. implemented beside the embed table
     std::optional<std::string> embedded_stdlib_content(const std::filesystem::path &path);
 
+    // the file list and `module.eco` text. empty when this binary was not
+    // built with ECO_EMBED_STDLIB. the parser's virtual source pool and the
+    // cache key both read through here, so a `stdlib:` path that parses is a
+    // path that hashes
+    std::vector<std::string> embedded_stdlib_relative_paths();
+    std::optional<std::string> embedded_stdlib_manifest_text();
+
     // `stdlib:/<relative>` — the path the embedded pool, the cache key and
     // the parser all name
     std::filesystem::path embedded_stdlib_path(std::string_view relative);

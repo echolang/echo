@@ -1,5 +1,5 @@
 // empty stays empty, already-cased text is unchanged, and the four functions
-// do what their PHP names suggest for ASCII
+// do what their names suggest for ASCII
 echo str::upper('')->size();
 echo str::lower('')->size();
 echo str::ucfirst('')->size();

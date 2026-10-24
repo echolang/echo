@@ -67,4 +67,5 @@ A remote is a `Source`. The origin on a `#[requires:]` is a tagged locator
 (`source: git "..."`); a later host is another tag, not a new field. GitHub
 remotes list tags and fetch a `module.eco` over HTTP; every other host (and
 GitHub when HTTP fails) uses git. The clone that fills `vendor/` is always
-git. There is no registry in v1.
+git. It writes every file exactly as committed (no line-ending, filter or
+`.gitattributes` conversion), so a tree hashes the same on every host. There is no registry in v1.

@@ -1,0 +1,33 @@
+// usize promotes to uint64. eliding the binding to `const usize&` makes `str::from`'s overload
+// set miss: read-through wants an exact pointee, promotion wants a primitive, and neither rank
+// composes. a unique `wide(uint64)` still wins by arity after a deref, so the set is the cut
+$shape = array<usize>();
+$shape[] = 32 as usize;
+$shape[] = 4 as usize;
+
+function wide(uint64 $n) : uint64
+{
+    return $n;
+}
+
+echo 'from';
+foreach ($shape as $viaFrom) {
+    echo str::from($viaFrom);
+}
+
+echo 'wide';
+foreach ($shape as $viaWide) {
+    echo wide($viaWide);
+}
+
+echo 'keyed';
+string $out = '[';
+foreach ($shape as $i => $extent) {
+    if ($i > 0) {
+        $out->append(', ');
+    }
+
+    $out->append(str::from($extent));
+}
+$out->append(']');
+echo $out;

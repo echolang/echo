@@ -171,21 +171,28 @@ public class file : contract::iterable<string>
         return .ok($kern - $unread + $held);
     }
 
+    /**
+     * What the open file is, asked of the descriptor rather than a path, so a rename since it was
+     * opened does not matter. The write window is flushed first: a size that left out bytes this
+     * program already wrote would be answering for somebody else.
+     */
+    function info() : result<fileinfo, ioerror>
+    {
+        // a closed file is the flush's EBADF
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        return stat_fd($this->fd);
+    }
+
     function size() : result<int64, ioerror>
     {
-        int64 $here = guard $this->position() else ($e) {
+        fileinfo $i = guard $this->info() else ($e) {
             return .error($e);
         }
 
-        int64 $end = guard $this->seek(0, .end) else ($e) {
-            return .error($e);
-        }
-
-        int64 $back = guard $this->seek($here, .start) else ($e) {
-            return .error($e);
-        }
-
-        return .ok($end);
+        return .ok($i->size);
     }
 
     /**

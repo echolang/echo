@@ -1,0 +1,24 @@
+// a destructor and no copy constructor: the type can be moved and cannot be copied. append of a
+// temporary, push of a temporary, and push of a moved local must all compile, because none of
+// them copies. the leftover `$items->push($local)` without `mv` is errors/push_uncopyable_local
+struct Item
+{
+    int32 $n;
+
+    destructor()
+    {
+    }
+}
+
+array<Item> $items = array<Item>();
+
+$items[] = Item(1);
+$items->push(Item(2));
+
+Item $three = Item(3);
+$items->push(mv $three);
+
+echo $items->count();
+echo $items[0]->n;
+echo $items[1]->n;
+echo $items[2]->n;

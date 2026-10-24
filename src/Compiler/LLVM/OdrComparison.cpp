@@ -649,7 +649,7 @@ bool Comparison::same_metadata_content(const llvm::Metadata *left, const llvm::M
     // **the compile unit is a fact about the module, not about the body.** every scope chain ends at
     // one and it names the module's first file, which is *supposed* to differ between two units - so
     // the walk stops here rather than comparing it. the types beneath it are deduplicated by the
-    // linker on their `identifier:`, exactly as C++ does across translation units
+    // linker on their `identifier:`
     if (llvm::isa<llvm::DICompileUnit>(left_node)) {
         return true;
     }

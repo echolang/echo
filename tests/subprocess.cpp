@@ -117,6 +117,27 @@ TEST_CASE("extra_env PATH replaces the parent's Path", "[subprocess]")
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.output.find("echo-install-sentinel") != std::string::npos);
 }
+
+TEST_CASE("a bare tool name is never found in the working directory", "[subprocess]")
+{
+    EchoTests::ScopedProject project("subprocess", "planted_tool");
+    std::filesystem::copy_file(
+        "C:\\Windows\\System32\\hostname.exe", project.root() / "eco_planted_tool.exe");
+
+    const std::filesystem::path previous = std::filesystem::current_path();
+    std::filesystem::current_path(project.root());
+
+    const std::optional<std::string> planted = Compiler::find_program_on_path("eco_planted_tool");
+    const int status = Compiler::run_wait({ "eco_planted_tool" });
+    const std::optional<std::string> cmd = Compiler::find_program_on_path("cmd");
+
+    std::filesystem::current_path(previous);
+
+    REQUIRE_FALSE(planted.has_value());
+    REQUIRE(status == 127);
+    REQUIRE(cmd.has_value());
+    REQUIRE(std::filesystem::path(cmd.value()).is_absolute());
+}
 #endif
 
 TEST_CASE("process_directory is the running executable's folder", "[subprocess]")

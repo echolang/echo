@@ -12,20 +12,8 @@
 
 namespace Compiler
 {
-    // where a compile spent its wall time, by phase, printed by `--timings`.
-    //
-    // this exists because the interesting question about this compiler is not answerable from the
-    // outside. `echoc run` on a program that uses the standard library takes ~3.5x as long as the same
-    // program with `--no-stdlib`, and that difference is spread across the three parse passes, the
-    // monomorphizer's fixpoint, IR construction, the module merge and the JIT - which of them dominates
-    // decides whether it is worth caching a module's *object* or only its IR, and no amount of reasoning
-    // substitutes for the number.
-    //
-    // **process-wide, deliberately.** The phases it has to span are owned by different objects - the
-    // driver owns parsing and the semantic passes, LLVMCompiler owns codegen and the merge, Backend owns
-    // emission - and threading a collector through all of them would change several signatures for a
-    // diagnostic. The alternative was a getenv, which is what ECO_TRACE_MONO does; a flag is better here
-    // because the output belongs beside the compile it describes.
+    // wall time by phase, printed by `--timings`. process-wide: parse, sema, codegen and emit live
+    // on different objects, and a flag is the right knob (output sits beside the compile it describes)
     class PhaseTimings
     {
     public:

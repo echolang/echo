@@ -17,27 +17,9 @@ namespace AST
 {
     class ComplexType;
 
-    // a namespace, and - for a *lexical* one - the declaration scope of a `{ }` block.
-    //
-    // that a lexical scope is a namespace is the whole of the fix: `{ function helper() {} }` puts helper
-    // in the block's lexical namespace and `{ struct P {} }` puts P there, and every question about
-    // either is then already answered.
-    // FunctionRegistry::overloads walks parent() outward and lets the innermost non-empty set win, so
-    // an inner helper hides an outer one and an unrelated name still resolves outward.
-    // find_by_signature searches one namespace, so two blocks each declaring helper(int32) do not
-    // collide. FunctionCallExprNode::lookup_namespace already records where a call looked its name up
-    // and already survives a clone, so the monomorphizer's fixpoint re-derives candidates with no new
-    // field. And mangle_function_name already prefixes the namespace path, so the two helpers get
-    // distinct symbols. four reuses, no new rule
-    //
-    // a type is the same four over again with the other two lookups: find_symbol_in_scope from the block
-    // outward is what lets a block-local `P` hide a file-scope one while an unrelated name still
-    // resolves, the exact-namespace find_symbol at the declaration is what makes that shadowing rather
-    // than a redeclaration, and ComplexType::mangled_token already takes mangling_segments()
-    //
-    // a lexical namespace is deliberately unspellable: it lives in `_lexical_children`, keyed by the
-    // declaration site of its opening brace rather than by a name, so NamespaceManager::retrieve/get
-    // cannot reach it and no `namespace <x>;` can merge into it
+    // a namespace, and for a lexical one the declaration scope of a `{ }` block.
+    // `{ function helper() {} }` and `{ struct P {} }` land in the same place. unspellable:
+    // keyed on the opening brace in `_lexical_children`, so `namespace x;` cannot merge into it
     class Namespace
     {
         friend class NamespaceManager;

@@ -54,7 +54,7 @@ namespace Compiler::LLVM
     // a this-module function lands in that file's partition. `linkonce_odr` that
     // `function_file_map` places in another module - generic instantiations,
     // synthesized deinits - land in `__shared`, and a small `#[inline]` helper is
-    // cloned into each partition that calls it, the C++ TU model. a call into a
+    // cloned into each partition that calls it. a call into a
     // large ODR body is an external from the file object and a definition in
     // `__shared`, so ISel of a huge deinit runs once
     //

@@ -9,34 +9,10 @@
 
 namespace AST
 {
-    // `const if (<condition>) { ... } else { ... }` - a branch decided **before codegen**, whose untaken
-    // arm is discarded from the tree.
-    //
-    // **transient.** AST::ConstFolding replaces it with the arm its condition selected, inside the
-    // monomorphizer's fixpoint - so it is visible with `-a` and gone by `-ar`. clone of a generic
-    // body clones only the taken arm when the substituted condition already folds, so the discarded
-    // arm is never in the instance; ConstFolding is still the splicer. every question after that
-    // point is asked about an ordinary AST::ScopeNode. no codegen arm, no ownership rule.
-    // AST::ForeachNode's contract, and the same two obligations fail silently without it:
-    // OwnershipPass::body_is_concrete must answer *false* while one is present, and
-    // PointerAdjuster::visit_const_if must throw.
-    //
-    // **an ordinary `if` over a folded constant is not the same thing**, which is the whole reason this
-    // exists. `if (mem::is_trivially_copyable<T>())` already emits `br i1 true` and LLVM deletes the dead
-    // block under `-O`. what it cannot do is stop the dead arm from being ownership-walked, rewritten and
-    // monomorphized: `clear<int32>`'s provably-dead arm declares `T $doomed` and calls `mem::take<T>`, and
-    // an `array<T>`'s dead copy arm is what mints its `operator []` instances. so the marker is explicit
-    // and the refusal is loud - a condition the compiler cannot answer is an error at the `const`, never a
-    // runtime branch.
-    //
-    // deliberately **not a flag on AST::IfStatementNode**, close as the two shapes read. a flag makes the
-    // failure *plausible*: a `const if` whose condition did not fold would compile as a runtime branch,
-    // which is precisely the silence this exists to end - and both transient obligations would become a
-    // conditional test inside an existing arm, which is the shape a forgotten check hides in. a distinct
-    // node kind makes every visitor total by construction.
-    //
-    // deliberately **not** in NodeReference::is_expression_node(): this is a statement, beside n_scope,
-    // n_if_statement and n_foreach. that trap in CLAUDE.md reads as unconditional and is not
+    // `const if (<condition>) { ... }`. ConstFolding splices the taken arm into the tree; the
+    // other is discarded. a runtime `if` over a folded constant still ownership-walks the dead
+    // arm, so this is its own node. body_is_concrete is false while one is present;
+    // PointerAdjuster::visit_const_if throws. not an expression
     class ConstIfNode : public Node
     {
     public:

@@ -20,34 +20,9 @@
 
 namespace Parser
 {
-    // what one module is made of, read from its manifest.
-    //
-    // a manifest is an Echo file holding nothing but attributes:
-    //
-    //     #[module: "mylib"]
-    //     #[version: "0.1.0"]
-    //     #[depends: "../geom/module.eco"]
-    //     #[sources: "src/*.eco"]
-    //     #[target: exe { name: "clock", entry: "src/main.eco" }]
-    //     #[link: lib "m"]
-    //     #[cc: sources "c/*.c"]
-    //     #[build_dir: "target"]
-    //
-    // Written in Echo rather than in a config format of its own, so there is one grammar and one lexer
-    // in the project, and so a manifest is highlighted, commented and diffed like the code beside it.
-    //
-    // It costs nothing to read that way. A file-scope attribute is already collected by the
-    // *declaration* pass, so the reader runs the real parser's first two passes over a throwaway module
-    // and never touches the bundle being built.
-    //
-    // repeated `depends` and `sources` accumulate, because AST::AttributeList is already a multimap -
-    // and so does a list inside one, because AST::AttributeReader::each reads a lone value as a list of
-    // it. The two spellings are one rule and not two arms.
-    // what a target produces.
-    //
-    // a **closed vocabulary, tagged in the grammar** rather than spelled into a field of the record, which
-    // is what lets a `lib` or a `test` be added later without the common case growing a word - the same
-    // shape, and the same reason, as `#[link: lib "m"]`
+    // what one module is made of, read from its `module.eco`. Echo attributes, so the real lexer
+    // and the declaration pass collect them. repeated `depends` / `sources` accumulate.
+    // what a target produces: a closed vocabulary, tagged in the grammar
     enum class TargetKind
     {
         t_executable,

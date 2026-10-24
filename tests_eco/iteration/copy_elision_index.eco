@@ -1,0 +1,10 @@
+// an index read is still an IndexExprNode when the elision is asked, so `$row['id']` does not count
+// as a write. the resolved AST is the pin: the binding is a const borrow
+$rows = array<map<string, int32>>();
+$first = map<string, int32>();
+$first['id'] = 7;
+$rows[] = $first;
+
+foreach ($rows as $cell) {
+    echo $cell['id'];
+}

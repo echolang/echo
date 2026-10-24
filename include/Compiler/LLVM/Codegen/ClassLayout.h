@@ -8,32 +8,12 @@
 
 namespace Compiler::LLVM
 {
-    // the heap block a class instance lives in. one llvm::StructType per class per compilation unit,
-    // wrapping the *payload* - which is the exact layout a `struct` with the same body would have had,
-    // built by the same code. that nesting is the whole trick: below the payload every member GEP is
-    // the struct path unchanged, so classes needed no second member-access implementation
+    // heap block a class lives in. the payload is wrapped, so member GEPs are the struct path:
     //
     //     %Foo.box = { i64 __strong, i64 __weak, ptr __typeinfo, %Foo }
     //
-    // __typeinfo holds the address of the class's own `@Foo.typeinfo` global, which is what `instanceof`
-    // compares - an address is exact identity across modules and needs no numbering scheme to keep stable
-    //
-    // **the two counts are two different questions, and they end at two different moments.** __strong is
-    // how many owners the *object* has; at zero its deinit runs and the payload is dead. __weak is how
-    // many handles need the *block* to stay readable, and only at zero is the block freed - so a
-    // `weak<Foo>` can always be asked whether the object is still there, rather than dangling to find
-    // out.
-    //
-    // The strong references collectively hold **one** __weak, seated with the first __strong and dropped
-    // by the release that takes __strong to zero. That convention is what keeps exactly one `free` in
-    // the whole runtime, in `__eco_weak_release`, rather than one per count that could disagree
-    //
-    // the header is the same shape in every box because the payload is *wrapped* - so an erased operand,
-    // or a closure environment that has no ClassLayout at all, reaches either count through
-    // `TypeLowering::class_header_llvm_type()`. see ClassCodegen::gen_header_ptr
-    //
-    // a class-typed value is *not* this type: it is an opaque `ptr` to a block of it. the layout is
-    // only ever needed to size an allocation, to reach the payload, and to touch the counts
+    // __strong == 0 runs deinit; __weak == 0 frees the block. the strong refs hold one weak,
+    // so the only `free` in the runtime is `__eco_weak_release`
     namespace ClassBox
     {
         static constexpr unsigned strong_index = 0;

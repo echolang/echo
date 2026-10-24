@@ -17,33 +17,9 @@ namespace AST
     class Namespace;
     class StringInterpolationExprNode;
 
-    // rewrites every interpolated string literal into the calls a hand written program would have
-    // spelled:
-    //
-    //     "a{$x}b{$y:.2f}"
-    //
-    //     ==>  str::concat(str::concat(str::concat("a", str::from($x)), "b"), str::from($y, ".2f"))
-    //
-    // **that is the whole of what interpolation is**, and stating it here rather than in the parser is
-    // what makes it one decision: the fold can become a builder, or `str::from` can be given a second
-    // overload, without a single call site moving.
-    //
-    // and it is why nothing in this feature needs a variadic function. a hole is a *unary* call, so the
-    // exact-arity rule AST::match_function has always had is untouched - the alternative reading, a
-    // `fmt(format, ...)` taking the holes as arguments, is the one that would have needed one.
-    //
-    // **inside AST::Monomorphizer's fixpoint**, beside AST::ForeachLowering. it mints calls, and one of
-    // them may name a user's own `str::from(MyType)` - so it has to be somewhere settle_calls still
-    // runs after it. and it must precede the ownership pass, which walks a body exactly once, ever:
-    // every call minted here returns an owning `string`, and a body walked before they exist is a body
-    // whose drops were decided against a tree that had not arrived.
-    //
-    // **unlike the other three rewriters it has no pending state and so no finalize().** it never
-    // needs a type: which overload `str::from` resolves to is AST::CallResolver's question, asked
-    // whenever the argument settles. so this pass either lowers a literal or refuses it, in the first
-    // round that reaches it, and there is no "not decided yet" to give an exit to. that is a fact and
-    // not a comment: AST::FixpointLowering *has* a finalize(), and this is the one subclass that does
-    // not re-expose it
+    // `"a{$x}b"` becomes a fold of `str::concat` over `str::from`. a hole is a unary call, so
+    // match_function's arity rule is untouched. inside the fixpoint, before ownership. no
+    // pending state, so no `finalize()`
     class InterpolationLowering : private FixpointLowering
     {
     public:

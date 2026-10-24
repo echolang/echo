@@ -58,35 +58,11 @@ namespace AST
         t_elements,
     };
 
-    // **the sole answer to "how is a value of this type copied".** every arm is named above, and both
-    // readers switch on it rather than re-deriving it
-    //
-    // A struct's answer is **folded from its properties' own answers** in one walk, so the taxonomy is
-    // compositional. A property with no rule makes the whole struct uncopyable: it would be copied as
-    // bytes alongside the ones that do have a rule, leaving two owners of one resource. And a struct
-    // whose properties are all byte copies is one itself.
-    //
-    // Deliberately *not* asked through AST::needs_destruction (ASTDestruction.h). The two ladders answer
-    // different questions - a struct with a destructor owns something and is still not copyable - and
-    // asking that one here walked the whole property graph a second time at every level, at every copy
-    // site, on every round of the fixpoint
-    //
-    // deliberately **not cached** on ComplexType, for the reason AST::needs_destruction gives. it
-    // bottoms out where that one does too: a class property is answered without descending into it
+    // how a value of this type is copied. a struct folds from its properties: one uncopyable field
+    // makes the whole uncopyable. a different ladder from needs_destruction, and not cached on ComplexType
     CopyKind classify_copy(const ValueType &type);
 
-    // does copying a value of this type mean *calling* something, rather than copying its bytes?
-    //
-    // the copying counterpart of AST::needs_destruction (ASTDestruction.h). true three ways, and each
-    // one is an arm of the classifier: the type is a reference, so a copy is one more of them; **the
-    // type declares a copy constructor**, so `$b = $a` must mean what `Foo($a)` means - true whether or
-    // not it owns anything, or which operation you got would depend on whether it happens to declare a
-    // destructor as well; or the type owns something, whether or not its author has said what a real
-    // copy would be, since a byte copy would leave two owners of one resource and there is nothing
-    // sound for it to mean
-    //
-    // a pointer answers false, so a borrow destination is copied by copying the address - which is
-    // what a borrow is
+    // true when a copy is a call rather than bytes: a retain, a declared constructor, or an owner
     inline bool copy_needs_constructor(const ValueType &type)
     {
         // everything that is not a byte copy goes through arrive_value's constructor switch,
@@ -94,42 +70,14 @@ namespace AST
         return classify_copy(type) != CopyKind::t_bytes;
     }
 
-    // can the compiler write this type's copy constructor itself?
-    //
-    // the one case the chapter leaves to the compiler: a struct whose properties each have a copy
-    // somebody has said how to make, transitively through struct-typed ones. copying it is a copy per
-    // property, and there is nothing to guess. every *other* owner ends at a raw pointer the type
-    // system knows nothing about, so it stays the author's to say - "we cannot copy owners we have no
-    // rule for", not "we cannot copy owners"
-    //
-    // three of the classifier's arms answer ahead of this one, and each is a refusal in its own right:
-    // anything that is not a struct, since a reference's copy is a retain and nothing else has a layout
-    // to ask about; a declared copy constructor, which is the answer already; and a declared
-    // **destructor**, because duplicating the value would run that body twice over things its author
-    // never said could be duplicated
+    // a struct whose properties each have a known copy, transitively. a declared destructor is not
     inline bool copy_is_synthesizable(const ValueType &type)
     {
         return classify_copy(type) == CopyKind::t_synthesizable;
     }
 
-    // **may a copy of this type read a `const` source?** - which is to say, what does the parameter of
-    // the copy constructor AST::OwnershipPass synthesizes have to be, `const Foo&` or `Foo&`
-    //
-    // Asked rather than fixed, because it is not this pass's to decide. A hand-written
-    // `constructor(Point& $other)` takes a *mutable* borrow, and by doing so reserves the right to write
-    // through it - so a value holding a `Point` cannot promise to copy itself out of a const source
-    // however it is spelled here. The const-ness has to be folded out of the properties for the same
-    // reason CopyKind is, and this is the same walk with a different question at its leaves.
-    //
-    // The answer is `const` wherever it can be, and that is what matters. It is the difference between
-    // `$b = $a` working on a `const Foo&` and being the one operation a const value cannot take part in
-    // - including a copy out of a const *place*, `$other[$i]` inside stdlib/core/array.eco's
-    // `constructor(const array<T>& $other)`, which is how an owning array copies its elements at all.
-    //
-    // Deliberately **not** answered by stripping const at the call instead. A teardown may do that -
-    // AST::OwnershipPass::receiver_for_teardown says why: the storage is going away, so nothing that
-    // happens to it afterwards is observable. A copy may **not**. Its source outlives it and is read
-    // again, so a `Point&` constructor writing through one would be observable
+    // may a copy read a `const` source? folded from the properties, because a hand-written
+    // `constructor(Point& $other)` may write through. a teardown may strip const; a copy may not
     bool copy_source_may_be_const(const ValueType &type);
 };
 

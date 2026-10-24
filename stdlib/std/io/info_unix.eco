@@ -1,0 +1,339 @@
+/**
+ * Unix half of `info`, `chmod`, `realpath` and `copy`.
+ *
+ * Darwin and wasi read a `stat` buffer, Linux a `statx` one. `copy` uses `fcopyfile` or
+ * `copy_file_range` when the kernel will move the bytes, and a read/write loop when it will not.
+ */
+
+namespace std::io;
+
+#[if: os != windows]
+private function unix_time(int64 $secs, int64 $nanos) : std::time::timestamp
+{
+    return std::time::timestamp(std::time::duration($secs, $nanos));
+}
+
+/**
+ * A heap block this scope owns, freed on every way out of it.
+ */
+#[unique]
+private struct owned_bytes
+{
+    ptr<uint8> $p;
+
+    destructor()
+    {
+        mem::free<uint8>($this->p);
+    }
+}
+
+/**
+ * A descriptor this scope owns, closed on every way out of it.
+ */
+#[unique]
+private struct owned_fd
+{
+    int32 $fd;
+
+    destructor()
+    {
+        c_close($this->fd);
+    }
+}
+
+#[if: family == darwin || family == wasi]
+private function info_of(const stat_buf& $st) : fileinfo
+{
+    return fileinfo(
+        kind_of_mode($st->mode),
+        $st->size,
+        fileperms($st->mode),
+        unix_time($st->mtime_sec, $st->mtime_nsec),
+        unix_time($st->atime_sec, $st->atime_nsec),
+        birth_of($st)
+    );
+}
+
+internal function stat_path(const string& $path, bool $follow) : result<fileinfo, ioerror>
+{
+    stat_buf $st = stat_buf();
+    int32 $rc = 0;
+
+    if ($follow) {
+        $rc = c_stat($path->cstr(), &$st);
+    }
+    else {
+        $rc = c_lstat($path->cstr(), &$st);
+    }
+
+    if ($rc < 0) {
+        return .error(last_error());
+    }
+
+    return .ok(info_of($st));
+}
+
+private function fstat_of(int32 $fd) : result<stat_buf, ioerror>
+{
+    stat_buf $st = stat_buf();
+
+    if (c_fstat($fd, &$st) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok($st);
+}
+
+// device and inode, the identity of a file whatever path reached it
+private function same_file(const stat_buf& $a, const stat_buf& $b) : bool
+{
+    return $a->dev == $b->dev && $a->ino == $b->ino;
+}
+#[end]
+
+#[if: family == darwin]
+private function birth_of(const stat_buf& $st) : std::time::timestamp?
+{
+    return unix_time($st->birthtime_sec, $st->birthtime_nsec);
+}
+#[elif: family == wasi]
+private function birth_of(const stat_buf& $st) : std::time::timestamp?
+{
+    return null;
+}
+#[end]
+
+#[if: family == linux]
+private function info_of(const stat_buf& $sx) : fileinfo
+{
+    std::time::timestamp? $created = null;
+
+    // a filesystem that keeps no birth time leaves the bit out of the mask rather than writing 0
+    if (($sx->mask & STATX_BTIME) != 0) {
+        $created = unix_time($sx->btime_sec, $sx->btime_nsec);
+    }
+
+    return fileinfo(
+        kind_of_mode($sx->mode),
+        $sx->size as int64,
+        fileperms($sx->mode),
+        unix_time($sx->mtime_sec, $sx->mtime_nsec),
+        unix_time($sx->atime_sec, $sx->atime_nsec),
+        $created
+    );
+}
+
+internal function stat_path(const string& $path, bool $follow) : result<fileinfo, ioerror>
+{
+    stat_buf $sx = stat_buf();
+    int32 $flags = 0;
+
+    if (!$follow) {
+        $flags = AT_SYMLINK_NOFOLLOW;
+    }
+
+    if (c_statx(AT_FDCWD, $path->cstr(), $flags, STATX_WANTED, &$sx) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok(info_of($sx));
+}
+
+private function fstat_of(int32 $fd) : result<stat_buf, ioerror>
+{
+    stat_buf $sx = stat_buf();
+
+    // an empty path with AT_EMPTY_PATH is the descriptor itself
+    if (c_statx($fd, ''->cstr(), AT_EMPTY_PATH, STATX_WANTED, &$sx) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok($sx);
+}
+
+private function same_file(const stat_buf& $a, const stat_buf& $b) : bool
+{
+    return $a->ino == $b->ino && $a->dev_major == $b->dev_major && $a->dev_minor == $b->dev_minor;
+}
+#[end]
+
+internal function stat_fd(int32 $fd) : result<fileinfo, ioerror>
+{
+    stat_buf $st = guard fstat_of($fd) else ($e) {
+        return .error($e);
+    }
+
+    return .ok(info_of($st));
+}
+
+internal function chmod_path(const string& $path, fileperms $perms) : result<bool, ioerror>
+{
+    if (c_chmod($path->cstr(), $perms->mode()) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok(true);
+}
+
+internal function realpath_of(const string& $path) : result<string, ioerror>
+{
+    ptr<uint8> $buf = mem::alloc<uint8>(PATH_MAX);
+
+    if ($buf:$ == null) {
+        return .error(ioerror(ENOMEM));
+    }
+
+    owned_bytes $hold = owned_bytes($buf);
+    ptr<uint8> $got = c_realpath($path->cstr(), $buf);
+
+    if ($got:$ == null) {
+        return .error(last_error());
+    }
+
+    return .ok(str::from(ptr<const uint8>($buf:$)));
+}
+
+internal function copy_file(const string& $from, const string& $to) : result<bool, ioerror>
+{
+    int32 $in_fd = guard open_path($from, O_RDONLY | O_CLOEXEC) else ($e) {
+        return .error($e);
+    }
+
+    owned_fd $in = owned_fd($in_fd);
+
+    // one stat of the open source answers all three: is it a regular file, what are its
+    // permissions, and which file is it. open already followed a symlink
+    stat_buf $src = guard fstat_of($in->fd) else ($e) {
+        return .error($e);
+    }
+
+    fileinfo $src_info = info_of($src);
+    bool $ok = guard require_regular_file($src_info->kind) else ($e) {
+        return .error($e);
+    }
+
+    uint32 $mode = $src_info->perms->mode();
+
+    // no O_TRUNC yet: if `$to` is `$from` under another name, truncating it here is the data gone
+    int32 $out_fd = guard open_path($to, O_WRONLY | O_CREAT | O_CLOEXEC, $mode) else ($e) {
+        return .error($e);
+    }
+
+    owned_fd $out = owned_fd($out_fd);
+
+    stat_buf $dst = guard fstat_of($out->fd) else ($e) {
+        return .error($e);
+    }
+
+    if (same_file($src, $dst)) {
+        return .error(ioerror(EINVAL));
+    }
+
+    if (c_ftruncate($out->fd, 0) < 0) {
+        return .error(last_error());
+    }
+
+    bool $copied = guard copy_data($in->fd, $out->fd) else ($e) {
+        return .error($e);
+    }
+
+#[if: family != wasi]
+    // the mode O_CREAT used went through the umask, and a file that already existed kept its
+    // own. wasi has no permissions to set
+    if (c_fchmod($out->fd, $mode) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+#[if: family == darwin]
+private function copy_data(int32 $in, int32 $out) : result<bool, ioerror>
+{
+    if (c_fcopyfile($in, $out, ptr<uint8>(null), COPYFILE_DATA) >= 0) {
+        return .ok(true);
+    }
+
+    // rewind so a failed fcopyfile that wrote some bytes does not duplicate them
+    if (c_lseek($in, 0, SEEK_SET) < 0) {
+        return .error(last_error());
+    }
+
+    if (c_lseek($out, 0, SEEK_SET) < 0) {
+        return .error(last_error());
+    }
+
+    if (c_ftruncate($out, 0) < 0) {
+        return .error(last_error());
+    }
+
+    return copy_by_reading($in, $out);
+}
+#[elif: family == linux]
+// one call may stop short of the whole file, so it is a loop until the kernel says 0
+private function copy_data(int32 $in, int32 $out) : result<bool, ioerror>
+{
+    bool $moved_any = false;
+
+    while (true) {
+        isize $n = c_copy_file_range($in, ptr<int64>(null), $out, ptr<int64>(null), COPY_CHUNK, 0);
+
+        if ($n == 0) {
+            return .ok(true);
+        }
+
+        if ($n < 0) {
+            ioerror $e = last_error();
+
+            // across filesystems, on a kernel without it, or on a filesystem that declines: the
+            // bytes have to come through here after all. only before any moved, so the offsets agree
+            if (!$moved_any
+                && ($e->code == EXDEV || $e->code == ENOSYS || $e->code == EINVAL || $e->code == EOPNOTSUPP)) {
+                return copy_by_reading($in, $out);
+            }
+
+            return .error($e);
+        }
+
+        $moved_any = true;
+    }
+}
+
+// a gigabyte: large enough that a big file is a handful of calls, small enough to fit an `ssize_t`
+// on any target
+private const usize COPY_CHUNK = 1073741824;
+#[elif: family == wasi]
+private function copy_data(int32 $in, int32 $out) : result<bool, ioerror>
+{
+    return copy_by_reading($in, $out);
+}
+#[end]
+
+private function copy_by_reading(int32 $in, int32 $out) : result<bool, ioerror>
+{
+    ptr<uint8> $buf = mem::alloc<uint8>(IO_BUF);
+
+    if ($buf:$ == null) {
+        return .error(ioerror(ENOMEM));
+    }
+
+    owned_bytes $hold = owned_bytes($buf);
+
+    while (true) {
+        isize $got = c_read($in, $buf, IO_BUF);
+
+        if ($got < 0) {
+            return .error(last_error());
+        }
+
+        if ($got == 0) {
+            return .ok(true);
+        }
+
+        usize $put = guard raw_write_all($out, ptr<const uint8>($buf:$), $got as usize) else ($e) {
+            return .error($e);
+        }
+    }
+}
+#[end]

@@ -1,0 +1,28 @@
+// a `const T?` field reads into a plain `T?` local, the way a `const T` field reads into a `T`. a
+// by-value optional holds its payload, so `const` on the one is `const` on the other - one type
+struct Point
+{
+    int64 $x;
+}
+
+struct Sample
+{
+    const int32? $count;
+    const Point? $at;
+    const Point $origin;
+}
+
+Sample $s = Sample(3, Point(7), Point(0));
+
+int32? $count = $s->count;
+Point? $at = $s->at;
+Point $origin = $s->origin;
+
+echo $count ?? 0;
+echo $at?->x ?? 0;
+echo $origin->x;
+
+// and a plain local can be reassigned from a const one
+const int32? $fixed = 5;
+$count = $fixed;
+echo $count ?? 0;

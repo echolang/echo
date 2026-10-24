@@ -1,7 +1,7 @@
 // `map<K, V>` - the surface, over a trivial key and a trivial value so nothing here is about ownership
 //
 // note `$m['a'] = 1` and `$m->set('a', 1)` are the same operation, and now literally so: `set`'s body *is*
-// `$this[$key] = mv $value`, the mirror of `array<T>::push` being `$this[] = $value`. one implementation of
+// `$this[$key] = mv $value`, the mirror of `array<T>::push` being `$this[] = mv $value`. one implementation of
 // the write rather than two that have to agree
 
 map<string, int32> $m = map<string, int32>();

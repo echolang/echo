@@ -85,14 +85,12 @@ static int is_unc(const wchar_t *path)
     return path[0] == L'\\' && path[1] == L'\\';
 }
 
-/* absolute Win32 path with a \\?\ prefix so vendor trees past MAX_PATH work */
-static wchar_t *wide_ntpath(const char *utf8)
+static wchar_t *wide_fullpath(const char *utf8)
 {
     wchar_t *wide;
     wchar_t *full;
     DWORD needed;
     DWORD n;
-    wchar_t *out;
 
     wide = utf8_to_wide(utf8);
     if (wide == NULL) {
@@ -124,9 +122,25 @@ static wchar_t *wide_ntpath(const char *utf8)
         return NULL;
     }
 
+    return full;
+}
+
+/* absolute Win32 path with a \\?\ prefix so vendor trees past MAX_PATH work */
+static wchar_t *wide_ntpath(const char *utf8)
+{
+    wchar_t *full;
+    wchar_t *out;
+    size_t n;
+
+    full = wide_fullpath(utf8);
+    if (full == NULL || wcsncmp(full, L"\\\\?\\", 4) == 0) {
+        return full;
+    }
+
+    n = wcslen(full);
+
     if (is_unc(full)) {
         /* \\server\share -> \\?\UNC\server\share */
-        size_t n = wcslen(full);
         out = malloc((8 + n + 1) * sizeof(wchar_t));
         if (out == NULL) {
             free(full);
@@ -138,18 +152,15 @@ static wchar_t *wide_ntpath(const char *utf8)
         return out;
     }
 
-    {
-        size_t n = wcslen(full);
-        out = malloc((4 + n + 1) * sizeof(wchar_t));
-        if (out == NULL) {
-            free(full);
-            return NULL;
-        }
-        memcpy(out, L"\\\\?\\", 4 * sizeof(wchar_t));
-        memcpy(out + 4, full, (n + 1) * sizeof(wchar_t));
+    out = malloc((4 + n + 1) * sizeof(wchar_t));
+    if (out == NULL) {
         free(full);
-        return out;
+        return NULL;
     }
+    memcpy(out, L"\\\\?\\", 4 * sizeof(wchar_t));
+    memcpy(out + 4, full, (n + 1) * sizeof(wchar_t));
+    free(full);
+    return out;
 }
 
 typedef struct {
@@ -296,11 +307,19 @@ int32_t epm_kind(const char *path)
     return (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 2 : 1;
 }
 
-/* 1 for a symbolic link or a junction (a reparse point, wherever it points); 0 otherwise */
+#ifndef IO_REPARSE_TAG_SYMLINK
+#define IO_REPARSE_TAG_SYMLINK (0xA000000CL)
+#endif
+#ifndef IO_REPARSE_TAG_MOUNT_POINT
+#define IO_REPARSE_TAG_MOUNT_POINT (0xA0000003L)
+#endif
+
+/* 1 for a symbolic link or a junction, wherever it points; 0 otherwise */
 int32_t epm_is_link(const char *path)
 {
     wchar_t *wide;
-    DWORD attributes;
+    WIN32_FIND_DATAW data;
+    HANDLE found;
 
     if (path == NULL) {
         return 0;
@@ -311,22 +330,21 @@ int32_t epm_is_link(const char *path)
         return 0;
     }
 
-    attributes = GetFileAttributesW(wide);
+    found = FindFirstFileW(wide, &data);
     free(wide);
 
-    if (attributes == INVALID_FILE_ATTRIBUTES) {
+    if (found == INVALID_HANDLE_VALUE) {
         return 0;
     }
 
-    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
-}
+    FindClose(found);
 
-#ifndef IO_REPARSE_TAG_SYMLINK
-#define IO_REPARSE_TAG_SYMLINK (0xA000000CL)
-#endif
-#ifndef IO_REPARSE_TAG_MOUNT_POINT
-#define IO_REPARSE_TAG_MOUNT_POINT (0xA0000003L)
-#endif
+    if ((data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
+        return 0;
+    }
+
+    return data.dwReserved0 == IO_REPARSE_TAG_SYMLINK || data.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT;
+}
 
 typedef struct {
     ULONG ReparseTag;
@@ -364,7 +382,7 @@ int32_t epm_readlink(const char *path, char *buf, uint64_t cap)
     size_t path_off;
     int utf8;
 
-    if (path == NULL || buf == NULL || cap == 0) {
+    if (path == NULL || buf == NULL || cap < 2) {
         return -1;
     }
 
@@ -771,7 +789,19 @@ static int read_available(HANDLE pipe, char **buf, size_t *cap, size_t *len)
     }
 
     *len += (size_t)got;
-    return 1;
+    return got > 0 ? 2 : 1;
+}
+
+static int32_t abandon_child(HANDLE process, HANDLE out_r, HANDLE err_r, char *out_buf, char *err_buf)
+{
+    TerminateProcess(process, 1);
+    WaitForSingleObject(process, INFINITE);
+    CloseHandle(process);
+    CloseHandle(out_r);
+    CloseHandle(err_r);
+    free(out_buf);
+    free(err_buf);
+    return -1;
 }
 
 static int is_absolute_dir(const wchar_t *dir, size_t n)
@@ -781,6 +811,11 @@ static int is_absolute_dir(const wchar_t *dir, size_t n)
     }
 
     return n >= 2 && (dir[0] == L'\\' || dir[0] == L'/') && (dir[1] == L'\\' || dir[1] == L'/');
+}
+
+static int has_image_extension(const wchar_t *name, size_t n)
+{
+    return n >= 4 && (_wcsicmp(name + n - 4, L".exe") == 0 || _wcsicmp(name + n - 4, L".com") == 0);
 }
 
 static wchar_t *path_lookup(const char *argv0)
@@ -811,8 +846,8 @@ static wchar_t *path_lookup(const char *argv0)
         return NULL;
     }
 
-    ext = wcschr(name, L'.') != NULL ? L"" : L".exe";
     name_len = wcslen(name);
+    ext = has_image_extension(name, name_len) ? L"" : L".exe";
     start = path;
 
     while (found == NULL && *start != L'\0') {
@@ -868,7 +903,7 @@ static wchar_t *explicit_app(const char *argv0)
 {
     if (strchr(argv0, '/') != NULL || strchr(argv0, '\\') != NULL
         || (argv0[0] != '\0' && argv0[1] == ':')) {
-        return wide_ntpath(argv0);
+        return wide_fullpath(argv0);
     }
 
     return path_lookup(argv0);
@@ -961,35 +996,28 @@ int32_t epm_run(
     out_buf = malloc(out_cap);
     err_buf = malloc(err_cap);
     if (out_buf == NULL || err_buf == NULL) {
-        free(out_buf);
-        free(err_buf);
-        CloseHandle(out_r);
-        CloseHandle(err_r);
-        TerminateProcess(pi.hProcess, 1);
-        CloseHandle(pi.hProcess);
-        return -1;
+        return abandon_child(pi.hProcess, out_r, err_r, out_buf, err_buf);
     }
 
     for (;;) {
-        DWORD wait = WaitForSingleObject(pi.hProcess, 15);
-        if (read_available(out_r, &out_buf, &out_cap, &out_len) < 0
-            || read_available(err_r, &err_buf, &err_cap, &err_len) < 0) {
-            free(out_buf);
-            free(err_buf);
-            CloseHandle(out_r);
-            CloseHandle(err_r);
-            CloseHandle(pi.hProcess);
-            return -1;
+        int out_state = read_available(out_r, &out_buf, &out_cap, &out_len);
+        int err_state = read_available(err_r, &err_buf, &err_cap, &err_len);
+        DWORD wait;
+
+        if (out_state < 0 || err_state < 0) {
+            return abandon_child(pi.hProcess, out_r, err_r, out_buf, err_buf);
         }
+
+        wait = WaitForSingleObject(pi.hProcess, (out_state == 2 || err_state == 2) ? 0 : 15);
+
+        if (wait == WAIT_FAILED) {
+            return abandon_child(pi.hProcess, out_r, err_r, out_buf, err_buf);
+        }
+
         if (wait == WAIT_OBJECT_0) {
             if (drain_pipe(out_r, &out_buf, &out_cap, &out_len) < 0
                 || drain_pipe(err_r, &err_buf, &err_cap, &err_len) < 0) {
-                free(out_buf);
-                free(err_buf);
-                CloseHandle(out_r);
-                CloseHandle(err_r);
-                CloseHandle(pi.hProcess);
-                return -1;
+                return abandon_child(pi.hProcess, out_r, err_r, out_buf, err_buf);
             }
             break;
         }

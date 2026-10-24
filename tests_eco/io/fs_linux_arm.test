@@ -1,0 +1,11 @@
+flags: --target-os linux
+# Linux reads file info with statx - one layout on every arch - and copies with copy_file_range
+
+--- OUT --->
+--- IR --->
+CHECK: declare i32 @statx(
+CHECK: declare i32 @chmod(
+CHECK: declare ptr @realpath(
+CHECK: declare i32 @ftruncate(
+CHECK: declare i32 @fchmod(
+CHECK: declare i64 @copy_file_range(

@@ -100,11 +100,15 @@ function Broadcast-Environment {
 }
 
 function Get-UserPath {
-    $path = [Environment]::GetEnvironmentVariable("Path", "User")
+    $key = Get-Item -LiteralPath "HKCU:\Environment" -ErrorAction SilentlyContinue
+    if ($null -eq $key) {
+        return ""
+    }
+    $path = $key.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
     if ($null -eq $path) {
         return ""
     }
-    return $path
+    return [string]$path
 }
 
 function Set-UserPath([string]$Path) {

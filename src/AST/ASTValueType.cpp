@@ -618,6 +618,15 @@ AST::ValueType AST::TypeRegistry::get_or_create_optional(const AST::ValueType &p
         return payload;
     }
 
+    // **a const payload is a const optional, interned once.** a by-value optional *contains* its payload,
+    // so nothing can write the one without writing the other - `const T` inside and `const` on the pair
+    // are one promise. keyed on the const payload it was a second layout, `const int32?` beside `int32?`,
+    // and make_mutable could only ever strip the outer level, so a const field read refused to copy into
+    // a plain local while the same read of a `const T` copied fine
+    if (payload.is_const()) {
+        return ValueType::make_const(get_or_create_optional(ValueType::make_mutable(payload)));
+    }
+
     if (auto it = _optionals.find(payload); it != _optionals.end()) {
         return ValueType::make_complex(it->second);
     }
@@ -1214,9 +1223,9 @@ size_t AST::generic_application_depth(const ValueType &type)
 // in every instance, and how `extern function<void(T)>?` would have done the same through the
 // signature arm
 //
-// const first, then nullability, matching the type-parameter arm: over a bound type with no
-// spare null value, `const T?` with T := int32 is a tagged pair whose payload is const, not a
-// const pair of a mutable payload. OR'd rather than re-derived, so a bound type that is already
+// const first, then nullability, matching the type-parameter arm. where the const lands on a
+// tagged pair is not decided here: get_or_create_optional owns that, and answers a const pair
+// over a mutable payload either way. OR'd rather than re-derived, so a bound type that is already
 // nullable stays so - `T?` with T := Node? is a Node?, which is idempotence
 //
 // the pointer skip is the borrow rule: a pointer level spells this bit with `ptr<T>` vs `T&`,

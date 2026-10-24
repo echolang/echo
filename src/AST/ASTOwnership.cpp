@@ -2172,27 +2172,8 @@ ExprNode *OwnershipPass::arrive_value(
         return walk_expression(expr);
     }
 
-    // **an implicit cast is transparent to value arrival**, and what is under it arrives as its own
-    // type.
-    //
-    // AST::CallResolver wraps an argument in one whenever `is_implicitly_convertible` declines, which
-    // for a borrow read into a by-value parameter it always does: this pass runs *inside* the fixpoint,
-    // so the argument is still `ptr<const T>` where the parameter says `T`, and AST::PointerAdjuster
-    // has not yet written the deref that reconciles them.
-    //
-    // A cast is `t_materializable`, so the place test below took the non-place early return and the
-    // value was handed over with no copy and no retain. Two owners, one reference count, and the first
-    // teardown frees what the other still names.
-    //
-    // The copy belongs *inside* the cast, around the place. A RetainExprNode has to be typed as the
-    // value for codegen to move the right count, and a copy constructor call has to be the value's
-    // rather than whatever the cast reconciled it to. That is also what makes the interface widening
-    // above a consequence of this rule rather than an arm of its own.
-    //
-    // Idempotent across rounds: next round the operand is a retain or a call, neither of which is a
-    // place, so this cannot wrap twice. `param` is not forwarded, because the `mv` rule above has
-    // already been asked of the outer expression and the parameter's own type is not what arrives
-    // under the cast
+    // an implicit cast is transparent: copy the place inside it, as the operand's type. a cast is
+    // t_materializable, so skipping this hands the value over with no retain
     if (TypeCastNode *cast = place_under_implicit_cast(*expr)) {
         // AST::value_result_type is the peel, including the incomplete-pointee case where the
         // pointer *is* the value. reconstructing it here from read_peels_pointer and value_type_of
@@ -2219,26 +2200,8 @@ ExprNode *OwnershipPass::arrive_value(
 
     expr = walk_expression(expr);
 
-    // "a read that reaches storage is copied, a computed value is moved". a value the program
-    // computed - a constructor call, a call returning `T` - is one nobody else holds, so it needs no
-    // annotation and leaves nothing behind
-    //
-    // a place yielded by a t_materializable form is not this arrival's to copy.
-    // arrive_computed_place hung it on the producing edge; a place lhs of `??`
-    // hangs its own off present_value. by the time the form arrives here it is
-    // already a copy nobody else holds
-    //
-    // **a call returning a borrow is on the copying side**, which is the whole of why this asks
-    // AST::read_reaches_storage rather than is_place_expression: `string $s = $a->at(0);` reads
-    // through the address the call handed back, and what it found is still the array's. answering
-    // "non-place, so moved" there is a bitwise copy of a buffer handle with no retain, and the
-    // local's scope-exit drop then frees storage the container still names
-    //
-    // and a copy is only this pass's business when it is not a copy of bytes. which copy this is, is
-    // AST::classify_copy - decided once here and dispatched on below, because the arms are separated
-    // by the move analysis in between. re-deciding them there would make this ladder a second
-    // implementation of the one in ASTCopy.cpp. every other copy in the language still happens
-    // with nothing inserted and nothing tracked
+    // a read that reaches storage is copied; a computed value is moved. a call returning a borrow
+    // is on the copying side (`string $s = $a->at(0)` still names the array's element)
     if (!read_reaches_storage(*expr)) {
         return expr;
     }
@@ -2273,29 +2236,9 @@ ExprNode *OwnershipPass::arrive_value(
 
     VarDeclNode *source = whole_variable_moved(expr);
 
-    // the two destinations that move a place without being told to - see ValueDestination
-    //
-    // **a returned local is moved, not copied.** "the caller's slot is the destination, the local is
-    // about to die, so there is nothing to duplicate and nothing left behind to destroy", and no
-    // `mv` is written because there is nothing else a returned local could be. this is the rule a
-    // constructor rests on: its `$this` is a body-local of value type with an implicit
-    // `return $this`, so without this `$a = Buffer(...)` frees the buffer twice - once when the
-    // constructor's `$this` goes out of scope and once when `$a` does
-    //
-    // **an initialization moves too**, which is what lets a struct hold an owner at all: the
-    // field-wise constructor's `$this->inner = inner` is the parameter being built into the struct,
-    // and marking the parameter moved is what stops it being dropped at the end of the constructor
-    // while the struct it now lives in is handed back
-    // **and an argument the enclosing `return` was about to destroy anyway.** the third implicit move,
-    // and the one that is a proof rather than a property of the position: `return f($x)` ends `$x`'s
-    // scope exactly as `return $x` does, so the local is handed to the callee rather than duplicated
-    // for it - which for an owning type is a whole allocation per call, and is what
-    // `return .ok($out)` was paying twice.
-    //
-    // AST::handover_reads_in is what decides, once per body and never here: this walk knows what came
-    // before an arrival and the question is about what comes after it. `param` is required rather than
-    // implied, because a call with no declaration - `echo` - has no parameter to hand anything to and
-    // is the last owner of what it printed
+    // implicit moves: a returned local, an initialization, and an argument handover_reads_in proved
+    // (`return f($x)` ends `$x` the same way `return $x` does). without the first, `$a = Buffer(...)`
+    // frees the buffer twice
     const bool hands_over_to_callee =
         destination == ValueDestination::t_argument
         && param != nullptr

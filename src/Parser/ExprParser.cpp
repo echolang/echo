@@ -1659,17 +1659,20 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         bool is_call = false;
-        auto *call = parse_funccall(payload, nullptr, &is_call, Parser::CallLookup { nullptr, {}, dot_token });
+        Parser::CallLookup lookup;
+        lookup.shorthand_dot.emplace(dot_token);
+
+        // a declared variable or a return names the owner, so parse-time resolve dest-types
+        // the arguments. an argument still cannot: the parameter sits on a declaration nobody
+        // has chosen yet
+        if (expected_type != nullptr) {
+            lookup.static_owner = AST::static_owner_of_destination(expected_type->type);
+        }
+
+        auto *call = parse_funccall(payload, nullptr, &is_call, lookup);
 
         if (call == nullptr) {
             return AST::make_void_ref();
-        }
-
-        // the destination, where the position carries one it already knows: a declared variable's type
-        // and a return type both arrive here. an *argument* cannot - the parameter sits on a
-        // declaration nobody has chosen yet - so that one is bound by AST::CallResolver instead
-        if (expected_type != nullptr) {
-            AST::bind_shorthand_to(call, expected_type->type);
         }
 
         return Parser::parse_postfix_chain(payload, AST::make_ref(*call));
@@ -2409,26 +2412,9 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
             continue;
         }
 
-        // **an infix operator, or nothing.** a *custom* symbol declared only in prefix or suffix
-        // position is not one, and has to fall through so it is parsed as part of an operand instead:
-        // `500mm` reaches here after an operand, and reading a suffix-only `mm` as infix would make
-        // the yard pop two operands for it
-        //
-        // a built-in symbol is always usable here whatever anybody declared, because its infix meaning
-        // is the language's - `$a - $b` does not stop being a subtraction because somebody wrote a
-        // prefix `-` for a struct
-        // ...and a custom symbol in **operand** position is not an infix operator either, whatever it
-        // was declared as. that is what keeps a word operator usable as a function name: with `avg`
-        // declared infix, the ordinary call `avg(1.0, 2.0)` arrives here at offset 0, where reading it
-        // as an operator leaves the yard popping two operands for something with no left operand at
-        // all. falling through parses it as the operand it is
-        //
-        // the one built-in exception is `!`, which has no infix meaning to be the language's - it is
-        // asked here only after the prefix arm above declined, so what is left is `$a ! $b`, and
-        // falling through reports it as two expressions with nothing between them
-        // grouping parens are operands, parsed by parse_prefix_unary, not infix operators
-        // the yard used to collect. `as` is not an `is_expr_token`, so a nested
-        // `((e) as T)` stopped the loop at `as` with the outer `(` still on the stack
+        // an infix operator, or nothing. a custom prefix/suffix (`500mm`) falls through as an operand.
+        // a custom word in operand position (`avg(1.0, 2.0)`) does too. `!` has no infix meaning.
+        // grouping parens are operands: `((e) as T)` must not stop at `as` with the outer `(` on the stack
         const bool grouping_paren = op != nullptr
             && (op->type == Token::Type::t_open_paren || op->type == Token::Type::t_close_paren);
 

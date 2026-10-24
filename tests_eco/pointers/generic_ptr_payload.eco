@@ -1,0 +1,44 @@
+struct box<T>
+{
+    T $value;
+}
+
+struct cell
+{
+    ptr<int32> $p;
+
+    constructor(ptr<int32> $p)
+    {
+        $this->p:$ = $p;
+        $this->p = 20;
+    }
+}
+
+function wrap(ptr<uint8> $p) : result<ptr<uint8>, std::io::ioerror>
+{
+    return .ok($p);
+}
+
+array<uint8> $bytes = array<uint8>();
+$bytes[] = 7 as uint8;
+ptr<uint8> $p = &$bytes[0];
+
+box<ptr<uint8>> $b = box<ptr<uint8>>($p);
+echo $b->value:$ == $p:$;
+echo $bytes[0];
+
+ptr<uint8> $q = guard wrap($p) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $q:$ == $p:$;
+echo $q;
+
+array<ptr<uint8>> $all = array<ptr<uint8>>();
+$all[] = $p;
+echo $all[0]:$ == $p:$;
+
+int32 $target = 1;
+cell $c = cell(&$target);
+echo $target;

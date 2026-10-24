@@ -124,18 +124,21 @@ void AbortCodegen::write_pieces(
     write_stderr(message, message_len);
     _ctx.builder->CreateBr(after_msg);
 
+    const std::string newline(_ctx.options.codegen.line_ending());
+    const std::string at = newline + "  at ";
+
     _ctx.set_insert_point(after_msg);
     write_stderr(
-        _ctx.builder->CreateGlobalStringPtr("\n  at ", ".crash.sep"),
-        llvm::ConstantInt::get(size_ty, 6));
+        _ctx.builder->CreateGlobalStringPtr(at, ".crash.sep"),
+        llvm::ConstantInt::get(size_ty, at.size()));
     write_stderr(file, file_len);
     write_stderr(
         _ctx.builder->CreateGlobalStringPtr(":", ".crash.sep"),
         llvm::ConstantInt::get(size_ty, 1));
     write_stderr(line, line_len);
     write_stderr(
-        _ctx.builder->CreateGlobalStringPtr("\n", ".crash.sep"),
-        llvm::ConstantInt::get(size_ty, 1));
+        _ctx.builder->CreateGlobalStringPtr(newline, ".crash.sep"),
+        llvm::ConstantInt::get(size_ty, newline.size()));
 }
 
 void AbortCodegen::crash_llvm_types(llvm::StructType *&info_ty, llvm::StructType *&view_ty)

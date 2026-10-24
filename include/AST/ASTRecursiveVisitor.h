@@ -12,27 +12,9 @@ namespace AST
 {
     class ExprNode;
 
-    // a walker over the AST. every visit method descends into the node's owned children (mirroring the
-    // child edges enumerated authoritatively in src/AST/ASTClone.cpp) and does nothing else. subclass
-    // this for a pass that only cares about a few node kinds: override the interesting visit* methods,
-    // do the work, then call the RecursiveVisitor:: base to continue the descent. cross-reference edges
-    // (a VarNode's decl, a call's decl) are deliberately not followed so the walk stays a tree
-    // traversal and terminates
-    //
-    // **this is the sole owner of two facts**, and both are about the node's shape rather than about
-    // any pass's policy:
-    //
-    //  - *what owned edges does this node have* - already true before the seams below existed, and the
-    //    reason ForeachLowering could be built on it;
-    //  - *which of those positions want a place rather than a read* - the operand of `&`, of a deref,
-    //    of a `:$`, an index base and a `->` base. a different question from AST::is_place_expression,
-    //    which is about an expression rather than about the position it sits in
-    //
-    // the totality is the point. every visit* is pure virtual on AST::Visitor, so a node kind added
-    // without a method does not compile - where a hand-rolled `switch` over NodeType ending in a
-    // `default:` silently treats the new kind as a leaf and never visits its subtree. that failure
-    // mode cost this compiler two live bugs (a `foreach` in a guard's else arm, and every pointer read
-    // inside a `??`, a `?->` or a `strong`), which is why the two rewriters are built on this now
+    // walker: every visit descends into owned children. override a few, then call the base.
+    // total by construction (Visitor is pure virtual). rewrite_value_edge / rewrite_place_edge
+    // are the two seams; is_place_expression is a different question (the expression, not the slot)
     class RecursiveVisitor : public Visitor
     {
     public:

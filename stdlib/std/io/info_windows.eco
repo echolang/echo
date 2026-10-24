@@ -1,0 +1,428 @@
+/**
+ * Windows half of `info`, `chmod`, `realpath` and `copy`.
+ *
+ * Handle-based so a symlink is followed the way Unix `open`/`chmod` follow: `CreateFileW` without
+ * `FILE_FLAG_OPEN_REPARSE_POINT`, then the question is asked of that handle. Identity is the
+ * volume serial plus the file index, the same pair `_wstat64` uses.
+ */
+
+namespace std::io;
+
+#[if: os == windows]
+private function filetime(uint32 $lo, uint32 $hi) : std::time::timestamp
+{
+    std::time::timespec $ts = std::time::filetime_to_timespec((($hi as uint64) << 32) | ($lo as uint64));
+
+    return std::time::timestamp(std::time::duration($ts->sec, $ts->nsec));
+}
+
+// the extensions `_wstat64` calls executable, compared without case the way the filesystem does
+private function executable_name(const string& $path) : bool
+{
+    usize $n = $path->size();
+
+    if ($n < 4) {
+        return false;
+    }
+
+    string::view $ext = $path->view()->sub($n - 4, 4);
+
+    return str::iequals($ext, '.exe') || str::iequals($ext, '.cmd') || str::iequals($ext, '.bat')
+        || str::iequals($ext, '.com');
+}
+
+// `_wstat64`'s mode: r always, w unless read-only, x for a directory or an executable name, then
+// copied from the owner to group and other
+private function perms_of(uint32 $attr, bool $executable) : fileperms
+{
+    uint32 $mode = S_IRUSR;
+
+    if (($attr & FILE_ATTRIBUTE_READONLY) == 0) {
+        $mode = $mode | S_IWUSR;
+    }
+
+    if ($executable || ($attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        $mode = $mode | S_IXUSR;
+    }
+
+    return fileperms($mode | ($mode >> 3) | ($mode >> 6));
+}
+
+private function info_of(const handle_info& $hi, uint32 $tag, bool $executable) : fileinfo
+{
+    int64 $size = ((($hi->size_hi as uint64) << 32) | ($hi->size_lo as uint64)) as int64;
+
+    return fileinfo(
+        kind_from_attributes($hi->attributes, $tag),
+        $size,
+        perms_of($hi->attributes, $executable),
+        filetime($hi->written_lo, $hi->written_hi),
+        filetime($hi->accessed_lo, $hi->accessed_hi),
+        filetime($hi->created_lo, $hi->created_hi)
+    );
+}
+
+/**
+ * A handle this scope owns, closed on every way out of it.
+ */
+#[unique]
+private struct owned_handle
+{
+    ptr<uint8> $h;
+
+    destructor()
+    {
+        c_CloseHandle($this->h);
+    }
+}
+
+// volume serial plus file index: the identity of a file whatever path reached it
+private function same_file(const handle_info& $a, const handle_info& $b) : bool
+{
+    return $a->volume == $b->volume && $a->index_hi == $b->index_hi && $a->index_lo == $b->index_lo;
+}
+
+// a handle opened to ask about the file, or to chmod it. shared with everyone, and allowed to be
+// a directory. `$follow` false opens the link itself. `$access` is 0 to query, `FILE_WRITE_ATTRIBUTES`
+// to chmod
+private function query_handle(
+    const string& $path,
+    bool $follow,
+    uint32 $access = 0
+) : result<ptr<uint8>, ioerror>
+{
+    std::env::wide_string $wide = std::env::wide_string();
+    if (!$wide->load_utf8($path)) {
+        return .error(wide_error());
+    }
+
+    uint32 $flags = FILE_FLAG_BACKUP_SEMANTICS;
+
+    if (!$follow) {
+        $flags = $flags | FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+
+    ptr<uint8> $h = c_CreateFileW(
+        $wide->data(), $access, FILE_SHARE_ALL, ptr<uint8>(null), OPEN_EXISTING, $flags, ptr<uint8>(null));
+
+    if (invalid_handle($h)) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok($h);
+}
+
+private function handle_info_of(ptr<uint8> $h) : result<handle_info, ioerror>
+{
+    handle_info $hi = handle_info();
+
+    if (c_GetFileInformationByHandle($h, &$hi) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok($hi);
+}
+
+// the path `GetFinalPathNameByHandleW` writes, `\\?\` prefix still on. `realpath` strips it;
+// `copy` keeps it so long paths survive the second open
+private function final_path(ptr<uint8> $h) : result<string, ioerror>
+{
+    std::env::wide_string $buf = std::env::wide_string();
+    uint32 $room = MAX_PATH;
+    uint32 $n = 0;
+
+    // too small answers the size it needs, NUL included; big enough answers the length without
+    while (true) {
+        if (!$buf->resize($room as usize)) {
+            return .error(ioerror(ENOMEM));
+        }
+
+        $n = c_GetFinalPathNameByHandleW($h, $buf->data(), $room, 0);
+
+        if ($n == 0) {
+            return .error(win32_ioerror());
+        }
+
+        if ($n < $room) {
+            break;
+        }
+
+        $room = $n;
+    }
+
+    string $full = guard std::env::wide_to_utf8($buf->data(), $n as int32) else {
+        return .error(wide_error());
+    }
+
+    return .ok($full);
+}
+
+internal function stat_path(const string& $path, bool $follow) : result<fileinfo, ioerror>
+{
+    ptr<uint8> $raw = guard query_handle($path, $follow) else ($e) {
+        return .error($e);
+    }
+
+    owned_handle $h = owned_handle($raw);
+    handle_info $hi = guard handle_info_of($h->h) else ($e) {
+        return .error($e);
+    }
+
+    uint32 $tag = 0;
+
+    if (!$follow && ($hi->attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        attribute_tag_info $ti = attribute_tag_info();
+
+        if (c_GetFileInformationByHandleEx(
+                $h->h, FILE_ATTRIBUTE_TAG_INFO_CLASS, &$ti, mem::size<attribute_tag_info>() as uint32) == 0) {
+            return .error(win32_ioerror());
+        }
+
+        $tag = $ti->tag;
+    }
+
+    return .ok(info_of($hi, $tag, executable_name($path)));
+}
+
+// a descriptor has no name to read an extension from, so a file's `x` is never set here - which
+// is `_fstat64`'s answer too
+internal function stat_fd(int32 $fd) : result<fileinfo, ioerror>
+{
+    ptr<uint8> $h = c_get_osfhandle($fd);
+
+    if (invalid_handle($h)) {
+        return .error(ioerror(EBADF));
+    }
+
+    handle_info $hi = guard handle_info_of($h) else ($e) {
+        return .error($e);
+    }
+
+    return .ok(info_of($hi, 0, false));
+}
+
+// Windows has one permission bit, and `chmod` reads only whether the owner may write. the handle
+// is opened following, so a symlink's target is what is marked read-only
+internal function chmod_path(const string& $path, fileperms $perms) : result<bool, ioerror>
+{
+    ptr<uint8> $raw = guard query_handle($path, true, FILE_WRITE_ATTRIBUTES) else ($e) {
+        return .error($e);
+    }
+
+    owned_handle $h = owned_handle($raw);
+    handle_info $hi = guard handle_info_of($h->h) else ($e) {
+        return .error($e);
+    }
+
+    uint32 $attr = $hi->attributes;
+
+    if ($perms->owner_writable()) {
+        $attr = $attr & ~FILE_ATTRIBUTE_READONLY;
+    }
+    else {
+        $attr = $attr | FILE_ATTRIBUTE_READONLY;
+    }
+
+    // no attributes at all is spelled NORMAL, or the call refuses it
+    if ($attr == 0) {
+        $attr = FILE_ATTRIBUTE_NORMAL;
+    }
+
+    basic_info $bi = basic_info();
+    $bi->attributes = $attr;
+
+    if (c_SetFileInformationByHandle(
+            $h->h, FILE_BASIC_INFO_CLASS, &$bi, mem::size<basic_info>() as uint32) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok(true);
+}
+
+internal function realpath_of(const string& $path) : result<string, ioerror>
+{
+    ptr<uint8> $raw = guard query_handle($path, true) else ($e) {
+        return .error($e);
+    }
+
+    owned_handle $h = owned_handle($raw);
+    string $full = guard final_path($h->h) else ($e) {
+        return .error($e);
+    }
+
+    return .ok(strip_verbatim($full));
+}
+
+// `\\?\C:\x` is `C:\x`, and `\\?\UNC\host\share` is `\\host\share`
+private function strip_verbatim(const string& $full) : string
+{
+    if ($full->starts('\\\\?\\UNC\\')) {
+        return str::concat('\\\\', $full->sub(8, $full->size() - 8));
+    }
+
+    if ($full->starts('\\\\?\\')) {
+        return $full->sub(4, $full->size() - 4);
+    }
+
+    return $full->sub(0, $full->size());
+}
+
+// the inverse of `strip_verbatim`, so CopyFileW of a dest that does not exist yet still takes a
+// long path. GetFullPathNameW has already made `$full` absolute
+private function make_verbatim(const string& $full) : string
+{
+    if ($full->starts('\\\\?\\')) {
+        return $full->sub(0, $full->size());
+    }
+
+    if ($full->starts('\\\\')) {
+        return str::concat('\\\\?\\UNC', $full->sub(1, $full->size() - 1));
+    }
+
+    return str::concat('\\\\?\\', $full);
+}
+
+// absolute `\\?\` form of a path that may not exist yet. `final_path` is the handle half
+private function full_path(const string& $path) : result<string, ioerror>
+{
+    std::env::wide_string $src = std::env::wide_string();
+    if (!$src->load_utf8($path)) {
+        return .error(wide_error());
+    }
+
+    std::env::wide_string $buf = std::env::wide_string();
+    uint32 $room = MAX_PATH;
+    uint32 $n = 0;
+
+    while (true) {
+        if (!$buf->resize($room as usize)) {
+            return .error(ioerror(ENOMEM));
+        }
+
+        $n = c_GetFullPathNameW($src->data(), $room, $buf->data(), ptr<uint8>(null));
+
+        if ($n == 0) {
+            return .error(win32_ioerror());
+        }
+
+        if ($n < $room) {
+            break;
+        }
+
+        $room = $n;
+    }
+
+    string $full = guard std::env::wide_to_utf8($buf->data(), $n as int32) else {
+        return .error(wide_error());
+    }
+
+    return .ok(make_verbatim($full));
+}
+
+// CopyFileW copies the source's timestamps. stamp them to now so dest matches Unix O_CREAT
+private function stamp_copy_now(const string& $path) : result<bool, ioerror>
+{
+    ptr<uint8> $raw = guard query_handle($path, true, FILE_WRITE_ATTRIBUTES) else ($e) {
+        return .error($e);
+    }
+
+    owned_handle $h = owned_handle($raw);
+    uint64 $now = 0;
+    std::time::c_GetSystemTimePreciseAsFileTime(&$now);
+    int64 $ticks = $now as int64;
+
+    basic_info $bi = basic_info();
+    $bi->created = $ticks;
+    $bi->accessed = $ticks;
+    $bi->written = $ticks;
+    $bi->changed = $ticks;
+
+    if (c_SetFileInformationByHandle(
+            $h->h, FILE_BASIC_INFO_CLASS, &$bi, mem::size<basic_info>() as uint32) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok(true);
+}
+
+private function copy_wide(const string& $from, const string& $to) : result<bool, ioerror>
+{
+    std::env::wide_string $from_w = std::env::wide_string();
+    if (!$from_w->load_utf8($from)) {
+        return .error(wide_error());
+    }
+
+    std::env::wide_string $to_w = std::env::wide_string();
+    if (!$to_w->load_utf8($to)) {
+        return .error(wide_error());
+    }
+
+    if (c_CopyFileW($from_w->data(), $to_w->data(), 0) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok(true);
+}
+
+// CopyFileW of the resolved source, so a symlink copies the target's bytes. dest is resolved too
+// when it already exists, so a symlink dest is overwritten at the target the way Unix `open` does
+internal function copy_file(const string& $from, const string& $to) : result<bool, ioerror>
+{
+    ptr<uint8> $src_raw = guard query_handle($from, true) else ($e) {
+        return .error($e);
+    }
+
+    owned_handle $src = owned_handle($src_raw);
+    handle_info $src_hi = guard handle_info_of($src->h) else ($e) {
+        return .error($e);
+    }
+
+    bool $ok = guard require_regular_file(kind_from_attributes($src_hi->attributes, 0)) else ($e) {
+        return .error($e);
+    }
+
+    string $src_path = guard final_path($src->h) else ($e) {
+        return .error($e);
+    }
+
+    string $dst_path = guard full_path($to) else ($e) {
+        return .error($e);
+    }
+
+    result<ptr<uint8>, ioerror> $dst_r = query_handle($dst_path, true);
+
+    if ($dst_r->failed()) {
+        ioerror $e = $dst_r->failure();
+
+        if (!$e->missing()) {
+            return .error($e);
+        }
+    }
+    else {
+        owned_handle $dst = owned_handle($dst_r->unwrap());
+        handle_info $dst_hi = guard handle_info_of($dst->h) else ($e) {
+            return .error($e);
+        }
+
+        bool $dst_ok = guard require_regular_file(kind_from_attributes($dst_hi->attributes, 0)) else ($e) {
+            return .error($e);
+        }
+
+        if (same_file($src_hi, $dst_hi)) {
+            return .error(ioerror(EINVAL));
+        }
+
+        string $resolved = guard final_path($dst->h) else ($e) {
+            return .error($e);
+        }
+
+        $dst_path = $resolved;
+    }
+
+    bool $copied = guard copy_wide($src_path, $dst_path) else ($e) {
+        return .error($e);
+    }
+
+    return stamp_copy_now($dst_path);
+}
+#[end]

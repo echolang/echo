@@ -14,34 +14,10 @@ namespace AST
 {
     class VarDeclNode;
 
-    // **a value nobody stored, given storage for exactly as long as one expression reads it.**
-    //
-    // `$o->mid()->tag` reads a member off a call result. a member is reached from an address and a value
-    // nobody stored has none, so it needs a slot - and the slot needs an *owner*, because
-    // `$box->get()` hands back +1 for a class and reading one field off it and walking away leaks. that
-    // owner cannot be the enclosing statement, and that is the whole reason this is a node rather than
-    // a hoist: binding at the top of the statement would acquire a `while` condition's temporary once
-    // per evaluation and release it once in total, and would bind the right-hand side of a
-    // short-circuiting `&&` on the path that never evaluates it. a temporary has to live where it is
-    // *used*, and only an expression knows where that is
-    //
-    // bind `temporaries`, run `statements`, evaluate `body`, run `teardown`, hand back the body's
-    // value. every property of this node follows from that order: the body has already read what it
-    // wanted out of the temporary before the teardown runs, which is why a class-typed member arrives
-    // here already wrapped in a RetainExprNode - AST::OwnershipPass put it there through the ordinary
-    // "a place is copied" arm, with no arm of its own - and is one reference up before the teardown's
-    // release takes one back down
-    //
-    // **the value handed out is one nobody else holds**, which is the invariant every non-place in this
-    // compiler carries and what lets a call result arrive anywhere with nothing inserted. the retain
-    // above is how that invariant is kept for a class read out of the temporary; a value the compiler
-    // has no copy rule for is a located error instead, worded where the copy rules are
-    //
-    // **deliberately not a place** - AST::is_place_expression has no arm for it and must not grow one.
-    // its value is a copy of something about to be destroyed, so `&$o->mid()->x` would hand out an
-    // address that dangles at the end of the statement and `$o->mid()->x = 5` would write into bytes
-    // nothing will ever read. both stay located errors from AST::OwnershipPass, which is the only pass
-    // that ever knew a temporary was wanted
+    // a value nobody stored, given a slot for as long as one expression reads it.
+    // `$o->mid()->tag` needs an address, and a hoist to the statement would bind a `while`
+    // condition once and a short-circuit `&&` on the path that never runs it. not a place:
+    // `&$o->mid()->x` would dangle at the end of the statement
     class TemporaryBindExprNode : public ExprNode
     {
     public:

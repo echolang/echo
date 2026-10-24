@@ -18,42 +18,14 @@ namespace AST
     class FunctionDeclNode;
     class Module;
 
-    // **the chassis a pass running inside AST::Monomorphizer's fixpoint gets.**
+    // chassis for a pass inside the monomorphizer's fixpoint. subclasses hook an edge; this owns
+    // the walk, the hoist counter, finalize, and `_changed`. none of those fail loudly:
     //
-    // five passes rewrite or resolve the tree from inside the fixpoint - AST::ForeachLowering,
-    // AST::GuardLowering, AST::InterpolationLowering, AST::MatchResolution and AST::CastResolution -
-    // and only *which edge they hook* is genuinely theirs. everything around it is this class: the
-    // walk, the position it walks from, the exit obligation and the generic-body skip.
+    //   - finalize() is one more round, not an `of_type` sweep (detached nodes stay in the arena)
+    //   - hoist indices are per file, so a golden's `$__guard0` does not move
+    //   - `_changed` is what the fixpoint reads: mutate and forget it, and the round stalls
     //
-    // it exists because the three invariants below must live in one place, and **none of them
-    // breaks loudly**: forgetting one is a golden diff or a round that stalls, never a compile error.
-    //
-    //   - **finalize() is one more round, not a sweep.** a round inherits visitFunctionDecl's
-    //     generic-body and t_owned skip and walks scope children, which is the tree walk these
-    //     passes are required to use: NodeCollection owns a detached node forever, so an `of_type`
-    //     arena sweep would reach nodes the pass already lowered away and blame them.
-    //   - **a hoist counter is per file**, so a golden's `$__guard0` does not move when an unrelated
-    //     file above it grows one. owned here rather than left as a rule to remember - a pass asks
-    //     next_hoist_index() and there is no reset to forget.
-    //   - **`_changed` is what the fixpoint reads.** a pass that mutates the tree and does not set it
-    //     stalls the round rather than failing, so the program compiles a round later or not at all.
-    //
-    // **what is deliberately not here.** no `lower()` virtual: the three hook different edges -
-    // `visitScope` for the two that splice statements, `rewrite_value_edge` for the one that replaces an
-    // expression - so a hook declared here would be a shape two of them do not have. and no reporting:
-    // a refusal's wording and whether the node is kept or discarded are per pass, and the two answers
-    // differ (AST::GuardLowering reports and *keeps*, the other two discard).
-    //
-    // **AST::OperatorRewriter is not built on this**, though it is the fourth pass in the fixpoint. its
-    // pending state is a different shape, and its round ends by flushing the nodes it detached - which
-    // this has no hook for and would have to grow one for. its `finalize()` is otherwise the same one
-    // more round; what folding it in would cost is that hook plus generalising the pending state until
-    // it described nothing. it keeps its own `_hoist_count`, and that is the one rule still written
-    // twice.
-    //
-    // **not a `run_semantic_passes` pass**, so CLAUDE.md's mirror trap does not apply to anything built
-    // on it: a subclass is a member of AST::Monomorphizer, and both the real pipeline and
-    // tests/helpers.cpp get it by construction rather than by remembering to register it twice.
+    // OperatorRewriter stays outside: its pending state is a different shape
     class FixpointLowering : protected RecursiveVisitor
     {
     protected:

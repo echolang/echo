@@ -1,0 +1,5 @@
+# file::info and file::size flush the write window first, so buffered bytes count
+
+--- OUT --->
+14
+1

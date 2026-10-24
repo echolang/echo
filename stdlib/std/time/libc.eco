@@ -7,7 +7,7 @@
  * never write a platform conditional.
  *
  * `CLOCK_MONOTONIC` rather than `_RAW` on both Unixes: NTP may slew it, it never steps, and that
- * is the clock Go and Rust hand you for measuring. Darwin's value is 6; everyone else uses 1,
+ * is the clock to measure with. Darwin's value is 6; everyone else uses 1,
  * which is the linux uapi and the id the Windows QPC shim keys on.
  *
  * A C symbol may only be declared once per module, so they live here. `internal`: the rest of
@@ -138,12 +138,21 @@ internal function c_clock_gettime(int32 $clock, ptr<timespec> $ts) : int32
     uint64 $ticks = 0;
     c_GetSystemTimePreciseAsFileTime(&$ticks);
 
+    timespec $now = filetime_to_timespec($ticks);
+    $ts->sec = $now->sec;
+    $ts->nsec = $now->nsec;
+    return 0;
+}
+
+// a FILETIME's 100ns ticks since 1601 as Unix seconds and nanoseconds. the system clock and a
+// file's times both arrive as one
+internal function filetime_to_timespec(uint64 $ticks) : timespec
+{
     uint64 $per_sec = FILETIME_TICKS_PER_SEC as uint64;
     int64 $secs_1601 = ($ticks / $per_sec) as int64;
     int64 $subsec = ($ticks % $per_sec) as int64;
-    $ts->sec = $secs_1601 - FILETIME_EPOCH_DELTA_SECS;
-    $ts->nsec = $subsec * FILETIME_NANOS_PER_TICK;
-    return 0;
+
+    return timespec($secs_1601 - FILETIME_EPOCH_DELTA_SECS, $subsec * FILETIME_NANOS_PER_TICK);
 }
 
 internal function c_nanosleep(ptr<timespec> $req, ptr<timespec> $rem) : int32

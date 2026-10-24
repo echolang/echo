@@ -55,29 +55,9 @@ namespace AST
         // silently move, and move out of a *borrowed* source at that
         bool hands_over_value = false;
 
-        // --- the old value's teardown ------------------------------------------------------------
-        //
-        // the target held a value before this write, and that value is owed its end. AST::OwnershipPass
-        // decides *whether*, gen_assign decides *when* - the old value only exists at runtime, and the
-        // one correct window is after the right-hand side has been evaluated. neither may be a drop
-        // pushed *ahead* of the assignment: the right-hand side can read the very value being torn
-        // down, so `$a = $a` would become a release before a retain, or a destructor before a copy
-        //
-        // two fields rather than one, because the two say the same thing differently:
-        //
-        //  - a **struct** is destroyed in place by an ordinary teardown call in the tree - the same
-        //    node emit_drop appends at a scope end, so -ar shows it, the type checker validates it
-        //    and a generic teardown instantiates from this call site like any other. it runs
-        //    before the store that overwrites those bytes. set for a whole local, a member_path_of
-        //    field, a static property, and an indexed place whose address was bound once below
-        //  - a **class** owes one reference less, and that cannot be a node. the release needs the old
-        //    handle out of the slot codegen already addressed, and a class target may be `$node->next`
-        //    or an element whose index expression must not be evaluated twice. so the handle is read
-        //    before the store and released after it, which also keeps a deinit from observing the
-        //    dying handle through the slot it is leaving
-        //
-        // null / false when the variable was moved out of - what the slot appears to hold is somebody
-        // else's now
+        // the old value is owed its end. OwnershipPass decides whether, gen_assign decides when: after
+        // the rhs, so `$a = $a` is not a release before a retain. a struct is a teardown node in the
+        // tree; a class is a release of the handle already addressed
         ScopeNode *teardown_old = nullptr;
         bool releases_old = false;
 

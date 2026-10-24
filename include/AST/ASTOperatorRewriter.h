@@ -21,48 +21,17 @@ namespace AST
     class FunctionDeclNode;
     class ExprNode;
     class FunctionCallExprNode;
+    class IndirectCallExprNode;
     class IndexExprNode;
     class MatchExprNode;
     class ScopeNode;
     class WhileStatementNode;
     class ForStatementNode;
 
-    // **turns operand syntax into calls, once the types that decide what it means are known.**
-    //
-    // the parser already asks this question and answers most of it: `$a + $b` over two `Point`s
-    // becomes a call to `operator +` where it is written, because the operand types are right there.
-    // two shapes it cannot answer, and they share a cause - the type arrives later:
-    //
-    //  - **a bracket.** `$a[$i]` is a pointer offset or a container's element contract depending on
-    //    what `$a` is, and `$a` may be typed from a call the fixpoint has not settled or from a type
-    //    parameter nothing has substituted yet
-    //  - **an operator over a bare type parameter.** inside `function add<T>(T $a, T $b)` the
-    //    operands are `T`, which AST::binary_has_builtin_meaning is deliberately non-committal about,
-    //    so the parser takes the built-in path and builds a BinaryExprNode the substituted body then
-    //    keeps
-    //  - **a write through a bracket.** `$c[$k] = $v` is either one call that owns the whole
-    //    insert-or-replace or an ordinary write through a place, and which one it is depends on whether
-    //    `$c`'s type declares an element-write contract - AST::declares_index_write
-    //
-    // so this is **the parser's own decision, re-asked with the types a round produced**. Same
-    // predicates, same operand normalizer - AST::parse_time_operand, because this runs before
-    // AST::PointerAdjuster and a place read of a borrow is still a pointer here. There is no second
-    // rule anywhere in this file, only a second moment.
-    //
-    // **one walk, five rules**, and the walk is not this file's.
-    //
-    // AST::RecursiveVisitor owns the descent, so this pass overrides rewrite_value_edge and
-    // inherits an enumeration it cannot fall behind. a second complete expression-edge switch
-    // would silently miss a new node (`guard`, `??`, `?->`, `strong`). the rules do not differ
-    // by edge *position* the way the adjuster's policies do, so both seams answer alike.
-    //
-    // runs **inside the monomorphizer's fixpoint**, per round, the way AST::OwnershipPass does and
-    // for the same reason: it needs the concrete types the round produced, and the call it builds may
-    // itself be generic. `operator []` over `array<int32>` is an instantiation, and only the fixpoint
-    // can still create one.
-    //
-    // Ordered ahead of the re-derivation steps, because a declaration inferred from `$a[0]` has no
-    // type at all until the element call is attached
+    // turns operand syntax into calls once the types are known. the parser already does this for
+    // `$a + $b` over two `Point`s; what it cannot answer is a bracket, an operator over a bare
+    // type parameter, or `$c[$k] = $v` (place write vs element-write contract).
+    // same predicates as the parser, second moment. inside the fixpoint, ahead of re-derivation
     class OperatorRewriter : public RecursiveVisitor
     {
     public:
@@ -87,6 +56,8 @@ namespace AST
         void visitWhileStatement(WhileStatementNode &node) override;
         void visit_for_statement(ForStatementNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
+        void visitFunctionCallExpr(FunctionCallExprNode &node) override;
+        void visit_indirect_call_expr(IndirectCallExprNode &node) override;
 
         // rule 5's three sites - see upgrade_optional_operand below
         void visit_guard(GuardNode &node) override;
@@ -175,6 +146,9 @@ namespace AST
         // be null on a compiler-made `while`; a token is then taken from the hoist itself
         void bind_value_if_hoisted(ExprNode *&expr, const TokenReference &at);
         void bind_value_if_hoisted(ExprNode *&expr, const TokenReference *at);
+
+        // bound_type is idempotent; CallResolver types call arguments after this pass
+        void value_edges_except_untyped_collections(std::vector<ExprNode *> &arguments);
 
         // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.
         // AST::CollectionLiteralExpansion is the rewrite; this walk places what it returns. a statement

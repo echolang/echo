@@ -1,0 +1,31 @@
+// an open file's info is asked of its descriptor, and what the program wrote counts even before a flush
+string $tmp = str::from(std::env::tmp());
+string $pid = str::from(std::env::pid());
+string $path = std::env::join($tmp, "echo-io-finfo-{$pid}.txt");
+
+std::io::file $f = guard std::io::create($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $n = guard $f->write('still buffered') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+int64 $size = guard $f->size() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $size;
+
+std::io::fileinfo $i = guard $f->info() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $i->kind == std::io::filekind::file;
+
+$f->close();
+std::io::remove($path);

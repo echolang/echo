@@ -14,24 +14,9 @@
 
 namespace Compiler
 {
-    // **the sole answer to "what does this invocation mean".**
-    //
-    // resolved once, in main, and handed to everything below it. It replaced an argument parser threaded
-    // through eighteen functions, each of which read flags back by string literal - so a renamed flag was
-    // a lookup that answered false, in eighteen places, with nothing failing to compile.
-    //
-    // **stated versus settled is the whole of the split** with Compiler::CommandLine, and it is the same
-    // rule Compiler::CompilerOptions already states about target_cpu: what was asked for is one fact and
-    // what it resolved to is another. These implications live here and nowhere else -
-    //
-    //   `-g` means `--optimize none` unless --optimize was stated
-    //   `--explain memory` implies `--track-allocations`
-    //   `run` defaults to --debug and `build` to --release
-    //   `--print ir` or `--optimize whole` means one merged module and no object cache
-    //   `test` still JITs, so it still merges; `run` is a cached build plus exec
-    //
-    // - and splitting them into resolve_options while one sat in wants_whole_program_module would
-    // be two owners for one question
+    // stated argv after its implications. CommandLine is what was asked; this is what it means.
+    // `-g` defaults `--optimize none`; `--explain memory` implies `--track-allocations`; `run` defaults
+    // `--debug`, `build` `--release`; `--print ir` / `--optimize whole` merge and skip the object cache
     struct DriverOptions
     {
         Subcommand subcommand = Subcommand::t_none;

@@ -5,24 +5,8 @@
 
 namespace Compiler::LLVM
 {
-    // what an interface-typed value *is*: a fat pointer, one shape for every interface.
-    //
-    //     %eco.iface = { ptr object, ptr vtable }
-    //
-    // the same trade `eco.callable` makes, and for the same reason. the object alone knows its own type -
-    // its block carries a typeinfo word - but finding a method through it would mean scanning the
-    // conformance table at every call. the **widening** is where the concrete class is still statically
-    // known, so that is where the vtable is resolved, and a dispatch is then one load and an indirect
-    // call. the conformance table stays for `instanceof`, which is the question it answers.
-    //
-    // **object is field 0, and that is load-bearing.** a class method's receiver is `Circle&` - the
-    // address of a slot holding a handle, not the handle itself - and `&iface.object` is exactly that
-    // shape. so an erased receiver needs no shim: the address of field 0 *is* the `$this` the concrete
-    // method already expects, and the same `{address, storage_type}` pair gen_lvalue hands everything
-    // else works unchanged.
-    //
-    // a vtable slot is the requirement's ordinal in AST::interface_requirements(), which is declaration
-    // order - one walk decides both what the table holds and which entry a call site reads.
+    // an interface value: `{ ptr object, ptr vtable }`. object is field 0 so `&iface.object` is the
+    // `$this` a class method already expects. the vtable is resolved at the widening
     namespace IfaceValue
     {
         static constexpr unsigned object_index = 0;

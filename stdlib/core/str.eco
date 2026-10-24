@@ -177,13 +177,14 @@ private extern {
 // takes its type from where it lands - which is why they are `uint8` here and still fine on the
 // right of an `int32` subtraction.
 //
-// **Split by who reads them, not by what they spell.** The four this file alone compares against are
-// `private`; the rest are `internal` because format.eco is written on them too - a spec's letters and
-// its digits are the same table. Neither group is a surface: a program spelling `str::CH_DOT` is
-// reading this file's implementation, and `'.'->byte(0)` is what it should write instead.
+// **Split by who reads them, not by what they spell.** TAB, PLUS, MINUS, UPPER_Z are `private`;
+// LF and CR are `internal` because split.eco reads them; the rest are `internal` because format.eco
+// is written on them too - a spec's letters and its digits are the same table. Neither group is a
+// surface: a program spelling `str::CH_DOT` is reading this file's implementation, and `'.'->byte(0)`
+// is what it should write instead.
 private const uint8 CH_TAB = 9;
-private const uint8 CH_LF = 10;
-private const uint8 CH_CR = 13;
+internal const uint8 CH_LF = 10;
+internal const uint8 CH_CR = 13;
 private const uint8 CH_PLUS = 43;
 private const uint8 CH_MINUS = 45;
 
@@ -470,33 +471,12 @@ public function iequals(string::view $a, string::view $b) : bool
 }
 
 /**
- * Offset of the first `$b` in `$n` bytes at `$p`, or `$n` when it is not there.
- *
- * Its own function so the loop has no `push` inside it. Fields here are a
- * handful of bytes; a `memchr` call per field is slower than this walk.
- */
-private function find_byte(ptr<const uint8> $p, usize $n, uint8 $b) : usize
-{
-    usize $i = 0;
-
-    while ($i < $n) {
-        if ($p:$[$i] == $b) {
-            return $i;
-        }
-
-        $i = $i + 1;
-    }
-
-    return $n;
-}
-
-/**
  * One field of a `str::parts`: an offset and a length into `$source`.
  *
  * Offsets, not pointers, so an inline source can move and `at()` still
- * names the live bytes.
+ * names the live bytes. `internal` because split.eco constructs these.
  */
-private struct part
+internal struct part
 {
     usize $off;
     usize $len;
@@ -610,73 +590,6 @@ public struct parts : contract::iterable<string::view>, contract::const_iterable
     const function iterate() : parts_iterator
     {
         return parts_iterator($this->source, $this->spans);
-    }
-}
-
-/**
- * `$text` cut at every occurrence of `$sep`.
- *
- * Always answers at least one part, and `n` separators give `n + 1` of them - so an empty text
- * splits to one empty part and `",a,"` on `","` gives three. That is the rule that makes
- * `str::join(str::split($t, $s), $s)` give `$t` back, which is the only rule worth promising here.
- *
- * An empty separator would match everywhere and nowhere, so it answers the whole text unsplit
- * rather than one part per byte.
- *
- * The parts are offsets into `$text`. `$p->at($i)` rebuilds a window. `$p->owned()` is
- * the list of owning strings this used to return.
- */
-public function split(const string& $text, const string& $sep) : parts
-{
-    array<part> $spans = array<part>();
-    string::view $all = $text->view();
-    usize $n = $all->size;
-
-    if ($sep->empty()) {
-        $spans->push(part(0, $n));
-
-        return parts($text, $spans);
-    }
-
-    ptr<const uint8> $bytes = $all->bytes;
-
-    // a character separator is a byte scan with no store inside it, then one
-    // push. a loop that stores a view on every comma will not vectorise
-    if ($sep->size() == 1) {
-        uint8 $b = $sep->byte(0);
-        usize $start = 0;
-
-        while (true) {
-            usize $at = find_byte($bytes:$ + $start, $n - $start, $b);
-            usize $i = $start + $at;
-
-            $spans->push(part($start, $at));
-
-            if ($i == $n) {
-                return parts($text, $spans);
-            }
-
-            $start = $i + 1;
-        }
-    }
-
-    string::view $needle = $sep->view();
-    usize $start = 0;
-
-    while (true) {
-        string::view $rest = $all->sub($start, $n - $start);
-        usize $at = $rest->find($needle);
-
-        // `find` answers the haystack's own size when there is no match - there is no `Option`
-        // to hand back, and the size is the one value always to hand and never a valid index
-        if ($at >= $rest->size) {
-            $spans->push(part($start, $n - $start));
-
-            return parts($text, $spans);
-        }
-
-        $spans->push(part($start, $at));
-        $start = $start + $at + $needle->size;
     }
 }
 

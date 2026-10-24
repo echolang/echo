@@ -208,10 +208,10 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         // above the floor is untouched and the doc's promise about reserving up front is unchanged.
         // `fit` is the way to ask for a small buffer sized to the byte.
         //
-        // by element size, which is what Rust's RawVec calls MIN_NON_ZERO_CAP: the smaller the element,
-        // the more of them fit in the smallest block an allocator will hand out at all, so the floor
-        // costs nothing there and saves more. A `T` bigger than a page gets no floor, because for one of
-        // those the allocation *is* the cost and rounding it up doubles that.
+        // by element size: the smaller the element, the more of them fit in the smallest block an
+        // allocator will hand out at all, so the floor costs nothing there and saves more. A `T` bigger
+        // than a page gets no floor, because for one of those the allocation *is* the cost and rounding
+        // it up doubles that.
         //
         // plain `if`s and not `const if`: `mem::size<T>()` folds to a constant at the call site in
         // codegen, so both tests are already decided by the time LLVM sees them - but AST::const_fold
@@ -391,12 +391,12 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     /**
      * Appends one element. Exactly what `$a[] = $value` means, written as a call.
      *
-     * The body *is* `$a[] = $value`, so the growth, the fresh-slot rule and the append itself have
-     * one implementation rather than two that could drift.
+     * The body *is* `$a[] = mv $value`: the parameter is already an owner. The growth, the
+     * fresh-slot rule and the append itself have one implementation rather than two that could drift.
      */
     function push(T $value) : void
     {
-        $this[] = $value;
+        $this[] = mv $value;
     }
 
     /**

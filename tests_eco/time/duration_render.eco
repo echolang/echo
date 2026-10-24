@@ -1,4 +1,4 @@
-// Go-style `str::from(duration)`: zero, sub-second units, h/m/s, negatives, unbounded hours
+// `str::from(duration)`: zero, sub-second units, h/m/s, negatives, unbounded hours
 use std::time;
 
 time::duration $z = time::duration::zero();

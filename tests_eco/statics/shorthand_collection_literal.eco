@@ -1,0 +1,72 @@
+// a collection literal argument of `.of(...)` is dest-typed from the parameter, the way
+// `P::of(...)` already was. inferring from the first entry made `['a', 1]` an array<string>
+
+struct Value
+{
+    int32 $tag;
+    string $text;
+    int32 $n;
+
+    #[implicit]
+    static function from(string $s) : Value
+    {
+        return Value(1, $s, 0);
+    }
+
+    #[implicit]
+    static function from(int32 $n) : Value
+    {
+        return Value(2, '', $n);
+    }
+}
+
+struct P
+{
+    array<Value> $vs = array<Value>();
+    map<string, Value> $kv = map<string, Value>();
+
+    static function of(array<Value> $vs) : P
+    {
+        return P($vs);
+    }
+
+    static function named(map<string, Value> $kv) : P
+    {
+        return P(array<Value>(), $kv);
+    }
+}
+
+function take(P $p) : int32
+{
+    return $p->vs->count();
+}
+
+function make() : P
+{
+    return .of(['a', 1]);
+}
+
+P $a = P::of(['a', 1]);
+echo $a->vs->count();
+echo $a->vs[0]->tag;
+echo $a->vs[1]->tag;
+
+P $b = .of(['a', 1]);
+echo $b->vs->count();
+echo $b->vs[0]->tag;
+echo $b->vs[1]->tag;
+
+P $r = make();
+echo $r->vs->count();
+echo $r->vs[1]->tag;
+
+echo take(.of(['a', 1]));
+
+P $c = .named(['min' => 0]);
+echo $c->kv->count();
+echo $c->kv['min']->tag;
+
+array<Value> $typed = ['a', 1];
+P $d = .of($typed);
+echo $d->vs->count();
+echo $d->vs[1]->tag;

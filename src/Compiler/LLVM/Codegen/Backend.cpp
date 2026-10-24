@@ -348,11 +348,8 @@ void Backend::init_target()
 {
     _ctx.target_triple = _ctx.options.codegen.effective_triple();
 
-    // **the subtarget is not a detail of this line.** every cost model in the compiler reads the machine
-    // built here - both PassBuilder pipelines through their TargetTransformInfo, and instruction
-    // selection in emit_object - so `generic` was the vectorizer answering for a CPU nobody runs on, at
-    // about 1.8x on any loop whose throughput it decides. Compiler::baseline_subtarget_for owns what the
-    // default is, and it is a table rather than a policy in here
+    // every cost model reads this machine (PassBuilder TTI, instruction selection). `generic` is a
+    // CPU nobody runs; baseline_subtarget_for owns the default
     const Compiler::Subtarget sub = subtarget();
 
     std::string error;
@@ -906,47 +903,11 @@ void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
 
     cmp_unit.optimized = true;
 
-    // **the definitions this unit does not reference are not this unit's to emit**, and that is a rule
-    // about the object rather than a thing an optimizer happens to do.
-    //
-    // a `t_odr_shared` body is emitted into every unit that *references* it, and a generic the
-    // application instantiates over its own types reaches the library's unit too - so a library object
-    // ended up holding `map<clash, int32>::seat`, whose body calls a `hash::of` and an `operator ==`
-    // that only the application defines. That object is stored under the library's key, which is
-    // correct by its own rules and knows nothing about the application, so a second unrelated program
-    // with the same key is served it and fails to link. Two bundles, one key, two different objects.
-    //
-    // the O2 pipeline below has been hiding it: GlobalDCE drops exactly those bodies. So the bug was
-    // invisible until `--optimize none` - which `-g` implies, which is why it read as debug info being
-    // broken rather than as the cache being unsound. Doing it here, unconditionally, is what makes the
-    // two paths agree by construction rather than by one of them running a pipeline.
-    //
-    // safe because a symbol nothing in a unit references is provided by whichever unit does reference
-    // it - the invariant Backend.h states over emit_object, and the one thing every `linkonce_odr`
-    // definition this compiler emits has in common. `GlobalDCEPass` and nothing beside it: no
-    // InternalizePass, which is what makes this a different thing from `prune_to_entry` and not a
-    // weaker one - there is no root set here, only a use count
-    //
-    // **and the baseline pipeline after it unless the invocation said not to.** one pass manager for
-    // both, a ModulePassManager being itself a module pass - so the discard is the first thing the unit
-    // sees either way and stays unconditional, while an `--optimize none` unit no longer pays for a
-    // second PassBuilder and a second set of analysis managers it has nothing to run in
-    //
-    // **O2 rather than O3, and that is not timidity - it is that this one has to stay cheap.**
-    // `Backend::optimize` runs once, over a merged module, for a build that asked for it. This runs on
-    // every unit of every ordinary `echoc build`, whose whole point is that it is the fast path.
-    //
-    // it exists because that path previously ran **no IR pass at all**: no mem2reg, no SROA, no inlining.
-    // Every parameter of every function is spilled to an entry alloca by StmtCodegen and reloaded per use,
-    // every accessor is a real call, and CodegenContext::entry_alloca goes to the trouble of putting slots
-    // where mem2reg can find them - for a pipeline that was never run. The backend was already at -O2 for
-    // instruction selection, so the IR was the only part left unoptimized.
-    //
-    // **per unit, which is what keeps it compatible with the object cache.** a pipeline over one unit is a
-    // pure function of that unit's IR, so a cached object stays a function of its own sources plus its
-    // dependencies' keys - which is what Compiler::compute_module_keys promises and tests/module_cache.cpp
-    // pins byte for byte. Whole-program `-O` is still merge-then-O3 and still bypasses the cache; the two
-    // are no longer all or nothing, which is the actual change here
+    // drop unreferenced `linkonce_odr` bodies first, unconditionally: a generic the application
+    // instantiates over its own types is emitted into the library's unit too, and that object
+    // must not depend on the consumer. GlobalDCE only (no root set: that is prune_to_entry).
+    // then O2 per unit, unless `--optimize none`. whole-program is merge-then-O3 and bypasses
+    // the cache; this path is a function of one unit, so the object cache stays sound
     const bool optimize = !_ctx.options.no_optimize;
     Compiler::LLVM::FunctionTimeTrace trace("optimize");
     Compiler::LLVM::prepare_module(

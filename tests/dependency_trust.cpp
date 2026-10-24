@@ -208,7 +208,12 @@ TEST_CASE("a dependency's C source that is a symlink out of its tree is refused"
     write_file(project.root() / "secret.c", "int steal(void) { return 1; }\n");
     write_project(project.root(), "#[cc: sources \"c/*.c\"]\n");
     fs::remove(project.root() / "dep" / "c" / "h.c");
-    fs::create_symlink(project.root() / "secret.c", project.root() / "dep" / "c" / "h.c");
+
+    std::error_code link_error;
+    fs::create_symlink(project.root() / "secret.c", project.root() / "dep" / "c" / "h.c", link_error);
+    if (link_error) {
+        SKIP("this account cannot create symlinks");
+    }
 
     const ProcessResult built = project.echoc("build -o out", project.root() / "app");
 

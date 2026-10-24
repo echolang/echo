@@ -1,0 +1,59 @@
+// copy replaces what was there, carries the permission bits, and refuses a directory and itself
+string $tmp = str::from(std::env::tmp());
+string $pid = str::from(std::env::pid());
+string $from = std::env::join($tmp, "echo-io-copy-from-{$pid}.txt");
+string $to = std::env::join($tmp, "echo-io-copy-to-{$pid}.txt");
+
+usize $w1 = guard std::io::writefile($from, 'the new contents') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+// a longer file already at the destination: what is left of it must not survive the copy
+usize $w2 = guard std::io::writefile($to, 'an older and much longer set of contents') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+// rwx------ : 0700, which no umask produces on its own
+bool $set = guard std::io::chmod($from, std::io::fileperms(0x1c0)) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+bool $copied = guard std::io::copy($from, $to) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string $read = guard std::io::readfile($to) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $read;
+
+std::io::fileinfo $i = guard std::io::info($to) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $i->perms->owner_writable();
+
+// a directory is not a file to copy
+result<bool, std::io::ioerror> $dir = std::io::copy($tmp, $to);
+echo $dir->failed();
+
+// and a file copied onto itself is refused rather than truncated to nothing
+result<bool, std::io::ioerror> $self = std::io::copy($from, $from);
+echo $self->failed();
+
+string $still = guard std::io::readfile($from) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $still;
+
+std::io::remove($from);
+std::io::remove($to);

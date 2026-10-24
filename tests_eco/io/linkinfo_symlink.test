@@ -1,0 +1,9 @@
+# info follows a symlink, linkinfo and a directory listing see the link itself, realpath resolves it
+
+--- OUT --->
+1
+12
+1
+1
+1
+1

@@ -73,50 +73,12 @@ namespace AST
         t_erased_release,
         t_assume,
 
-        // **move the value out of a place**, leaving the storage behind it dead
-        //
-        // The verb the two predicates above are useless without. Knowing `T` owns something buys
-        // nothing if the only way to get an element out of a raw buffer is to *copy* it, which leaves
-        // the slot holding a second owner nothing will ever release.
-        //
-        // What a container needs is the read that ends the source's claim, and Echo has no spelling for
-        // one: `mv` transfers a *variable*, and an element of a buffer this type is itself managing is
-        // not one.
-        //
-        // Its lowering is one load through the borrow, and everything else follows from it being a
-        // **call**. A call result is not a place, so AST::OwnershipPass inserts no copy, and the owner
-        // it hands back is destroyed by the ordinary frame drop of wherever it lands. So `pop()` is a
-        // move, and a destructor's element loop is a take whose value is dropped at the end of the
-        // iteration - with no arm for either anywhere in that pass.
-        //
-        // Unsafe by construction, and squarely in `mem::` for that reason: taking twice from one place
-        // duplicates ownership exactly as freeing twice duplicates a free. AST::TypeChecker refuses the
-        // two misuses that have a correct spelling instead - a source that is not a place, and a whole
-        // local variable, which is what `mv` is for
+        // load through a borrow and leave the slot dead. a call, so OwnershipPass inserts no copy.
+        // `mv` is for a variable; this is for a slot a container manages itself
         t_take,
 
-        // **move a value into a place that holds nothing**, which is the mirror of `take` above and the
-        // other half of what a container needs.
-        //
-        // `take` empties storage the compiler is not accounting for; this fills it. Writing to that
-        // storage with an ordinary `=` is a *re*-assignment, so AST::OwnershipPass ends whatever the
-        // destination held - and for a slot straight out of `mem::alloc` that is a destructor call over
-        // whatever bytes the allocator handed back. There is no other spelling: `array<T>` gets the rule
-        // from the *shape* of its append operator (AST::IndexExprNode::is_append, a syntactic question the
-        // parser answers), and a container whose slots are not appended to has no shape to get it from.
-        //
-        // deliberately **not** an ordinary library function. `function init<T>(T& $p, T $v) { $p = $v; }`
-        // is exactly the re-assignment it exists to avoid, one level further in - so the seam has to be a
-        // builtin, where the write is emitted rather than written
-        //
-        // Its lowering is one store through the borrow, and what makes that correct is that the value
-        // *arrived by value*. The caller's copy already happened, so this hands over an owner rather
-        // than duplicating one, and nothing is owed a release.
-        //
-        // It shares `take`'s place rule exactly - AST::is_unaccounted_storage, one predicate with two
-        // readers - and it is unsafe in the same direction and for the same reason. Initializing a place
-        // that already holds a value leaks that value, the way taking twice from one place duplicates
-        // ownership. Squarely in `mem::` for that reason
+        // store into a place that holds nothing. `=` would drop the old value, and a slot out of
+        // `mem::alloc` has none. the value arrives by value, so this hands over an owner
         t_init,
 
         // the two ways a program stops itself. unlike the two above they take arguments, return

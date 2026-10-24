@@ -911,6 +911,32 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
     }
 }
 
+void OperatorRewriter::value_edges_except_untyped_collections(std::vector<ExprNode *> &arguments)
+{
+    for (ExprNode *&arg : arguments) {
+        CollectionLiteralExprNode *literal = collection_literal_of(arg);
+
+        // bound_type is idempotent; CallResolver types call arguments after this pass
+        if (literal != nullptr && !literal->bound_type.has_value() && !_finalizing) {
+            continue;
+        }
+
+        value_edge(arg);
+    }
+}
+
+void OperatorRewriter::visitFunctionCallExpr(FunctionCallExprNode &node)
+{
+    type_edges(node.explicit_type_args);
+    value_edges_except_untyped_collections(node.arguments);
+}
+
+void OperatorRewriter::visit_indirect_call_expr(IndirectCallExprNode &node)
+{
+    value_edge(node.callee);
+    value_edges_except_untyped_collections(node.arguments);
+}
+
 void OperatorRewriter::visit_index_expr(IndexExprNode &node)
 {
     // **the operands before the bracket itself**: `$a[$b[0]]` has to decide the inner one before the

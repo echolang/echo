@@ -16,30 +16,9 @@ namespace AST
     class ScopeNode;
     class VarDeclNode;
 
-    // **the one way to read which case an enum is holding.**
-    //
-    //     $meters = match ($unit) {
-    //         Unit::meter($v)     => $v,
-    //         Unit::kilometer($v) => $v * 1000,
-    //         else                => 0,
-    //     };
-    //
-    // an **expression**, and a statement only in the sense that any expression may be one. that is not
-    // symmetry for its own sake: an arm produces a value, and there is nowhere else in Echo for a value
-    // produced by a branch to come from - `??` is the only other one and it has exactly two arms.
-    //
-    // **a node that reaches codegen, rather than a lowering inside the fixpoint.** the three passes that
-    // rewrite in there - AST::ConstFolding, AST::ForeachLowering, AST::InterpolationLowering - each turn
-    // a statement into statements, and the rule is what separates this from them:
-    // `for` is a node because the difference it makes is a basic block, `foreach` is not because it
-    // makes none. a match makes N of them and a phi, and lowering it would mean hoisting a declaration
-    // out of an arbitrary expression position, which changes the order the operands around it evaluate
-    // in. so it is emitted, by ExprCodegen::gen_match, as a switch over `__tag` and a phi
-    //
-    // **a pattern names a case, and the parenthesised names after it bind that case's payload.** they
-    // take no part in choosing the arm - `Unit::meter` and `Unit::meter($v)` select identically, and the
-    // second additionally says what to call what is inside. so there is no arm ordering to reason about
-    // and no overlap between two patterns naming one case: that is a duplicate, and it is refused
+    // `match ($unit) { Unit::meter($v) => $v, else => 0 }`. an expression that reaches codegen
+    // (a switch over `__tag` plus a phi): hoisting a declaration out of an expression position
+    // would reorder the operands around it. a pattern names a case; parenthesised names bind payload
     class MatchExprNode : public ExprNode
     {
     public:

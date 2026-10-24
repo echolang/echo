@@ -1,0 +1,8 @@
+--- OUT --->
+opt-index-write
+2
+opt-index-read
+1
+--- RAST --->
+CHECK: vardecl<type<Bag?>>($viaBump)
+CHECK: vardecl<type<const Bag?&>>($viaRead)

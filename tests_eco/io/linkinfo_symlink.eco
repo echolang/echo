@@ -1,0 +1,121 @@
+// `info` follows a symlink and `linkinfo` does not, and a listing reports the link as one. the
+// standard library has no `symlink` of its own, so this program binds libc's. Windows CI cannot
+// create a symlink without a privilege, so that host pins follow/realpath/listing on the file
+#[if: os != windows]
+extern {
+    function symlink as c_symlink(ptr<const uint8> $target, ptr<const uint8> $link) : int32;
+}
+#[end]
+
+string $tmp = str::from(std::env::tmp());
+string $pid = str::from(std::env::pid());
+string $dir = std::env::join($tmp, "echo-io-links-{$pid}");
+
+bool $made = guard std::io::mkdir($dir) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string $target = std::env::join($dir, 'target.txt');
+string $link = std::env::join($dir, 'link.txt');
+
+usize $w = guard std::io::writefile($target, 'twelve bytes') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+#[if: os != windows]
+if (c_symlink($target->cstr(), $link->cstr()) != 0) {
+    echo 'symlink failed';
+    return 1;
+}
+
+std::io::fileinfo $through = guard std::io::info($link) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+std::io::fileinfo $itself = guard std::io::linkinfo($link) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $through->kind == std::io::filekind::file;
+echo $through->size;
+echo $itself->kind == std::io::filekind::symlink;
+
+string $a = guard std::io::realpath($link) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string $b = guard std::io::realpath($target) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $a == $b;
+
+std::io::dir $d = guard std::io::opendir($dir) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $links = 0;
+usize $files = 0;
+
+foreach ($d as $ent) {
+    if ($ent->kind() == std::io::filekind::symlink) {
+        $links = $links + 1;
+    }
+
+    if ($ent->is_file()) {
+        $files = $files + 1;
+    }
+}
+
+echo $links;
+echo $files;
+
+std::io::remove($link);
+#[else]
+std::io::fileinfo $through = guard std::io::info($target) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $through->kind == std::io::filekind::file;
+echo $through->size;
+echo 1;
+
+string $a = guard std::io::realpath($target) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string $b = guard std::io::realpath($target) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $a == $b;
+
+std::io::dir $d = guard std::io::opendir($dir) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $files = 0;
+
+foreach ($d as $ent) {
+    if ($ent->is_file()) {
+        $files = $files + 1;
+    }
+}
+
+echo 1;
+echo $files;
+#[end]
+
+std::io::remove($target);
+std::io::rmdir($dir);
