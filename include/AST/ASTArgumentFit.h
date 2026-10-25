@@ -433,36 +433,13 @@ namespace AST
             return argument_fit(from, expr, to.optional_payload());
         }
 
-        // **a weak fits a weak of the same class and nothing else.** so the equality above is the only
-        // arm that can admit one, and everything below is skipped rather than merely happening to answer
-        // no - the interface-widening arm would ask `conforms_to` about a type with no ComplexType, and
-        // the declared-conversion arm would ask for a `#[implicit]` method on one. neither is a question
-        // a weak can answer, and asking gets an assert rather than a false
-        if (from.is_weak() || to.is_weak()) {
-            // except through a borrow: a `weak<Foo>& $w` parameter takes the address of a weak place,
-            // which is the ordinary auto-borrow and says nothing about the count
-            //
-            // a *place* only, and deliberately not the t_borrow_temporary arm at the bottom: a weak
-            // exists to outlive the handle it watches, so binding one to storage that dies with the
-            // statement is a shape nobody can have meant
-            // the pointee comparison is the borrow arms', asked through the same helper so this does
-            // not become a third spelling of "which pointee does a borrow accept" - const rule
-            // included, which costs this arm nothing it wanted: a `const weak<Foo>` place handed to a
-            // `weak<Foo>&` is the laundering borrow_preserves_const exists to refuse, and refusing it
-            // here is the arm agreeing with its two mirrors rather than an exception to them
-            const ExprNode *inner = peel_move(expr);
-            if (parameter_auto_borrows(to) && inner != nullptr && is_place_expression(*inner)
-                && borrow_type_matches(from, to)) {
-                return ArgumentFit::t_borrow;
-            }
-
-            return ArgumentFit::t_none;
-        }
-
         // before the borrow rule, so an argument that already fits a borrow parameter is not
         // wrapped in a second address-of. that ordering is load-bearing in
         // AST::CallResolver::coerce_arguments, where taking the address of a ptr<int32> for a
         // ptr<int32> parameter would build a ptr<ptr<int32>>
+        //
+        // **const on a weak is this arm**: `is_implicitly_convertible` drops top-level const,
+        // then equality, so `const weak<T>` at `weak<T>` is a widening
         if (is_implicitly_convertible(from, to)) {
             return ArgumentFit::t_widening;
         }
@@ -496,6 +473,16 @@ namespace AST
             if (ValueType::make_mutable(value_type_of(from)) == ValueType::make_mutable(to)) {
                 return ArgumentFit::t_read_through;
             }
+        }
+
+        // **a weak fits a weak of the same class and nothing else.** the arms above already
+        // dropped const, auto-borrowed a place, and read through a `const weak&` (foreach
+        // elision seats unread elements that way). everything below is skipped:
+        // `t_borrow_temporary` would bind a weak to storage that dies with the statement, and
+        // the interface / declared-conversion arms would ask `conforms_to` / `#[implicit]`
+        // about a type with no ComplexType, which asserts rather than false
+        if (from.is_weak() || to.is_weak()) {
+            return ArgumentFit::t_none;
         }
 
         // a `ptr<T>` place at a `T&` parameter. after t_read_through, which is the *value*

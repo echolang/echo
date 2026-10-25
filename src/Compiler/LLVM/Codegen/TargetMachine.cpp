@@ -5,16 +5,45 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Target/TargetMachine.h>
-#include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Triple.h>
 
+#include <cassert>
 #include <fmt/core.h>
+
+llvm::TargetOptions Compiler::LLVM::target_options_for(const std::string &triple)
+{
+    llvm::TargetOptions opt;
+    // `unreachable` is a trap, not fall-through into the next function
+    opt.TrapUnreachable = true;
+    const llvm::Triple parsed(triple);
+    // wasm's backend miscompiles a skipped trap after noreturn. Windows SEH
+    // needs the trap so .pdata still names the caller
+    if (!parsed.isWasm() && !parsed.isOSWindows()) {
+        opt.NoTrapAfterNoreturn = true;
+    }
+    return opt;
+}
+
+llvm::CodeGenOptLevel Compiler::LLVM::codegen_opt_level(Compiler::CodegenOpt opt)
+{
+    switch (opt) {
+    case Compiler::CodegenOpt::t_none:
+        return llvm::CodeGenOptLevel::None;
+    case Compiler::CodegenOpt::t_baseline:
+        return llvm::CodeGenOptLevel::Default;
+    case Compiler::CodegenOpt::t_aggressive:
+        return llvm::CodeGenOptLevel::Aggressive;
+    }
+
+    assert(false && "unhandled CodegenOpt in codegen_opt_level");
+    return llvm::CodeGenOptLevel::Default;
+}
 
 std::unique_ptr<llvm::TargetMachine> Compiler::LLVM::make_target_machine(
     const std::string &triple,
     const std::string &cpu,
     const std::string &features,
-    bool no_optimize,
+    llvm::CodeGenOptLevel opt_level,
     bool pic,
     std::string &error
 )
@@ -27,14 +56,11 @@ std::unique_ptr<llvm::TargetMachine> Compiler::LLVM::make_target_machine(
         return nullptr;
     }
 
-    const llvm::CodeGenOptLevel opt_level =
-        no_optimize ? llvm::CodeGenOptLevel::None : llvm::CodeGenOptLevel::Default;
-
     // Echo's floor is `generic`; x86 MC has no such processor. llvm_cpu_name is
     // the spelling createTargetMachine will not fprintf-and-ignore
     const std::string mc_cpu = Compiler::llvm_cpu_name(triple, cpu);
 
-    llvm::TargetOptions opt;
+    const llvm::TargetOptions opt = target_options_for(triple);
     const llvm::Reloc::Model reloc = pic ? llvm::Reloc::PIC_ : llvm::Reloc::Static;
 #if LLVM_VERSION_MAJOR >= 21
     std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(

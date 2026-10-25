@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] return_class_handle_address.eco:15:5
+
+  cannot return the address of local '$local' - its storage ends with the call
+
+  14 |     Box $local = $b;
+  15 |     return &$local;
+     :     ^^^^^^
+  16 | }
+
+[error] return_class_handle_address.eco:26:5
+
+  cannot return the address of local '$local' - its storage ends with the call
+
+  25 |     Box $local = $b;
+  26 |     return pass($local);
+     :     ^^^^^^
+  27 | }
+
+2 errors, nothing was compiled.

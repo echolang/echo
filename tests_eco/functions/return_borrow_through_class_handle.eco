@@ -1,0 +1,27 @@
+// a class handle names a heap object. returning a member borrow through a local
+// copy of the handle is not returning the frame slot. visu Entities.get is this
+class Box
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    public function slot() : int32&
+    {
+        return &$this->n;
+    }
+}
+
+function through_handle(Box $b) : int32&
+{
+    Box $local = $b;
+    return $local->slot();
+}
+
+Box $b = Box(3);
+int32& $n = through_handle($b);
+$n = 9;
+echo $b->n;

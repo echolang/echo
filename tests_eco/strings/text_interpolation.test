@@ -1,0 +1,9 @@
+flags: --track-allocations
+
+--- OUT --->
+a3b
+2
+0
+Ronon is 3
+3
+a|b|c

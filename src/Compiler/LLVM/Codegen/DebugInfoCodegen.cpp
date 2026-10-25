@@ -150,7 +150,7 @@ void DebugInfoCodegen::create_unit(CmpUnit &cmp_unit)
         llvm::dwarf::DW_LANG_C_plus_plus,
         cu_file,
         "echoc",
-        /*isOptimized=*/!_ctx.options.no_optimize,
+        /*isOptimized=*/!_ctx.options.no_optimize(),
         /*Flags=*/"",
         /*RV=*/0);
 }
@@ -248,7 +248,7 @@ void DebugInfoCodegen::begin_function(const AST::FunctionDeclNode &node, llvm::F
 
     llvm::DISubprogram::DISPFlags flags = llvm::DISubprogram::SPFlagDefinition;
 
-    if (!_ctx.options.no_optimize) {
+    if (!_ctx.options.no_optimize()) {
         flags |= llvm::DISubprogram::SPFlagOptimized;
     }
 

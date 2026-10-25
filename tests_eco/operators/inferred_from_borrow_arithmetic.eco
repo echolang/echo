@@ -1,0 +1,9 @@
+// `$a->at(1)` is `int32&`. `$x = $a->at(1) + 1` infers int32: `+` peels the borrow
+// at parse time, so the declaration is not an `int32&` that then cannot hold the
+// integer. `$p:$ - $q:$` after strip_peel is still two pointer varrefs and stays
+// address distance — that arm was not this one
+array<int32> $a = [4, 8];
+
+$x = $a->at(1) + 1;
+
+echo $x;

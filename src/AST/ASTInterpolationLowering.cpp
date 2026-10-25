@@ -8,10 +8,12 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTNode.h"
+#include "AST/ASTSymbol.h"
 #include "AST/ExprNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/StringInterpolationNode.h"
 #include "AST/TemporaryBindExprNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarRefNode.h"
@@ -109,9 +111,16 @@ ExprNode *InterpolationLowering::refuse(StringInterpolationExprNode &node, std::
 ExprNode *InterpolationLowering::lower(StringInterpolationExprNode &node)
 {
     // **`--no-stdlib` is legitimate**, and there is nothing to lower to there: no `string` to
-    // append into and no `str` to render through. refused with a sentence naming the standard library
-    // rather than reported as three missing functions
-    if (!node.core_string_type.has_value() || _collector.namespaces.get("str") == nullptr) {
+    // freeze into, no `str::from` to render through, no `str::text` to append into. refused with
+    // a sentence naming the standard library rather than reported as three missing functions
+    Namespace *str = _collector.namespaces.get("str");
+    Symbol *text_sym = str != nullptr ? _collector.namespaces.find_symbol("text", *str) : nullptr;
+    TypeDeclNode *text_decl =
+        text_sym != nullptr && text_sym->node.has_type<TypeDeclNode>()
+            ? text_sym->node.get_ptr<TypeDeclNode>()
+            : nullptr;
+
+    if (!node.core_string_type.has_value() || str == nullptr || text_decl == nullptr) {
         return refuse(node,
             "string interpolation needs the standard library's 'string' type and its 'str' namespace. "
             "Write the value out with a single quoted string and 'echo' instead.");
@@ -160,24 +169,28 @@ ExprNode *InterpolationLowering::lower(StringInterpolationExprNode &node)
     } else if (pieces.size() == 1) {
         acc = pieces[0].first;
     } else {
-        // first piece is the buffer, the rest append. an empty `""` init is a .rodata literal, and
-        // the first append would clone it - empty_inline()'s tax, paid here for nothing
+        // unique buffer, then take(). an empty `str::text()` allocates nothing, so every piece
+        // including the first is an append
         auto &decl = _current_module->nodes.emplace_back<VarDeclNode>(
             _current_module->make_virtual_token(
                 fmt::format("$__interp{}", next_hoist_index()),
                 Token::Type::t_varname,
                 node.token_string),
-            &_current_module->nodes.emplace_back<TypeNode>(*node.core_string_type));
+            &_current_module->nodes.emplace_back<TypeNode>(text_decl->value_type()));
 
-        decl.init_expr = pieces[0].first;
+        decl.init_expr = &str_call("text", node.token_string, {});
+
+        auto &take = make_unresolved_member_call(
+            *_current_module, decl, "take", node.token_string);
 
         auto &bind = _current_module->nodes.emplace_back<TemporaryBindExprNode>(
-            &local_place(*_current_module, decl), node.token_string);
+            &take, node.token_string);
 
         bind.temporaries.push_back(&decl);
 
-        for (size_t i = 1; i < pieces.size(); i++) {
-            auto &call = make_unresolved_member_call(*_current_module, decl, "append", pieces[i].second);
+        for (size_t i = 0; i < pieces.size(); i++) {
+            auto &call = make_unresolved_member_call(
+                *_current_module, decl, "append", pieces[i].second);
 
             call.arguments.push_back(pieces[i].first);
             bind.statements.push_back(make_ref(call));

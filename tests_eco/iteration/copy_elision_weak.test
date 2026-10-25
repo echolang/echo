@@ -1,0 +1,6 @@
+--- OUT --->
+1
+2
+2
+--- RAST --->
+CHECK: vardecl<type<const weak<Node>&>>($ref)

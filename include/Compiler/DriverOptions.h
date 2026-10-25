@@ -29,7 +29,7 @@ namespace Compiler
         // colour choice in a cache key is a cache that goes cold for nothing
         CompilerOptions options;
 
-        // how hard, and over what. `options.no_optimize` is the per-unit half of this and is set from it;
+        // how hard, and over what. `options.codegen_opt` is the per-unit half of this and is set from it;
         // `whole_program` below is the driver half
         OptimizeMode optimize = OptimizeMode::t_module;
 

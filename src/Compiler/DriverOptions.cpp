@@ -135,7 +135,13 @@ bool Compiler::resolve_driver_options(
         out.options.debug_info = true;
     }
 
-    out.options.no_optimize = out.optimize == OptimizeMode::t_none;
+    if (out.optimize == OptimizeMode::t_none) {
+        out.options.codegen_opt = CodegenOpt::t_none;
+    } else if (out.optimize == OptimizeMode::t_whole) {
+        out.options.codegen_opt = CodegenOpt::t_aggressive;
+    } else {
+        out.options.codegen_opt = CodegenOpt::t_baseline;
+    }
 
     // **three reasons, kept apart from the cache key's one.** The whole-program pipeline and a single IR
     // dump can each only look at one module, so both force the merge - but a dump changes no emitted

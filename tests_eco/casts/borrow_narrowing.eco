@@ -1,0 +1,11 @@
+// a foreach binding of uint32 is `const uint32&` when never written. `as uint16` peels
+// then narrows. visu gltfAppendIndices is written this way
+function put(const array<uint32>& $indices) : void
+{
+    foreach ($indices as $i) {
+        echo $i as uint16;
+    }
+}
+
+array<uint32> $a = [1, 2, 70000];
+put($a);

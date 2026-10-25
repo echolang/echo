@@ -129,7 +129,7 @@ bool c_spec_digest(
     }
 
     digest = Compiler::fnv1a64(
-        options.no_optimize ? std::string("noopt") : std::string("opt"), digest);
+        options.no_optimize() ? std::string("noopt") : std::string("opt"), digest);
     digest = Compiler::fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), digest);
 
@@ -284,7 +284,7 @@ void append_common_arguments(
 
     // **before the module's own flags, so an author can override one.** A `flag:-O0` on a debug build is a
     // reasonable thing to write and would be pointless if it came first
-    argv.push_back(options.no_optimize ? "-O0" : "-O2");
+    argv.push_back(options.no_optimize() ? "-O0" : "-O2");
 
     if (options.emitting_debug_info()) {
         argv.push_back("-g");

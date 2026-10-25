@@ -84,7 +84,13 @@ llvm::Function *AbortCodegen::get_or_create_abort_thunk()
         name,
         _ctx.current_module());
 
+    // cold and never inlined: an inlined abort makes FunctionAttrs mark the
+    // caller `cold`, which lays its loops out unaligned. nounwind: abort
+    // never returns into an unwind
     thunk->addFnAttr(llvm::Attribute::NoReturn);
+    thunk->addFnAttr(llvm::Attribute::Cold);
+    thunk->addFnAttr(llvm::Attribute::NoInline);
+    thunk->addFnAttr(llvm::Attribute::NoUnwind);
 
     llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
     _ctx.set_insert_point(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", thunk));

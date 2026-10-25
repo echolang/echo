@@ -52,7 +52,7 @@ static IsolatedEmitRequest make_isolated_request(
     request.triple = ctx.target_triple;
     request.cpu = sub.cpu;
     request.features = sub.features;
-    request.no_optimize = ctx.options.no_optimize;
+    request.codegen_opt = ctx.options.codegen_opt;
     request.pic = ctx.options.codegen.uses_pic();
     request.targeting_windows = ctx.targeting_windows();
     request.already_optimized = already_optimized;
@@ -116,7 +116,7 @@ bool emit_unit_objects(
     env.triple = ctx.target_triple;
     env.cpu = sub.cpu;
     env.features = sub.features;
-    env.no_optimize = ctx.options.no_optimize;
+    env.no_optimize = ctx.options.no_optimize();
     env.targeting_windows = ctx.targeting_windows();
     env.cross = ctx.options.codegen.is_cross();
     env.exec_model = Compiler::exec_model_environment(ctx.options.codegen);

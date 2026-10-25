@@ -6,6 +6,7 @@
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTNode.h"
 #include "AST/ASTNullability.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 
@@ -65,7 +66,12 @@ namespace AST
             return CastLookup::ok(CastKind::t_function_pointer);
         }
 
-        if (from.is_primitive() && to.is_primitive() && !from.is_void() && !to.is_void()) {
+        // a borrow is a pointer, so `const uint32& as uint16` missed the primitive arm and
+        // refused. value_result_type peels T& and leaves ptr<T> alone — the same peel an
+        // argument uses. a `$p as uint16` of a `ptr<uint32>` stays a refusal
+        const ValueType from_value = value_result_type(from_expr, from);
+
+        if (from_value.is_primitive() && to.is_primitive() && !from_value.is_void() && !to.is_void()) {
             return CastLookup::ok(CastKind::t_numeric);
         }
 

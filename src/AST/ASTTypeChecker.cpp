@@ -1086,7 +1086,8 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
 
 void TypeChecker::visit_strong_expr(StrongExprNode &node)
 {
-    const ValueType operand_type = node.operand->result_type();
+    const ValueType raw = node.operand->result_type();
+    const ValueType operand_type = value_result_type(*node.operand, raw);
 
     // reported here rather than in the parser for the reason every type question in this compiler is: at
     // parse time the operand may be a bare type parameter, an unsettled call, or an element access whose
@@ -1094,13 +1095,13 @@ void TypeChecker::visit_strong_expr(StrongExprNode &node)
     //
     // is_undetermined_type still passes through, because a call that never resolved has an
     // UnknownFunction already and does not need a second diagnostic on top of it
-    if (!operand_type.is_weak() && !is_undetermined_type(operand_type)) {
+    if (!operand_type.is_weak() && !is_undetermined_type(raw) && !is_undetermined_type(operand_type)) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token),
             fmt::format(
                 "'strong' needs a weak reference, not '{}' - there is nothing to upgrade, and a value "
                 "that owns its object is already as strong as it gets",
-                operand_type.get_type_desciption()));
+                raw.get_type_desciption()));
     }
 
     RecursiveVisitor::visit_strong_expr(node);

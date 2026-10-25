@@ -719,6 +719,12 @@ namespace AST
                 continue;
             }
 
+            // parser planted AddrOf after peeling known pointers. a generic body's
+            // receiver was unknown then: address_member_receiver replays the peel
+            if (i == 0 && call.is_member_lookup()) {
+                call.arguments[i] = address_member_receiver(nodes, call.arguments[i], /*replay=*/true);
+            }
+
             wrap_argument(call.arguments[i], expected, call.token_function_name, nodes);
 
             // **a receiver refused for its const-ness gets no residual cast.** `ptr<const Foo>` and

@@ -1,0 +1,47 @@
+// unique growable text: append, reserve, take into a string. take plants a str::buf
+// over the live block, including a short result - this type does not seat INLINE bytes
+{
+    str::text $empty = str::text();
+    string $none = $empty->take();
+
+    echo $none->empty();
+    echo mem::live_allocations();
+}
+
+str::text $t = str::text();
+
+echo $t->empty();
+echo $t->size();
+
+$t->append('hello');
+$t->push(32);
+$t->append('world');
+
+echo $t->size();
+
+string $short = $t->take();
+
+echo $short;
+echo $t->empty();
+echo mem::live_allocations();
+echo mem::refs($short->owner);
+
+$short = '';
+echo mem::live_allocations();
+
+str::text $big = str::text();
+$big->reserve(32);
+$big->append('0123456789abcdef');
+$big->push(33);
+
+echo $big->capacity() >= 32;
+echo $big->size();
+
+string $long = $big->take();
+
+echo $long;
+echo mem::live_allocations();
+echo mem::refs($long->owner);
+
+$long = '';
+echo mem::live_allocations();

@@ -1,0 +1,26 @@
+// an unread by-value weak binding elides to `const weak&`. copying that handle into `push` is
+// the same-class widening plus a read-through; the weak arm used to return t_none first
+class Node
+{
+    int32 $tag;
+}
+
+array<weak<Node>> $slots = array<weak<Node>>();
+Node $a = Node(1);
+Node $b = Node(2);
+weak<Node> $wa = &$a;
+weak<Node> $wb = &$b;
+$slots->push($wa);
+$slots->push($wb);
+
+array<weak<Node>> $kept = array<weak<Node>>();
+foreach ($slots as $ref) {
+    Node $live = guard strong($ref) else {
+        continue;
+    }
+
+    $kept->push($ref);
+    echo $live->tag;
+}
+
+echo $kept->count();

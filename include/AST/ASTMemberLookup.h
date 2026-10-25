@@ -180,6 +180,13 @@ namespace AST
     ExprNode *receiver_for_member_call(NodeCollection &nodes, ExprNode *place);
     ExprNode *receiver_for_member_call(Module &module, ExprNode *place);
 
+    // **`->`'s peel, then AddrOf.** every pointer level, so `$p->m()` on a `ptr<Foo>` calls
+    // on `Foo`. parse plants this; CallResolver replays it on a stale AddrOf once a generic
+    // body's receiver is concrete (`array&&` at `array&`). undetermined is not a pointer,
+    // so parse AddrOfs the unknown and a later round peels. `replay` is CallResolver: a
+    // seated T& from receiver_for_member_call is already the receiver and stays
+    ExprNode *address_member_receiver(NodeCollection &nodes, ExprNode *receiver, bool replay = false);
+
     // **the parser's wrap of `decl` as member-call argument 0.** `$el->m()` is AddrOf($el) because
     // `$el` was untyped at parse. ForeachLowering reseats it through receiver_for_member_call after
     // eliding to `const V&`; is_never_written skips it so the call, not the AddrOf, answers. a
@@ -231,9 +238,10 @@ namespace AST
     // FunctionDeclNode::is_interface_requirement().
     //
     // **two readers.** AST::ForeachLowering, for the three calls a cursor's own protocol declares -
-    // `advance`, `current`, `key`. AST::InterpolationLowering, for `append` into the one buffer a
-    // multi-piece `"..."` becomes. AST::GuardLowering was a third and is not any more: its callees
-    // come off AST::UnwrapPlan now, which is the rule IterationPlan::iterate already stated
+    // `advance`, `current`, `key`. AST::InterpolationLowering, for `append` / `take` on the
+    // `str::text` a multi-piece `"..."` becomes. AST::GuardLowering was a third and is not any
+    // more: its callees come off AST::UnwrapPlan now, which is the rule IterationPlan::iterate
+    // already stated
     FunctionCallExprNode &make_unresolved_member_call(
         Module &module,
         VarDeclNode &local,

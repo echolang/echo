@@ -150,8 +150,8 @@ namespace Compiler
     //
     // deliberately **not** on Compiler::CompilerOptions. `t_whole` is a fact about how the driver drove
     // the compiler - merge every unit, then O3, and store no object - and not about the program being
-    // compiled, so the readers of `no_optimize` would each owe an arm they must never take. The per-unit
-    // half of this answer *is* `no_optimize`, and Compiler::resolve_driver_options sets it from here
+    // compiled, so the readers of `codegen_opt` would each owe an arm they must never take. The per-unit
+    // half of this answer *is* `codegen_opt`, and Compiler::resolve_driver_options sets it from here
     enum class OptimizeMode
     {
         t_none,

@@ -1,0 +1,24 @@
+// a member call on a T& that a generic method returned. parse plants AddrOf after peeling known
+// pointers; in the template `hooks()` is still unknown, so clone left AddrOf sitting on the
+// concrete `array&` (`array&&` at `array&`). the instance reseats before wrap
+struct Holder<T>
+{
+    T $items;
+
+    function hooks() : T&
+    {
+        return $this->items;
+    }
+
+    function listen(int32 $n) : void
+    {
+        $this->hooks()->push($n);
+    }
+}
+
+$h = Holder(array<int32>());
+$h->listen(7);
+$h->listen(9);
+echo $h->items[0];
+echo $h->items[1];
+echo $h->items->count();

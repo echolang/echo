@@ -1,0 +1,27 @@
+// `$i + 1` over a usize& peels to the integer, `$a - $b` over two usize& too.
+// treating the borrow as an address made `$i + 1 < $n` a pointer offset
+// compared with a usize, and a declared operator < then refused the pair
+function next_ok(usize& $i, usize $n) : bool
+{
+    return $i + 1 < $n;
+}
+
+function skip_two(usize& $i, usize $n) : bool
+{
+    return $i + 2 < $n;
+}
+
+function gap(usize& $a, usize& $b) : usize
+{
+    return $a - $b;
+}
+
+usize $i = 0;
+echo next_ok($i, 3);
+echo skip_two($i, 1);
+$i = 2;
+echo next_ok($i, 3);
+echo skip_two($i, 5);
+usize $x = 5;
+usize $y = 2;
+echo gap($x, $y);

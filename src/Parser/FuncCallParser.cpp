@@ -616,14 +616,12 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     // the receiver, as an address. taken here rather than left to the borrow coercion in
     // resolve_funccall because that rule reads a *value* against a borrow parameter - a `ptr<Foo>`
     // receiver would rank as no fit at all, and `$p->m()` would fail where `$p->x` works. `->`
-    // reaches through every pointer level, so the derefs are spelled out to match - and the type the
-    // walk lands on is the receiver's target type, which is what the member lookup below wants
-    AST::ExprNode *self_arg = receiver;
-    AST::ValueType receiver_type = receiver->result_type();
-    while (receiver_type.is_pointer()) {
-        self_arg = &payload.context.emplace_node<AST::DerefExprNode>(self_arg);
-        receiver_type = receiver_type.pointee();
-    }
+    // reaches through every pointer level, so AST::address_member_receiver spells the derefs -
+    // and the type that walk lands on is the receiver's target type, which is what the member
+    // lookup below wants
+    AST::ExprNode *addr = AST::address_member_receiver(payload.context.module.nodes, receiver);
+    AST::ExprNode *self_arg = static_cast<AST::AddrOfExprNode *>(addr)->operand;
+    AST::ValueType receiver_type = AST::target_type_of(receiver->result_type());
 
     // a receiver needs storage. OwnershipPass binds a temporary for a call result
     // (`$o->get()->size()`). skip a ConstRef: ConstantExpander has not cloned it yet
@@ -640,7 +638,7 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     }
 
     std::vector<AST::ExprNode *> args;
-    args.push_back(&payload.context.emplace_node<AST::AddrOfExprNode>(self_arg));
+    args.push_back(addr);
 
     std::vector<AST::CallArgumentName> names;
     if (!parse_call_arguments(payload, member_token, args, &names)) {

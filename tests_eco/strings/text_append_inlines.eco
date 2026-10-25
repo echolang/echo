@@ -1,0 +1,14 @@
+// `append(string)` in a loop must inline to a memcpy. growth and self-view
+// reseat live in append_slow, so the hot body stays a compare and a copy
+function fill(str::text& $t, usize $n) : void
+{
+    usize $i = 0;
+    while ($i < $n) {
+        $t->append('abcdefg');
+        $i = $i + 1;
+    }
+}
+
+str::text $t = str::text();
+fill(&$t, 3);
+echo $t->take();

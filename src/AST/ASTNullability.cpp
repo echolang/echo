@@ -100,8 +100,10 @@ AST::ExprNode *AST::optional_operand_of(
 
     const ValueType type = expr->result_type();
 
-    // a weak is upgraded first, and then it is an ordinary nullable like any other
-    if (type.is_weak()) {
+    // a weak is upgraded first, and then it is an ordinary nullable like any other.
+    // a `const weak&` place is the handle, one load away - foreach elision seats unread
+    // elements that way, and `guard strong($ref)` / `$ref?->` have to see it
+    if (value_result_type(*expr, type).is_weak()) {
         return &module.nodes.emplace_back<StrongExprNode>(expr, at);
     }
 

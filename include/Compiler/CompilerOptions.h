@@ -22,6 +22,17 @@ namespace Compiler
         t_release,
     };
 
+    // ISel and the per-unit pipeline. three answers rather than two bools that can both
+    // be true: `t_none` is `--optimize none` / `-g`, `t_baseline` is module, `t_aggressive`
+    // is the ISel half of `--optimize whole`. not the merge: `--print ir` and `test` fold
+    // units without asking for O3
+    enum class CodegenOpt
+    {
+        t_none,
+        t_baseline,
+        t_aggressive,
+    };
+
     struct CompilerOptions
     {
         BuildMode mode = BuildMode::t_debug;
@@ -47,14 +58,11 @@ namespace Compiler
         // plain debug build should start doing
         bool check_refcounts = false;
 
-        // **turns off the per-unit baseline pipeline** that prepare_unit_for_emission runs on every ordinary
-        // build. for reading raw IR, for bisecting a miscompile against the optimizer, and for the two
-        // goldens that pin unoptimized output on purpose. it is not the inverse of `-O`, which is a
-        // *different* thing: that one merges every unit and runs O3 over the result
-        //
-        // both emitters read it from here rather than from the flag - Backend::print_unit_ir dumps what
-        // LLVMCompiler::emit_objects is about to write, so a second reader is a way for the two to disagree
-        bool no_optimize = false;
+        // **how hard ISel and the per-unit pipeline run.** `t_none` turns the baseline
+        // pipeline off (raw IR, `-g`, the goldens that pin unoptimized output). `t_aggressive`
+        // is ISel for `--optimize whole`: O3 IR with Default ISel is two answers to one
+        // question. both emitters read it from here rather than from the flag
+        CodegenOpt codegen_opt = CodegenOpt::t_baseline;
 
         // **does the emitted object carry DWARF**, so a debugger can name a source line, a function and
         // a local.
@@ -66,12 +74,12 @@ namespace Compiler
         //
         // it does settle one thing at the CLI rather than here - see resolve_options - because the O2
         // pipeline prepare_unit_for_emission runs on every ordinary build reorders and folds until a line
-        // table describes a program nobody wrote. `-g` alone therefore also sets no_optimize, and `-O`
+        // table describes a program nobody wrote. `-g` alone therefore also sets `t_none`, and `-O`
         // said out loud overrides it
         bool debug_info = false;
 
         // `echoc run --profile`. its own flag: a release build without it emits the bytes it
-        // emits today. implies track_allocations and debug_info, and does not imply no_optimize
+        // emits today. implies track_allocations and debug_info, and does not imply `t_none`
         bool profile = false;
         bool profile_calls = false;
         bool profile_stdlib = false;
@@ -163,6 +171,14 @@ namespace Compiler
 
         bool profiling_stdlib() const {
             return profile_stdlib;
+        }
+
+        bool no_optimize() const {
+            return codegen_opt == CodegenOpt::t_none;
+        }
+
+        bool aggressive_codegen() const {
+            return codegen_opt == CodegenOpt::t_aggressive;
         }
     };
 

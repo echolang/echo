@@ -1,0 +1,16 @@
+// self-view after an exact-fit first alloc: grow must reseat, not copy from the old block
+{
+    str::text $t = str::text();
+    $t->append('hello');
+    $t->append($t->view());
+    echo $t->take();
+}
+
+// room already there: the copy is from live bytes onto the end, no grow
+{
+    str::text $t = str::text();
+    $t->reserve(20);
+    $t->append('hello');
+    $t->append($t->view());
+    echo $t->take();
+}

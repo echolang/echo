@@ -352,6 +352,39 @@ AST::ExprNode *AST::receiver_for_member_call(AST::NodeCollection &nodes, AST::Ex
     return &nodes.emplace_back<AST::AddrOfExprNode>(place);
 }
 
+AST::ExprNode *AST::address_member_receiver(
+    AST::NodeCollection &nodes, AST::ExprNode *receiver, bool replay)
+{
+    if (receiver == nullptr) {
+        return receiver;
+    }
+
+    AST::ExprNode *self = receiver;
+
+    // parse planted AddrOf of an unknown. unwrap so a later round peels now that
+    // the type is known (`array&&` at `array&`). a seated AddrOf of a value stays
+    if (self->get_node_type() == AST::NodeType::n_expr_addrof) {
+        auto *addrof = static_cast<AST::AddrOfExprNode *>(self);
+        const AST::ValueType planted = addrof->operand->result_type();
+        if (!type_is_determined_for_fit(planted) || !planted.is_pointer()) {
+            return self;
+        }
+
+        self = addrof->operand;
+    } else if (replay) {
+        // CallResolver: a T& receiver_for_member_call seated is already the receiver
+        return receiver;
+    }
+
+    AST::ValueType type = self->result_type();
+    while (type.is_pointer()) {
+        self = &nodes.emplace_back<AST::DerefExprNode>(self);
+        type = type.pointee();
+    }
+
+    return &nodes.emplace_back<AST::AddrOfExprNode>(self);
+}
+
 AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode *place)
 {
     return receiver_for_member_call(module.nodes, place);

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCopy  text_cannot_copy.eco:4:16
+
+  'str::text' is unique: exactly one value may name its storage, so it is moved and never copied.
+
+  3 | $a->append('hey');
+  4 | str::text $b = $a;
+    :                ^^
+  5 | echo $b->size();
+
+  help: Write 'mv $a' to transfer it. Or take a borrow ('str::text&') if it is only being read.
+
+1 error, nothing was compiled.

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "Compiler/CompilerOptions.h"
+
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -26,7 +28,8 @@ namespace Compiler::LLVM
         std::string triple;
         std::string cpu;
         std::string features;
-        bool no_optimize = false;
+        // ISel and the per-unit pipeline. same field Backend::init_target reads
+        Compiler::CodegenOpt codegen_opt = Compiler::CodegenOpt::t_baseline;
         bool pic = true;
         bool targeting_windows = false;
         bool already_optimized = false;

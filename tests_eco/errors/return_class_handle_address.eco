@@ -1,0 +1,31 @@
+// `&$box` is the handle slot on the frame, even though the object is on the heap
+class Box
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+function slot(Box $b) : Box&
+{
+    Box $local = $b;
+    return &$local;
+}
+
+function pass(Box& $b) : Box&
+{
+    return $b;
+}
+
+function through_pass(Box $b) : Box&
+{
+    Box $local = $b;
+    return pass($local);
+}
+
+Box $b = Box(1);
+Box& $r = slot($b);
+echo $r->n;

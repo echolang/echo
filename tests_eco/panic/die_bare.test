@@ -3,3 +3,7 @@ expect: fail
 --- OUT --->
 fatal error
   at die_bare.eco:2
+--- IR --->
+# abort stays a call: cold, never inlined, never returns into an unwind
+CHECK: Function Attrs: cold noinline noreturn nounwind
+CHECK: @__eco_abort

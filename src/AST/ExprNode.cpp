@@ -49,17 +49,20 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     if (op_node != nullptr && (raw_left.is_pointer() || raw_right.is_pointer())) {
         const auto op = op_node->op->type;
 
-        // offsetting an address stays an address, scaled by the pointee's size. **mutable**, for the
-        // reason spelled out below: the const on the operand's own level said its slot could not be
-        // re-seated, and this answer is a fresh value with no slot to re-seat. the pointee's const
-        // rides along untouched, which is the half that is actually a promise about storage
+        // offsetting an address stays an address, scaled by the pointee's size. **ptr<T> only**:
+        // a borrow is a pointer too, and `$i + 1` over `usize&` has to peel to the integer — the
+        // collapse below already says so. **mutable**, for the reason spelled out there: the const
+        // on the operand's own level said its slot could not be re-seated, and this answer is a
+        // fresh value with no slot to re-seat. the pointee's const rides along untouched
         if ((op == Token::Type::t_op_add || op == Token::Type::t_op_sub)
-            && raw_left.is_pointer() && !raw_right.is_pointer()) {
+            && is_address_operand(raw_left) && !raw_right.is_pointer()) {
             return AST::ValueType::make_mutable(raw_left);
         }
 
-        // the distance between two addresses, in elements
-        if (op == Token::Type::t_op_sub && raw_left.is_pointer() && raw_right.is_pointer()) {
+        // the distance between two addresses, in elements. **ptr<T> only**: a
+        // borrow is a pointer too, and `$a - $b` over `usize&` peels to the integer
+        if (op == Token::Type::t_op_sub
+            && is_address_operand(raw_left) && is_address_operand(raw_right)) {
             return AST::ValueType(AST::ValueTypePrimitive::t_int64);
         }
 
@@ -301,7 +304,10 @@ const std::string AST::AddrOfExprNode::node_description()
 
 AST::ValueType AST::StrongExprNode::result_type() const
 {
-    const ValueType operand_type = operand->result_type();
+    // a `const weak&` place is the handle, one load away. value_result_type peels T&
+    // and leaves ptr<T> alone, so `strong($ref)` types during the fixpoint before
+    // PointerAdjuster writes that deref - GuardLowering asks
+    const ValueType operand_type = value_result_type(*operand);
 
     // not a weak: unknown rather than an assert, so TypeChecker can report it against the token this node
     // carries. `unknown` is read everywhere as "says nothing" rather than as a mismatch, which is also

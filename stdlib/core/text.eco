@@ -1,0 +1,222 @@
+/**
+ * A unique growable buffer of text bytes. Building, then `take()` once into a `string`.
+ *
+ * `string` is a window onto a shared `str::buf`: copying one is a retain, and every `append` first
+ * asks whether this value uniquely owns the whole buffer. That question is the right one for a
+ * value you pass around, and the wrong one for a loop that only ever writes.
+ *
+ * This is the other shape. `#[unique]` refuses the copy, so the uniqueness gate has nothing to
+ * ask: the bytes have one owner, growth doubles, `take()` plants a `str::buf` over the live
+ * block. Short results stay on that block: this type is for building, and seating
+ * `string::INLINE` bytes would copy then free what it just grew. The terminator `str::buf`
+ * requires is written at that freeze, not on every append. An empty text that never allocated
+ * takes to an empty string.
+ *
+ * A namespace is a property of the file, so this cannot sit in string.eco.
+ */
+
+namespace str;
+
+#[unique]
+public struct text
+{
+    // same accounting as `str::buf`: `$cap` is text bytes, the allocation is `$cap + 1`.
+    // private so a field-wise constructor cannot forge a second owner of one block
+    private ptr<uint8> $bytes;
+    private usize $len;
+    private usize $cap;
+
+    /**
+     * Empty, no allocation. The first append that needs room pays for the block.
+     */
+    constructor()
+    {
+        $this->bytes:$ = null;
+        $this->len = 0;
+        $this->cap = 0;
+    }
+
+    destructor()
+    {
+        mem::free($this->bytes);
+    }
+
+    const function size() : usize
+    {
+        return $this->len;
+    }
+
+    const function empty() : bool
+    {
+        return $this->len == 0;
+    }
+
+    const function capacity() : usize
+    {
+        return $this->cap;
+    }
+
+    /**
+     * A window over the live bytes. Growing this buffer invalidates it.
+     */
+    const function view() : string::view
+    {
+        return string::view($this->bytes, $this->len);
+    }
+
+    /**
+     * Grows so at least `$capacity` text bytes fit. Does nothing when they already do.
+     */
+    function reserve(usize $capacity) : void
+    {
+        if ($this->cap >= $capacity) {
+            return;
+        }
+
+        $this->grow_to($capacity);
+    }
+
+    private function grow_for(usize $count) : void
+    {
+        if ($count > ~(0 as usize) - $this->len) {
+            mem::out_of_memory();
+        }
+
+        $this->grow_to($this->len + $count);
+    }
+
+    private function grow_to(usize $capacity) : void
+    {
+        usize $grown = $this->cap * 2;
+
+        if ($grown < $capacity) {
+            $grown = $capacity;
+        }
+
+        if ($this->bytes:$ == null) {
+            $this->bytes:$ = text_block($grown);
+        } else {
+            $this->bytes:$ = text_regrow($this->bytes, $grown);
+        }
+
+        $this->cap = $grown;
+    }
+
+    /**
+     * Copies `$count` bytes onto the end. The uniquely-owned heap path of `string::append`,
+     * without the uniqueness load: a compare and a memcpy. Growth and a self-view reseat
+     * live in `append_slow`, so this stays small enough to inline into a tight loop. A
+     * `$src` that names this block is reseated after a grow, so `$t->append($t->view())` is
+     * sound.
+     */
+    #[inline]
+    function append(ptr<const uint8> $src, usize $count) : void
+    {
+        if ($count == 0) {
+            return;
+        }
+
+        // room left rather than room needed, so a count a caller computed cannot wrap.
+        // dest starts at `$len`, so a self-view `[0, len)` does not overlap. grow and
+        // reseat live in `append_slow`: inlining them here made `append(string)` too
+        // big for a loop
+        if ($count <= $this->cap - $this->len) {
+            mem::copy<uint8>($this->bytes:$ + $this->len, ptr<uint8>($src:$), $count);
+            $this->len = $this->len + $count;
+            return;
+        }
+
+        $this->append_slow($src, $count);
+    }
+
+    // growth and a self-view reseat, **out of the inline body**. takes `text&`, so it
+    // cannot be `#[echoc::cold]`
+    private function append_slow(ptr<const uint8> $src, usize $count) : void
+    {
+        usize $from = 0;
+        bool $inside = false;
+
+        if ($this->bytes:$ != null) {
+            ptr<const uint8> $base = ptr<const uint8>($this->bytes:$);
+            ptr<const uint8> $limit = $base:$ + $this->cap;
+
+            if ($src:$ >= $base:$ && $src:$ < $limit:$) {
+                $inside = true;
+                $from = ($src:$ - $base:$) as usize;
+            }
+        }
+
+        $this->grow_for($count);
+
+        if ($inside) {
+            $src:$ = ptr<const uint8>($this->bytes:$ + $from);
+        }
+
+        mem::copy<uint8>($this->bytes:$ + $this->len, ptr<uint8>($src:$), $count);
+        $this->len = $this->len + $count;
+    }
+
+    #[inline]
+    function append(string::view $s) : void
+    {
+        $this->append($s->bytes, $s->size);
+    }
+
+    // a borrow: text only copies the bytes. `string::append(string)` is by value so a
+    // self-append clones; this type is unique and has no such gate. a 40-byte by-value
+    // `string` was enough IR that `#[inline]` could not fire in a loop. interpolation's
+    // `str::from` pieces get a temporary, the same one any other borrow argument gets
+    #[inline]
+    function append(const string& $other) : void
+    {
+        usize $extra = $other->size();
+
+        if ($extra != 0) {
+            $this->append($other->data(), $extra);
+        }
+    }
+
+    #[inline]
+    function push(uint8 $byte) : void
+    {
+        if ($this->len == $this->cap) {
+            $this->grow_for(1);
+        }
+
+        $this->bytes:$[$this->len] = $byte;
+        $this->len = $this->len + 1;
+    }
+
+    /**
+     * Drops the contents and keeps the allocation.
+     */
+    function clear() : void
+    {
+        $this->len = 0;
+    }
+
+    /**
+     * Hands the bytes to a `string` and leaves this empty.
+     *
+     * A block this already grew becomes a `str::buf` over it, so the freeze is one class box
+     * rather than a second copy of the document. Never allocated takes to an empty string.
+     * The NUL `str::buf` requires is written here.
+     */
+    function take() : string
+    {
+        if ($this->bytes:$ == null) {
+            return string(string::view(null, 0));
+        }
+
+        $this->bytes:$[$this->len] = 0;
+
+        str::buf $owner = str::buf($this->cap, $this->len, $this->bytes);
+        string $s = string(string::view($this->bytes, $this->len), $owner);
+
+        $this->bytes:$ = null;
+        $this->len = 0;
+        $this->cap = 0;
+
+        return $s;
+    }
+}

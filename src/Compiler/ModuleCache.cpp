@@ -138,7 +138,7 @@ bool Compiler::compute_module_keys(
     // through the baseline pipeline at all. Two builds differing only in that flag produce different
     // objects, so without this one of them would be served the other's
     environment = fnv1a64(
-        options.no_optimize ? std::string("noopt") : std::string("opt"), environment);
+        options.no_optimize() ? std::string("noopt") : std::string("opt"), environment);
     environment = fnv1a64(
         options.tracking_allocations() ? std::string("track") : std::string("notrack"), environment);
 

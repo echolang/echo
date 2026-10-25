@@ -1,5 +1,6 @@
 #include "AST/ASTPlaceExpr.h"
 
+#include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
@@ -225,6 +226,55 @@ bool is_borrow_local(const VarDeclNode *decl, const FunctionDeclNode *function)
     return type.is_pointer() && !type.is_nullable();
 }
 
+// a class handle names a heap object. `&$box` is still the slot on the frame;
+// `$box->n` / `$box->slot()` name the payload, which other handles may keep
+bool is_class_handle(const VarDeclNode *decl)
+{
+    if (decl == nullptr || !decl->has_type()) {
+        return false;
+    }
+
+    return value_type_of(decl->type()).is_class();
+}
+
+// the handle's own frame slot: `$local` or `&$local`. a member, index, or call is
+// the heap object
+bool is_class_handle_slot(const VarDeclNode *root, ExprNode *place)
+{
+    if (!is_class_handle(root)) {
+        return false;
+    }
+
+    place = strip_implicit_casts(place);
+
+    if (place == nullptr) {
+        return false;
+    }
+
+    if (place->get_node_type() == NodeType::n_varref) {
+        return true;
+    }
+
+    if (place->get_node_type() != NodeType::n_expr_addrof) {
+        return false;
+    }
+
+    ExprNode *operand = strip_implicit_casts(static_cast<AddrOfExprNode *>(place)->operand);
+
+    return operand != nullptr && operand->get_node_type() == NodeType::n_varref;
+}
+
+// `pass($local) : Box&` names the slot. `$local->slot() : int32&` names the payload
+bool is_borrow_of_same_class(const ValueType &result, const VarDeclNode *root)
+{
+    if (!is_class_handle(root) || !result.is_pointer() || result.is_nullable()) {
+        return false;
+    }
+
+    return ValueType::make_mutable(value_type_of(result.pointee()))
+        == ValueType::make_mutable(value_type_of(root->type()));
+}
+
 VarDeclNode *names_callee_frame_storage_walk(
     ExprNode *expr,
     FunctionDeclNode *function,
@@ -294,6 +344,10 @@ VarDeclNode *names_callee_frame_storage_through_call(
 
         if (VarDeclNode *root = names_callee_frame_storage_walk(
                 borrowed_through_deref((*arguments)[i]), function, argument_visited)) {
+            if (is_class_handle(root) && !is_borrow_of_same_class(result, root)) {
+                continue;
+            }
+
             return root;
         }
     }
@@ -344,6 +398,10 @@ VarDeclNode *names_callee_frame_storage_walk(
             }
 
             return names_callee_frame_storage_walk(root->init_expr, function, visited);
+        }
+
+        if (is_class_handle(root) && !is_class_handle_slot(root, expr)) {
+            return nullptr;
         }
 
         return root;
@@ -413,6 +471,10 @@ VarDeclNode *names_callee_frame_storage_walk(
                     return from_init;
                 }
 
+                continue;
+            }
+
+            if (is_class_handle(root) && !is_class_handle_slot(root, place)) {
                 continue;
             }
 

@@ -776,8 +776,10 @@ namespace AST
     public:
         ECO_AST_NODE_TYPE(n_expr_strong);
 
-        // an expression of weak type. a place is not required: the upgrade reads the handle, and a weak
-        // handed back by a call is as upgradable as one sitting in a variable
+        // an expression of weak type, or a borrow of one. a place is not required: the upgrade
+        // reads the handle, and a weak handed back by a call is as upgradable as one sitting in a
+        // variable. `const weak&` is the handle one load away - foreach elision seats unread
+        // elements that way, and result_type peels so GuardLowering can type during the fixpoint
         ExprNode *operand;
 
         // where `strong` was written, for the diagnostic when the operand is not a weak

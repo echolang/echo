@@ -17,10 +17,10 @@ namespace AST
     class Namespace;
     class StringInterpolationExprNode;
 
-    // `"a{$x}b"` becomes one local and a sequence of `append`s over `str::from`. a hole is a
-    // unary call, so match_function's arity rule is untouched. a single piece stays the
-    // expression it is. inside the fixpoint, before ownership. no pending state, so no
-    // `finalize()`
+    // `"a{$x}b"` becomes a `str::text` local, a sequence of `append`s over `str::from`, and
+    // `take()` into a `string`. a hole is a unary call, so match_function's arity rule is
+    // untouched. a single piece stays the expression it is. inside the fixpoint, before
+    // ownership. no pending state, so no `finalize()`
     class InterpolationLowering : private FixpointLowering
     {
     public:

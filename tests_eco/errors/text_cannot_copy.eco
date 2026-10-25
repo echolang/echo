@@ -1,0 +1,5 @@
+// str::text is unique: a copy is a second owner of one block
+str::text $a = str::text();
+$a->append('hey');
+str::text $b = $a;
+echo $b->size();

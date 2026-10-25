@@ -578,22 +578,26 @@ TEST_CASE("the subcommand decides the build mode, and a flag overrides it", "[cl
 TEST_CASE("debug symbols default the optimize mode but never override a written one", "[cli]")
 {
     REQUIRE(resolved({ "build", "-o", "x", "a.eco" }).optimize == OptimizeMode::t_module);
-    REQUIRE_FALSE(resolved({ "build", "-o", "x", "a.eco" }).options.no_optimize);
+    REQUIRE_FALSE(resolved({ "build", "-o", "x", "a.eco" }).options.no_optimize());
+    REQUIRE_FALSE(resolved({ "build", "-o", "x", "a.eco" }).options.aggressive_codegen());
 
     REQUIRE(resolved({ "build", "-o", "x", "-g", "a.eco" }).optimize == OptimizeMode::t_none);
-    REQUIRE(resolved({ "build", "-o", "x", "-g", "a.eco" }).options.no_optimize);
+    REQUIRE(resolved({ "build", "-o", "x", "-g", "a.eco" }).options.no_optimize());
+    REQUIRE_FALSE(resolved({ "build", "-o", "x", "-g", "a.eco" }).options.aggressive_codegen());
 
     const DriverOptions stated_whole
         = resolved({ "build", "-o", "x", "-g", "--optimize", "whole", "a.eco" });
 
     REQUIRE(stated_whole.optimize == OptimizeMode::t_whole);
-    REQUIRE_FALSE(stated_whole.options.no_optimize);
+    REQUIRE_FALSE(stated_whole.options.no_optimize());
+    REQUIRE(stated_whole.options.aggressive_codegen());
 
     const DriverOptions stated_module
         = resolved({ "build", "-o", "x", "-g", "--optimize", "module", "a.eco" });
 
     REQUIRE(stated_module.optimize == OptimizeMode::t_module);
-    REQUIRE_FALSE(stated_module.options.no_optimize);
+    REQUIRE_FALSE(stated_module.options.no_optimize());
+    REQUIRE_FALSE(stated_module.options.aggressive_codegen());
 }
 
 // **the single assertion standing between this and a silent cache-key change.** A dump changes no
@@ -609,6 +613,8 @@ TEST_CASE("printing the IR merges the program but never enters the cache key", "
 
     REQUIRE(optimized.whole_program);
     REQUIRE(optimized.optimize_is_whole_program());
+    REQUIRE(optimized.options.aggressive_codegen());
+    REQUIRE_FALSE(dumped.options.aggressive_codegen());
 
     // `run` is a cached build plus exec, so a plain run is not a merge. `--print ir` still is
     REQUIRE_FALSE(resolved({ "run", "a.eco" }).whole_program);
@@ -644,7 +650,7 @@ TEST_CASE("profile implies tracking and debug info without dropping optimize", "
     REQUIRE(run_profile.options.debug_info);
     REQUIRE(run_profile.options.mode == BuildMode::t_debug);
     REQUIRE(run_profile.optimize == OptimizeMode::t_module);
-    REQUIRE_FALSE(run_profile.options.no_optimize);
+    REQUIRE_FALSE(run_profile.options.no_optimize());
 
     const std::string profile_help = Compiler::option_for(Opt::t_profile).description;
     REQUIRE(contains(profile_help, "still asserts unless --release"));
@@ -659,7 +665,7 @@ TEST_CASE("profile implies tracking and debug info without dropping optimize", "
     REQUIRE(driver.options.debug_info);
     REQUIRE(driver.options.mode == BuildMode::t_release);
     REQUIRE(driver.optimize == OptimizeMode::t_module);
-    REQUIRE_FALSE(driver.options.no_optimize);
+    REQUIRE_FALSE(driver.options.no_optimize());
 
     const DriverOptions calls = resolved({ "run", "--profile-calls", "a.eco" });
     REQUIRE(calls.options.profiling());

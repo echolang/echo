@@ -264,7 +264,7 @@ bool Backend::prepare_execution()
 #endif
 
     std::string errorStr;
-    const llvm::TargetOptions opts;
+    const llvm::TargetOptions opts = target_options_for(_ctx.target_triple);
 
     {
         Compiler::ScopedPhase engine("engine");
@@ -272,6 +272,7 @@ bool Backend::prepare_execution()
             .setErrorStr(&errorStr)
             .setEngineKind(llvm::EngineKind::JIT)
             .setTargetOptions(opts)
+            .setOptLevel(codegen_opt_level(_ctx.options.codegen_opt))
             .setMCPU(Compiler::llvm_cpu_name(_ctx.target_triple, sub.cpu))
             .setMAttrs(attributes)
             .create();
@@ -357,7 +358,7 @@ void Backend::init_target()
         _ctx.target_triple,
         sub.cpu,
         sub.features,
-        _ctx.options.no_optimize,
+        codegen_opt_level(_ctx.options.codegen_opt),
         _ctx.options.codegen.uses_pic(),
         error
     );
@@ -908,7 +909,7 @@ void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
     // must not depend on the consumer. GlobalDCE only (no root set: that is prune_to_entry).
     // then O2 per unit, unless `--optimize none`. whole-program is merge-then-O3 and bypasses
     // the cache; this path is a function of one unit, so the object cache stays sound
-    const bool optimize = !_ctx.options.no_optimize;
+    const bool optimize = !_ctx.options.no_optimize();
     Compiler::LLVM::FunctionTimeTrace trace("optimize");
     Compiler::LLVM::prepare_module(
         *cmp_unit.llvm_module, _target_machine.get(), optimize);

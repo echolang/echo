@@ -1,0 +1,10 @@
+mode: build
+flags: --optimize whole
+
+--- OUT --->
+abcdefgabcdefgabcdefg
+--- IR --->
+CHECK: define dso_local void @_fillZZMRBMLCN3str4textEZMLPy
+CHECK: llvm.memcpy
+CHECK-NOT: call void @_str_MN3str4textE_appendZZ
+CHECK: ret void

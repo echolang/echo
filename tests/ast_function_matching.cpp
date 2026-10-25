@@ -5,6 +5,7 @@
 #include <AST/ASTTypeParam.h>
 #include <AST/ASTValueType.h>
 #include <AST/FunctionDeclNode.h>
+#include <AST/TypeDeclNode.h>
 
 #include "helpers.h"
 
@@ -187,6 +188,26 @@ TEST_CASE("a borrow parameter is answered by a conversion to what it borrows", "
     // address is a decision the caller should be able to see in the source
     const ValueType nullable = ValueType::make_pointer(t_int32, true);
     REQUIRE( AST::implicit_conversion_target(nullable) == nullable );
+}
+
+TEST_CASE("a weak of the same class drops const as widening", "[fnmatch]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Handle { int32 $tag; }\n"
+        "class Other { int32 $tag; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    const ValueType handle = EchoTests::type_named(m, "Handle")->value_type();
+    const ValueType other = EchoTests::type_named(m, "Other")->value_type();
+    const ValueType weak = ValueType::make_weak(handle);
+    const ValueType const_weak = ValueType::make_const(weak);
+    const ValueType other_weak = ValueType::make_weak(other);
+
+    REQUIRE( AST::argument_fit(weak, nullptr, weak) == ArgumentFit::t_exact );
+    REQUIRE( AST::argument_fit(const_weak, nullptr, weak) == ArgumentFit::t_widening );
+    REQUIRE( AST::argument_fit(weak, nullptr, const_weak) == ArgumentFit::t_widening );
+    REQUIRE( AST::argument_fit(weak, nullptr, other_weak) == ArgumentFit::t_none );
 }
 
 TEST_CASE("a lone candidate with a type-parameter argument stays pending", "[fnmatch]")

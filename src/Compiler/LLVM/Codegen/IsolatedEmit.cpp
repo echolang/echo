@@ -123,7 +123,7 @@ IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
         request.triple,
         request.cpu,
         request.features,
-        request.no_optimize,
+        codegen_opt_level(request.codegen_opt),
         request.pic,
         error
     );
@@ -138,7 +138,7 @@ IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
 
     if (!request.already_optimized) {
         FunctionTimeTrace trace(request.timings ? &result.slowest_optimize : nullptr);
-        prepare_module(module, machine.get(), !request.no_optimize);
+        prepare_module(module, machine.get(), request.codegen_opt != Compiler::CodegenOpt::t_none);
     }
 
     result.optimize_ms = std::chrono::duration<double, std::milli>(
