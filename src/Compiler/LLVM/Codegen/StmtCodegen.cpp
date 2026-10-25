@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
+#include "Compiler/LLVM/Codegen/ProfileCodegen.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -400,6 +401,9 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
             _ctx.builder->CreateRet(dummy_ret);
         }
     }
+
+    _ctx.profile->instrument_copy_function(*func, node);
+    _ctx.profile->instrument_body(*func, node);
 
     _ctx.debug_info->end_function();
 

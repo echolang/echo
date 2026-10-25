@@ -9,7 +9,7 @@
 // editing one here *is* the decision to start a new series, and the commit that does it is an
 // ordinary commit
 #define ECO_VERSION_MAJOR 0
-#define ECO_VERSION_MINOR 9
+#define ECO_VERSION_MINOR 10
 
 // the patch is a fact about the release history rather than about this source tree: every push to
 // master is a patch release, and the number is whatever the highest v<major>.<minor>.<n> tag on the

@@ -312,6 +312,26 @@ Compiler::BuildLayout Compiler::BuildLayout::resolve(
     return layout;
 }
 
+std::filesystem::path Compiler::BuildLayout::profile_dir() const
+{
+    if (_scratch_is_temporary || _entry_dir.empty()) {
+        return {};
+    }
+
+    return _entry_dir / "profile";
+}
+
+std::filesystem::path Compiler::BuildLayout::profile_path(const std::string &stem) const
+{
+    const std::string file = stem + ".ecoprof";
+    const std::filesystem::path dir = profile_dir();
+    if (dir.empty()) {
+        return std::filesystem::current_path() / file;
+    }
+
+    return dir / file;
+}
+
 void Compiler::BuildLayout::discard_temporary_scratch() const
 {
     if (!_scratch_is_temporary || _scratch.empty()) {

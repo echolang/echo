@@ -13,6 +13,26 @@ AST::FunctionDeclNode *AST::copy_constructor_for(const AST::ValueType &type)
     return AST::find_copy_constructor(type.get_complex_type());
 }
 
+bool AST::is_copy_function(const FunctionDeclNode *decl)
+{
+    if (decl == nullptr) {
+        return false;
+    }
+
+    if (decl->is_inline_array_copy) {
+        return true;
+    }
+
+    // shape, not slot pointer: the published copy_constructor() and the FunctionDeclNode
+    // codegen emits can be two nodes of one declaration. classify_copy is still the owner
+    // of "is this a copy": a class constructor(const T&) is a new heap object, t_retain
+    if (!is_copy_constructor(decl, decl->get_return_type())) {
+        return false;
+    }
+
+    return classify_copy(decl->get_return_type()) == CopyKind::t_constructor;
+}
+
 namespace
 {
     // **the one walk**: a struct is copied by copying each of its properties, so its answer is the fold

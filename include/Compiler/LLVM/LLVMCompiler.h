@@ -26,6 +26,7 @@
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
+#include "Compiler/LLVM/Codegen/ProfileCodegen.h"
 #include "Compiler/LLVM/Codegen/Backend.h"
 
 #include <filesystem>
@@ -243,6 +244,7 @@ private:
     Compiler::LLVM::DebugPrintCodegen _debug_print;
     Compiler::LLVM::ErasureCodegen _erasure;
     Compiler::LLVM::DebugInfoCodegen _debug_info;
+    Compiler::LLVM::ProfileCodegen _profile;
     Compiler::LLVM::Backend _backend;
 };
 

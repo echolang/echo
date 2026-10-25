@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -438,6 +439,15 @@ std::string Compiler::host_clang()
 
 int Compiler::run_wait(const std::string &program, const std::vector<std::string> &argv)
 {
+    return run_wait(program, argv, {});
+}
+
+int Compiler::run_wait(
+    const std::string &program,
+    const std::vector<std::string> &argv,
+    const std::vector<std::pair<std::string, std::string>> &extra_env
+)
+{
     if (argv.empty()) {
         return 127;
     }
@@ -461,10 +471,58 @@ int Compiler::run_wait(const std::string &program, const std::vector<std::string
     // of their own
     ProgressReporter::instance().suspend();
 
+    std::optional<llvm::ArrayRef<llvm::StringRef>> env;
+    std::vector<llvm::StringRef> env_refs;
+    std::vector<std::string> env_storage;
+#if !defined(_WIN32)
+    std::unique_ptr<ChildImage> image;
+    if (!extra_env.empty()) {
+        image = std::make_unique<ChildImage>(argv, extra_env);
+        for (char *const *entry = image->env(); entry != nullptr && *entry != nullptr; ++entry) {
+            env_refs.emplace_back(*entry);
+        }
+        env = env_refs;
+    }
+#else
+    if (!extra_env.empty()) {
+        const wchar_t *block = GetEnvironmentStringsW();
+        if (block != nullptr) {
+            const wchar_t *cursor = block;
+            while (*cursor != L'\0') {
+                const std::wstring entry(cursor);
+                cursor += entry.size() + 1;
+                const size_t eq = entry.find(L'=');
+                if (eq == std::wstring::npos || eq == 0) {
+                    continue;
+                }
+                const std::string key = narrow(entry.c_str(), eq);
+                bool replaced = false;
+                for (const auto &pair : extra_env) {
+                    if (env_names_match(pair.first, key)) {
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced) {
+                    env_storage.push_back(narrow(entry.c_str(), entry.size()));
+                }
+            }
+            FreeEnvironmentStringsW(const_cast<wchar_t *>(block));
+        }
+        for (const auto &pair : extra_env) {
+            env_storage.push_back(pair.first + "=" + pair.second);
+        }
+        for (const std::string &entry : env_storage) {
+            env_refs.emplace_back(entry);
+        }
+        env = env_refs;
+    }
+#endif
+
     std::string error;
     bool failed = false;
     const int status = llvm::sys::ExecuteAndWait(
-        program, args, std::nullopt, {}, 0, 0, &error, &failed);
+        program, args, env, {}, 0, 0, &error, &failed);
 
     if (failed) {
         llvm::errs() << "could not start '" << program << "'";

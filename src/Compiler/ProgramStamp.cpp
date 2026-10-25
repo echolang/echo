@@ -9,6 +9,7 @@
 #include "Compiler/HostTool.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/ParsePipeline.h"
+#include "Compiler/ProfileRuntime.h"
 
 #include <fmt/core.h>
 
@@ -130,6 +131,12 @@ bool compute_program_echo_key(
     }
 
     digest = fold_flag(plan.options.report_allocations, "report", "noreport", digest);
+
+    if (plan.options.profiling()) {
+        digest = fold_field(Compiler::profile_runtime_stamp(), digest);
+        digest = fold_flag(plan.options.profiling_calls(), "calls", "nocalls", digest);
+        digest = fold_flag(plan.options.profiling_stdlib(), "pstdlib", "nopstdlib", digest);
+    }
 
     digest = fold_field(plan.program_name, digest);
     digest = fold_field(plan.entry_file.string(), digest);

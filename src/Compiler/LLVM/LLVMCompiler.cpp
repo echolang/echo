@@ -38,7 +38,7 @@
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
       _abort(_ctx), _abi(_ctx), _atomics(_ctx), _simd(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx),
-      _erasure(_ctx), _debug_info(_ctx), _backend(_ctx)
+      _erasure(_ctx), _debug_info(_ctx), _profile(_ctx), _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
     _ctx.options = options;
@@ -60,6 +60,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.erasure = &_erasure;
     _ctx.abi = &_abi;
     _ctx.debug_info = &_debug_info;
+    _ctx.profile = &_profile;
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -200,6 +201,7 @@ void LLVMCompiler::emit_entry_point(Compiler::LLVM::CmpUnit &main_cmp_unit, cons
     // before the file-root walk below, because a module-scope `env::arg(1)` is one of the statements it
     // emits and would otherwise read a global nothing had filled in yet
     _process.gen_capture(function);
+    _profile.emit_start();
 
     {
         Compiler::ScopedPhase entry_phase("entry point");
@@ -242,6 +244,7 @@ void LLVMCompiler::emit_entry_point(Compiler::LLVM::CmpUnit &main_cmp_unit, cons
             _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
         }
 
+        _profile.instrument_main_returns(function);
         _debug_info.end_function();
     }
 }
@@ -469,6 +472,8 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         Compiler::ScopedPhase phase("drain");
         drain_pending_definitions();
     }
+
+    _profile.mark_frame_pointers();
 
     // **after the drain and before the ODR check.** The drain is the last thing that can add a body to
     // any unit, and verify_odr_consistency compares final metadata - everything downstream of here (the

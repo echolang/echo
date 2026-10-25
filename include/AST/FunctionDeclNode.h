@@ -351,6 +351,9 @@ namespace AST
         // point back at, and this has none
         bool is_implicitly_generated = false;
 
+        // `$copy_inline_array`, set in ensure_inline_array_copy. AST::is_copy_function reads it
+        bool is_inline_array_copy = false;
+
         // author wrote the declaration, compiler wrote the body
         bool body_is_synthesized = false;
 

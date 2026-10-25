@@ -18,6 +18,12 @@ namespace AST
     // than a layout, so the guard belongs here once instead of at each of them
     FunctionDeclNode *copy_constructor_for(const ValueType &type);
 
+    // a copy constructor by shape (is_copy_constructor of the return type) whose
+    // classify_copy is t_constructor, or decl->is_inline_array_copy. constructors have
+    // no owner_type, and the published slot may be a different FunctionDeclNode than
+    // the one codegen emits
+    bool is_copy_function(const FunctionDeclNode *decl);
+
     // **how a value of this type is copied** - the five ways there are, plus the refusal, and the one
     // place that decides between them
     //

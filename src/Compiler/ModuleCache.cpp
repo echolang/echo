@@ -154,6 +154,15 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
 
+    // **only when the flag is on**, so an unprofiled build's keys stay byte for byte
+    if (options.profiling()) {
+        environment = fnv1a64(std::string("profile"), environment);
+        environment = fnv1a64(
+            options.profiling_calls() ? std::string("calls") : std::string("nocalls"), environment);
+        environment = fnv1a64(
+            options.profiling_stdlib() ? std::string("pstdlib") : std::string("nopstdlib"), environment);
+    }
+
     // **and whether a typed access carries its `!tbaa` tag.** `--no-tbaa` strips every tag codegen would
     // have planted, which is a different object for every module that loads or stores - and the one
     // that could be served from the other's store is exactly the differential `--no-tbaa` exists to run

@@ -97,13 +97,20 @@ bool Compiler::resolve_driver_options(
     out.options.debug_info = cli.flag(Opt::t_debug_symbols);
     out.options.no_tbaa = cli.flag(Opt::t_no_tbaa);
     out.options.fixed_hash_seed = cli.flag(Opt::t_fixed_hash_seed);
+    out.options.profile_calls = cli.flag(Opt::t_profile_calls);
+    out.options.profile_stdlib = cli.flag(Opt::t_profile_stdlib);
+    out.options.profile = cli.flag(Opt::t_profile)
+        || out.options.profile_calls
+        || out.options.profile_stdlib;
 
     // **--explain memory implies --track-allocations**, settled here rather than at the two readers: a
     // report over a counter nothing maintains does not fail, it reads zero forever - which is the answer
     // a person hoped for and so the one they would believe
     out.options.report_allocations = out.explains(ExplainKind::t_memory);
     out.options.track_allocations
-        = out.options.report_allocations || cli.flag(Opt::t_track_allocations);
+        = out.options.report_allocations
+        || cli.flag(Opt::t_track_allocations)
+        || out.options.profile;
     out.options.check_refcounts = cli.flag(Opt::t_check_refcounts);
 
     // the request as written, resolved by Compiler::resolve_subtarget wherever it is needed
@@ -119,6 +126,13 @@ bool Compiler::resolve_driver_options(
 
     if (out.options.debug_info && !cli.stated(Opt::t_optimize)) {
         out.optimize = OptimizeMode::t_none;
+    }
+
+    // `--profile` wants DWARF to symbolize, and must not inherit `-g`'s optimize-none.
+    // applied after the `-g` rule, which keys on the written `-g`. checks stay the
+    // subcommand default; `run --profile` still asserts unless `--release` was written
+    if (out.options.profile) {
+        out.options.debug_info = true;
     }
 
     out.options.no_optimize = out.optimize == OptimizeMode::t_none;
@@ -154,6 +168,16 @@ bool Compiler::resolve_driver_options(
     }
 
     out.decls_all = cli.flag(Opt::t_decls_all);
+    out.profile_text = cli.flag(Opt::t_text);
+
+    if (cli.stated(Opt::t_folded)) {
+        for (const OptionValue &value : option_for(Opt::t_folded).values) {
+            if (cli.value(Opt::t_folded) == value.name) {
+                out.profile_fold = static_cast<ProfileFoldKind>(value.code);
+                break;
+            }
+        }
+    }
 
     if (out.decls_all && !out.prints(PrintKind::t_decls)) {
         out_error = "'--decls-all' needs '--print decls'.";

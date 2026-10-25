@@ -36,6 +36,9 @@ namespace AST
         // already checked those names, at the callee's origin
         bool from_parameter_default = false;
 
+        // OwnershipPass decided this arrival is a bytewise copy. codegen reads it when profiling
+        bool bytewise_copy = false;
+
         ExprNode() {};
         ExprNode(bool implicit) : is_implcit(implicit) {};
         virtual ~ExprNode() {};

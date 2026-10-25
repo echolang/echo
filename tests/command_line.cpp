@@ -31,6 +31,7 @@
 // resolution - plus the help page, asserted structurally rather than as a golden. See the note above the
 // help section for why that is deliberate
 
+using Compiler::BuildMode;
 using Compiler::CommandLine;
 using Compiler::CommandLineHelp;
 using Compiler::CommandLineOption;
@@ -41,6 +42,7 @@ using Compiler::OptimizeMode;
 using Compiler::OptionArity;
 using Compiler::OptionCategory;
 using Compiler::PrintKind;
+using Compiler::ProfileFoldKind;
 using Compiler::Subcommand;
 using Compiler::TerminalCapabilities;
 using EchoTests::a_terminal;
@@ -150,7 +152,7 @@ TEST_CASE("the option table is indexed by its own ids", "[cli]")
 {
     const std::vector<CommandLineOption> &table = Compiler::command_line_options();
 
-    REQUIRE(table.size() == static_cast<size_t>(Opt::t_dir) + 1);
+    REQUIRE(table.size() == static_cast<size_t>(Opt::t_folded) + 1);
 
     for (size_t i = 0; i < table.size(); i++) {
         REQUIRE(static_cast<size_t>(table[i].id) == i);
@@ -460,7 +462,7 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({}) == "No command given.");
 
     REQUIRE(refusal({ "compile", "a.eco" })
-        == "'compile' is not an echoc command. Write 'run', 'build', 'install', 'test', 'clean' or 'lsp'.");
+        == "'compile' is not an echoc command. Write 'run', 'build', 'install', 'test', 'clean', 'lsp' or 'profile'.");
 
     REQUIRE(refusal({ "run", "--nonsense", "a.eco" }) == "Unknown option '--nonsense'.");
 
@@ -631,6 +633,106 @@ TEST_CASE("explaining memory implies tracking allocations", "[cli]")
 
     REQUIRE(counted.options.track_allocations);
     REQUIRE_FALSE(counted.options.report_allocations);
+}
+
+TEST_CASE("profile implies tracking and debug info without dropping optimize", "[cli]")
+{
+    const DriverOptions run_profile = resolved({ "run", "--profile", "a.eco" });
+
+    REQUIRE(run_profile.options.profiling());
+    REQUIRE(run_profile.options.track_allocations);
+    REQUIRE(run_profile.options.debug_info);
+    REQUIRE(run_profile.options.mode == BuildMode::t_debug);
+    REQUIRE(run_profile.optimize == OptimizeMode::t_module);
+    REQUIRE_FALSE(run_profile.options.no_optimize);
+
+    const std::string profile_help = Compiler::option_for(Opt::t_profile).description;
+    REQUIRE(contains(profile_help, "still asserts unless --release"));
+    REQUIRE_FALSE(contains(profile_help, "otherwise a release build"));
+    REQUIRE_FALSE(contains(
+        Compiler::option_for(Opt::t_profile_calls).description, "optimized program"));
+
+    const DriverOptions driver = resolved({ "run", "--profile", "--release", "a.eco" });
+
+    REQUIRE(driver.options.profiling());
+    REQUIRE(driver.options.track_allocations);
+    REQUIRE(driver.options.debug_info);
+    REQUIRE(driver.options.mode == BuildMode::t_release);
+    REQUIRE(driver.optimize == OptimizeMode::t_module);
+    REQUIRE_FALSE(driver.options.no_optimize);
+
+    const DriverOptions calls = resolved({ "run", "--profile-calls", "a.eco" });
+    REQUIRE(calls.options.profiling());
+    REQUIRE(calls.options.profiling_calls());
+
+    const DriverOptions stdlib = resolved({ "run", "--profile-stdlib", "a.eco" });
+    REQUIRE(stdlib.options.profiling());
+    REQUIRE(stdlib.options.profiling_stdlib());
+    REQUIRE_FALSE(stdlib.options.profiling_calls());
+
+    const DriverOptions both = resolved({ "run", "--profile-calls", "--profile-stdlib", "a.eco" });
+    REQUIRE(both.options.profiling_calls());
+    REQUIRE(both.options.profiling_stdlib());
+
+    // `-g` was written, so it still wins. `--profile` alone must not
+    const DriverOptions with_g = resolved({ "run", "-g", "--profile", "a.eco" });
+    REQUIRE(with_g.options.debug_info);
+    REQUIRE(with_g.optimize == OptimizeMode::t_none);
+
+    REQUIRE(contains(refusal({ "test", "--profile", "a.eco" }), "does not take '--profile'"));
+}
+
+TEST_CASE("the profile subcommand reads a file and its report flags", "[cli]")
+{
+    const DriverOptions plain = resolved({ "profile", "app.ecoprof" });
+    REQUIRE(plain.subcommand == Subcommand::t_profile);
+    REQUIRE(plain.sources == std::vector<std::string>{ "app.ecoprof" });
+    REQUIRE_FALSE(plain.profile_text);
+    REQUIRE_FALSE(plain.profile_fold.has_value());
+
+    const DriverOptions text = resolved({ "profile", "--text", "app.ecoprof" });
+    REQUIRE(text.profile_text);
+
+    const DriverOptions folded = resolved({ "profile", "--folded", "time", "app.ecoprof" });
+    REQUIRE(folded.profile_fold == ProfileFoldKind::t_time);
+
+    REQUIRE(resolved({ "profile", "--folded", "self", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_self);
+    REQUIRE(resolved({ "profile", "--folded", "allocs", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_allocs);
+    REQUIRE(resolved({ "profile", "--folded", "alloc-bytes", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_alloc_bytes);
+    REQUIRE(resolved({ "profile", "--folded", "live-bytes", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_live_bytes);
+    REQUIRE(resolved({ "profile", "--folded", "copies", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_copies);
+    REQUIRE(resolved({ "profile", "--folded", "copy-bytes", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_copy_bytes);
+    REQUIRE(resolved({ "profile", "--folded", "calls", "a.ecoprof" }).profile_fold
+        == ProfileFoldKind::t_calls);
+
+    REQUIRE(refusal({ "profile", "--folded", "hard", "a.ecoprof" })
+        == "Unknown '--folded' value 'hard'. Expected one of: "
+           "time|self|allocs|alloc-bytes|live-bytes|copies|copy-bytes|calls.");
+
+    REQUIRE(contains(refusal({ "run", "--folded", "time", "a.eco" }), "does not take '--folded'"));
+    REQUIRE(contains(refusal({ "run", "--text", "a.eco" }), "does not take '--text'"));
+    REQUIRE(contains(refusal({ "profile", "--profile", "a.ecoprof" }), "does not take '--profile'"));
+    REQUIRE(refusal({ "profile", "--color", "never", "a.ecoprof" }) == "<accepted>");
+    REQUIRE(refusal({ "profile", "--diagnostics", "json", "a.ecoprof" }) == "<accepted>");
+    REQUIRE(contains(refusal({ "profile", "-m", "lib", "a.ecoprof" }), "does not take"));
+    REQUIRE(contains(refusal({ "clean", "--profile" }), "does not take '--profile'"));
+    REQUIRE(contains(refusal({ "install", "--profile" }), "does not take '--profile'"));
+    REQUIRE(contains(refusal({ "lsp", "--profile" }), "does not take '--profile'"));
+
+    CommandLine empty;
+    std::string error;
+    REQUIRE(parse({ "profile" }, empty, error));
+    REQUIRE(empty.sources.empty());
+
+    const std::string help = page(Subcommand::t_profile, TerminalCapabilities::plain());
+    REQUIRE(contains(help, "--text"));
+    REQUIRE(contains(help, "--folded"));
 }
 
 TEST_CASE("check-refcounts is its own flag", "[cli]")
@@ -936,7 +1038,8 @@ TEST_CASE("the usage line is built from the table", "[cli]")
         "  echoc install [options]\n"
         "  echoc test [options] <sources...>\n"
         "  echoc clean [options]\n"
-        "  echoc lsp [options]\n");
+        "  echoc lsp [options]\n"
+        "  echoc profile [options] <file>\n");
 }
 
 TEST_CASE("a refusal is the sentence, the usage and where to read more", "[cli]")

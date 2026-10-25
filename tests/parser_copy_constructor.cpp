@@ -58,6 +58,8 @@ TEST_CASE("a copy constructor is recognised and published on its type", "[copy_c
     // and the copying question keys on it, owning type or not
     REQUIRE(copy_needs_constructor(decl->value_type()));
     REQUIRE(copy_constructor_for(decl->value_type()) == copy_ctor);
+    REQUIRE(copy_ctor->get_return_type() == decl->value_type());
+    REQUIRE(is_copy_function(copy_ctor));
 }
 
 TEST_CASE("a copy constructor stays in the overload set", "[copy_constructor]")

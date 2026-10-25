@@ -9,6 +9,7 @@
 #include "Compiler/TerminalCapabilities.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,7 +17,9 @@ namespace Compiler
 {
     // stated argv after its implications. CommandLine is what was asked; this is what it means.
     // `-g` defaults `--optimize none`; `--explain memory` implies `--track-allocations`; `run` defaults
-    // `--debug`, `build` `--release`; `--print ir` / `--optimize whole` merge and skip the object cache
+    // `--debug`, `build` `--release`; `--print ir` / `--optimize whole` merge and skip the object cache;
+    // `--profile-calls` / `--profile-stdlib` imply `--profile`; `--profile` implies tracking and DWARF
+    // after the `-g` rule, so a profiled build keeps its optimization
     struct DriverOptions
     {
         Subcommand subcommand = Subcommand::t_none;
@@ -113,6 +116,10 @@ namespace Compiler
 
         // with --print decls: include dependency and stdlib declarations. refused without -p decls
         bool decls_all = false;
+
+        // `profile` only
+        bool profile_text = false;
+        std::optional<ProfileFoldKind> profile_fold;
 
         ColorChoice color = ColorChoice::t_auto;
         DiagnosticFormat format = DiagnosticFormat::t_auto;

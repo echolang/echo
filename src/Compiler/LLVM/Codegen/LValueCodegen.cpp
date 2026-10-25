@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
+#include "Compiler/LLVM/Codegen/ProfileCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/CompilationUnit.h"
@@ -260,9 +261,15 @@ void LValueCodegen::tag_access(llvm::Instruction *access, const LValue &place)
     }
 }
 
+CodegenValue LValueCodegen::gen_load(const LValue &place, AST::ExprNode &expr, const char *name)
+{
+    _ctx.profile->note_arrival(expr);
+    return gen_load(place, name);
+}
+
 CodegenValue LValueCodegen::gen_load(AST::ExprNode &expr, const char *name)
 {
-    return gen_load(gen_lvalue(expr), name);
+    return gen_load(gen_lvalue(expr), expr, name);
 }
 
 LValue LValueCodegen::deref_once(const LValue &place)

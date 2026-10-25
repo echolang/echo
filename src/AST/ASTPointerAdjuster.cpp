@@ -22,6 +22,8 @@
 #include "AST/WhileStatementNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
+#include <utility>
+
 namespace AST
 {
 
@@ -105,7 +107,9 @@ ExprNode *PointerAdjuster::as_value(ExprNode *expr)
         return expr;
     }
 
-    return &_current_module->nodes.emplace_back<DerefExprNode>(expr);
+    DerefExprNode &deref = _current_module->nodes.emplace_back<DerefExprNode>(expr);
+    deref.bytewise_copy = std::exchange(expr->bytewise_copy, false);
+    return &deref;
 }
 
 ExprNode *PointerAdjuster::as_value_for(ExprNode *expr, const ValueType &wanted)

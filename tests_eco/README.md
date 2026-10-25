@@ -58,6 +58,8 @@ test that quietly asserts less than its author wrote.
 | `stdin` | space-separated words | fed to the program on standard input, **one line per word** |
 | `timeout` | milliseconds | deadline for every spawn this case starts. default 60000; `0` waits forever |
 
+`--profile` in `flags` is skipped on Windows (the host refuses it). The runner also sets `ECHO_PROFILE_OUT` to the case scratch for those cases, so a `mode: build` binary does not write `a.ecoprof` into the suite cwd.
+
 `expect` takes an **exact status** as well as `ok`/`fail`, and that exists because `std::env::exit($code)`
 made the status something a program *chooses*: pinned as `fail`, a case asserting `exit(3)` would pass just
 as well if the compiler crashed. In `mode: build` an exact status is the *program's* — a build that fails

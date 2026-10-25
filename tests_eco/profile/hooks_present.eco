@@ -1,0 +1,11 @@
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+Point $a = Point(1, 2);
+Point $b = $a;
+array<int32> $n;
+$n[] = 1;
+echo $b->x;

@@ -19,7 +19,8 @@ namespace Compiler
         t_test,
         t_clean,
         t_lsp,
-        t_install
+        t_install,
+        t_profile
     };
 
     // the bits an option's `subcommands` mask carries. a mask rather than a vector because the only
@@ -32,6 +33,7 @@ namespace Compiler
         constexpr unsigned int clean = 1u << 3;
         constexpr unsigned int lsp = 1u << 4;
         constexpr unsigned int install = 1u << 5;
+        constexpr unsigned int profile = 1u << 6;
 
         // the shapes that recur
         // `compiling` is the set that turns source into code, and is what replaced the second
@@ -43,7 +45,13 @@ namespace Compiler
         // what `--explain prune` is about
         constexpr unsigned int compiling = run | build | test | install;
         constexpr unsigned int jitting = run | test;
-        constexpr unsigned int all = run | build | test | clean | lsp | install;
+        constexpr unsigned int all = run | build | test | clean | lsp | install | profile;
+        // diagnostics, colour, silent: a report, not a compile
+        constexpr unsigned int reporting = compiling | clean | profile;
+        // locates a module graph. `profile` reads a file, not a project
+        constexpr unsigned int project = all & ~profile;
+        // `--target-os` / `--target-arch`: a project, and not install
+        constexpr unsigned int targeting = project & ~install;
     };
 
     unsigned int bit_of(Subcommand id);
@@ -90,7 +98,12 @@ namespace Compiler
         t_help,
         t_version,
         t_decls_all,
-        t_dir
+        t_dir,
+        t_profile,
+        t_profile_calls,
+        t_profile_stdlib,
+        t_text,
+        t_folded
     };
 
     // what `-p, --print <what>` names. **the enumerator order is the table's row order**, and
@@ -116,6 +129,19 @@ namespace Compiler
         t_prune,
         t_memory,
         t_time
+    };
+
+    // `--folded` on `echoc profile`. the enumerator order is the table's row order
+    enum class ProfileFoldKind
+    {
+        t_time,
+        t_self,
+        t_allocs,
+        t_alloc_bytes,
+        t_live_bytes,
+        t_copies,
+        t_copy_bytes,
+        t_calls
     };
 
     // how hard, and over what. three answers rather than two flags that are not each other's
@@ -309,8 +335,9 @@ namespace Compiler
         // the paragraph its own page opens with
         const char *description;
 
-        // does it take `.eco` positionals at all. `clean` parses no source and runs no pass, so a filename
-        // on its command line is a mistake and is refused rather than ignored
+        // does it take positionals at all. `clean` parses no source and runs no pass, so a filename
+        // on its command line is a mistake and is refused rather than ignored. `profile` takes a
+        // `.ecoprof`, not a `.eco`
         bool takes_sources;
 
         // extra sentence on the "takes no source files" refusal, nullptr where there is none

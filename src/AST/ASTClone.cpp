@@ -498,7 +498,9 @@ Node *VarNode::clone(CloneContext &cc) const
 
 Node *VarRefNode::clone(CloneContext &cc) const
 {
-    return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarNode>()));
+    VarRefNode *c = cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarNode>()));
+    c->bytewise_copy = bytewise_copy;
+    return c;
 }
 
 Node *AssignNode::clone(CloneContext &cc) const

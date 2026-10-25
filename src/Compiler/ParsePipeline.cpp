@@ -185,6 +185,7 @@ namespace
             auto &module = bundle.modules.get_module(handle);
             module.writes_compiler_attributes =
                 Compiler::is_compiler_supplied_module(manifest) || !with_stdlib;
+            module.compiler_supplied = Compiler::is_compiler_supplied_module(manifest);
             module.directory = manifest.directory;
 
             auto input = Parser::ModuleParser::InputPayload {

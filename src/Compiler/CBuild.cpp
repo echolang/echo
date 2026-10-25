@@ -133,6 +133,10 @@ bool c_spec_digest(
     digest = Compiler::fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), digest);
 
+    if (options.profiling()) {
+        digest = Compiler::fnv1a64(std::string("fp"), digest);
+    }
+
     digest = Compiler::fold_toolchain_sysroots(options, digest);
 
     for (const std::filesystem::path &include : spec.includes) {
@@ -284,6 +288,10 @@ void append_common_arguments(
 
     if (options.emitting_debug_info()) {
         argv.push_back("-g");
+    }
+
+    if (options.profiling()) {
+        argv.push_back("-fno-omit-frame-pointer");
     }
 
     for (const std::string &flag : spec.flags) {

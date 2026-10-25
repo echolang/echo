@@ -1,0 +1,9 @@
+flags: --profile-calls
+expect: ok
+mode: build
+--- IR --->
+CHECK: __eco_prof_enter
+CHECK: __eco_prof_exit
+CHECK: ret
+--- OUT --->
+3

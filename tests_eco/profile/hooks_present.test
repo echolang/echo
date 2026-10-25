@@ -1,0 +1,10 @@
+flags: --profile
+expect: ok
+mode: build
+--- IR --->
+CHECK-NOT: __eco_prof_enter
+CHECK: __eco_prof_alloc
+CHECK: __eco_prof_copy
+CHECK-NOT: __eco_prof_enter
+--- OUT --->
+1

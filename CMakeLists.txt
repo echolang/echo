@@ -234,6 +234,8 @@ set(LLVM_COMPONENTS
     Target
     Analysis
     Passes
+    Object
+    DebugInfoDWARF
 )
 
 # add the native architecture to the list of components
@@ -284,9 +286,47 @@ llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 # llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_TARGETS_TO_BUILD} mcjit)
 target_link_libraries(${APPNAME} ${LLVM_LIBS})
 
+set(ECO_PROFILE_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/runtime/profile")
+set(ECO_PROFILE_EMBEDDED "${CMAKE_BINARY_DIR}/generated/profile_runtime_embedded.h")
+set(ECO_PROFILE_EMBED_INPUTS
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.h"
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_internal.h"
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.c"
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_intern.c"
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_sample.c"
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_alloc.c"
+    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_write.c"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ECO_PROFILE_EMBED_INPUTS})
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.h" ECO_PROFILE_H)
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_internal.h" ECO_PROFILE_INTERNAL)
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.c" ECO_PROFILE_C)
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_intern.c" ECO_PROFILE_INTERN)
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_sample.c" ECO_PROFILE_SAMPLE)
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_alloc.c" ECO_PROFILE_ALLOC)
+file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_write.c" ECO_PROFILE_WRITE)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+file(WRITE "${ECO_PROFILE_EMBEDDED}"
+"#ifndef PROFILE_RUNTIME_EMBEDDED_H
+#define PROFILE_RUNTIME_EMBEDDED_H
+#pragma once
+static constexpr const char k_profile_runtime_header[] = R\"echo_profile(${ECO_PROFILE_H})echo_profile\";
+static constexpr const char k_profile_runtime_internal[] = R\"echo_profile(${ECO_PROFILE_INTERNAL})echo_profile\";
+static constexpr const char k_profile_runtime_c[] = R\"echo_profile(${ECO_PROFILE_C})echo_profile\";
+static constexpr const char k_profile_runtime_intern[] = R\"echo_profile(${ECO_PROFILE_INTERN})echo_profile\";
+static constexpr const char k_profile_runtime_sample[] = R\"echo_profile(${ECO_PROFILE_SAMPLE})echo_profile\";
+static constexpr const char k_profile_runtime_alloc[] = R\"echo_profile(${ECO_PROFILE_ALLOC})echo_profile\";
+static constexpr const char k_profile_runtime_write[] = R\"echo_profile(${ECO_PROFILE_WRITE})echo_profile\";
+#endif
+")
+
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CMAKE_SOURCE_DIR}/stdlib/build)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
+target_include_directories(${LIBNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
+target_include_directories(${APPNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # vendor
 add_subdirectory(vendor)
@@ -311,6 +351,7 @@ endif()
 # Catch2, not Catch2WithMain: tests/test_main.cpp owns main so it can add `--dev`
 target_link_libraries(tests PRIVATE Catch2::Catch2)
 target_link_libraries(tests PRIVATE ${LIBNAME})
+target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
 
 # the same LLVM components the compiler links, because the tests link the whole compiler library and any
 # archive member they pull in may reach LLVM. This was latent until Compiler::TargetFacts - it reads the

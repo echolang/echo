@@ -45,7 +45,7 @@ namespace
         for (const std::string &name : Compiler::TargetFacts::known_operating_systems()) {
             // never install: the option itself refuses it
             // a value reaches no further than its option
-            unsigned int mask = Compiler::accepts::all & ~Compiler::accepts::install;
+            unsigned int mask = Compiler::accepts::targeting;
             const char *summary = "evaluate conditions as this OS";
             const char *description =
                 "Picks the '#[if: os == ...]' arms. 'build' of ios or wasi is a real cross.";
@@ -123,6 +123,11 @@ namespace
         return static_cast<unsigned int>(mode);
     }
 
+    unsigned int code_of(Compiler::ProfileFoldKind kind)
+    {
+        return static_cast<unsigned int>(kind);
+    }
+
     // `<none|module|whole>` for an option that owns its vocabulary, the written metavar otherwise. one
     // place, so a value added to a row shows up in every usage line without a second string being edited
     std::string metavar_of(const Compiler::CommandLineOption &option)
@@ -164,6 +169,8 @@ unsigned int Compiler::bit_of(Subcommand id)
         return accepts::lsp;
     case Subcommand::t_install:
         return accepts::install;
+    case Subcommand::t_profile:
+        return accepts::profile;
     case Subcommand::t_none:
         return 0;
     }
@@ -239,7 +246,7 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_module, "module", nullptr, 'm',
             OptionArity::t_repeated_value, OptionCategory::t_inputs,
-            accepts::all, 0, ExclusionGroup::t_none,
+            accepts::project, 0, ExclusionGroup::t_none,
             "<manifest>", "",
             "build a module from its manifest",
             "Build a module from its manifest. Point it at the 'module.eco' file or at the directory "
@@ -554,7 +561,7 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             Opt::t_target_os, "target-os", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
             // not install: what it installs runs on this machine, so another OS's binary has nowhere to go
-            accepts::all & ~accepts::install, 0, ExclusionGroup::t_none,
+            accepts::targeting, 0, ExclusionGroup::t_none,
             "<name>", "",
             "evaluate '#[if:]' as if targeting this OS",
             "Look at the code the way another platform sees it. Every '#[if: os == ...]' condition is "
@@ -581,7 +588,7 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             Opt::t_target_arch, "target-arch", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_target,
             // not install, for --target-os's reason
-            accepts::all & ~accepts::install, 0, ExclusionGroup::t_none,
+            accepts::targeting, 0, ExclusionGroup::t_none,
             "<name>", "",
             "the same for the architecture",
             "The same thing for '#[if: arch == ...]', against the same closed arch list a condition "
@@ -612,7 +619,7 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_define, "define", nullptr, '\0',
             OptionArity::t_repeated_value, OptionCategory::t_target,
-            accepts::all, 0, ExclusionGroup::t_none,
+            accepts::project, 0, ExclusionGroup::t_none,
             "<name>", "",
             "declare a flag '#[if: NAME]' can test",
             "Switch on a region of your own code, guarded by '#[if: NAME]':\n"
@@ -784,8 +791,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_diagnostics, "diagnostics", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_report,
-            // compiling | clean: the server publishes LSP diagnostics, it does not render any
-            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
+            // compiling | clean | profile: the server publishes LSP diagnostics, it does not render any
+            accepts::reporting, 0, ExclusionGroup::t_none,
             "<auto|pretty|ascii|json>", "auto",
             "how a diagnostic is drawn",
             "How an error or a warning is drawn:\n"
@@ -802,8 +809,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_color, "color", "colour", '\0',
             OptionArity::t_value, OptionCategory::t_report,
-            // compiling | clean: the server renders nothing
-            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
+            // compiling | clean | profile: the server renders nothing
+            accepts::reporting, 0, ExclusionGroup::t_none,
             "<auto|always|never>", "auto",
             "colourise diagnostics",
             "Colourise diagnostics:\n"
@@ -818,8 +825,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
         {
             Opt::t_silent, "silent", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_report,
-            // compiling | clean: the server draws no checklist
-            accepts::compiling | accepts::clean, 0, ExclusionGroup::t_none,
+            // compiling | clean | profile: the server draws no checklist
+            accepts::reporting, 0, ExclusionGroup::t_none,
             nullptr, "",
             "do not draw the progress checklist",
             "Stop drawing the checklist that rewrites itself as each module and phase finishes:\n"
@@ -955,12 +962,93 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "('%LOCALAPPDATA%\\echo\\bin' on Windows, which is where the echoc installer already put "
             "echoc). The directory is created if it does not exist.",
             {}, nullptr
+        },
+        {
+            Opt::t_profile, "profile", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::run | accepts::build, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "sample time and count allocations",
+            "Sample time, count allocations and copies. `run` writes an .ecoprof and prints a short summary; "
+            "`build` instruments the binary:\n"
+            "  echoc run --profile app.eco\n"
+            "A build without this flag is unchanged. Checks and --optimize stay what the subcommand "
+            "already chose (`run` still asserts unless --release). You get line-table DWARF and frame pointers.",
+            {}, nullptr
+        },
+        {
+            Opt::t_profile_calls, "profile-calls", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::run | accepts::build, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "instrument every call for exact counts",
+            "Instrument function entry and exit for exact call counts and times:\n"
+            "  echoc run --profile-calls app.eco\n"
+            "Implies --profile. Samples still follow the subcommand's --optimize; this is the extra "
+            "exact-calls view beside them.",
+            {}, nullptr
+        },
+        {
+            Opt::t_profile_stdlib, "profile-stdlib", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::run | accepts::build, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "instrument the standard library too",
+            "With --profile-calls, also instrument the standard library:\n"
+            "  echoc run --profile-calls --profile-stdlib app.eco\n"
+            "Implies --profile. Call sites in the standard library need --profile-calls too.",
+            {}, nullptr
+        },
+        {
+            Opt::t_text, "text", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_report,
+            accepts::profile, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "print the fuller human-readable profile dump",
+            "Print the same summary `run --profile` prints, with more rows and the file's stack counts:\n"
+            "  echoc profile --text app.ecoprof",
+            {}, nullptr
+        },
+        {
+            Opt::t_folded, "folded", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_report,
+            accepts::profile, 0, ExclusionGroup::t_none,
+            "<what>", "",
+            "write collapsed stacks for a flamegraph",
+            "Write collapsed stacks for speedscope or flamegraph.pl:\n"
+            "  echoc profile --folded time app.ecoprof",
+            {
+                { "time", accepts::profile, code_of(ProfileFoldKind::t_time),
+                    "sampled inclusive time",
+                    "Collapsed stacks weighted by sample count." },
+                { "self", accepts::profile, code_of(ProfileFoldKind::t_self),
+                    "sampled self time",
+                    "Collapsed stacks weighted by the leaf frame's samples." },
+                { "allocs", accepts::profile, code_of(ProfileFoldKind::t_allocs),
+                    "allocation counts",
+                    "Collapsed stacks weighted by allocation count." },
+                { "alloc-bytes", accepts::profile, code_of(ProfileFoldKind::t_alloc_bytes),
+                    "allocation bytes",
+                    "Collapsed stacks weighted by allocated bytes." },
+                { "live-bytes", accepts::profile, code_of(ProfileFoldKind::t_live_bytes),
+                    "bytes still live at exit",
+                    "Collapsed stacks weighted by bytes still allocated at exit." },
+                { "copies", accepts::profile, code_of(ProfileFoldKind::t_copies),
+                    "copy counts",
+                    "Collapsed stacks weighted by copy count." },
+                { "copy-bytes", accepts::profile, code_of(ProfileFoldKind::t_copy_bytes),
+                    "copied bytes",
+                    "Collapsed stacks weighted by copied bytes." },
+                { "calls", accepts::profile, code_of(ProfileFoldKind::t_calls),
+                    "exact call counts",
+                    "Collapsed stacks weighted by --profile-calls counts." },
+            }, nullptr
         }
     };
 
     // the identity option_for relies on, asserted where the table is built rather than trusted at every
     // lookup. tests/command_line.cpp pins it too, for a release build where this does not run
-    assert(table.size() == static_cast<size_t>(Opt::t_dir) + 1 && "an Opt has no row in the table");
+    assert(table.size() == static_cast<size_t>(Opt::t_folded) + 1 && "an Opt has no row in the table");
 
     return table;
 }
@@ -1214,6 +1302,22 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             nullptr,
             nullptr,
             nullptr,
+            false
+        },
+        {
+            Subcommand::t_profile, "profile", accepts::profile,
+            "read a profile file and print a summary",
+            "Read an .ecoprof file, symbolize it if it is still raw, and print the same summary "
+            "`echoc run --profile` prints:\n"
+            "  echoc profile app.ecoprof\n"
+            "  echoc profile --text app.ecoprof\n"
+            "  echoc profile --folded time app.ecoprof",
+            true,
+            nullptr,
+            "<file>",
+            "the .ecoprof file to read",
+            "The profile file `echoc run --profile` wrote. If it is still raw, this command "
+            "symbolizes it from the binary named inside.",
             false
         }
     };

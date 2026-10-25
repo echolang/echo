@@ -32,6 +32,7 @@
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
+#include "Compiler/ProfileDriver.h"
 #include "Compiler/ProgramStamp.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/PublicTools.h"
@@ -61,6 +62,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -1389,6 +1391,20 @@ static bool resolve_invocation(
         }
     }
 
+    if (driver.options.profiling()) {
+        if (const auto issue = Compiler::profile_refuse_host()) {
+            diagnostics.render_untyped(issue->title, issue->message);
+            return false;
+        }
+
+        for (const Program &program : out.programs) {
+            if (const auto issue = Compiler::profile_refuse_target(program.codegen)) {
+                diagnostics.render_untyped(issue->title, issue->message);
+                return false;
+            }
+        }
+    }
+
     if (driver.options.track_allocations || driver.options.report_allocations) {
         for (const Program &program : out.programs) {
             if (program.codegen.is_library()) {
@@ -1856,6 +1872,13 @@ static std::optional<int> compile_and_link_program(
             return 1;
         }
 
+        std::string runtime_error;
+        if (!Compiler::profile_link_runtime(
+                front.options, front.layout(), c_builds.objects, runtime_error)) {
+            diagnostics.render_untyped("Profile Runtime Failed", runtime_error);
+            return 1;
+        }
+
         std::string link_error;
 
         if (!Compiler::merge_link_requirements(c_builds.objects, link, link_error)) {
@@ -2053,6 +2076,13 @@ int main_run(
         && facts.architecture == host.architecture
         && !driver.explains(Compiler::ExplainKind::t_prune);
 
+    if (driver.options.profiling()) {
+        if (const auto issue = Compiler::profile_refuse_native_run(native_run)) {
+            diagnostics.render_untyped(issue->title, issue->message);
+            return 1;
+        }
+    }
+
     if (native_run) {
         compiler.set_entry(entry_module, front.entry_file());
 
@@ -2086,8 +2116,30 @@ int main_run(
         Compiler::ProgressReporter::instance().close(
             fmt::format("compiled '{}'", entry_module), Compiler::progress_elapsed_ms(started));
 
-        status = Compiler::run_wait(runner.string(), argv);
+        std::vector<std::pair<std::string, std::string>> extra_env;
+        std::filesystem::path profile_path;
+        if (driver.options.profiling()) {
+            Compiler::profile_prepare_run(
+                front.layout(),
+                std::filesystem::path(program_name(driver, program)).stem().string(),
+                profile_path,
+                extra_env);
+        }
+
+        status = Compiler::run_wait(runner.string(), argv, extra_env);
         (void)environment;
+
+        if (driver.options.profiling()) {
+            const Compiler::TerminalCapabilities answering = Compiler::TerminalCapabilities::resolve(
+                driver.color, driver.format, Compiler::TerminalStream::t_stdout);
+            if (const auto issue = Compiler::profile_report_run(
+                    profile_path, runner, std::cout, answering)) {
+                diagnostics.render_untyped(issue->title, issue->message);
+                if (status == 0) {
+                    status = 1;
+                }
+            }
+        }
     } else {
         if (const std::optional<int> failed = prepare_jit(
                 driver, diagnostics, front, bundle, compiler)) {
@@ -2821,6 +2873,21 @@ static int main_lsp(const Compiler::DriverOptions &driver)
 // `environ` symbol it would otherwise have to read is spelled `_NSGetEnviron()` on Darwin and is not
 // portably addressable from IR anywhere. `run` forwards this to the JIT'd program; a `build`'s binary
 // gets its own from the OS
+static int main_profile(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics
+)
+{
+    std::optional<Compiler::ProfileIssue> issue;
+    const Compiler::TerminalCapabilities answering = Compiler::TerminalCapabilities::resolve(
+        driver.color, driver.format, Compiler::TerminalStream::t_stdout);
+    const int status = Compiler::run_profile_command(driver, std::cout, answering, issue);
+    if (issue.has_value()) {
+        diagnostics.render_untyped(issue->title, issue->message);
+    }
+    return status;
+}
+
 int main(int argc, char *argv[], char *envp[])
 {
     // ahead of everything, so an exception escaping anything below says what it was
@@ -2932,6 +2999,9 @@ int main(int argc, char *argv[], char *envp[])
     switch (driver.subcommand) {
     case Compiler::Subcommand::t_run:
         return main_run(driver, diagnostics, envp);
+
+    case Compiler::Subcommand::t_profile:
+        return main_profile(driver, diagnostics);
 
     case Compiler::Subcommand::t_clean:
         return main_clean(driver, diagnostics);

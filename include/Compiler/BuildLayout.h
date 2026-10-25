@@ -199,6 +199,11 @@ namespace Compiler
 
         std::filesystem::path scratch_object(const std::string &module_name) const;
 
+        // `<entry build dir>/profile/<stem>.ecoprof`, honouring `--build-dir`. a loose `.eco`
+        // goes to `./<stem>.ecoprof`, because the temp scratch is deleted after a run
+        std::filesystem::path profile_dir() const;
+        std::filesystem::path profile_path(const std::string &stem) const;
+
         // removes the scratch directory, but **only when it is the temporary one**.
         //
         // A project's scratch lives inside its build directory, where `echoc clean` reaches it and where a

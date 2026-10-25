@@ -62,6 +62,7 @@ namespace Compiler::LLVM
     class AbiCodegen;
     class DebugInfoCodegen;
     class StmtCodegen;
+    class ProfileCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -360,6 +361,7 @@ namespace Compiler::LLVM
         // own subsystem for AbortCodegen's reason, being state carried across a whole function body
         // rather than a fact about the node in hand
         DebugInfoCodegen *debug_info = nullptr;
+        ProfileCodegen *profile = nullptr;
 
         // `__eco_static_once` names pthread_self / sched_yield. set when that helper is
         // emitted, read by the driver so the compiler-introduced symbols carry their own

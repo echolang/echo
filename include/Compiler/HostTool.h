@@ -34,6 +34,12 @@ namespace Compiler
     // keeps the source file as argv[0] while spawning the scratch binary
     int run_wait(const std::string &program, const std::vector<std::string> &argv);
 
+    int run_wait(
+        const std::string &program,
+        const std::vector<std::string> &argv,
+        const std::vector<std::pair<std::string, std::string>> &extra_env
+    );
+
 #if defined(_WIN32)
     // CommandLineToArgvW encoding of one argv word: 2n / 2n+1 backslashes before a quote, empty
     // arguments as `""`. CreateProcess is the consumer; tests pin the encoding

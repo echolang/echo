@@ -1,0 +1,9 @@
+expect: ok
+mode: build
+--- IR --->
+CHECK: source_filename
+CHECK-NOT: __eco_prof
+CHECK-NOT: "frame-pointer"
+CHECK: define i32 @main
+--- OUT --->
+1

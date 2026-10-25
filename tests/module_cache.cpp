@@ -265,6 +265,35 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         const std::string line = line_starting_with(first.output, "cachelib");
         REQUIRE(line.find("miss") != std::string::npos);
     }
+
+#if !defined(_WIN32)
+    SECTION("profiling is a different object, and an unprofiled rebuild is not")
+    {
+        // `--profile` implies `-g` and `--track-allocations`, so the comparison holds those
+        // constant. the extra fold is the flag itself, and it is **only when the flag is on**
+        const std::string matched = args
+            + " --release --optimize module --track-allocations -g";
+        const ProcessResult unprofiled = project.echoc(matched, app_dir);
+        REQUIRE(unprofiled.exit_code == 0);
+        const std::string lib_plain = line_starting_with(unprofiled.output, "cachelib");
+        const std::string stdlib_plain = line_starting_with(unprofiled.output, "stdlib");
+        REQUIRE_FALSE(lib_plain.empty());
+
+        const ProcessResult again = project.echoc(matched, app_dir);
+        REQUIRE(cache_key(line_starting_with(again.output, "cachelib")) == cache_key(lib_plain));
+        REQUIRE(line_starting_with(again.output, "cachelib").find("hit") != std::string::npos);
+
+        const ProcessResult profiled = project.echoc(args + " --profile --release", app_dir);
+        REQUIRE(profiled.exit_code == 0);
+        const std::string lib_profiled = line_starting_with(profiled.output, "cachelib");
+        REQUIRE(cache_key(lib_profiled) != cache_key(lib_plain));
+        REQUIRE(cache_key(line_starting_with(profiled.output, "stdlib")) != cache_key(stdlib_plain));
+
+        const ProcessResult calls = project.echoc(args + " --profile-calls --release", app_dir);
+        REQUIRE(calls.exit_code == 0);
+        REQUIRE(cache_key(line_starting_with(calls.output, "cachelib")) != cache_key(lib_profiled));
+    }
+#endif
 }
 
 // **the invariant the whole module cache rests on.** A module's emitted code has to be a function of its own

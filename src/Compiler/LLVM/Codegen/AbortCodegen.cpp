@@ -6,6 +6,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
+#include "Compiler/LLVM/Codegen/ProfileCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -196,6 +197,7 @@ void AbortCodegen::emit_thunk(llvm::Function *thunk)
     if (!hooks_enabled()) {
         flush_stdout();
         print_pieces();
+        _ctx.profile->emit_finish(2);
         _ctx.builder->CreateCall(get_exit(), { llvm::ConstantInt::get(i32, 1) });
         _ctx.builder->CreateUnreachable();
         return;
@@ -245,6 +247,7 @@ void AbortCodegen::emit_thunk(llvm::Function *thunk)
     _ctx.builder->CreateBr(done);
 
     _ctx.set_insert_point(done);
+    _ctx.profile->emit_finish(2);
     _ctx.builder->CreateCall(get_exit(), { llvm::ConstantInt::get(i32, 1) });
     _ctx.builder->CreateUnreachable();
 }
@@ -422,6 +425,7 @@ void AbortCodegen::gen_abort_dynamic(
 
 void AbortCodegen::gen_exit(llvm::Value *code)
 {
+    _ctx.profile->emit_finish(1);
     _ctx.builder->CreateCall(get_exit(), { code });
     _ctx.builder->CreateUnreachable();
 }

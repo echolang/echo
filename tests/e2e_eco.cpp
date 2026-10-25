@@ -57,6 +57,16 @@ namespace
         return test.needs_cross_tools() && !wasi_corpus_ready();
     }
 
+    bool profile_unavailable(const EchoTests::EcoTestFile &test)
+    {
+#if defined(_WIN32)
+        return test.flags.find("--profile") != std::string::npos;
+#else
+        (void)test;
+        return false;
+#endif
+    }
+
     // `echoc <run|build -o bin> [dump] [flags] <file>`.
     //
     // one builder for both subcommands: they differ in the subcommand word and the `-o` target and in
@@ -141,7 +151,10 @@ namespace
         return argv;
     }
 
-    std::vector<std::pair<std::string, std::string>> extra_env_from(const EchoTests::EcoTestFile &test)
+    std::vector<std::pair<std::string, std::string>> extra_env_from(
+        const EchoTests::EcoTestFile &test,
+        const fs::path &scratch
+    )
     {
         std::vector<std::pair<std::string, std::string>> env;
 
@@ -149,6 +162,19 @@ namespace
             const size_t eq = pair.find('=');
             if (eq != std::string::npos) {
                 env.emplace_back(pair.substr(0, eq), pair.substr(eq + 1));
+            }
+        }
+
+        if (test.flags.find("--profile") != std::string::npos) {
+            bool has = false;
+            for (const auto &entry : env) {
+                if (entry.first == "ECHO_PROFILE_OUT") {
+                    has = true;
+                    break;
+                }
+            }
+            if (!has) {
+                env.emplace_back("ECHO_PROFILE_OUT", (scratch / "out.ecoprof").string());
             }
         }
 
@@ -450,7 +476,7 @@ namespace
         }
 
         const unsigned deadline = entry.test.timeout_ms;
-        const auto env = extra_env_from(entry.test);
+        const auto env = extra_env_from(entry.test, entry.scratch);
         const std::string input = stdin_text(entry.test);
 
         // stdin belongs to the program, not to `echoc build` or a dump invocation
@@ -545,7 +571,8 @@ namespace
                     || !_cases[i].runnable()
                     || (EchoTests::is_dev_lane()
                         && _cases[i].test.mode == EchoTests::RunMode::t_build)
-                    || missing_cross_tools(_cases[i].test)) {
+                    || missing_cross_tools(_cases[i].test)
+                    || profile_unavailable(_cases[i].test)) {
                     _slots[i].state = Slot::State::t_done;
                     continue;
                 }
@@ -819,6 +846,10 @@ TEST_CASE("eco end-to-end", "[e2e]")
             if (EchoTests::wasi_tools_required()) {
                 FAIL("WASI SDK and wasmtime required (ECO_REQUIRE_WASI)");
             }
+            continue;
+        }
+
+        if (profile_unavailable(entry.test)) {
             continue;
         }
 

@@ -64,6 +64,10 @@ namespace AST
         // any module of a `--no-stdlib` build
         bool writes_compiler_attributes = false;
 
+        // is this module the compiler's own (the standard library). **not**
+        // writes_compiler_attributes, which is true for every `--no-stdlib` module
+        bool compiler_supplied = false;
+
         // the directory a relative `std::embed` path may not leave. a manifest module's own
         // directory; empty for a loose `main` module, where the jail is the calling file's parent
         std::filesystem::path directory;

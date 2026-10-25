@@ -70,6 +70,12 @@ namespace Compiler
         // said out loud overrides it
         bool debug_info = false;
 
+        // `echoc run --profile`. its own flag: a release build without it emits the bytes it
+        // emits today. implies track_allocations and debug_info, and does not imply no_optimize
+        bool profile = false;
+        bool profile_calls = false;
+        bool profile_stdlib = false;
+
         // **turns off type-based alias metadata**, for differential testing and for bisecting a
         // miscompile against the aliasing model rather than against the optimizer.
         //
@@ -145,6 +151,18 @@ namespace Compiler
         // object carrying DWARF is not the object beside it that does not
         bool emitting_debug_info() const {
             return debug_info;
+        }
+
+        bool profiling() const {
+            return profile;
+        }
+
+        bool profiling_calls() const {
+            return profile_calls;
+        }
+
+        bool profiling_stdlib() const {
+            return profile_stdlib;
         }
     };
 

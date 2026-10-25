@@ -331,6 +331,10 @@ namespace AST
         // is already an owner and is only walked
         ExprNode *arrive_computed_place(ExprNode *expr);
 
+        // a t_bytes arrival the profile should count: not a last-read handover. which layouts
+        // are worth counting is ProfileCodegen::note_arrival's
+        void mark_bytewise_copy(ExprNode *expr);
+
         // the nodes walked so far that need storage for their operand, innermost first. two owners, and
         // between them every way a value with no home is reached into: a **member access**, whose base is
         // the value (`$o->get()->tag`), and an **`&`**, whose operand is - which is how a *receiver* gets

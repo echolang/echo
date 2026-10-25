@@ -1526,6 +1526,13 @@ ExprNode *OwnershipPass::walk_value_edge(ExprNode *expr, MaterializationScope::B
     return scope.close(walk_expression(expr));
 }
 
+void OwnershipPass::mark_bytewise_copy(ExprNode *expr)
+{
+    if (expr != nullptr && _handover_reads.count(expr) == 0) {
+        expr->bytewise_copy = true;
+    }
+}
+
 ExprNode *OwnershipPass::arrive_computed_place(ExprNode *expr)
 {
     if (expr == nullptr) {
@@ -1547,6 +1554,8 @@ ExprNode *OwnershipPass::arrive_computed_place(ExprNode *expr)
 
             return resolve_value_arrival(expr, target, nullptr, dest);
         }
+
+        mark_bytewise_copy(expr);
     }
 
     return walk_value_edge(expr);
@@ -2271,6 +2280,7 @@ ExprNode *OwnershipPass::arrive_value(
     const CopyKind copy_kind = classify_copy(copy_target);
 
     if (copy_kind == CopyKind::t_bytes) {
+        mark_bytewise_copy(expr);
         return expr;
     }
 
@@ -3621,6 +3631,7 @@ FunctionDeclNode *OwnershipPass::ensure_inline_array_copy(
     }
 
     auto &decl = begin_synthesized_decl("$copy_inline_array", site);
+    decl.is_inline_array_copy = true;
     const BodyMutationScope mutating(*this, decl);
 
     auto &return_type = _current_module->nodes.emplace_back<TypeNode>(own_type);

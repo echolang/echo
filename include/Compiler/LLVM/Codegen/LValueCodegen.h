@@ -61,6 +61,9 @@ namespace Compiler::LLVM
         // gen_lvalue followed by gen_load: the ordinary "read this expression" path
         CodegenValue gen_load(AST::ExprNode &expr, const char *name);
 
+        // load of an already-computed place, noting a bytewise copy on `expr`
+        CodegenValue gen_load(const LValue &place, AST::ExprNode &expr, const char *name);
+
         // gen_lvalue with one auto-deref applied when the storage holds a pointer, so the
         // result addresses the pointee. that is what a plain read or write of a transparent
         // pointer wants: `$p = 20` stores into the pointee, never into the slot

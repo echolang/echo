@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/Codegen/MemoryCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
+#include "Compiler/LLVM/Codegen/ProfileCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include <llvm/IR/BasicBlock.h>
@@ -121,6 +122,7 @@ llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()
 
     _ctx.set_insert_point(count_block);
     gen_counter_delta(1);
+    _ctx.profile->emit_alloc(block, thunk->getArg(0));
     _ctx.builder->CreateBr(done_block);
 
     _ctx.set_insert_point(done_block);
@@ -155,6 +157,7 @@ llvm::Function *MemoryCodegen::get_or_create_free_thunk()
 
     _ctx.set_insert_point(count_block);
     gen_counter_delta(-1);
+    _ctx.profile->emit_free(block);
     _ctx.builder->CreateCall(_ctx.libc_callee(Compiler::RuntimeSymbol::t_free, void_type, { opaque_ptr }), { block });
     _ctx.builder->CreateBr(done_block);
 
@@ -190,6 +193,8 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
     llvm::Value *new_block = _ctx.builder->CreateCall(
         _ctx.libc_callee(Compiler::RuntimeSymbol::t_realloc, opaque_ptr, { opaque_ptr, size_ty }),
         { old_block, size }, "block.new");
+
+    _ctx.profile->emit_realloc(old_block, new_block, size);
 
     // **the one thunk where the delta is not readable off the arguments.** `realloc` is four operations
     // wearing one name, and only two of them move the count:

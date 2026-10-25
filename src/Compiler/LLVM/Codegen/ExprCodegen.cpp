@@ -38,6 +38,7 @@
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -2016,16 +2017,8 @@ void ExprCodegen::gen_chain_base(AST::ChainBaseNode &node)
     //
     // a *load* for a scalar, because this is the value position - reaching the slot itself is
     // gen_lvalue's arm, which is what a method receiver and a write through the chain go through.
-    // a large aggregate stays the slot: loading it is the SSA pathology
     const LValue &place = it->second;
-    llvm::Type *ty = _ctx.types->get_llvm_type(node.type, *_ctx.current_cmp_unit);
-
-    if (aggregate_lives_in_memory(ty, _ctx.layout())) {
-        _ctx.push(CodegenValue::aggregate(place.address, ty, place.provenance));
-        return;
-    }
-
-    _ctx.push(_ctx.lvalues->gen_load(place, "chain.base"));
+    _ctx.push(_ctx.lvalues->gen_load(place, node, "chain.base"));
 }
 
 void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)

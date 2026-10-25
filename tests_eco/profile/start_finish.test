@@ -1,0 +1,11 @@
+flags: --profile
+expect: ok
+mode: build
+--- IR --->
+CHECK-NOT: __eco_prof_enter
+CHECK: __eco_prof_start
+CHECK: __eco_prof_finish
+CHECK: "frame-pointer"="all"
+CHECK-NOT: __eco_prof_enter
+--- OUT --->
+1
