@@ -54,13 +54,19 @@ namespace AST
     // still arriving - an unfolder const if, an unlowered foreach, a non-terminal call, a binary
     // or unary that will become a declared-operator call, an untyped declaration, **a T& method
     // whose body is still arriving** (borrow_result_of would freeze a copy). a t_owned
-    // callee is already concrete. nested function declarations and type declarations are
-    // separate regions and do not count. a new transient node is one arm here
+    // or body_concrete callee is already concrete. nested function declarations and type
+    // declarations are separate regions and do not count. a new transient node is one arm here
     bool body_is_pending(ScopeNode &scope);
+    bool body_is_pending(FunctionDeclNode &fn);
 
     inline bool body_is_concrete(ScopeNode &scope)
     {
         return !body_is_pending(scope);
+    }
+
+    inline bool body_is_concrete(FunctionDeclNode &fn)
+    {
+        return !body_is_pending(fn);
     }
 
     // every call the live tree still contains that bind or settle still owes. skips generic bodies

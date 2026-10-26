@@ -204,7 +204,7 @@ namespace
 
 };
 
-BorrowResult borrow_result_of(const FunctionDeclNode *fn)
+BorrowResult borrow_result_of(FunctionDeclNode *fn)
 {
     BorrowResult none;
 
@@ -217,7 +217,7 @@ BorrowResult borrow_result_of(const FunctionDeclNode *fn)
         return none;
     }
 
-    if (!body_is_concrete(*fn->body)) {
+    if (!body_is_concrete(*fn)) {
         return none;
     }
 

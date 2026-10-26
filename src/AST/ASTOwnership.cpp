@@ -386,7 +386,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     // it can arrive first. asking needs_destruction then answers "no" for what is really a class, and
     // because a body is processed exactly once that answer would never be revisited: the local would
     // silently never be released
-    if (!body_is_concrete(*decl.body)) {
+    if (!AST::body_is_concrete(decl)) {
         return;
     }
 
@@ -523,6 +523,17 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
                 : _loop_frames.back().continue_facts;
 
             carried.merge(_flow);
+
+            // **what outlives the loop.** owning locals of the body (and anything nested in it)
+            // die with their frame; carrying them out is how a guard hoist became ConditionalMove
+            // on an outer `if`. a Tag is never a frame local (`needs_destruction` is the push
+            // gate), so a break-move of one still reaches UseAfterMove after the loop
+            for (size_t i = _loop_frames.back().frame_floor; i < _frames.size(); i++) {
+                for (const VarDeclNode *local : _frames[i].locals) {
+                    carried.moved.erase(local);
+                    carried.maybe_moved.erase(local);
+                }
+            }
         }
 
         rebuilt.push_back(kept);
@@ -1145,22 +1156,6 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
         auto after_loop = back_edge;
         after_loop.insert(frame.break_facts.moved.begin(), frame.break_facts.moved.end());
 
-        // **owning body-locals must not leave the loop as moved-facts.** walk_scope
-        // already erases them from `_flow.moved` when the body frame pops;
-        // break/continue snapshots were taken *before* that erase, and assigning
-        // `after_loop` would put them back. an outer `if` then reports
-        // ConditionalMove against an arm that never declared the hoist (libtcp
-        // reactor). a Tag moved on `break` is not on `outer` (it owns nothing, so
-        // it was never a frame local) and must stay: UseAfterMove after the loop
-        // reads `_flow.moved`
-        for (auto it = after_loop.begin(); it != after_loop.end(); ) {
-            if (outer.count(*it) == 0 && (*it)->has_type() && needs_destruction((*it)->type())) {
-                it = after_loop.erase(it);
-            } else {
-                ++it;
-            }
-        }
-
         // judged over both, and that is the over-approximation this keeps. a `break` runs at
         // most once, so moving an outer local on that path does not repeat - but the loop can
         // also be left through its condition, where the value was never moved and the drop after
@@ -1454,8 +1449,10 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
     // before this walk, so the value here is already `Filter` not `Filter&`. requiring a pointer
     // then copied the struct (array handle and all) and still destroyed the temp - hydrahon
     // `Insert()->with(Select()->where($u->id == 1))` stored a dangling CTE
-    const bool elide = kept == MaterializationScope::BoundValue::t_kept
-        && elides_dying_borrow(value);
+    const std::optional<BorrowChain> chain = kept == MaterializationScope::BoundValue::t_kept
+        ? movable_borrow_chain(value)
+        : std::nullopt;
+    const bool elide = chain.has_value() && chain_root_is_pending(*chain);
 
     if (kept == MaterializationScope::BoundValue::t_kept && value->result_type().is_pointer()
         && !elide) {
@@ -1482,7 +1479,6 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
     // recording order *is* binding order: the walk reaches an inner request first, and an inner
     // temporary holds the storage the outer one reads through, so it has to exist first
     VarDeclNode *moved_temp = nullptr;
-    const std::optional<BorrowChain> chain = elide ? borrow_chain_of(value) : std::nullopt;
 
     for (size_t i = mark; i < _pending_temporaries.size(); i++) {
         ExprNode *owner = _pending_temporaries[i];
@@ -1570,21 +1566,25 @@ std::optional<BorrowChain> OwnershipPass::movable_borrow_chain(ExprNode *expr) c
     return chain;
 }
 
-bool OwnershipPass::elides_dying_borrow(ExprNode *expr) const
+bool OwnershipPass::chain_root_is_pending(const BorrowChain &chain) const
 {
-    const std::optional<BorrowChain> chain = movable_borrow_chain(expr);
-
-    if (!chain.has_value()) {
+    if (chain.root == nullptr) {
         return false;
     }
 
     for (ExprNode *owner : _pending_temporaries) {
-        if (pending_edge(owner).get() == chain->root) {
+        if (pending_edge(owner).get() == chain.root) {
             return true;
         }
     }
 
     return false;
+}
+
+bool OwnershipPass::elides_dying_borrow(ExprNode *expr) const
+{
+    const std::optional<BorrowChain> chain = movable_borrow_chain(expr);
+    return chain.has_value() && chain_root_is_pending(*chain);
 }
 
 bool OwnershipPass::elides_guard_hoist_payload(ExprNode *expr, const VarDeclNode *hoist) const

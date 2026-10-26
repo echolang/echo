@@ -780,6 +780,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // template would otherwise start t_owned and skip the ownership walk, and a cleared
     // live_calls_pending would hide the body's calls from bind
     c->region_state = RegionState::t_open;
+    c->body_concrete = false;
     c->live_calls_pending = true;
     c->operators_quiet = false;
 

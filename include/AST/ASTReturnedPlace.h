@@ -49,7 +49,7 @@ namespace AST
     // walks `fn`'s body (the instance a call landed on). a body that is not yet concrete
     // answers t_none for this round. instantiations are asked as themselves: the clone
     // carries the match the template has not resolved
-    BorrowResult borrow_result_of(const FunctionDeclNode *fn);
+    BorrowResult borrow_result_of(FunctionDeclNode *fn);
 
     // peels Deref, implicit casts, and T& calls `borrow_result_of` answers, down to the
     // value the chain names. none when a link does not name its receiver

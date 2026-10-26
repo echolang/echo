@@ -386,6 +386,9 @@ namespace AST
         // chain plus remainder-silent. both elides_* ask this, so a remainder gate cannot drift
         std::optional<BorrowChain> movable_borrow_chain(ExprNode *expr) const;
 
+        // the chain's root is a compiler temporary this statement requested
+        bool chain_root_is_pending(const BorrowChain &chain) const;
+
         // a T& that names a dying compiler temporary: the pending root of a fluent chain.
         // a remainder that still needs a destructor keeps the copy. a guard hoist is
         // elides_guard_hoist_payload, asked only of the success binding

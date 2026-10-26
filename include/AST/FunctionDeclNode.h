@@ -392,6 +392,10 @@ namespace AST
         // twice) then t_owned after. a lowering that mints into t_owned is an assert. AST::RegionState
         RegionState region_state = RegionState::t_open;
 
+        // last pending walk of this body said no. T& callers skip the re-walk; t_owned already
+        // skips. a clone resets it with region_state
+        bool body_concrete = false;
+
         // bind/settle still walk a t_owned body: ownership mints drop calls then marks t_owned, and
         // the next round instantiates them. once a live_calls walk of a t_owned body finds no
         // generic-decl and no non-terminal call, later rounds skip it. a clone resets this
