@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+7
+fatal error: box is empty
+  at <runtime>:0

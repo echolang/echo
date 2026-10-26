@@ -1,0 +1,22 @@
+// seating constructor, get() as a T&, a field write through the borrow, take() hands T back
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+box<int32> $n = box<int32>(7);
+echo $n->get();
+
+int32& $slot = $n->get();
+$slot = 9;
+echo $n->get();
+
+echo $n->take();
+
+box<Point> $p = box<Point>(Point(1, 2));
+echo $p->get()->x;
+$p->get()->x = 3;
+echo $p->get()->x;
+echo $p->get()->y;

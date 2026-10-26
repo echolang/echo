@@ -3,9 +3,11 @@
 #include "Compiler/LLVM/Codegen/ProfileCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include <llvm/IR/Attributes.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 
@@ -22,6 +24,10 @@ namespace
     constexpr const char *k_realloc_symbol = "__eco_realloc";
     constexpr const char *k_free_symbol = "__eco_free";
     constexpr const char *k_live_counter_symbol = "__eco_alloc_live";
+    constexpr const char *k_cache_alloc_symbol = "__eco_cache_alloc";
+    constexpr const char *k_cache_realloc_symbol = "__eco_cache_realloc";
+    constexpr const char *k_cache_free_symbol = "__eco_cache_free";
+    constexpr const char *k_cache_family = "__eco_cache";
 };
 
 llvm::Function *MemoryCodegen::declare_thunk(
@@ -58,6 +64,102 @@ void MemoryCodegen::mark_allocating_thunk(llvm::Function *thunk, unsigned size_a
     thunk->addRetAttr(llvm::Attribute::NoAlias);
     thunk->addFnAttr(llvm::Attribute::getWithAllocSizeArgs(
         thunk->getContext(), size_argument, std::nullopt));
+}
+
+llvm::FunctionCallee MemoryCodegen::cache_callee(
+    const char *name,
+    llvm::Type *return_type,
+    const std::vector<llvm::Type *> &parameter_types,
+    MemoryCodegen::CacheCallee kind
+)
+{
+    llvm::FunctionCallee callee = _ctx.current_module()->getOrInsertFunction(
+        name,
+        llvm::FunctionType::get(return_type, parameter_types, false));
+
+    auto *fn = llvm::dyn_cast<llvm::Function>(callee.getCallee());
+    if (fn == nullptr || fn->hasFnAttribute("alloc-family")) {
+        return callee;
+    }
+
+    // the three declarations are one family, and free carries allocptr. marking
+    // only the alloc is what used to lower a dead block to an alloca and leave
+    // __eco_cache_free on it. the counting thunk stays unmarked: its counter is
+    // the observable effect isRemovableAlloc would drop
+    llvm::AllocFnKind alloc_kind;
+    switch (kind) {
+    case CacheCallee::t_free:
+        alloc_kind = llvm::AllocFnKind::Free;
+        fn->addParamAttr(0, llvm::Attribute::AllocatedPointer);
+        break;
+    case CacheCallee::t_alloc:
+        alloc_kind = llvm::AllocFnKind::Alloc | llvm::AllocFnKind::Uninitialized;
+        fn->addRetAttr(llvm::Attribute::NoAlias);
+        fn->addFnAttr(llvm::Attribute::getWithAllocSizeArgs(
+            fn->getContext(), 0, std::nullopt));
+        break;
+    case CacheCallee::t_realloc:
+        alloc_kind = llvm::AllocFnKind::Realloc;
+        fn->addRetAttr(llvm::Attribute::NoAlias);
+        fn->addFnAttr(llvm::Attribute::getWithAllocSizeArgs(
+            fn->getContext(), 1, std::nullopt));
+        fn->addParamAttr(0, llvm::Attribute::AllocatedPointer);
+        break;
+    }
+
+    fn->addFnAttr(llvm::Attribute::get(
+        fn->getContext(),
+        llvm::Attribute::AllocKind,
+        static_cast<uint64_t>(alloc_kind)));
+    fn->addFnAttr("alloc-family", k_cache_family);
+
+    return callee;
+}
+
+llvm::FunctionCallee MemoryCodegen::heap_callee(CacheCallee kind)
+{
+    llvm::Type *size_ty = _ctx.size_int_ty();
+    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+    llvm::Type *void_ty = llvm::Type::getVoidTy(*_ctx.llvm_context);
+    const bool page_heap = _ctx.options.using_page_heap();
+
+    switch (kind) {
+    case CacheCallee::t_alloc:
+        if (!page_heap) {
+            return _ctx.libc_callee(Compiler::RuntimeSymbol::t_malloc, opaque_ptr, { size_ty });
+        }
+        return cache_callee(k_cache_alloc_symbol, opaque_ptr, { size_ty }, kind);
+    case CacheCallee::t_realloc:
+        if (!page_heap) {
+            return _ctx.libc_callee(
+                Compiler::RuntimeSymbol::t_realloc, opaque_ptr, { opaque_ptr, size_ty });
+        }
+        return cache_callee(
+            k_cache_realloc_symbol, opaque_ptr, { opaque_ptr, size_ty }, kind);
+    case CacheCallee::t_free:
+        if (!page_heap) {
+            return _ctx.libc_callee(Compiler::RuntimeSymbol::t_free, void_ty, { opaque_ptr });
+        }
+        return cache_callee(k_cache_free_symbol, void_ty, { opaque_ptr }, kind);
+    }
+
+    assert(false && "CacheCallee has no arm");
+    return {};
+}
+
+llvm::FunctionCallee MemoryCodegen::heap_alloc()
+{
+    return heap_callee(CacheCallee::t_alloc);
+}
+
+llvm::FunctionCallee MemoryCodegen::heap_realloc()
+{
+    return heap_callee(CacheCallee::t_realloc);
+}
+
+llvm::FunctionCallee MemoryCodegen::heap_free()
+{
+    return heap_callee(CacheCallee::t_free);
 }
 
 llvm::GlobalVariable *MemoryCodegen::get_or_create_live_counter()
@@ -107,8 +209,7 @@ llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()
     // the byte count is the only argument
     mark_allocating_thunk(thunk, 0);
 
-    llvm::Value *block = _ctx.builder->CreateCall(
-        _ctx.libc_callee(Compiler::RuntimeSymbol::t_malloc, opaque_ptr, { size_ty }), { thunk->getArg(0) }, "block");
+    llvm::Value *block = _ctx.builder->CreateCall(heap_alloc(), { thunk->getArg(0) }, "block");
 
     // **a failed allocation is not an allocation.** `mem::alloc` is documented to hand back null when
     // the allocator could not, so counting the attempt would leave a program that survived an OOM
@@ -158,7 +259,7 @@ llvm::Function *MemoryCodegen::get_or_create_free_thunk()
     _ctx.set_insert_point(count_block);
     gen_counter_delta(-1);
     _ctx.profile->emit_free(block);
-    _ctx.builder->CreateCall(_ctx.libc_callee(Compiler::RuntimeSymbol::t_free, void_type, { opaque_ptr }), { block });
+    _ctx.builder->CreateCall(heap_free(), { block });
     _ctx.builder->CreateBr(done_block);
 
     _ctx.set_insert_point(done_block);
@@ -191,8 +292,7 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
     llvm::Value *size = thunk->getArg(1);
 
     llvm::Value *new_block = _ctx.builder->CreateCall(
-        _ctx.libc_callee(Compiler::RuntimeSymbol::t_realloc, opaque_ptr, { opaque_ptr, size_ty }),
-        { old_block, size }, "block.new");
+        heap_realloc(), { old_block, size }, "block.new");
 
     _ctx.profile->emit_realloc(old_block, new_block, size);
 
@@ -251,14 +351,10 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
 
 llvm::Value *MemoryCodegen::gen_alloc(llvm::Value *size, const llvm::Twine &name)
 {
-    llvm::Type *size_ty = _ctx.size_int_ty();
     llvm::Value *n = _ctx.as_size(size);
 
-    // with tracking off the seam is not a layer, it *is* the call - so an untracked build emits exactly
-    // what it emitted before this subsystem existed, down to the symbol
     if (!_ctx.options.tracking_allocations()) {
-        return _ctx.builder->CreateCall(
-            _ctx.libc_callee(Compiler::RuntimeSymbol::t_malloc, _ctx.opaque_ptr_type(), { size_ty }), { n }, name);
+        return _ctx.builder->CreateCall(heap_alloc(), { n }, name);
     }
 
     return _ctx.builder->CreateCall(get_or_create_alloc_thunk(), { n }, name);
@@ -266,13 +362,17 @@ llvm::Value *MemoryCodegen::gen_alloc(llvm::Value *size, const llvm::Twine &name
 
 llvm::Value *MemoryCodegen::gen_realloc(llvm::Value *block, llvm::Value *size, const llvm::Twine &name)
 {
-    llvm::Type *size_ty = _ctx.size_int_ty();
-    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
     llvm::Value *n = _ctx.as_size(size);
 
+    // a literal null at the builtin. a loaded null still needs mem::realloc's
+    // branch, or LLVM will not delete an allockind("realloc") pair - pinned by
+    // tests_eco/memory/fixed_block_never_reaches_the_binary
+    if (llvm::isa<llvm::ConstantPointerNull>(block)) {
+        return gen_alloc(n, name);
+    }
+
     if (!_ctx.options.tracking_allocations()) {
-        return _ctx.builder->CreateCall(
-            _ctx.libc_callee(Compiler::RuntimeSymbol::t_realloc, opaque_ptr, { opaque_ptr, size_ty }), { block, n }, name);
+        return _ctx.builder->CreateCall(heap_realloc(), { block, n }, name);
     }
 
     return _ctx.builder->CreateCall(get_or_create_realloc_thunk(), { block, n }, name);
@@ -280,11 +380,8 @@ llvm::Value *MemoryCodegen::gen_realloc(llvm::Value *block, llvm::Value *size, c
 
 void MemoryCodegen::gen_free(llvm::Value *block)
 {
-    llvm::Type *void_type = llvm::Type::getVoidTy(*_ctx.llvm_context);
-
     if (!_ctx.options.tracking_allocations()) {
-        _ctx.builder->CreateCall(
-            _ctx.libc_callee(Compiler::RuntimeSymbol::t_free, void_type, { _ctx.opaque_ptr_type() }), { block });
+        _ctx.builder->CreateCall(heap_free(), { block });
         return;
     }
 

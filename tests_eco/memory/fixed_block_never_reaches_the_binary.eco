@@ -1,7 +1,7 @@
 // **a heap block of a constant size whose contents never leave the function is one LLVM deletes**, and
-// nothing in Echo's allocation seam stands in the way of it: `mem::alloc` is a plain `malloc` call in an
-// untracked build, which TargetLibraryInfo recognises and `isRemovableAlloc` will remove once every load
-// out of the block has been forwarded.
+// nothing in Echo's allocation seam stands in the way of it: untracked `mem::alloc` is a plain `malloc`
+// call (or `__eco_cache_alloc` under `--alloc-cache`, one alloc-family with its free), which
+// `isRemovableAlloc` will remove once every load out of the block has been forwarded.
 //
 // **what used to stand in the way was the copy.** `return .ok($out)` duplicated the array into the
 // argument, so the loop held `malloc(16)`, a `memcpy` into `malloc(12)`, and two `free`s - two blocks,

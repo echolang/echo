@@ -67,6 +67,10 @@ namespace Compiler
         LinkLinkage linkage = LinkLinkage::t_dynamic;
         LinkRuntime runtime = LinkRuntime::t_load;
 
+        // echoc compiled this object and hashed it into the program stamp. link
+        // reuse may keep it: the path is in the digest, the bytes in the stamp
+        bool compiler_object = false;
+
         // exact loadable name when the author knows the SONAME (`libssl.so.3`). empty means "find
         // `lib<value>.<ext>` and its versioned neighbours"
         std::optional<std::string> file;
@@ -78,6 +82,21 @@ namespace Compiler
             return scheme == other.scheme && value == other.value;
         }
     };
+
+    // echoc compiled this object and hashed it into the program stamp. link
+    // reuse may keep it: the path is in the digest, the bytes in the stamp
+    inline LinkRequirement compiler_object_link(
+        const std::filesystem::path &object,
+        std::string declared_by
+    )
+    {
+        LinkRequirement requirement;
+        requirement.scheme = LinkScheme::t_object;
+        requirement.value = object.string();
+        requirement.declared_by = std::move(declared_by);
+        requirement.compiler_object = true;
+        return requirement;
+    }
 
     // the "expected one of" a refused value is answered with, built from the same table that resolves one -
     // so a scheme added there cannot be missing from the message that rejects its neighbours. The rule

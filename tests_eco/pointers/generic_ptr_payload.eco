@@ -1,4 +1,4 @@
-struct box<T>
+struct bag<T>
 {
     T $value;
 }
@@ -23,7 +23,7 @@ array<uint8> $bytes = array<uint8>();
 $bytes[] = 7 as uint8;
 ptr<uint8> $p = &$bytes[0];
 
-box<ptr<uint8>> $b = box<ptr<uint8>>($p);
+bag<ptr<uint8>> $b = bag<ptr<uint8>>($p);
 echo $b->value:$ == $p:$;
 echo $bytes[0];
 

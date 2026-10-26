@@ -7,8 +7,9 @@
  *
  * This is the other shape. `#[unique]` refuses the copy, so the uniqueness gate has nothing to
  * ask: the bytes have one owner, growth doubles, `take()` plants a `str::buf` over the live
- * block. Short results stay on that block: this type is for building, and seating
- * `string::INLINE` bytes would copy then free what it just grew. The terminator `str::buf`
+ * block. A result of at most `string::INLINE` bytes lives in this value and never touches the
+ * heap, and `take()` seats it in the string the same way. A reserved heap block still freezes
+ * as a `str::buf`, including a short result sitting on a larger one. The terminator `str::buf`
  * requires is written at that freeze, not on every append. An empty text that never allocated
  * takes to an empty string.
  *
@@ -21,24 +22,69 @@ namespace str;
 public struct text
 {
     // same accounting as `str::buf`: `$cap` is text bytes, the allocation is `$cap + 1`.
-    // private so a field-wise constructor cannot forge a second owner of one block
+    // private so a field-wise constructor cannot forge a second owner of one block.
+    // `$bytes == null` is the inline store, `$cap` is `INLINE`. a self-pointer into
+    // `$sso_*` would dangle on move
     private ptr<uint8> $bytes;
     private usize $len;
     private usize $cap;
+    private uint64 $sso_lo;
+    private uint64 $sso_hi;
 
     /**
-     * Empty, no allocation. The first append that needs room pays for the block.
+     * Empty, no allocation. Capacity is `string::INLINE`; the first append that still fits stays here.
      */
     constructor()
     {
         $this->bytes:$ = null;
         $this->len = 0;
-        $this->cap = 0;
+        $this->cap = string::INLINE;
+        $this->sso_lo = 0;
+        $this->sso_hi = 0;
     }
 
     destructor()
     {
         mem::free($this->bytes);
+    }
+
+    #[inline]
+    private function sso_bytes() : ptr<uint8>
+    {
+        return ptr<uint8>(&$this->sso_lo);
+    }
+
+    #[inline]
+    private const function sso_addr() : ptr<const uint8>
+    {
+        return ptr<const uint8>(&$this->sso_lo);
+    }
+
+    // `$bytes == null` is the inline store. append/push keep the raw compare
+    #[inline]
+    private const function is_inline() : bool
+    {
+        return $this->bytes:$ == null;
+    }
+
+    #[inline]
+    private const function live_bytes() : ptr<const uint8>
+    {
+        if ($this->is_inline()) {
+            return $this->sso_addr();
+        }
+
+        return ptr<const uint8>($this->bytes:$);
+    }
+
+    #[inline]
+    private function dest() : ptr<uint8>
+    {
+        if ($this->is_inline()) {
+            return $this->sso_bytes();
+        }
+
+        return $this->bytes;
     }
 
     const function size() : usize
@@ -61,7 +107,7 @@ public struct text
      */
     const function view() : string::view
     {
-        return string::view($this->bytes, $this->len);
+        return string::view($this->live_bytes(), $this->len);
     }
 
     /**
@@ -87,16 +133,26 @@ public struct text
 
     private function grow_to(usize $capacity) : void
     {
+        if ($this->cap >= $capacity) {
+            return;
+        }
+
         usize $grown = $this->cap * 2;
 
         if ($grown < $capacity) {
             $grown = $capacity;
         }
 
-        if ($this->bytes:$ == null) {
-            $this->bytes:$ = text_block($grown);
+        if ($this->is_inline()) {
+            ptr<uint8> $block = text_block($grown);
+
+            if ($this->len > 0) {
+                mem::copy<uint8>($block, $this->dest(), $this->len);
+            }
+
+            $this->bytes:$ = $block;
         } else {
-            $this->bytes:$ = text_regrow($this->bytes, $grown);
+            $this->bytes:$ = text_regrow($this->dest(), $grown);
         }
 
         $this->cap = $grown;
@@ -104,10 +160,10 @@ public struct text
 
     /**
      * Copies `$count` bytes onto the end. The uniquely-owned heap path of `string::append`,
-     * without the uniqueness load: a compare and a memcpy. Growth and a self-view reseat
-     * live in `append_slow`, so this stays small enough to inline into a tight loop. A
-     * `$src` that names this block is reseated after a grow, so `$t->append($t->view())` is
-     * sound.
+     * without the uniqueness load: a compare and a memcpy. Growth, the inline store, and a
+     * self-view reseat live in `append_slow`, so this stays small enough to inline into a
+     * tight loop. A `$src` that names this block is reseated after a grow, so
+     * `$t->append($t->view())` is sound.
      */
     #[inline]
     function append(ptr<const uint8> $src, usize $count) : void
@@ -116,11 +172,10 @@ public struct text
             return;
         }
 
-        // room left rather than room needed, so a count a caller computed cannot wrap.
-        // dest starts at `$len`, so a self-view `[0, len)` does not overlap. grow and
-        // reseat live in `append_slow`: inlining them here made `append(string)` too
-        // big for a loop
-        if ($count <= $this->cap - $this->len) {
+        // heap with room: a compare and a memcpy. SSO is the same trap as on
+        // `string::append`: an arm here stops a tight loop inlining. dest starts
+        // at `$len`, so a self-view `[0, len)` does not overlap
+        if ($this->bytes:$ != null && $count <= $this->cap - $this->len) {
             mem::copy<uint8>($this->bytes:$ + $this->len, ptr<uint8>($src:$), $count);
             $this->len = $this->len + $count;
             return;
@@ -129,30 +184,31 @@ public struct text
         $this->append_slow($src, $count);
     }
 
-    // growth and a self-view reseat, **out of the inline body**. takes `text&`, so it
-    // cannot be `#[echoc::cold]`
+    // growth, inline seating, and a self-view reseat, **out of the inline body**.
+    // takes `text&`, so it cannot be `#[echoc::cold]`
     private function append_slow(ptr<const uint8> $src, usize $count) : void
     {
         usize $from = 0;
         bool $inside = false;
 
-        if ($this->bytes:$ != null) {
-            ptr<const uint8> $base = ptr<const uint8>($this->bytes:$);
-            ptr<const uint8> $limit = $base:$ + $this->cap;
+        ptr<uint8> $live = $this->dest();
+        ptr<const uint8> $base = ptr<const uint8>($live:$);
+        ptr<const uint8> $limit = $base:$ + $this->cap;
 
-            if ($src:$ >= $base:$ && $src:$ < $limit:$) {
-                $inside = true;
-                $from = ($src:$ - $base:$) as usize;
-            }
+        if ($src:$ >= $base:$ && $src:$ < $limit:$) {
+            $inside = true;
+            $from = ($src:$ - $base:$) as usize;
         }
 
         $this->grow_for($count);
 
+        ptr<uint8> $dst = $this->dest();
+
         if ($inside) {
-            $src:$ = ptr<const uint8>($this->bytes:$ + $from);
+            $src:$ = ptr<const uint8>($dst:$ + $from);
         }
 
-        mem::copy<uint8>($this->bytes:$ + $this->len, ptr<uint8>($src:$), $count);
+        mem::copy<uint8>($dst:$ + $this->len, ptr<uint8>($src:$), $count);
         $this->len = $this->len + $count;
     }
 
@@ -179,11 +235,24 @@ public struct text
     #[inline]
     function push(uint8 $byte) : void
     {
+        if ($this->bytes:$ != null && $this->len < $this->cap) {
+            $this->bytes:$[$this->len] = $byte;
+            $this->len = $this->len + 1;
+            return;
+        }
+
+        $this->push_slow($byte);
+    }
+
+    // SSO, growth, and a first seating, **out of the inline body**. same split as append
+    private function push_slow(uint8 $byte) : void
+    {
         if ($this->len == $this->cap) {
             $this->grow_for(1);
         }
 
-        $this->bytes:$[$this->len] = $byte;
+        ptr<uint8> $dst = $this->dest();
+        $dst:$[$this->len] = $byte;
         $this->len = $this->len + 1;
     }
 
@@ -198,24 +267,29 @@ public struct text
     /**
      * Hands the bytes to a `string` and leaves this empty.
      *
-     * A block this already grew becomes a `str::buf` over it, so the freeze is one class box
-     * rather than a second copy of the document. Never allocated takes to an empty string.
-     * The NUL `str::buf` requires is written here.
+     * Inline text seats `string::INLINE` and allocates nothing. A block this already grew
+     * becomes a `str::buf` over it, so the freeze is one class box rather than a second copy
+     * of the document. Empty takes to an empty string. The NUL `str::buf` requires is written
+     * here. Afterwards this is empty inline again, capacity `INLINE`.
      */
     function take() : string
     {
-        if ($this->bytes:$ == null) {
-            return string(string::view(null, 0));
+        if ($this->is_inline()) {
+            string $short = string::from(string::view($this->live_bytes(), $this->len));
+            $this->len = 0;
+
+            return $short;
         }
 
-        $this->bytes:$[$this->len] = 0;
+        ptr<uint8> $dst = $this->dest();
+        $dst:$[$this->len] = 0;
 
-        str::buf $owner = str::buf($this->cap, $this->len, $this->bytes);
-        string $s = string(string::view($this->bytes, $this->len), $owner);
+        str::buf $owner = str::buf($this->cap, $this->len, $dst);
+        string $s = string(string::view($this->live_bytes(), $this->len), $owner);
 
         $this->bytes:$ = null;
         $this->len = 0;
-        $this->cap = 0;
+        $this->cap = string::INLINE;
 
         return $s;
     }

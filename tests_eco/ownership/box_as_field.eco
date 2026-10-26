@@ -1,0 +1,20 @@
+// a non-unique owner holds one cell. seating the constructor result into the field, the
+// owner's teardown destroys it once
+
+struct Probe
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Wrap
+{
+    box<Probe> $inner;
+}
+
+Wrap $w = Wrap(box<Probe>(Probe(1)));
+echo 0;

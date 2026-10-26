@@ -1,0 +1,19 @@
+// a unique recursive tree: the field is a pointer-sized cell, not a Node inside a Node.
+// two heap nodes, two allocations, both gone at the end
+
+struct Node
+{
+    int32 $n;
+    box<Node>? $left;
+}
+
+echo mem::live_allocations();
+
+{
+    box<Node> $root = box<Node>(Node(0, box<Node>(Node(1, null))));
+    echo mem::live_allocations();
+    echo $root->get()->n;
+    echo $root->get()->left?->get()->n ?? -1;
+}
+
+echo mem::live_allocations();

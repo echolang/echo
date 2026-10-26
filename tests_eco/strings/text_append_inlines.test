@@ -2,7 +2,7 @@ mode: build
 flags: --optimize whole
 
 --- OUT --->
-abcdefgabcdefgabcdefg
+abcdefgabcdefgabcdefgabcdefg
 --- IR --->
 CHECK: define dso_local void @_fillZZMRBMLCN3str4textEZMLPy
 CHECK: llvm.memcpy

@@ -265,8 +265,17 @@ private function unless_overflowed<T>(ptr<uint8> $block, usize $count) : ptr<uin
  * May move the block, so the returned address is the one to keep - the old one is dead. Does not
  * preserve any alignment stronger than the allocator's own.
  */
+#[inline]
 public function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
 {
+    // a loaded null (`mem::buffer` resize of empty) is not ConstantPointerNull
+    // at the builtin. spelled as `alloc` so LLVM sees an allockind("alloc")
+    // pair it can delete, which it will not do for realloc. pinned by
+    // tests_eco/memory/fixed_block_never_reaches_the_binary
+    if ($p:$ == null) {
+        return alloc<T>($count);
+    }
+
     // see `bytes_for`. a failed realloc leaves the block where it was
     return ptr<T>(unless_overflowed<T>(realloc_bytes(ptr<uint8>($p:$), bytes_for<T>($count)), $count));
 }

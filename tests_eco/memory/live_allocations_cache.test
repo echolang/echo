@@ -1,0 +1,13 @@
+flags: --alloc-cache --track-allocations
+
+--- OUT --->
+0
+1
+0
+0
+1
+2
+0
+--- IR --->
+CHECK: @__eco_alloc_live = linkonce_odr global i64 0
+CHECK: @__eco_cache_alloc

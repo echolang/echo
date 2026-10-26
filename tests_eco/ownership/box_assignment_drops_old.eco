@@ -1,0 +1,12 @@
+// reassignment of a unique cell tears down the previous allocation, then seats the new one.
+// live count stays 1; the payload is the new value
+
+echo mem::live_allocations();
+
+box<int32> $a = box<int32>(1);
+echo mem::live_allocations();
+echo $a->get();
+
+$a = box<int32>(2);
+echo mem::live_allocations();
+echo $a->get();

@@ -1,0 +1,9 @@
+// const box<T>& reaches only const T&. writing through that borrow is the conversion refusal
+
+function read(const box<int32>& $b) : int32
+{
+    return $b->get();
+}
+
+box<int32> $n = box<int32>(7);
+echo read($n);

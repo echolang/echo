@@ -1,0 +1,10 @@
+// const get() is const T&. binding that as int32& is the conversion refusal
+
+function bump(const box<int32>& $b) : void
+{
+    int32& $n = $b->get();
+    $n = 9;
+}
+
+box<int32> $a = box<int32>(1);
+bump($a);

@@ -24,9 +24,9 @@ echo $a;
 echo ($inner:$ == $p:$);
 
 // the value form still decays, so this shares nothing with the two above
-function box<T>(T $v) : T {
+function pass<T>(T $v) : T {
     return $v;
 }
 
-echo box($p);
-echo box($a);
+echo pass($p);
+echo pass($a);

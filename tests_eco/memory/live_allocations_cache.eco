@@ -1,0 +1,22 @@
+// `--alloc-cache` still counts. the thunk is unmarked so a hit is a live allocation
+echo mem::live_allocations();
+
+ptr<int32> $p = mem::alloc<int32>(4);
+echo mem::live_allocations();
+
+mem::free($p);
+echo mem::live_allocations();
+
+mem::free(ptr<int32>(null));
+echo mem::live_allocations();
+
+ptr<int32> $q = mem::alloc<int32>(2);
+$q:$ = mem::realloc($q, 4096);
+echo mem::live_allocations();
+
+ptr<int32> $r = mem::realloc(ptr<int32>(null), 8);
+echo mem::live_allocations();
+
+mem::free($q);
+mem::free($r);
+echo mem::live_allocations();

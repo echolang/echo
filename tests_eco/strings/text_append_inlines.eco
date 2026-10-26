@@ -1,5 +1,6 @@
-// `append(string)` in a loop must inline to a memcpy. growth and self-view
-// reseat live in append_slow, so the hot body stays a compare and a copy
+// `append(string)` in a loop must inline to a memcpy. growth, SSO, and self-view
+// reseat live in append_slow, so the hot body stays a compare and a copy. four
+// pieces so the fourth hits the heap path after INLINE fills
 function fill(str::text& $t, usize $n) : void
 {
     usize $i = 0;
@@ -10,5 +11,5 @@ function fill(str::text& $t, usize $n) : void
 }
 
 str::text $t = str::text();
-fill(&$t, 3);
+fill(&$t, 4);
 echo $t->take();

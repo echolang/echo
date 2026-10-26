@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  box_const_get_is_const.eco:5:12
+
+  Invalid type conversion: cannot implicitly convert 'const int32' to 'int32&'
+
+  4 | {
+  5 |     int32& $n = $b->get();
+    :            ^^
+  6 |     $n = 9;
+
+1 error, nothing was compiled.

@@ -641,6 +641,14 @@ TEST_CASE("explaining memory implies tracking allocations", "[cli]")
     REQUIRE_FALSE(counted.options.report_allocations);
 }
 
+TEST_CASE("alloc-cache is off unless written", "[cli]")
+{
+    REQUIRE_FALSE(resolved({ "run", "a.eco" }).options.using_alloc_cache());
+    REQUIRE(resolved({ "run", "--alloc-cache", "a.eco" }).options.using_alloc_cache());
+    REQUIRE(resolved({ "build", "--alloc-cache", "-o", "x", "a.eco" }).options.using_alloc_cache());
+    REQUIRE(resolved({ "run", "--alloc-cache", "a.eco" }).options.using_page_heap());
+}
+
 TEST_CASE("profile implies tracking and debug info without dropping optimize", "[cli]")
 {
     const DriverOptions run_profile = resolved({ "run", "--profile", "a.eco" });

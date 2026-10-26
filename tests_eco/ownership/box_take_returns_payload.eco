@@ -1,0 +1,24 @@
+// take() hands T over and frees the cell. the box destructor then no-ops, so live count is 0
+// and the payload destructor still ran once
+
+struct Probe
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+echo mem::live_allocations();
+
+{
+    box<Probe> $b = box<Probe>(Probe(7));
+    echo mem::live_allocations();
+    Probe $out = $b->take();
+    echo mem::live_allocations();
+    echo $out->tag;
+}
+
+echo mem::live_allocations();

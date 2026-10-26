@@ -494,6 +494,20 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_alloc_cache, "alloc-cache", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "per-thread page heap for small allocations",
+            "A per-thread page heap for allocations that fit in one 16 KiB page. Off unless you "
+            "write it:\n"
+            "  echoc build --alloc-cache -o app main.eco\n"
+            "Native only. Wasm keeps libc, and the flag is refused there. Small blocks are "
+            "slots in 16 KiB pages with no per-object prefix. A live block above that still "
+            "goes to malloc, with a 16-byte prefix so realloc can grow in place.",
+            {}, nullptr
+        },
+        {
             Opt::t_check_refcounts, "check-refcounts", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_build,
             accepts::compiling, 0, ExclusionGroup::t_none,

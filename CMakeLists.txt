@@ -286,47 +286,69 @@ llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 # llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_TARGETS_TO_BUILD} mcjit)
 target_link_libraries(${APPNAME} ${LLVM_LIBS})
 
+function(echo_embed_runtime)
+    cmake_parse_arguments(EMBED "" "OUTPUT;GUARD;DELIM;DIR" "FILES" ${ARGN})
+    set(EMBED_INPUTS)
+    set(EMBED_BODY "#ifndef ${EMBED_GUARD}\n#define ${EMBED_GUARD}\n#pragma once\n")
+    list(LENGTH EMBED_FILES EMBED_N)
+    set(EMBED_I 0)
+    while(EMBED_I LESS EMBED_N)
+        list(GET EMBED_FILES ${EMBED_I} EMBED_SYM)
+        math(EXPR EMBED_J "${EMBED_I} + 1")
+        list(GET EMBED_FILES ${EMBED_J} EMBED_FILE)
+        set(EMBED_PATH "${EMBED_DIR}/${EMBED_FILE}")
+        list(APPEND EMBED_INPUTS "${EMBED_PATH}")
+        file(READ "${EMBED_PATH}" EMBED_TEXT)
+        string(APPEND EMBED_BODY
+            "static constexpr const char ${EMBED_SYM}[] = R\"${EMBED_DELIM}(${EMBED_TEXT})${EMBED_DELIM}\";\n")
+        math(EXPR EMBED_I "${EMBED_I} + 2")
+    endwhile()
+    string(APPEND EMBED_BODY "#endif\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${EMBED_INPUTS})
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+    file(WRITE "${EMBED_OUTPUT}" "${EMBED_BODY}")
+endfunction()
+
 set(ECO_PROFILE_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/runtime/profile")
 set(ECO_PROFILE_EMBEDDED "${CMAKE_BINARY_DIR}/generated/profile_runtime_embedded.h")
-set(ECO_PROFILE_EMBED_INPUTS
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.h"
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_internal.h"
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.c"
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_intern.c"
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_sample.c"
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_alloc.c"
-    "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_write.c"
+echo_embed_runtime(
+    OUTPUT "${ECO_PROFILE_EMBEDDED}"
+    GUARD PROFILE_RUNTIME_EMBEDDED_H
+    DELIM echo_profile
+    DIR "${ECO_PROFILE_RUNTIME_DIR}"
+    FILES
+        k_profile_runtime_header eco_profile.h
+        k_profile_runtime_internal eco_profile_internal.h
+        k_profile_runtime_c eco_profile.c
+        k_profile_runtime_intern eco_profile_intern.c
+        k_profile_runtime_sample eco_profile_sample.c
+        k_profile_runtime_alloc eco_profile_alloc.c
+        k_profile_runtime_write eco_profile_write.c
 )
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ECO_PROFILE_EMBED_INPUTS})
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.h" ECO_PROFILE_H)
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_internal.h" ECO_PROFILE_INTERNAL)
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile.c" ECO_PROFILE_C)
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_intern.c" ECO_PROFILE_INTERN)
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_sample.c" ECO_PROFILE_SAMPLE)
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_alloc.c" ECO_PROFILE_ALLOC)
-file(READ "${ECO_PROFILE_RUNTIME_DIR}/eco_profile_write.c" ECO_PROFILE_WRITE)
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-file(WRITE "${ECO_PROFILE_EMBEDDED}"
-"#ifndef PROFILE_RUNTIME_EMBEDDED_H
-#define PROFILE_RUNTIME_EMBEDDED_H
-#pragma once
-static constexpr const char k_profile_runtime_header[] = R\"echo_profile(${ECO_PROFILE_H})echo_profile\";
-static constexpr const char k_profile_runtime_internal[] = R\"echo_profile(${ECO_PROFILE_INTERNAL})echo_profile\";
-static constexpr const char k_profile_runtime_c[] = R\"echo_profile(${ECO_PROFILE_C})echo_profile\";
-static constexpr const char k_profile_runtime_intern[] = R\"echo_profile(${ECO_PROFILE_INTERN})echo_profile\";
-static constexpr const char k_profile_runtime_sample[] = R\"echo_profile(${ECO_PROFILE_SAMPLE})echo_profile\";
-static constexpr const char k_profile_runtime_alloc[] = R\"echo_profile(${ECO_PROFILE_ALLOC})echo_profile\";
-static constexpr const char k_profile_runtime_write[] = R\"echo_profile(${ECO_PROFILE_WRITE})echo_profile\";
-#endif
-")
+
+set(ECO_ALLOC_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/runtime/alloc")
+set(ECO_ALLOC_EMBEDDED "${CMAKE_BINARY_DIR}/generated/alloc_runtime_embedded.h")
+echo_embed_runtime(
+    OUTPUT "${ECO_ALLOC_EMBEDDED}"
+    GUARD ALLOC_RUNTIME_EMBEDDED_H
+    DELIM echo_alloc
+    DIR "${ECO_ALLOC_RUNTIME_DIR}"
+    FILES
+        k_alloc_runtime_header eco_cache.h
+        k_alloc_runtime_c eco_cache.c
+)
 
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CMAKE_SOURCE_DIR}/stdlib/build)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
+target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
+target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
+target_sources(${LIBNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
+target_sources(${APPNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
 
 # vendor
 add_subdirectory(vendor)
@@ -352,6 +374,8 @@ endif()
 target_link_libraries(tests PRIVATE Catch2::Catch2)
 target_link_libraries(tests PRIVATE ${LIBNAME})
 target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
+target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
+target_include_directories(tests PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # the same LLVM components the compiler links, because the tests link the whole compiler library and any
 # archive member they pull in may reach LLVM. This was latent until Compiler::TargetFacts - it reads the

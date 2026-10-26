@@ -1,0 +1,6 @@
+// `--alloc-cache` is the only thing that spells `__eco_cache_alloc` into a program. keep the
+// block live so the call cannot be deleted
+ptr<int32> $p = mem::alloc<int32>(1);
+$p:$[0] = 7;
+echo $p:$[0];
+mem::free($p);

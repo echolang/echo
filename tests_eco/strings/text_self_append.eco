@@ -1,4 +1,4 @@
-// self-view after an exact-fit first alloc: grow must reseat, not copy from the old block
+// self-view while inline: stays in the store, dest does not overlap
 {
     str::text $t = str::text();
     $t->append('hello');
@@ -11,6 +11,16 @@
     str::text $t = str::text();
     $t->reserve(20);
     $t->append('hello');
+    $t->append($t->view());
+    echo $t->take();
+}
+
+// heap with not enough room for a self-view: grow must reseat, not copy from the freed block.
+// reserve(16) doubles past INLINE to 30, sixteen bytes leave 14 of room, the second copy grows
+{
+    str::text $t = str::text();
+    $t->reserve(16);
+    $t->append('0123456789abcdef');
     $t->append($t->view());
     echo $t->take();
 }

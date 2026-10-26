@@ -10,6 +10,7 @@
 #include "Compiler/ModuleCache.h"
 #include "Compiler/ParsePipeline.h"
 #include "Compiler/ProfileRuntime.h"
+#include "Compiler/AllocRuntime.h"
 
 #include <fmt/core.h>
 
@@ -131,6 +132,10 @@ bool compute_program_echo_key(
     }
 
     digest = fold_flag(plan.options.report_allocations, "report", "noreport", digest);
+    digest = fold_flag(plan.options.using_alloc_cache(), "alloccache", "nocache", digest);
+    if (plan.options.using_alloc_cache()) {
+        digest = fold_field(Compiler::alloc_runtime_stamp(), digest);
+    }
 
     if (plan.options.profiling()) {
         digest = fold_field(Compiler::profile_runtime_stamp(), digest);

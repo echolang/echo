@@ -5,6 +5,7 @@
 #include "Compiler/LLVM/Codegen/TargetMachine.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/AllocRuntime.h"
 #include "Compiler/ArtifactFile.h"
 #include "Compiler/ArtifactSeal.h"
 #include "Compiler/CodegenTarget.h"
@@ -13,6 +14,10 @@
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
+
+#if defined(_WIN32)
+#include "eco_cache.h"
+#endif
 
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Config/llvm-config.h>
@@ -135,6 +140,10 @@ bool Backend::prepare_execution()
 
     Compiler::ensure_targets_for_triple(_ctx.target_triple);
 
+    if (_ctx.options.using_alloc_cache()) {
+        Compiler::touch_alloc_runtime();
+    }
+
     auto main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {
         throw Compiler::InternalCompilerException("No main module found to run", nullptr);
@@ -200,6 +209,11 @@ bool Backend::prepare_execution()
     pin("malloc", malloc);
     pin("free", free);
     pin("realloc", realloc);
+    if (_ctx.options.using_alloc_cache()) {
+        pin("__eco_cache_alloc", __eco_cache_alloc);
+        pin("__eco_cache_realloc", __eco_cache_realloc);
+        pin("__eco_cache_free", __eco_cache_free);
+    }
     pin("getenv", getenv);
     pin("strtoull", strtoull);
     pin("rand_s", rand_s);
@@ -642,6 +656,10 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
 static bool link_is_reusable(const std::vector<Compiler::LinkRequirement> &link)
 {
     return std::all_of(link.begin(), link.end(), [](const Compiler::LinkRequirement &requirement) {
+        if (requirement.scheme == Compiler::LinkScheme::t_object
+            && requirement.compiler_object) {
+            return true;
+        }
         return requirement.scheme == Compiler::LinkScheme::t_library
             && requirement.runtime == Compiler::LinkRuntime::t_process
             && requirement.linkage == Compiler::LinkLinkage::t_dynamic;

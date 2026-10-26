@@ -46,6 +46,9 @@ namespace Compiler
         // the wrong one - and would have left `mode: build` cases unable to be leak-checked at all
         bool track_allocations = false;
 
+        // per-thread page heap. off unless `--alloc-cache`. native only
+        bool alloc_cache = false;
+
         // does `main` print the `[memory]` section on its way out? implies the above, resolved once
         // where the options are built - a report over a counter nothing maintains reads zero forever
         bool report_allocations = false;
@@ -141,6 +144,17 @@ namespace Compiler
         // call site comparing the field is a second answer to one question
         bool tracking_allocations() const {
             return track_allocations;
+        }
+
+        bool using_alloc_cache() const {
+            return alloc_cache;
+        }
+
+        // IR and the link both ask this, so a wasm row cannot emit `__eco_cache_*`
+        // without an object, or link an object the IR never calls. the flag above
+        // is what was written; this is whether the page heap is actually in the program
+        bool using_page_heap() const {
+            return alloc_cache && !codegen.is_wasm();
         }
 
         bool reporting_allocations() const {

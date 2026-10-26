@@ -75,6 +75,7 @@ namespace Compiler
         t_no_tbaa,
         t_fixed_hash_seed,
         t_track_allocations,
+        t_alloc_cache,
         t_check_refcounts,
         t_no_stdlib,
         t_emit_stdlib_header,

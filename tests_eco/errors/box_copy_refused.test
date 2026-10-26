@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCopy  box_copy_refused.eco:4:17
+
+  'box<int32>' is unique: exactly one value may name its storage, so it is moved and never copied.
+
+  3 | box<int32> $a = box<int32>(1);
+  4 | box<int32> $b = $a;
+    :                 ^^
+  5 | 
+
+  help: Write 'mv $a' to transfer it. Or take a borrow ('box<int32>&') if it is only being read.
+
+1 error, nothing was compiled.

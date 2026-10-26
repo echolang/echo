@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UseAfterMove  box_use_after_move.eco:5:6
+
+  '$a' has been moved out of.
+
+  4 | box<int32> $b = mv $a;
+  5 | echo $a->get();
+    :      ^^
+  6 | 
+
+1 error, nothing was compiled.

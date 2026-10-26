@@ -1,0 +1,141 @@
+/**
+ * One heap `T`, owned by exactly one value.
+ *
+ * A class is a heap object plus a strong count, a weak count and a type pointer. `rc<T>` is that
+ * with the payload as a type parameter, so copying the handle is a retain. `ptr<T>` from
+ * `mem::alloc` is the address and nothing else: nothing frees it, and a `realloc` may move the
+ * block out from under it. This is the unique cell in between. One allocation, no header, the
+ * destructor destroys `T` and frees the block.
+ *
+ * `#[unique]` refuses the copy, so `box<T> $b = $a` is a located error rather than two owners of
+ * one slot. `private` on the address closes the other door: the pointer cannot be read out, written
+ * in, or taken by a field-wise constructor. Moving the box moves the pointer; `T` stays where it
+ * was allocated.
+ *
+ * Not a class, and not `mem::`. It does not satisfy `T : class`, it has no type pointer, and
+ * `erased::from` will not take it. `rc<T>` is still that wrapper. There is no `#[echoc::core:]`
+ * binding: the compiler never mints one, it only has to be a name you can write, the same way
+ * `result` is.
+ *
+ * Seat an already-built `T`. `box<Point>(1, 2)` is not a constructor of `box`: build the payload
+ * first, `box<Point>(Point(1, 2))`.
+ *
+ * ```echo
+ * struct Point
+ * {
+ *     int32 $x;
+ *     int32 $y;
+ * }
+ *
+ * box<Point> $p = box<Point>(Point(1, 2));
+ * echo $p->get()->x;           // 1
+ *
+ * box<int32> $n = box<int32>(7);
+ * echo $n->get();              // 7
+ * ```
+ *
+ * A recursive unique tree is a `box<Node>?` field. `struct Node { Node $left; }` is a layout
+ * cycle; a class field pays the header; this field is one pointer.
+ */
+
+#[unique]
+public struct box<T>
+{
+    // **private, and that is what turns the unique claim into a fact.** while this was reachable,
+    // `$b->data:$ = $a->data:$` would build a second owner of one slot in ordinary safe code
+    private ptr<T> $data;
+
+    /**
+     * `$value`, seated in a fresh allocation.
+     *
+     * The payload is moved in. A type that cannot be copied is still a legal `T`: construct it,
+     * then hand it over.
+     */
+    constructor(T $value)
+    {
+        ptr<T> $p = mem::alloc<T>(1);
+
+        if ($p:$ == null) {
+            mem::out_of_memory();
+        }
+
+        mem::init<T>($p:$[0], mv $value);
+        $this->data:$ = $p:$;
+    }
+
+    /**
+     * Destroys the payload, then frees the allocation.
+     *
+     * `take()` has already done both and left `$data` null, so a second pass is a no-op. The
+     * `needs_destruction` guard keeps `box<int32>` from walking a slot that owns nothing.
+     */
+    destructor()
+    {
+        if ($this->data:$ == null) {
+            return;
+        }
+
+        const if (mem::needs_destruction<T>()) {
+            T $gone = mem::take<T>($this->data:$[0]);
+        }
+
+        mem::free<T>($this->data);
+    }
+
+    /**
+     * A borrow of the payload, so writing through it writes into the heap slot.
+     *
+     * The method form of reaching `T`. A call is not an assignment destination, so bind the
+     * borrow (`int32& $n = $b->get(); $n = 9;`) or write a field of it (`$b->get()->x = 3`).
+     *
+     * Dies if `take()` has already emptied this box.
+     */
+    function get() : T&
+    {
+        if ($this->data:$ == null) {
+            mem::cold_die('box is empty');
+        }
+
+        // **the promotion, discharged here.** the caller gets an ordinary `T&` and inherits
+        // nothing: this address is the allocation the constructor made, and `private` is what
+        // keeps that true
+        unsafe {
+            return &$this->data:$[0];
+        }
+    }
+
+    /**
+     * The same borrow, read-only, for when the box is reached through a `const`.
+     */
+    const function get() : const T&
+    {
+        if ($this->data:$ == null) {
+            mem::cold_die('box is empty');
+        }
+
+        unsafe {
+            return &$this->data:$[0];
+        }
+    }
+
+    /**
+     * The payload, handed over. The allocation is freed and this box is empty.
+     *
+     * `mem::take` on `$b->get()` is refused: that borrow is a slot this value still counts.
+     * This goes through the raw address, then frees, then nulls `$data` so the destructor
+     * does not destroy `T` a second time.
+     *
+     * Dies if this box is already empty.
+     */
+    function take() : T
+    {
+        if ($this->data:$ == null) {
+            mem::cold_die('box is empty');
+        }
+
+        T $v = mem::take<T>($this->data:$[0]);
+        mem::free<T>($this->data);
+        $this->data:$ = null;
+        return $v;
+    }
+}

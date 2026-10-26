@@ -112,6 +112,7 @@ bool Compiler::resolve_driver_options(
         || cli.flag(Opt::t_track_allocations)
         || out.options.profile;
     out.options.check_refcounts = cli.flag(Opt::t_check_refcounts);
+    out.options.alloc_cache = cli.flag(Opt::t_alloc_cache);
 
     // the request as written, resolved by Compiler::resolve_subtarget wherever it is needed
     out.options.target_cpu = cli.value(Opt::t_target_cpu);

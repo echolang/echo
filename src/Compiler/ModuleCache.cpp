@@ -171,6 +171,11 @@ bool Compiler::compute_module_keys(
     // and whether `hash::of` folds in a per-process seed: the stdlib's object holds a load of it or a 0
     environment = fnv1a64(options.fixed_hash_seed ? std::string("fixedseed") : std::string("seeded"), environment);
 
+    // **only when the flag is on**, so a default build's keys stay byte for byte
+    if (options.using_alloc_cache()) {
+        environment = fnv1a64(std::string("alloccache"), environment);
+    }
+
     // **and what kind of program this is.** no two kinds share an object
     environment = fnv1a64(
         std::string(Compiler::exec_model_environment(options)), environment);

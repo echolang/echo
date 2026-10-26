@@ -1,8 +1,8 @@
 // a constructor whose body is an implicit guard still gets `return $this` on the success path,
-// and still stops on the absent one. the field-wise constructor is `box(int32)`, so the
+// and still stops on the absent one. the field-wise constructor is `Bin(int32)`, so the
 // written one takes `int32?` and the call site names that
 
-struct box
+struct Bin
 {
     int32 $v;
 
@@ -14,7 +14,7 @@ struct box
 }
 
 int32? $n = 3;
-echo box($n)->v;
+echo Bin($n)->v;
 
 int32? $gone = null;
-echo box($gone)->v;
+echo Bin($gone)->v;

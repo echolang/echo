@@ -1,0 +1,7 @@
+flags: --alloc-cache --optimize none
+
+--- OUT --->
+7
+--- IR --->
+CHECK: @__eco_cache_alloc
+CHECK: @__eco_cache_free

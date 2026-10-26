@@ -33,6 +33,7 @@
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProfileDriver.h"
+#include "Compiler/AllocRuntime.h"
 #include "Compiler/ProgramStamp.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/PublicTools.h"
@@ -1416,6 +1417,17 @@ static bool resolve_invocation(
         }
     }
 
+    if (driver.options.using_alloc_cache()) {
+        for (const Program &program : out.programs) {
+            if (program.codegen.is_wasm()) {
+                diagnostics.render_untyped(
+                    "Allocation Cache Unavailable",
+                    "'--alloc-cache' needs a host clang the wasi row does not always have");
+                return false;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -1922,6 +1934,19 @@ static std::optional<int> compile_and_link_program(
             "'{}' could not be created, and the objects on the way to '{}' have nowhere to go.",
             front.layout().scratch_dir().string(), output));
         return 1;
+    }
+
+    {
+        std::string runtime_error;
+        if (!Compiler::alloc_link_runtime(
+                front.options,
+                front.layout().scratch_dir() / "alloc",
+                front.layout().scratch_dir(),
+                link,
+                runtime_error)) {
+            diagnostics.render_untyped("Allocation Cache Failed", runtime_error);
+            return 1;
+        }
     }
 
     {

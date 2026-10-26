@@ -1,0 +1,20 @@
+// one allocation for the cell, gone at the brace. a short string is inline, so the count is still
+// the box itself
+
+echo mem::live_allocations();
+
+{
+    box<int32> $n = box<int32>(7);
+    echo mem::live_allocations();
+    echo $n->get();
+}
+
+echo mem::live_allocations();
+
+{
+    box<string> $s = box<string>('hi');
+    echo mem::live_allocations();
+    echo $s->get();
+}
+
+echo mem::live_allocations();

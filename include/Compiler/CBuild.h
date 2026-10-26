@@ -6,6 +6,7 @@
 #include "AST/ASTAttributeReader.h"
 #include "Compiler/CompilerOptions.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -164,6 +165,31 @@ namespace Compiler
     // defined COFF text/data names from `llvm-nm --extern-only --defined-only` output.
     // isolated from the linker so the scrape can be tested without running clang
     std::vector<std::string> coff_exports_from_nm(const std::string &nm_output);
+
+    // one file of an embedded C runtime, written into `source_dir` then compiled
+    struct EmbeddedCFile
+    {
+        const char *name;
+        const char *text;
+    };
+
+    // concatenated texts, folded into a program stamp so an edited runtime rebuilds
+    std::string embedded_c_stamp(const EmbeddedCFile *files, size_t file_count);
+
+    // write `files` into `source_dir` and compile the `.c` ones via `build_c_sources`.
+    // `spec` carries `module_name` and flags; this adds the include and the sources.
+    // `noun` is "the allocation cache" / "the profile runtime", for the sentences
+    bool compile_embedded_c(
+        const char *noun,
+        CBuildSpec spec,
+        const EmbeddedCFile *files,
+        size_t file_count,
+        const CompilerOptions &options,
+        const std::filesystem::path &source_dir,
+        const std::filesystem::path &scratch_dir,
+        std::vector<std::filesystem::path> &out_objects,
+        std::string &out_error
+    );
 };
 
 #endif

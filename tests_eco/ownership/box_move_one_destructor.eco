@@ -1,0 +1,21 @@
+// mv transfers the cell. the payload destructor runs once, on the destination, after the print
+
+struct Probe
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function scoped() : void
+{
+    box<Probe> $a = box<Probe>(Probe(1));
+    box<Probe> $b = mv $a;
+    echo 100;
+}
+
+scoped();
+echo 200;

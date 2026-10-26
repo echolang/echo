@@ -2,8 +2,14 @@ flags: --track-allocations
 
 --- OUT --->
 a3b
-2
+0
+0
+user7
 0
 Ronon is 3
 3
 a|b|c
+0
+0123456789abcdef
+16
+2

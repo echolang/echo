@@ -1,6 +1,5 @@
 // multi-piece interpolation seeds str::text and take()s a string. one hole stays str::from.
-// take() plants a class box over the live block, so live_allocations is 2 even for a
-// short result. a string-seed fallback would seat INLINE bytes and answer 0
+// a result of at most string::INLINE bytes stays inline, so live_allocations is 0
 {
     int32 $k = 3;
     string $built = "a{$k}b";
@@ -9,11 +8,31 @@
 }
 echo mem::live_allocations();
 
+{
+    int32 $i = 7;
+    string $s = "user{$i}";
+    echo $s;
+    echo mem::live_allocations();
+}
+
 int32 $n = 3;
 string $name = 'Ronon';
 
 echo "{$name} is {$n}";
 echo "{$n}";
 
-array<string> $parts = ['a', 'b', 'c'];
-echo str::join($parts, '|');
+{
+    array<string> $parts = ['a', 'b', 'c'];
+    usize $base = mem::live_allocations();
+    string $joined = str::join($parts, '|');
+    echo $joined;
+    echo mem::live_allocations() - $base;
+}
+
+{
+    string $x = 'abcdef';
+    string $long = "0123456789{$x}";
+    echo $long;
+    echo $long->size();
+    echo mem::live_allocations();
+}

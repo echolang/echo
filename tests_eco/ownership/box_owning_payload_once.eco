@@ -1,0 +1,21 @@
+// seating a T into the cell is a move. the payload destructor runs once, when the box drops, not
+// also at construction
+
+struct Probe
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function scoped() : void
+{
+    box<Probe> $b = box<Probe>(Probe(7));
+    echo 100;
+}
+
+scoped();
+echo 200;

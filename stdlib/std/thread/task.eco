@@ -12,7 +12,7 @@ namespace std::thread;
 // pointer into the object, and the write would be unaccounted storage. this cell is
 // an ordinary class: the worker assigns a field, the task reads it after join
 #[atomic]
-private class box<T>
+private class cell<T>
 {
     T? $value;
 
@@ -26,9 +26,9 @@ private class box<T>
 public class task<T>
 {
     private handle? $worker;
-    private box<T> $slot;
+    private cell<T> $slot;
 
-    // join before the box dies. a class deinit runs this, then drops fields in
+    // join before the cell dies. a class deinit runs this, then drops fields in
     // reverse declaration order — `$slot` first. after join the worker has already
     // dropped its retain, so this drop is the last
     destructor()
@@ -40,7 +40,7 @@ public class task<T>
         $h->join();
     }
 
-    private constructor(box<T> $slot)
+    private constructor(cell<T> $slot)
     {
         $this->slot = $slot;
     }
@@ -51,7 +51,7 @@ public class task<T>
      */
     static function spawn(function<T()> $work) : result<task<T>, error>
     {
-        box<T> $out = box<T>();
+        cell<T> $out = cell<T>();
         task<T> $t = task<T>($out);
 
         handle $h = guard handle::spawn(function[mv $work, mv $out]() : void {

@@ -1,0 +1,30 @@
+// wrapping a box into a tagged T? is a move of the payload into the pair. the cell destructor
+// runs once, when the optional dies
+
+struct Probe
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function make(int32 $tag) : box<Probe>?
+{
+    box<Probe> $b = box<Probe>(Probe($tag));
+    return $b;
+}
+
+function declared() : void
+{
+    box<Probe>? $x = box<Probe>(Probe(1));
+    echo 100;
+}
+
+declared();
+echo 200;
+
+box<Probe>? $y = make(7);
+echo 300;

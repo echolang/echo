@@ -1,5 +1,5 @@
-// unique growable text: append, reserve, take into a string. take plants a str::buf
-// over the live block, including a short result - this type does not seat INLINE bytes
+// unique growable text: append, reserve, take into a string. a short take seats
+// INLINE bytes and allocates nothing. reserve past INLINE, then take, plants a buf
 {
     str::text $empty = str::text();
     string $none = $empty->take();
@@ -8,10 +8,18 @@
     echo mem::live_allocations();
 }
 
+{
+    str::text $r = str::text();
+    $r->reserve(8);
+    echo mem::live_allocations();
+    echo $r->capacity() == string::INLINE;
+}
+
 str::text $t = str::text();
 
 echo $t->empty();
 echo $t->size();
+echo $t->capacity() == string::INLINE;
 
 $t->append('hello');
 $t->push(32);
@@ -21,10 +29,15 @@ echo $t->size();
 
 string $short = $t->take();
 
-echo $short;
 echo $t->empty();
+echo $t->capacity() == string::INLINE;
 echo mem::live_allocations();
 echo mem::refs($short->owner);
+
+// take copied: a write into the builder must not change $short
+$t->append('XXXXX');
+echo $short;
+echo $t->take();
 
 $short = '';
 echo mem::live_allocations();

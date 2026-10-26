@@ -33,9 +33,9 @@ namespace Compiler::LLVM
     public:
         MemoryCodegen(CodegenContext &ctx) : _ctx(ctx) {};
 
-        // `size` bytes, uninitialized, or null when the allocator could not. With tracking off this is
-        // a direct `malloc` call and the seam costs nothing at all - not even the extra call frame the
-        // thunk would add
+        // `size` bytes, uninitialized, or null when the allocator could not. Untracked this is
+        // libc malloc, or `__eco_cache_alloc` when `--alloc-cache` is on. Tracked it goes through
+        // the counting thunk, which calls the same seam
         llvm::Value *gen_alloc(llvm::Value *size, const llvm::Twine &name);
 
         // resize a block, moving it if it has to. Tracking-wise the interesting one: see the thunk
@@ -101,6 +101,30 @@ namespace Compiler::LLVM
         // left to LLVM to infer - because it is a fact about the allocator and not about an Echo type,
         // and because the JIT path runs no pass that would infer it
         void mark_allocating_thunk(llvm::Function *thunk, unsigned size_argument);
+
+        // the C cache, declared into this unit. native links the object; JIT
+        // resolves it from this process (echoc_lib compiles the same C). the
+        // three share alloc-family `__eco_cache`; free and realloc take allocptr
+        enum class CacheCallee
+        {
+            t_alloc,
+            t_realloc,
+            t_free,
+        };
+
+        llvm::FunctionCallee cache_callee(
+            const char *name,
+            llvm::Type *return_type,
+            const std::vector<llvm::Type *> &parameter_types,
+            CacheCallee kind
+        );
+
+        llvm::FunctionCallee heap_callee(CacheCallee kind);
+
+        // libc, or the C cache when `--alloc-cache` is on a native target
+        llvm::FunctionCallee heap_alloc();
+        llvm::FunctionCallee heap_realloc();
+        llvm::FunctionCallee heap_free();
     };
 };
 

@@ -23,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -885,4 +886,66 @@ std::vector<std::string> Compiler::coff_exports_from_nm(const std::string &nm_ou
     }
 
     return names;
+}
+
+std::string Compiler::embedded_c_stamp(const EmbeddedCFile *files, size_t file_count)
+{
+    std::string out;
+    for (size_t i = 0; i < file_count; i++) {
+        out += files[i].text;
+    }
+    return out;
+}
+
+bool Compiler::compile_embedded_c(
+    const char *noun,
+    CBuildSpec spec,
+    const EmbeddedCFile *files,
+    size_t file_count,
+    const CompilerOptions &options,
+    const std::filesystem::path &source_dir,
+    const std::filesystem::path &scratch_dir,
+    std::vector<std::filesystem::path> &out_objects,
+    std::string &out_error
+)
+{
+    out_objects.clear();
+
+    std::error_code ec;
+    std::filesystem::create_directories(source_dir, ec);
+    if (ec) {
+        out_error = fmt::format("'{}' could not be created for {}.", source_dir.string(), noun);
+        return false;
+    }
+
+    spec.includes.push_back(std::filesystem::absolute(source_dir));
+
+    for (size_t i = 0; i < file_count; i++) {
+        const EmbeddedCFile &file = files[i];
+        const std::filesystem::path path = source_dir / file.name;
+        if (!write_artifact_file(path, file.text)) {
+            out_error = fmt::format("{} could not be written.", noun);
+            return false;
+        }
+
+        if (std::string_view(file.name).ends_with(".c")) {
+            spec.sources.push_back(std::filesystem::absolute(path));
+        }
+    }
+
+    std::vector<std::string> explain;
+    CBuildResult compiled;
+    const std::filesystem::path cache = source_dir / "cc";
+
+    if (!build_c_sources(spec, options, cache, scratch_dir, explain, compiled, out_error)) {
+        return false;
+    }
+
+    if (compiled.objects.empty()) {
+        out_error = fmt::format("{} produced no object.", noun);
+        return false;
+    }
+
+    out_objects = compiled.objects;
+    return true;
 }

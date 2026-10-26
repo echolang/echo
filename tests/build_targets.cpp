@@ -888,6 +888,17 @@ TEST_CASE("a native lib hides C globals from #[cc:]", "[targets][cbuild]")
     REQUIRE_FALSE(has_export(nm.output, "eco_cc_fn"));
 }
 
+TEST_CASE("alloc-cache is refused on wasm", "[targets]")
+{
+    ScopedProject project("wasm_alloc_cache");
+    write_file(project.root() / "app.eco", "echo 1;\n");
+
+    const ProcessResult built = project.echoc("build --alloc-cache --target-os wasi -o app app.eco");
+    INFO(built.output);
+    REQUIRE(built.exit_code != 0);
+    REQUIRE(built.output.find("Allocation Cache Unavailable") != std::string::npos);
+}
+
 TEST_CASE("track-allocations is refused on a lib", "[targets]")
 {
     ScopedProject project("lib_track");

@@ -1,0 +1,4 @@
+// #[unique] refuses the copy. the unique-type wording, not "give it a copy constructor"
+
+box<int32> $a = box<int32>(1);
+box<int32> $b = $a;

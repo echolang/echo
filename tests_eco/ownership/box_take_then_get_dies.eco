@@ -1,0 +1,6 @@
+// get() after take() is empty: the cell was freed. stops in every build
+
+box<int32> $n = box<int32>(7);
+echo $n->take();
+echo $n->get();
+echo 'unreachable';
