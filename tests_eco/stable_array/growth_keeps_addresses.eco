@@ -1,0 +1,27 @@
+// the contract: live slots do not move. take a pointer to the first element, grow past
+// several block boundaries, and the old address still names that slot
+stable_array<int32> $a;
+echo $a->count();
+echo $a->capacity();
+echo $a->empty();
+
+$a[] = 7;
+ptr<int32> $first = &$a[0];
+int32& $also = &$a[0];
+
+usize $i = 1;
+while ($i < 80) {
+    $a[] = $i as int32;
+    $i = $i + 1;
+}
+
+echo $a->count();
+echo $first;
+echo $also;
+ptr<int32> $again = &$a[0];
+echo $first:$ == $again:$;
+
+$first = 99;
+echo $a[0];
+echo $a[79];
+echo $a->room() > 0;

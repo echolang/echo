@@ -200,32 +200,8 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         }
 
         // **a floor on the first allocation.** doubling from zero is zero, so without this the clamp
-        // above hands back exactly `$count`, and an array filled one element at a time reallocates on
-        // its first, second *and* third push to arrive at four elements - three trips through the
-        // allocator to do one allocation's work.
-        //
-        // it can only ever raise `$grown`, and `$grown` is already max(cap * 2, $count) - so a request
-        // above the floor is untouched and the doc's promise about reserving up front is unchanged.
-        // `fit` is the way to ask for a small buffer sized to the byte.
-        //
-        // by element size: the smaller the element, the more of them fit in the smallest block an
-        // allocator will hand out at all, so the floor costs nothing there and saves more. A `T` bigger
-        // than a page gets no floor, because for one of those the allocation *is* the cost and rounding
-        // it up doubles that.
-        //
-        // plain `if`s and not `const if`: `mem::size<T>()` folds to a constant at the call site in
-        // codegen, so both tests are already decided by the time LLVM sees them - but AST::const_fold
-        // cannot answer a layout query before codegen, so `const if` would refuse it. When that
-        // lands these should become `const if` and stop being branches in an unoptimized build too
-        usize $floor = 4;
-
-        if (mem::size<T>() == 1) {
-            $floor = 8;
-        }
-
-        if (mem::size<T>() > 1024) {
-            $floor = 1;
-        }
+        // above hands back exactly `$count`. `arr::growth_floor` is the shared size policy
+        usize $floor = arr::growth_floor<T>();
 
         if ($grown < $floor) {
             $grown = $floor;

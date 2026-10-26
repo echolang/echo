@@ -1,0 +1,5 @@
+// the bounds assert names this type, and the location is the operator in the stdlib file
+stable_array<int32> $numbers = [1, 2, 3];
+
+echo $numbers->get(0);
+echo $numbers->get(7);

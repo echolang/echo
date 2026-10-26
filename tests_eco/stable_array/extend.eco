@@ -1,0 +1,22 @@
+// extend from an array and from another stable_array. both copy
+array<int32> $src = [1, 2, 3];
+stable_array<int32> $a;
+$a->extend($src);
+echo $a->count();
+echo $a[2];
+
+stable_array<int32> $b = [10, 20];
+$a->extend($b);
+echo $a->count();
+echo $a[3];
+echo $a[4];
+echo $b[0];
+
+stable_array<string> $words;
+array<string> $more = [];
+$more[] = '';
+$more[0]->reserve(string::INLINE + 1);
+$more[0]->append('hi');
+$words->extend($more);
+echo $words[0];
+echo $words->count();

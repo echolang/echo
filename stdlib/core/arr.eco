@@ -89,3 +89,32 @@ public function extend_from<T>(array<T>& $into, ptr<const T> $src, usize $count)
         }
     }
 }
+
+/**
+ * How many elements the first allocation of a growable sequence should hold.
+ *
+ * Doubling from zero is zero, so a floor is what stops the first three appends each being
+ * their own allocation. Byte-sized `T` gets 8; a `T` bigger than a page gets 1, because the
+ * allocation is already the cost. The caller leaves a request above the floor alone.
+ *
+ * Plain `if`s: `mem::size<T>()` folds in codegen, and `const if` cannot answer a layout
+ * query before that.
+ *
+ * **`#[inline]`**, so `array::reserve` stays a compare and a resize: a call here is a call
+ * on every growth.
+ */
+#[inline]
+internal function growth_floor<T>() : usize
+{
+    usize $floor = 4;
+
+    if (mem::size<T>() == 1) {
+        $floor = 8;
+    }
+
+    if (mem::size<T>() > 1024) {
+        $floor = 1;
+    }
+
+    return $floor;
+}

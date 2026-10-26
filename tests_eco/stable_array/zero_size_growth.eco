@@ -1,0 +1,8 @@
+// a zero-size `T` asks realloc for 0 bytes. glibc and wasi-libc return null from
+// `realloc(p, 0)` as a legitimate free, which is not out of memory
+struct Unit {}
+
+stable_array<Unit> $a;
+$a[] = Unit();
+$a[] = Unit();
+echo $a->count();

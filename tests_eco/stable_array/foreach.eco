@@ -1,0 +1,22 @@
+// foreach walks blocks through the cursor. keyed and const both work
+stable_array<int32> $a = [10, 20, 30];
+
+int32 $sum = 0;
+foreach ($a as $i => const &$n) {
+    echo $i;
+    $sum = $sum + $n;
+}
+echo $sum;
+
+foreach ($a as &$n) {
+    $n = $n + 1;
+}
+echo $a[0];
+echo $a[2];
+
+const $frozen = $a;
+int32 $again = 0;
+foreach ($frozen as const &$n) {
+    $again = $again + $n;
+}
+echo $again;

@@ -1,0 +1,17 @@
+// `$b = $a` copies the elements into new blocks. writing through one does not write the other,
+// and the addresses differ
+stable_array<int32> $a = [1, 2, 3];
+stable_array<int32> $b = $a;
+
+$b[0] = 99;
+echo $a[0];
+echo $b[0];
+
+ptr<int32> $pa = &$a[0];
+ptr<int32> $pb = &$b[0];
+echo $pa:$ == $pb:$;
+
+$c = $a->clone();
+$c[1] = 88;
+echo $a[1];
+echo $c[1];

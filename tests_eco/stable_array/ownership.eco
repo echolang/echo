@@ -1,0 +1,82 @@
+// owns its elements: copy retains, clear destroys and keeps blocks, pop hands over
+{
+    stable_array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
+    $a[0]->append('hello');
+
+    assert(mem::live_allocations() == 4, "directory, block, buf, bytes");
+
+    stable_array<string> $b = $a;
+
+    assert(mem::live_allocations() == 6, "a second directory and block, the string retained");
+
+    echo $b[0];
+    echo $b->count();
+}
+
+assert(mem::live_allocations() == 0, "both gave back their blocks and released the element");
+
+{
+    stable_array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
+    $a[0]->append('gone');
+
+    assert(mem::live_allocations() == 4, "directory, block, one written string");
+
+    $a->clear();
+
+    echo $a->count();
+    assert(mem::live_allocations() == 2, "the element was destroyed and the blocks kept");
+
+    $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
+    $a[0]->append('again');
+    echo $a[0];
+}
+
+assert(mem::live_allocations() == 0, "balanced");
+
+{
+    stable_array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
+    $a[0]->append('popped');
+
+    assert(mem::live_allocations() == 4, "directory, block, one written string");
+
+    {
+        string $out = $a->pop();
+
+        echo $out;
+        echo $a->count();
+
+        assert(mem::live_allocations() == 4, "handed over, not duplicated");
+    }
+
+    assert(mem::live_allocations() == 2, "destroyed with the local that received it");
+}
+
+assert(mem::live_allocations() == 0, "balanced");
+
+{
+    stable_array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
+    $a[0]->append('cloned');
+
+    stable_array<string> $b = $a->clone();
+
+    assert(mem::live_allocations() == 6, "a second directory and block, the element retained");
+
+    echo $b[0];
+}
+
+assert(mem::live_allocations() == 0, "balanced");
+
+echo "balanced";

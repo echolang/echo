@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCopy  stable_array_push_uncopyable_local.eco:14:14
+
+  'Item' owns a resource and cannot be copied implicitly at this argument.
+
+  13 | Item $two = Item(2);
+  14 | $items->push($two);
+     :              ^^^^
+  15 | 
+
+  help: Write 'mv $two' to transfer ownership, take a borrow ('Item&') if the value is only being read, or give 'Item' a copy constructor ('constructor(Item& $other)').
+
+1 error, nothing was compiled.

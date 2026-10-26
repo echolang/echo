@@ -1,0 +1,34 @@
+// each block is its own allocation. growth adds blocks rather than resizing one region.
+// the destructor gives them all back
+{
+    stable_array<int32> $numbers = [1, 2, 3];
+
+    usize $before = mem::live_allocations();
+    assert($before >= 2, "directory plus at least one block");
+
+    usize $i = 0;
+    while ($i < 100) {
+        $numbers->push(7);
+        $i = $i + 1;
+    }
+
+    echo $numbers->count();
+    echo $numbers[99];
+    echo mem::live_allocations() > $before;
+}
+
+assert(mem::live_allocations() == 0, "the array gave its blocks back");
+
+{
+    stable_array<int32> $a = [1, 2, 3];
+    stable_array<int32> $b = $a;
+
+    $b->push(4);
+
+    echo $a->count();
+    echo $b->count();
+}
+
+assert(mem::live_allocations() == 0, "both gave theirs back");
+
+echo "balanced";

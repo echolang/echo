@@ -1,0 +1,31 @@
+// copy and extend walk every source block. grow past several boundaries, then duplicate
+stable_array<int32> $a;
+
+usize $i = 0;
+while ($i < 80) {
+    $a[] = $i as int32;
+    $i = $i + 1;
+}
+
+stable_array<int32> $b = $a;
+
+echo $b->count();
+echo $b[0];
+echo $b[4];
+echo $b[79];
+
+ptr<int32> $pa = &$a[0];
+ptr<int32> $pb = &$b[0];
+echo $pa:$ == $pb:$;
+
+$b[0] = 99;
+echo $a[0];
+echo $b[0];
+
+stable_array<int32> $c;
+$c[] = 7;
+$c->extend($a);
+echo $c->count();
+echo $c[0];
+echo $c[1];
+echo $c[80];

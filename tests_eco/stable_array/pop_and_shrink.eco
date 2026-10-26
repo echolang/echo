@@ -1,0 +1,21 @@
+// pop backs the bump up, so the next append reuses that address. clear keeps capacity.
+// shrink drops trailing empty blocks
+stable_array<int32> $a = [1, 2, 3];
+ptr<int32> $tail = &$a[2];
+
+echo $a->pop();
+echo $a->count();
+
+$a[] = 9;
+ptr<int32> $reused = &$a[2];
+echo $a[2];
+echo $tail:$ == $reused:$;
+
+usize $cap = $a->capacity();
+$a->clear();
+echo $a->count();
+echo $a->capacity() == $cap;
+
+$a->shrink();
+echo $a->capacity();
+echo $a->empty();

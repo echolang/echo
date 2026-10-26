@@ -1,0 +1,16 @@
+// a destination-typed literal fills through the append operator. untyped `[1, 2]` is still
+// `array<int32>`: this type has no core binding, and nothing mints it
+stable_array<int32> $a = [1, 2, 3];
+echo $a->count();
+echo $a[0];
+echo $a[2];
+
+stable_array<int32> $empty = [];
+echo $empty->count();
+
+$a = [7, 8];
+echo $a->count();
+echo $a[1];
+
+$b = [1, 2, 3];
+echo $b->data() != null;

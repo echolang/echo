@@ -1,0 +1,592 @@
+/**
+ * A growable, **owning** sequence whose live slots never move.
+ *
+ * `array<T>` grows by replacing the region. Every `T&` and `ptr<T>` into the old one is stale.
+ * This grows by taking another block and leaving the old ones alone. Addresses you already have
+ * stay valid until this value dies, or until you `clear` / `truncate` / `pop` the slot they name.
+ *
+ * A list of never-resized `mem::buffer<T>` blocks plus a bump. Full, a new block; the old ones
+ * stay put. Memory is fragmented on purpose: that is what keeps seats still. It does not compact.
+ *
+ * Not a slab, not a pool. A hole in the middle is never reused. `pop` and `clear` only back the
+ * bump up, which may reseat the next append at an address that was live before. Not a drop-in
+ * for `array` when you needed one contiguous region: there is no `data()`, no `sub()`, no C
+ * spare, and no sort-through-a-window.
+ *
+ * There is no `#[echoc::core:]` binding. The compiler never mints this type. An untyped `[1, 2]`
+ * is still `array<int32>`. A destination-typed literal fills through the append operator, the
+ * same way `ordered_map` fills from a destination.
+ *
+ * Counts, capacities and indices are `usize` throughout, matching `array<T>`.
+ */
+public struct stable_array<T> : contract::iterable<T>, contract::const_iterable<const T>
+{
+    // **private**, and the operators go through `seat` / `grow_by` so they do not have to read
+    // these. an operator is a free declaration, so a field it named would have to stay reachable
+    // the way `array::$storage` does. the walk lives in one method instead
+    private array<mem::buffer<T>> $blocks;
+    private usize $len;
+    private usize $cap;
+
+    /**
+     * An empty array that has not allocated anything.
+     */
+    constructor()
+    {
+        $this->blocks = array<mem::buffer<T>>();
+        $this->len = 0;
+        $this->cap = 0;
+    }
+
+    /**
+     * The deep copy. New blocks, copies of the elements. Addresses in the copy are new.
+     *
+     * Recognised by shape: one non-nullable borrow of the applied type. `const`, so a const
+     * source can still be copied. Written through `extend`, so the `const if` and the element
+     * loop have one implementation.
+     */
+    constructor(const stable_array<T>& $other)
+    {
+        $this->blocks = array<mem::buffer<T>>();
+        $this->len = 0;
+        $this->cap = 0;
+
+        $this->extend($other);
+    }
+
+    /**
+     * Destroys every element. The directory then destroys each block's storage, the same split
+     * `array<T>` has with `mem::buffer<T>`.
+     */
+    destructor()
+    {
+        $this->clear();
+    }
+
+    /**
+     * How many elements are in it.
+     */
+    const function count() : usize
+    {
+        return $this->len;
+    }
+
+    /**
+     * How many it has room for before it has to take another block.
+     */
+    const function capacity() : usize
+    {
+        return $this->cap;
+    }
+
+    /**
+     * True when it holds no elements. Says nothing about capacity.
+     */
+    const function empty() : bool
+    {
+        if ($this->len > 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * How many elements it can still accept without taking another block.
+     */
+    const function room() : usize
+    {
+        return $this->cap - $this->len;
+    }
+
+    /**
+     * Makes room for at least `$count` live elements without changing `count()`.
+     *
+     * Existing slots do not move. A request above the current capacity appends a new block (or
+     * several) and leaves every address you already have alone.
+     */
+    function reserve(usize $count) : void
+    {
+        if ($this->cap >= $count) {
+            return;
+        }
+
+        $this->grow_by($count - $this->len);
+    }
+
+    /**
+     * Grows as `$n` appends from here would, without writing slots.
+     *
+     * `$a[]=` and `extend` share this so a bulk fill ends up at the same capacity the equivalent
+     * appends would.
+     */
+    private function grow_by(usize $n) : void
+    {
+        if ($n > ~(0 as usize) - $this->len) {
+            mem::out_of_memory();
+        }
+
+        usize $needed = $this->len + $n;
+
+        while ($this->cap < $needed) {
+            $this->add_block($needed - $this->cap);
+        }
+    }
+
+    /**
+     * Drops trailing empty blocks so `capacity()` sits on the last live slot's block.
+     *
+     * Live slots do not move. A block that still holds a live element stays. After `clear()`,
+     * this is what gives the storage back without destroying the value itself.
+     */
+    function shrink() : void
+    {
+        usize $base = 0;
+        usize $keep = 0;
+        usize $b = 0;
+
+        while ($b < $this->blocks->count()) {
+            usize $block_cap = $this->blocks[$b]->capacity();
+
+            if ($base >= $this->len) {
+                break;
+            }
+
+            $keep = $keep + 1;
+            $base = $base + $block_cap;
+            $b = $b + 1;
+        }
+
+        while ($this->blocks->count() > $keep) {
+            usize $dropped = $this->blocks[$this->blocks->count() - 1]->capacity();
+            mem::buffer<T> $doomed = $this->blocks->pop();
+            $this->cap = $this->cap - $dropped;
+        }
+
+        $this->blocks->shrink();
+    }
+
+    /**
+     * Appends one element. Exactly what `$a[] = $value` means, written as a call.
+     */
+    function push(T $value) : void
+    {
+        $this[] = mv $value;
+    }
+
+    /**
+     * Appends every element of `$other`, leaving `$other` untouched.
+     *
+     * One `grow_by` up front. Bytes copy block by block; anything else copies through `$this[] =`
+     * so each element gets its own copy constructor.
+     */
+    function extend(const stable_array<T>& $other) : void
+    {
+        usize $n = $other->count();
+
+        if ($n == 0) {
+            return;
+        }
+
+        $this->grow_by($n);
+
+        const if (mem::is_trivially_copyable<T>()) {
+            usize $base = 0;
+            usize $b = 0;
+
+            while ($base < $n) {
+                usize $block_cap = $other->blocks[$b]->capacity();
+                usize $live = $block_cap;
+
+                if ($base + $live > $n) {
+                    $live = $n - $base;
+                }
+
+                slice<const T> $from = $other->blocks[$b]->sub(0, $live);
+                $this->copy_into($this->len + $base, ptr<const T>($from->data:$), $live);
+                $base = $base + $live;
+                $b = $b + 1;
+            }
+
+            $this->len = $this->len + $n;
+        }
+        else {
+            usize $i = 0;
+
+            while ($i < $n) {
+                $this[] = $other[$i];
+                $i = $i + 1;
+            }
+        }
+    }
+
+    /**
+     * Appends every element of a contiguous `$other`.
+     */
+    function extend(const array<T>& $other) : void
+    {
+        usize $n = $other->count();
+
+        if ($n == 0) {
+            return;
+        }
+
+        $this->grow_by($n);
+
+        const if (mem::is_trivially_copyable<T>()) {
+            $this->copy_into($this->len, $other->data(), $n);
+            $this->len = $this->len + $n;
+        }
+        else {
+            usize $i = 0;
+
+            while ($i < $n) {
+                $this[] = $other[$i];
+                $i = $i + 1;
+            }
+        }
+    }
+
+    /**
+     * Grows by one and hands back a borrow of the new element, so it can be filled in place.
+     *
+     * The slot starts out uninitialized while `count()` has already grown. `&$a[]` is the same
+     * thing written as a place. That place stays valid across later appends.
+     */
+    function slot() : T&
+    {
+        return &$this[];
+    }
+
+    /**
+     * Removes the last element and hands over its ownership.
+     *
+     * The next append may reuse that exact address. Pointers to the popped slot are dangling.
+     */
+    function pop() : T
+    {
+        assert($this->len > 0, "pop from an empty stable_array");
+
+        $this->len = $this->len - 1;
+
+        return $this->take_at($this->len);
+    }
+
+    /**
+     * A copy of the element at `$index`.
+     */
+    const function get(usize $index) : T
+    {
+        return $this[$index];
+    }
+
+    /**
+     * A borrow of the element at `$index`. The method form of `$a[$index]`.
+     */
+    function at(usize $index) : T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * The same borrow, read-only, for when the array itself is `const`.
+     */
+    const function at(usize $index) : const T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * Destroys every element and keeps the blocks, so the next fill reuses them.
+     */
+    function clear() : void
+    {
+        $this->truncate(0);
+    }
+
+    /**
+     * Destroys every element past `$count` and keeps the blocks.
+     *
+     * Pointers into the destroyed suffix are dangling. Slots that remain do not move.
+     */
+    function truncate(usize $count) : void
+    {
+        if ($count >= $this->len) {
+            return;
+        }
+
+        const if (mem::needs_destruction<T>()) {
+            while ($this->len > $count) {
+                $this->len = $this->len - 1;
+                T $doomed = $this->take_at($this->len);
+            }
+        }
+
+        $this->len = $count;
+    }
+
+    /**
+     * A cursor over the elements.
+     */
+    function iterate() : stable_array_iterator<T>
+    {
+        return stable_array_iterator<T>($this);
+    }
+
+    /**
+     * A cursor over the elements of an array nobody may write.
+     */
+    const function iterate() : stable_array_const_iterator<T>
+    {
+        return stable_array_const_iterator<T>($this);
+    }
+
+    /**
+     * An explicit deep copy: the same thing `$b = $a` does, said out loud at the call site.
+     */
+    const function clone() : stable_array<T>
+    {
+        return stable_array<T>($this);
+    }
+
+    /**
+     * The block and offset of logical `$index`. `$index` must sit inside `capacity()`.
+     */
+    private const function locate(usize $index) : stable_loc
+    {
+        usize $base = 0;
+        usize $b = 0;
+        usize $n = $this->blocks->count();
+
+        while ($b < $n) {
+            usize $block_cap = $this->blocks[$b]->capacity();
+
+            if ($index < $base + $block_cap) {
+                return stable_loc($b, $index - $base);
+            }
+
+            $base = $base + $block_cap;
+            $b = $b + 1;
+        }
+
+        die('stable_array locate past the end');
+    }
+
+    /**
+     * Grows by one, raises `len`, hands back the new slot. The append operator is this call.
+     */
+    internal function bump() : T&
+    {
+        $this->grow_by(1);
+        $this->len = $this->len + 1;
+
+        return $this->seat($this->len - 1);
+    }
+
+    /**
+     * A borrow of the slot at `$index`, **unchecked against `len`**. The append operator seats a
+     * freshly grown index this way. User indexing goes through the operators, which assert.
+     */
+    internal function seat(usize $index) : T&
+    {
+        stable_loc $at = $this->locate($index);
+
+        return $this->blocks[$at->block]->at($at->offset);
+    }
+
+    internal const function seat(usize $index) : const T&
+    {
+        stable_loc $at = $this->locate($index);
+
+        return $this->blocks[$at->block]->at($at->offset);
+    }
+
+    private function take_at(usize $index) : T
+    {
+        stable_loc $at = $this->locate($index);
+
+        return $this->blocks[$at->block]->take($at->offset);
+    }
+
+    private function add_block(usize $at_least) : void
+    {
+        usize $prev = 0;
+
+        if ($this->blocks->count() > 0) {
+            $prev = $this->blocks[$this->blocks->count() - 1]->capacity();
+        }
+
+        usize $next = $prev * 2;
+
+        // doubling wrapped: a last block of 2^31 on wasm32, or 2^63 natively
+        if ($prev != 0 && $next <= $prev) {
+            mem::out_of_memory();
+        }
+
+        if ($next < $at_least) {
+            $next = $at_least;
+        }
+
+        usize $floor = arr::growth_floor<T>();
+
+        if ($next < $floor) {
+            $next = $floor;
+        }
+
+        // $cap is the sum of block capacities; wrapping it would make grow_by loop forever
+        if ($next > ~(0 as usize) - $this->cap) {
+            mem::out_of_memory();
+        }
+
+        mem::buffer<T> $block = mem::buffer<T>();
+        $block->resize($next);
+        $this->blocks[] = mv $block;
+        $this->cap = $this->cap + $next;
+    }
+
+    /**
+     * Copies `$n` bytes-as-`T` from `$src` into logical `$dst`, spanning blocks as needed.
+     *
+     * The destination slots are spare. Caller has already `grow_by`'d and has not yet raised
+     * `len` over them.
+     */
+    private function copy_into(usize $dst, ptr<const T> $src, usize $n) : void
+    {
+        usize $done = 0;
+
+        while ($done < $n) {
+            stable_loc $at = $this->locate($dst + $done);
+            usize $room = $this->blocks[$at->block]->capacity() - $at->offset;
+            usize $left = $n - $done;
+            usize $chunk = $room;
+
+            if ($chunk > $left) {
+                $chunk = $left;
+            }
+
+            slice<T> $into = $this->blocks[$at->block]->sub($at->offset, $chunk);
+            mem::copy<T>($into->data, ptr<T>($src:$ + $done), $chunk);
+            $done = $done + $chunk;
+        }
+    }
+}
+
+/**
+ * Block index and offset inside it. `locate`'s answer, so `seat` / `take_at` / `copy_into` do
+ * not each keep a copy of the walk.
+ */
+internal struct stable_loc
+{
+    usize $block;
+    usize $offset;
+}
+
+/**
+ * The cursor `stable_array<T>` iterates through.
+ *
+ * It holds the owner by address and a snapshot of `count()`, so the trip count is a local.
+ * Appending during the loop does not move slots the cursor already named; it also does not
+ * make those new slots appear in this walk.
+ */
+public struct stable_array_iterator<T> : contract::iterator<T>, contract::keyed<usize>
+{
+    private stable_array<T>& $owner;
+    private usize $len;
+    private usize $pos;
+
+    internal constructor(stable_array<T>& $src)
+    {
+        $this->owner:$ = $src;
+        $this->len = $src->count();
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->len) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    function current() : T&
+    {
+        return $this->owner->seat($this->pos - 1);
+    }
+
+    function key() : usize
+    {
+        return $this->pos - 1;
+    }
+}
+
+/**
+ * The read-only cursor. A second type rather than `stable_array_iterator<const T>`, because
+ * the owner is `stable_array<T>` and substitution cannot turn that into a const walk.
+ */
+public struct stable_array_const_iterator<T> : contract::iterator<const T>, contract::keyed<usize>
+{
+    private const stable_array<T>& $owner;
+    private usize $len;
+    private usize $pos;
+
+    internal constructor(const stable_array<T>& $src)
+    {
+        $this->owner:$ = $src;
+        $this->len = $src->count();
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->len) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    function current() : const T&
+    {
+        return $this->owner->seat($this->pos - 1);
+    }
+
+    function key() : usize
+    {
+        return $this->pos - 1;
+    }
+}
+
+/**
+ * The element contract. Bounds-checked with `assert`, so a debug build catches the mistake
+ * and a release build pays nothing.
+ */
+operator<T> (stable_array<T>& $a)[usize $index] : T&
+{
+    assert($index < $a->count(), "stable_array index out of range");
+
+    return $a->seat($index);
+}
+
+operator<T> (const stable_array<T>& $a)[usize $index] : const T&
+{
+    assert($index < $a->count(), "stable_array index out of range");
+
+    return $a->seat($index);
+}
+
+/**
+ * The append contract: `$a[] = $value` grows by one and hands back the new slot.
+ *
+ * The slot is uninitialized, and the assignment writing into it is an initialization. The
+ * address remains valid across later appends.
+ */
+operator<T> (stable_array<T>& $a)[] : T&
+{
+    return $a->bump();
+}

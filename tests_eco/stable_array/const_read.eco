@@ -1,0 +1,16 @@
+// a const stable_array indexes, answers its read-only methods, and copies
+stable_array<int32> $source = [1, 2, 3];
+const $frozen = $source;
+
+echo $frozen[0];
+echo $frozen->count();
+echo $frozen->get(2);
+echo $frozen->empty();
+
+$source[0] = 9;
+echo $source[0];
+
+$copy = $frozen->clone();
+$copy[1] = 7;
+echo $copy[1];
+echo $frozen[1];

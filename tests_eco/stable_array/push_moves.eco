@@ -1,0 +1,32 @@
+// `push` takes T by value, then seats that parameter with `mv`. a temporary or a moved local
+// is therefore zero copies, and a surviving local is copied once at the call, not again inside
+// the method. `$a[] = Item(...)` is the same seating without the call
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(Item& $other)
+    {
+        $this->n = $other->n;
+        echo "copy {$this->n}";
+    }
+}
+
+stable_array<Item> $items = stable_array<Item>();
+
+$items[] = Item(1);
+$items->push(Item(2));
+
+Item $three = Item(3);
+$items->push(mv $three);
+
+Item $four = Item(4);
+$items->push($four);
+
+echo $items->count();
+echo $four->n;
