@@ -1,0 +1,41 @@
+// taking one field of a dying temp still copies when another field needs a destructor. eliding
+// would skip the holder's teardown and leak `$keep`
+
+struct Keep
+{
+    destructor()
+    {
+        echo 'keep';
+    }
+}
+
+struct Out
+{
+    constructor()
+    {
+    }
+
+    constructor(const Out& $other)
+    {
+        echo 'copy';
+    }
+
+    destructor()
+    {
+        echo 'out';
+    }
+}
+
+struct Holder
+{
+    Keep $keep;
+    Out $out;
+
+    function take() : Out&
+    {
+        return $this->out;
+    }
+}
+
+Out $p = Holder(Keep(), Out())->take();
+echo 1;

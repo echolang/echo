@@ -1,0 +1,36 @@
+// reading the payload out of a temporary result moves: unwrap() returns T& into a result that dies
+// at the semicolon. the same unwrap of a live local still copies, because the result is still yours
+
+struct Probe
+{
+    array<int64> $xs;
+
+    constructor(array<int64> $xs)
+    {
+        $this->xs = mv $xs;
+    }
+
+    constructor(const Probe& $other)
+    {
+        echo 'copy';
+        $this->xs = $other->xs;
+    }
+}
+
+function make() : result<Probe, string>
+{
+    array<int64> $xs = [1, 2, 3];
+    return .ok(Probe(mv $xs));
+}
+
+function viaUnwrap() : Probe
+{
+    return make()->unwrap();
+}
+
+Probe $a = viaUnwrap();
+echo $a->xs->count();
+
+result<Probe, string> $held = make();
+Probe $b = $held->unwrap();
+echo $b->xs->count();

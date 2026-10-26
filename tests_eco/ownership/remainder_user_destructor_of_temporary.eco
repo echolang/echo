@@ -1,0 +1,19 @@
+// taking a trivial field of a dying temp cannot skip the holder's destructor, so the T& is refused
+
+struct Holder
+{
+    int32 $n = 7;
+
+    destructor()
+    {
+        echo 'dtor';
+    }
+
+    function take() : int32&
+    {
+        return $this->n;
+    }
+}
+
+int32 $x = Holder()->take();
+echo $x;

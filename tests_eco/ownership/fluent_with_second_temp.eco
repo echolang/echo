@@ -1,0 +1,91 @@
+// hydrahon insert_with: `Insert()->row(v)->with(Select()->where($u->id == 1))`.
+// a mutating method on a dying temp that takes an owning by-value argument must
+// still run on the object that is stored. `where('id')` (a primitive) is not this
+
+struct Pred
+{
+    string $s;
+
+    constructor(string $s)
+    {
+        $this->s = $s;
+    }
+
+    constructor(const Pred& $other)
+    {
+        echo 'pred-copy';
+        $this->s = $other->s;
+    }
+}
+
+struct Row
+{
+    string $name;
+
+    constructor(string $name)
+    {
+        $this->name = $name;
+    }
+
+    constructor(const Row& $other)
+    {
+        echo 'row-copy';
+        $this->name = $other->name;
+    }
+}
+
+struct Filter
+{
+    array<Pred> $wheres = array<Pred>();
+
+    constructor()
+    {
+    }
+
+    constructor(const Filter& $other)
+    {
+        echo 'filter-copy';
+        $this->wheres = $other->wheres;
+    }
+
+    function where(Pred $p) : Filter&
+    {
+        $this->wheres[] = mv $p;
+        return $this;
+    }
+}
+
+struct Insert
+{
+    array<Row> $rows = array<Row>();
+    array<Filter> $ctes = array<Filter>();
+
+    constructor()
+    {
+    }
+
+    constructor(const Insert& $other)
+    {
+        echo 'insert-copy';
+        $this->rows = $other->rows;
+        $this->ctes = $other->ctes;
+    }
+
+    function row(Row $values) : Insert&
+    {
+        $this->rows[] = mv $values;
+        return $this;
+    }
+
+    function with(Filter $query) : Insert&
+    {
+        $this->ctes[] = mv $query;
+        return $this;
+    }
+}
+
+$q = Insert()->row(Row('a'))->with(Filter()->where(Pred('id')));
+echo $q->rows->count();
+echo $q->ctes->count();
+echo $q->ctes[0]->wheres->count();
+echo $q->ctes[0]->wheres[0]->s;

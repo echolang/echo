@@ -211,21 +211,6 @@ bool is_pointer_typed_parameter(const VarDeclNode *decl, const FunctionDeclNode 
     return false;
 }
 
-// T& / const T& local: non-nullable pointer, not a parameter. ptr<T> copies bits
-bool is_borrow_local(const VarDeclNode *decl, const FunctionDeclNode *function)
-{
-    if (decl == nullptr || !decl->has_type()) {
-        return false;
-    }
-
-    if (is_pointer_typed_parameter(decl, function)) {
-        return false;
-    }
-
-    const ValueType type = decl->type();
-    return type.is_pointer() && !type.is_nullable();
-}
-
 // a class handle names a heap object. `&$box` is still the slot on the frame;
 // `$box->n` / `$box->slot()` name the payload, which other handles may keep
 bool is_class_handle(const VarDeclNode *decl)
@@ -492,6 +477,20 @@ VarDeclNode *names_callee_frame_storage_walk(
     return nullptr;
 }
 
+}
+
+bool is_borrow_local(const VarDeclNode *decl, const FunctionDeclNode *function)
+{
+    if (decl == nullptr || !decl->has_type()) {
+        return false;
+    }
+
+    if (is_pointer_typed_parameter(decl, function)) {
+        return false;
+    }
+
+    const ValueType type = decl->type();
+    return type.is_pointer() && !type.is_nullable();
 }
 
 VarDeclNode *names_callee_frame_storage(ExprNode *expr, FunctionDeclNode *function)

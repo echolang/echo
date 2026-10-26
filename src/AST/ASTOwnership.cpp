@@ -6,6 +6,7 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTRegion.h"
+#include "AST/ASTReturnedPlace.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTControlFlow.h"
@@ -48,6 +49,7 @@
 
 #include <fmt/core.h>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -823,6 +825,9 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 ? decl->type()
                 : ValueType::make_unknown();
 
+            const bool elide_payload = decl != nullptr
+                && elides_guard_hoist_payload(decl->init_expr, stmt->hoisted_subject);
+
             // **the binding is an ordinary value arrival**, and that is the whole reason `guard` needed no
             // ownership rule of its own: `guard Res $r = $maybe` is a copy of a place, so it retains, and
             // `$r` joins the frame's locals and is released at the scope's end like any other
@@ -854,6 +859,11 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                         type,
                         nullptr,
                         ValueDestination::t_declaration);
+                }
+                else if (elide_payload) {
+                    // unwrap of GuardNode::hoisted_subject. skip the copy; mark the hoist after else,
+                    // which still owes the holder a drop (and else ($e) still copies)
+                    decl->init_expr = walk_expression(decl->init_expr);
                 }
                 else {
                     decl->init_expr = resolve_value_arrival(
@@ -891,6 +901,14 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 walk_scope(*stmt->else_scope);
 
                 _flow = before;
+            }
+
+            // a payload moved out of the hoist on the success path. marked *after* the else arm,
+            // which still owes the holder a drop (the error payload). marking in arrive_value would
+            // skip that drop
+            if (elide_payload) {
+                _flow.moved.insert(stmt->hoisted_subject);
+                _flow.maybe_moved.erase(stmt->hoisted_subject);
             }
 
             // **the binding joins the frame after the else arm, not before it.** Parser::parse_guard
@@ -1126,6 +1144,22 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
         // is what the loop is left by, and it is read from the header - plus every `break`
         auto after_loop = back_edge;
         after_loop.insert(frame.break_facts.moved.begin(), frame.break_facts.moved.end());
+
+        // **owning body-locals must not leave the loop as moved-facts.** walk_scope
+        // already erases them from `_flow.moved` when the body frame pops;
+        // break/continue snapshots were taken *before* that erase, and assigning
+        // `after_loop` would put them back. an outer `if` then reports
+        // ConditionalMove against an arm that never declared the hoist (libtcp
+        // reactor). a Tag moved on `break` is not on `outer` (it owns nothing, so
+        // it was never a frame local) and must stay: UseAfterMove after the loop
+        // reads `_flow.moved`
+        for (auto it = after_loop.begin(); it != after_loop.end(); ) {
+            if (outer.count(*it) == 0 && (*it)->has_type() && needs_destruction((*it)->type())) {
+                it = after_loop.erase(it);
+            } else {
+                ++it;
+            }
+        }
 
         // judged over both, and that is the over-approximation this keeps. a `break` runs at
         // most once, so moving an outer local on that path does not repeat - but the loop can
@@ -1409,7 +1443,22 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
     // `operator [](array<T>&) : T&` and an `#[implicit]` conversion both hand back an address into
     // their receiver and no enumeration of shapes could be trusted to catch the next one - so the one
     // position where the question does not arise is worth stating rather than approximating
-    if (kept == MaterializationScope::BoundValue::t_kept && value->result_type().is_pointer()) {
+    //
+    // **a T& that names the dying temp itself is the exception.** `$p = Probe()->add(1)` and
+    // `return make()->unwrap()` still look like a pointer out of a temporary, but the destination
+    // is by-value and the callee returns `$this` (or a field of it), so the load is a move of the
+    // temp rather than an address that would dangle. `Probe& $r = Probe()->add(1)` still refuses:
+    // a pointer destination opens a refusing scope, so bind_pending never sees the elide
+    //
+    // **pointer-ness is not the elide.** CallResolver plants Deref of a T& at a by-value dest
+    // before this walk, so the value here is already `Filter` not `Filter&`. requiring a pointer
+    // then copied the struct (array handle and all) and still destroyed the temp - hydrahon
+    // `Insert()->with(Select()->where($u->id == 1))` stored a dangling CTE
+    const bool elide = kept == MaterializationScope::BoundValue::t_kept
+        && elides_dying_borrow(value);
+
+    if (kept == MaterializationScope::BoundValue::t_kept && value->result_type().is_pointer()
+        && !elide) {
         refuse_pending_temporaries(mark, "the pointer in", "would be an address into a value destroyed at the end of this statement");
         return value;
     }
@@ -1432,6 +1481,9 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
 
     // recording order *is* binding order: the walk reaches an inner request first, and an inner
     // temporary holds the storage the outer one reads through, so it has to exist first
+    VarDeclNode *moved_temp = nullptr;
+    const std::optional<BorrowChain> chain = elide ? borrow_chain_of(value) : std::nullopt;
+
     for (size_t i = mark; i < _pending_temporaries.size(); i++) {
         ExprNode *owner = _pending_temporaries[i];
 
@@ -1440,11 +1492,19 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
         VarDeclNode &temp = make_temporary(edge.get(), location_of_expression(owner));
         bind.temporaries.push_back(&temp);
 
+        if (chain.has_value() && edge.get() == chain->root) {
+            moved_temp = &temp;
+        }
+
         // **and the operand becomes a place**, which is the whole of what codegen needed: it is a
         // varref now, so gen_member_lvalue addresses it through the arm a named local uses and `&`
         // takes the address of an alloca. no codegen arm had to learn that temporaries exist
         edge.set(make_place(&temp, {}));
     }
+
+    // the skip below is local to this bind. do not put `$__tempN` in `_flow.moved`:
+    // it is not a frame local, and an outer `if` would report ConditionalMove
+    // against an arm that never declared it (libhttp `parseHeaderBlock()->unwrap()`)
 
     // reverse binding order, as a scope's end uses and for the same reason: the last thing built is
     // the first thing torn down. through emit_drop, so what a temporary owes and what a local owes are
@@ -1458,7 +1518,7 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
     for (size_t i = bind.temporaries.size(); i-- > 0;) {
         VarDeclNode *temp = bind.temporaries[i];
 
-        if (!needs_destruction(temp->type())) {
+        if (temp == moved_temp || !needs_destruction(temp->type())) {
             continue;
         }
 
@@ -1493,6 +1553,53 @@ void OwnershipPass::refuse_pending_temporaries(size_t mark, const char *action, 
     // discarded rather than bound: nothing has been rewritten yet, so the tree stays exactly as it was
     // written and the reader sees the program they wrote
     _pending_temporaries.resize(mark);
+}
+
+std::optional<BorrowChain> OwnershipPass::movable_borrow_chain(ExprNode *expr) const
+{
+    const std::optional<BorrowChain> chain = borrow_chain_of(expr);
+
+    if (!chain.has_value() || chain->root == nullptr) {
+        return std::nullopt;
+    }
+
+    if (remainder_needs_destruction(chain->root->result_type(), chain->path)) {
+        return std::nullopt;
+    }
+
+    return chain;
+}
+
+bool OwnershipPass::elides_dying_borrow(ExprNode *expr) const
+{
+    const std::optional<BorrowChain> chain = movable_borrow_chain(expr);
+
+    if (!chain.has_value()) {
+        return false;
+    }
+
+    for (ExprNode *owner : _pending_temporaries) {
+        if (pending_edge(owner).get() == chain->root) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool OwnershipPass::elides_guard_hoist_payload(ExprNode *expr, const VarDeclNode *hoist) const
+{
+    if (hoist == nullptr) {
+        return false;
+    }
+
+    const std::optional<BorrowChain> chain = movable_borrow_chain(expr);
+
+    if (!chain.has_value()) {
+        return false;
+    }
+
+    return place_root_of(chain->root) == hoist;
 }
 
 void OwnershipPass::report_conditional_move(const VarDeclNode *decl, const std::string &remedy)
@@ -1911,10 +2018,18 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 bind->body, wanted, nullptr, ValueDestination::t_return);
 
             if (bind->teardown.empty()) {
+                const std::optional<BorrowChain> body_chain = movable_borrow_chain(bind->body);
+
                 for (size_t i = bind->temporaries.size(); i-- > 0;) {
                     VarDeclNode *temp = bind->temporaries[i];
 
                     if (_flow.moved.count(temp) > 0 || !needs_destruction(temp->type())) {
+                        continue;
+                    }
+
+                    // the body is a load of this temp (`Deref` of the dying T&). dropping it
+                    // here frees what the load just aliased (fluent_with_second_temp)
+                    if (body_chain.has_value() && place_root_of(body_chain->root) == temp) {
                         continue;
                     }
 
@@ -2260,6 +2375,13 @@ ExprNode *OwnershipPass::arrive_value(
     // a read that reaches storage is copied; a computed value is moved. a call returning a borrow
     // is on the copying side (`string $s = $a->at(0)` still names the array's element)
     if (!read_reaches_storage(*expr)) {
+        return expr;
+    }
+
+    // `$p = Probe()->add(1)` and `return make()->unwrap()`: the T& names a compiler temp that dies
+    // at the semicolon. skip the copy, do not mark moved here - bind_pending skips that temp's
+    // teardown, and a `$__guardN` hoist is marked after its else arm has dropped the holder
+    if (!wanted.is_pointer() && elides_dying_borrow(expr)) {
         return expr;
     }
 

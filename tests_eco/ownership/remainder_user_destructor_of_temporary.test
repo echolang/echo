@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] TemporaryMember  remainder_user_destructor_of_temporary.eco:18:12
+
+  'Holder' has no storage of its own, so the pointer in it would be an address into a value destroyed at the end of this statement.
+
+  17 | 
+  18 | int32 $x = Holder()->take();
+     :            ^^^^^^
+  19 | echo $x;
+
+  help: Bind it to a variable first.
+
+1 error, nothing was compiled.

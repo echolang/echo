@@ -27,6 +27,9 @@
 #include "AST/TypeDeclNode.h"
 #include "AST/VarDeclNode.h"
 
+#include <unordered_set>
+#include <vector>
+
 namespace AST
 {
 
@@ -48,6 +51,37 @@ namespace
     {
     public:
         bool pending = false;
+        std::vector<ScopeNode *> visiting;
+        std::unordered_set<ScopeNode *> concrete;
+
+        // a T& method that returns another that returns the first. asking each other's body
+        // would never finish; the cycle cannot name `$this`, so elision answers t_none either way.
+        // RAII so a throw cannot leave a body "not pending" and freeze a copy
+        struct InFlight
+        {
+            std::vector<ScopeNode *> &stack;
+
+            InFlight(std::vector<ScopeNode *> &s, ScopeNode *scope) : stack(s)
+            {
+                stack.push_back(scope);
+            }
+
+            ~InFlight()
+            {
+                stack.pop_back();
+            }
+        };
+
+        bool already_visiting(ScopeNode *scope) const
+        {
+            for (ScopeNode *seen : visiting) {
+                if (seen == scope) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         // **the flag is monotone, so the walk stops the moment it is true.** this runs once per
         // un-answered body *and* per file root on every fixpoint round, and a body that waits k rounds
@@ -266,6 +300,25 @@ namespace
                 return;
             }
 
+            // a T& method whose body is still arriving: borrow_result_of answers t_none for this
+            // round, and OwnershipPass walks a body once, so `$p = Probe()->add(1)` would copy
+            // forever. the call is terminal; the callee is not. t_owned is already concrete.
+            // remember a callee this walk found not-pending so two sites do not re-traverse it
+            if (node.decl != nullptr && node.decl->has_receiver()
+                && node.decl->get_return_type().is_pointer() && node.decl->body != nullptr
+                && node.decl->region_state != RegionState::t_owned
+                && !already_visiting(node.decl->body)
+                && !concrete.contains(node.decl->body)) {
+                InFlight hold(visiting, node.decl->body);
+                node.decl->body->accept(*this);
+
+                if (pending) {
+                    return;
+                }
+
+                concrete.insert(node.decl->body);
+            }
+
             RecursiveVisitor::visitFunctionCallExpr(node);
         }
 
@@ -473,6 +526,7 @@ bool function_is_settled(const FunctionDeclNode &fn)
 bool body_is_pending(ScopeNode &scope)
 {
     BodyPending walk;
+    BodyPending::InFlight hold(walk.visiting, &scope);
     scope.accept(walk);
     return walk.pending;
 }

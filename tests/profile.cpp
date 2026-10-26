@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <Compiler/CodegenTarget.h>
+#include <Compiler/CommandLineOption.h>
+#include <Compiler/ProfileDriver.h>
 #include <Compiler/ProfileFile.h>
 #include <Compiler/ProfileReport.h>
-#include <Compiler/CommandLineOption.h>
+#include <Compiler/TargetFacts.h>
 
 #include <eco_profile.h>
 
@@ -282,6 +285,18 @@ TEST_CASE("profile is refused for a lib, wasi, and ios", "[profile]")
     INFO(ios.output);
     REQUIRE(ios.exit_code != 0);
     REQUIRE(ios.output.find("native host program") != std::string::npos);
+}
+
+TEST_CASE("profile is refused for ios facts on a host codegen row", "[profile]")
+{
+    // `--target-os ios` off Darwin keeps the host codegen row; facts is the ask
+    Compiler::TargetFacts ios;
+    std::string error;
+    REQUIRE(Compiler::TargetFacts::resolve("ios", "", {}, ios, error));
+
+    const auto issue = Compiler::profile_refuse_target(Compiler::CodegenTarget(), ios);
+    REQUIRE(issue.has_value());
+    REQUIRE(std::string(issue->message).find("native host program") != std::string::npos);
 }
 
 TEST_CASE("a user copy constructor is a COPY_CTOR event", "[profile]")

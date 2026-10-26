@@ -1,0 +1,19 @@
+// a dying `result->unwrap()` in an `if` without else must not ConditionalMove the
+// bind's `$__tempN`. libhttp `parseHeaderBlock($block)->unwrap()`
+
+function make() : result<string, string>
+{
+    return .ok('yes');
+}
+
+function f(bool $take) : string
+{
+    if ($take) {
+        string $s = make()->unwrap();
+        return $s;
+    }
+    return 'no';
+}
+
+echo f(true);
+echo f(false);

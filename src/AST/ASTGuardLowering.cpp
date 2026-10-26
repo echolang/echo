@@ -88,6 +88,7 @@ VarDeclNode &GuardLowering::hoist_subject(
     scope.children.insert(
         scope.children.begin() + static_cast<long>(index), make_ref(subject_decl));
     scope.declare_variable(subject_decl);
+    guard.hoisted_subject = &subject_decl;
 
     return subject_decl;
 }

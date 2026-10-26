@@ -52,9 +52,10 @@ namespace AST
 
     // **the deny-list OwnershipPass walked as BodyAnswerable.** true while anything in the scope is
     // still arriving - an unfolder const if, an unlowered foreach, a non-terminal call, a binary
-    // or unary that will become a declared-operator call, an untyped declaration. nested function
-    // declarations and type declarations are separate regions and do not count. a new transient
-    // node is one arm here
+    // or unary that will become a declared-operator call, an untyped declaration, **a T& method
+    // whose body is still arriving** (borrow_result_of would freeze a copy). a t_owned
+    // callee is already concrete. nested function declarations and type declarations are
+    // separate regions and do not count. a new transient node is one arm here
     bool body_is_pending(ScopeNode &scope);
 
     inline bool body_is_concrete(ScopeNode &scope)

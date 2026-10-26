@@ -52,6 +52,11 @@ namespace AST
         // `clone` rebinds it rather than cloning it
         VarDeclNode *failure = nullptr;
 
+        // **not an owned edge.** GuardLowering splices `$__guardN` as a sibling of this statement
+        // in the enclosing scope, so clone rebinds it. OwnershipPass elides the success unwrap by
+        // pointer identity with this, never by the `__guard` name prefix
+        VarDeclNode *hoisted_subject = nullptr;
+
         // **has the fixpoint answered how this is unwrapped?** true straight from the parser for a `T?`,
         // whose payload is a property of the type and needs nobody's conformance.
         //

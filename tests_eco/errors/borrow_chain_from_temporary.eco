@@ -1,0 +1,11 @@
+// a named borrow of a fluent chain on a temporary still dangles at the semicolon. the by-value
+// destination is the move; this one keeps the address past the statement
+struct Probe
+{
+    function add(int32 $x) : Probe&
+    {
+        return $this;
+    }
+}
+
+Probe& $r = Probe()->add(1);

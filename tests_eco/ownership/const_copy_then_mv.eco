@@ -1,0 +1,40 @@
+// const method copies `$this` then `mv`s the copy into a wrapper. hydrahon
+// `Select::count` wrapping a UNION: the caller must keep its branches, and the
+// wrapper must see them too
+
+struct Select
+{
+    array<string> $branches = array<string>();
+
+    constructor()
+    {
+    }
+
+    constructor(const Select& $other)
+    {
+        echo 'copy';
+        $this->branches = $other->branches;
+    }
+
+    function union(string $b) : Select&
+    {
+        $this->branches[] = $b;
+        return $this;
+    }
+
+    const function wrap() : Select
+    {
+        Select $copy = $this;
+        Select $body = mv $copy;
+        Select $out = Select();
+        $out->branches = $body->branches;
+        return $out;
+    }
+}
+
+Select $a = Select()->union('u');
+Select $both = $a;
+$both->union('p');
+Select $c = $both->wrap();
+echo $c->branches->count();
+echo $both->branches->count();

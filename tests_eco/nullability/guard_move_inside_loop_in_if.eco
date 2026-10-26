@@ -1,0 +1,40 @@
+// a guard that moves the hoist inside a loop inside an `if` without else.
+// walk_loop must not leak that hoist as moved into the if join (ConditionalMove).
+// libtcp reactor: `guard $c->reader->take() else { return }` inside `while` inside
+// `if ($ev->readable())`
+
+function make() : result<string, string>
+{
+    return .ok('yes');
+}
+
+function throughReturn() : string
+{
+    if (true) {
+        while (true) {
+            string $s = guard make() else ($e) {
+                return $e;
+            }
+            return $s;
+        }
+    }
+    return 'no';
+}
+
+function throughBreak() : string
+{
+    string $out = '';
+    if (true) {
+        while (true) {
+            string $s = guard make() else ($e) {
+                return $e;
+            }
+            $out = $s;
+            break;
+        }
+    }
+    return $out;
+}
+
+echo throughReturn();
+echo throughBreak();

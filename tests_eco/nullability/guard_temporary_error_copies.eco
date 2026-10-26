@@ -1,0 +1,36 @@
+// `else ($e)` over a temporary result still copies the error. the holder is dropped on that path,
+// so moving `$e` out of `$__guardN` would free the payload twice
+
+struct Probe
+{
+    array<int64> $xs;
+
+    constructor(array<int64> $xs)
+    {
+        $this->xs = mv $xs;
+    }
+
+    constructor(const Probe& $other)
+    {
+        echo 'copy';
+        $this->xs = $other->xs;
+    }
+}
+
+function make() : result<int32, Probe>
+{
+    array<int64> $xs = [1, 2, 3];
+    return .error(Probe(mv $xs));
+}
+
+function viaError() : int32
+{
+    int32 $n = guard make() else ($e) {
+        echo $e->xs->count();
+        return 0;
+    }
+
+    return $n;
+}
+
+echo viaError();

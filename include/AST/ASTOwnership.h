@@ -5,10 +5,12 @@
 
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTControlFlow.h"
+#include "AST/ASTReturnedPlace.h"
 #include "AST/ASTValueType.h"
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -373,12 +375,25 @@ namespace AST
         // every edge in almost every program
         //
         // `kept` decides one arm and nothing else - the escape guard over a pointer-typed value. see
-        // MaterializationScope::BoundValue
+        // MaterializationScope::BoundValue. a dying T& chain that names its receiver is the one
+        // kept pointer that binds rather than refuses: the body stays the chain, the temp is moved
         ExprNode *bind_pending_temporaries(
             ExprNode *value,
             size_t mark,
             MaterializationScope::BoundValue kept
         );
+
+        // chain plus remainder-silent. both elides_* ask this, so a remainder gate cannot drift
+        std::optional<BorrowChain> movable_borrow_chain(ExprNode *expr) const;
+
+        // a T& that names a dying compiler temporary: the pending root of a fluent chain.
+        // a remainder that still needs a destructor keeps the copy. a guard hoist is
+        // elides_guard_hoist_payload, asked only of the success binding
+        bool elides_dying_borrow(ExprNode *expr) const;
+
+        // unwrap of GuardNode::hoisted_subject. not failure(): else ($e) still copies, and the
+        // hoist is still dropped on that path
+        bool elides_guard_hoist_payload(ExprNode *expr, const VarDeclNode *hoist) const;
 
         // discards every request above `mark`, reporting each: the position wanted the temporary's
         // *address*, and an address into a value destroyed at the end of the statement is the one thing

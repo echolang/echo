@@ -1,0 +1,19 @@
+// taking a field of a dying class cannot skip the release, so the T& is refused
+
+class Holder
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    function take() : int32&
+    {
+        return $this->n;
+    }
+}
+
+int32 $x = Holder(7)->take();
+echo $x;

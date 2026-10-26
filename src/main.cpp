@@ -1398,7 +1398,7 @@ static bool resolve_invocation(
         }
 
         for (const Program &program : out.programs) {
-            if (const auto issue = Compiler::profile_refuse_target(program.codegen)) {
+            if (const auto issue = Compiler::profile_refuse_target(program.codegen, out.target_facts)) {
                 diagnostics.render_untyped(issue->title, issue->message);
                 return false;
             }

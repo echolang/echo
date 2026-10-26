@@ -1,0 +1,21 @@
+// a unique type cannot be copied, so the same chain compiling is the proof the temp moved
+
+#[unique]
+struct Probe
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    function add(int32 $x) : Probe&
+    {
+        $this->n = $this->n + $x;
+        return $this;
+    }
+}
+
+Probe $p = Probe(0)->add(1)->add(2);
+echo $p->n;

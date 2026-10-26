@@ -33,7 +33,10 @@ std::optional<Compiler::ProfileIssue> Compiler::profile_refuse_host()
 #endif
 }
 
-std::optional<Compiler::ProfileIssue> Compiler::profile_refuse_target(const CodegenTarget &codegen)
+std::optional<Compiler::ProfileIssue> Compiler::profile_refuse_target(
+    const CodegenTarget &codegen,
+    const TargetFacts &facts
+)
 {
     if (codegen.is_library()) {
         return ProfileIssue {
@@ -42,7 +45,8 @@ std::optional<Compiler::ProfileIssue> Compiler::profile_refuse_target(const Code
         };
     }
 
-    if (codegen.is_wasm() || codegen.os() == TargetOs::t_ios) {
+    // `--target-os ios` off Darwin keeps the host codegen row; facts is the ask
+    if (codegen.is_wasm() || facts.operating_system == "ios") {
         return ProfileIssue {
             "Profile Unavailable",
             "'--profile' is for a native host program."
@@ -188,8 +192,11 @@ int Compiler::run_profile_command(
             }
         }
 
-        if (identity.has_uuid && uuid_present
-            && std::memcmp(identity.uuid.data(), file.binary().uuid, 16) != 0) {
+        // a recorded build id has to match, including a binary that has none.
+        // Windows PE often has no UUID, and skipping that case dumped a 0xff file
+        if (uuid_present
+            && (!identity.has_uuid
+                || std::memcmp(identity.uuid.data(), file.binary().uuid, 16) != 0)) {
             out_issue = ProfileIssue {
                 "Binary Mismatch",
                 "the binary's build id does not match this profile file."

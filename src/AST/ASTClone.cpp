@@ -659,6 +659,9 @@ Node *GuardNode::clone(CloneContext &cc) const
     // the failure mode a rebind exists to prevent
     c->failure = cc.rebind(c->failure);
 
+    // sibling of this guard in the enclosing scope, cloned in ScopeNode's declaration pre-pass
+    c->hoisted_subject = cc.rebind(c->hoisted_subject);
+
     return c;
 }
 

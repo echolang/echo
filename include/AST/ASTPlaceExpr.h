@@ -389,6 +389,10 @@ namespace AST
     // and is not. the VarDeclNode is the root the diagnostic names
     VarDeclNode *names_callee_frame_storage(ExprNode *expr, FunctionDeclNode *function);
 
+    // T& / const T& local: non-nullable pointer, not a parameter. ptr<T> copies bits.
+    // names_callee_frame_storage and borrow_result_of both follow such a local's initializer
+    bool is_borrow_local(const VarDeclNode *decl, const FunctionDeclNode *function);
+
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers
     // already look, but owned by AST::source_token_of ([ASTSourceToken.h]) - which answers the same
     // question over *every* node kind rather than over expressions only, because a DILocation is asked

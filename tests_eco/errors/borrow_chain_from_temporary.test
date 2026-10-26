@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] TemporaryMember  borrow_chain_from_temporary.eco:11:13
+
+  'Probe' has no storage of its own, so a borrow of it would point into a value destroyed at the end of this statement.
+
+  10 | 
+  11 | Probe& $r = Probe()->add(1);
+     :             ^^^^^
+  12 | 
+
+  help: Bind it to a variable first.
+
+1 error, nothing was compiled.

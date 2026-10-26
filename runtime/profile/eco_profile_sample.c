@@ -1,3 +1,8 @@
+// REG_RIP / REG_RBP are GNU; POSIX ucontext.h names the array and not the slots
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "eco_profile_internal.h"
 
 #if defined(_WIN32)

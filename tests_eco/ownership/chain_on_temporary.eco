@@ -1,0 +1,30 @@
+// a fluent chain on a constructor temp moves: every `return $this` names the dying value, so the
+// copy constructor does not run. the same chain on a live local still copies
+
+struct Probe
+{
+    array<int64> $xs = array<int64>();
+
+    constructor()
+    {
+    }
+
+    constructor(const Probe& $other)
+    {
+        echo 'copy';
+        $this->xs = $other->xs;
+    }
+
+    function add(int64 $x) : Probe&
+    {
+        $this->xs[] = $x;
+        return $this;
+    }
+}
+
+$p = Probe()->add(1)->add(2);
+echo $p->xs->count();
+
+Probe $live = Probe();
+Probe $q = $live->add(9);
+echo $q->xs->count();

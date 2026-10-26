@@ -8,6 +8,7 @@
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/DriverOptions.h"
 #include "Compiler/LinkRequirement.h"
+#include "Compiler/TargetFacts.h"
 #include "Compiler/TerminalCapabilities.h"
 
 #include <filesystem>
@@ -26,7 +27,10 @@ namespace Compiler
     };
 
     std::optional<ProfileIssue> profile_refuse_host();
-    std::optional<ProfileIssue> profile_refuse_target(const CodegenTarget &codegen);
+    std::optional<ProfileIssue> profile_refuse_target(
+        const CodegenTarget &codegen,
+        const TargetFacts &facts
+    );
     std::optional<ProfileIssue> profile_refuse_native_run(bool native_run);
 
     bool profile_link_runtime(
