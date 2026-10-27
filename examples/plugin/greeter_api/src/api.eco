@@ -1,4 +1,0 @@
-public extern interface greeter {
-    function add(int32 $a, int32 $b) : int32;
-    function answer() : int32;
-}

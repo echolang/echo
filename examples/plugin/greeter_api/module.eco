@@ -1,2 +1,0 @@
-#[module: "greeter_api"]
-#[sources: "src/*.eco"]
