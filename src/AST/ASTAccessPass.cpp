@@ -4,6 +4,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTRegion.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"

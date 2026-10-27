@@ -37,9 +37,9 @@ namespace AST
     //
     // this is a *separate* ordering from `fit`, over the same facts, and the difference is the
     // point: `fit` is asked by overload resolution, which only wants to know whether the candidate
-    // is in or out, while `blame` is asked by the monomorphizer, which has to name something. the
-    // two disagree about exactly one fact - an argument whose shape cannot be reconciled - see
-    // `t_argument_shape`
+    // is in or out, while `blame` is asked by the monomorphizer, which has to name something. they
+    // disagree about a shape mismatch (`t_argument_shape`) and agree that a later typed argument
+    // replacing a concrete binding (`t_conflicting_binding`) is out
     enum class InstantiationBlame
     {
         // nothing to blame
@@ -52,6 +52,15 @@ namespace AST
         // type parameters. fewer is a prefix: `make<Handle>(7)` binds T and infers A. a method's
         // inherited prefix cannot be spelled at a call site, so it is not counted here
         t_type_argument_count,
+
+        // two typed arguments bind the same parameter to different concrete types.
+        // `pick($int32, $int64)` is the shape: T is int32 from the first, and the second would
+        // bind int64. the monomorphizer reports this rather than instantiating `pick<int32>`
+        // and silently narrowing. a deferred literal that disagrees stays `t_argument_shape`,
+        // so `pick($small, 9223372036854775807)` can still IntegerOverflow against the instance
+        //
+        // `param` is the parameter, `bound` is what already won, `argument` is the later one
+        t_conflicting_binding,
 
         // `unify_type` could not reconcile argument `argument` with its parameter, so no
         // substitution makes this argument fit
@@ -91,10 +100,11 @@ namespace AST
         InstantiationFit fit = InstantiationFit::t_no;
         InstantiationBlame blame = InstantiationBlame::n_none;
 
-        // t_unbound_parameter, t_undecided_parameter, t_constraint
+        // t_unbound_parameter, t_undecided_parameter, t_constraint, t_conflicting_binding
         const TypeParamDecl *param = nullptr;
 
-        // t_constraint: what the parameter was bound to
+        // t_constraint: what the parameter was bound to. t_conflicting_binding: the
+        // concrete type that already won
         ValueType bound;
 
         // set when the refusal came from a `where` clause rather than the parameter's own
@@ -110,7 +120,8 @@ namespace AST
             return param != nullptr ? param->constraint_spelling : empty;
         }
 
-        // t_argument_shape: which argument, indexed into the call's argument list
+        // t_argument_shape, t_conflicting_binding: which argument, indexed into the call's
+        // argument list
         size_t argument = 0;
 
         // the identity of the instance this call names: every type parameter bound to a concrete

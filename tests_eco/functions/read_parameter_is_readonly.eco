@@ -1,0 +1,10 @@
+// a `read` parameter that the body only reads keeps LLVM `readonly`. the B60 miscompile was
+// this attribute over a body that wrote through an alias
+
+function add1(read int32& $src) : int32
+{
+    return $src + 1;
+}
+
+int32 $v = 7;
+echo add1(&$v);

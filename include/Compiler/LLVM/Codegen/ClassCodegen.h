@@ -56,7 +56,8 @@ namespace Compiler::LLVM
         void gen_instanceof(AST::InstanceOfExprNode &node);
 
         // `$x as I` / `$x as Class` from a stored interface or a class whose conformance is
-        // not static. `fallible` is `$x as I?`: miss is a wrapped absence rather than an abort
+        // not static. `fallible` is `$x as T?`: miss is absence (a null handle, or a wrapped
+        // pair) rather than an abort
         llvm::Value *gen_iface_recast(
             llvm::Value *value,
             const AST::ValueType &from,

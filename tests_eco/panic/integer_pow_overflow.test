@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1024
+fatal error: integer overflow: this '**' has no result of its type
+  at integer_pow_overflow.eco:5

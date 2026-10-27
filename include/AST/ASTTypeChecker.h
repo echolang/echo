@@ -17,6 +17,7 @@ namespace AST
     class BinaryExprNode;
     class ExprNode;
     class TypeNode;
+    class VarRefNode;
 
     // a semantic-analysis pass that runs after monomorphization and before codegen. it walks the
     // concrete AST resolving member accesses and call arguments, and records located issues on the

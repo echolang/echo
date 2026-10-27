@@ -31,7 +31,11 @@ namespace AST
     //
     // The consequence is `mv`'s consequence: `f(inout T& $x)` and `f(T& $x)` mangle identically and
     // collide as a DuplicateFunctionSignature. That is correct for the same reason - an effect is a
-    // contract about the argument, not a distinction a call can be resolved on
+    // contract about the argument, not a distinction a call can be resolved on.
+    //
+    // `read` is the exception: it rewrites the pointee to `const` at parse (FuncDeclParser), so
+    // `f(read T&)` collides with `f(const T&)` and not with `f(T&)`. that is the type system's
+    // "may this place be written" question, which `const` already owns
     enum class AccessEffect
     {
         // nothing said. a plain `T&` parameter, an address with C aliasing, exactly as every one of

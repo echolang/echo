@@ -1,0 +1,27 @@
+// a captured class handle outlives the closure frame. returning a projection
+// through it is not a dangle of the callee
+class Box
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    public function slot() : int32&
+    {
+        return $this->n;
+    }
+}
+
+function make() : function<int32&()>
+{
+    Box $b = Box(1);
+    return function() : int32& { return $b->slot(); };
+}
+
+function<int32&()> $f = make();
+int32& $n = $f();
+$n = 9;
+echo $n;

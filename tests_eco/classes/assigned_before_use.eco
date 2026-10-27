@@ -1,0 +1,42 @@
+// visu Services.get: a class local with no initializer is seated by the next
+// assignment, including one inside `unsafe`, before anything reads it
+
+class Thunk
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    function run() : int32
+    {
+        return $this->n;
+    }
+}
+
+function from_assume(erased $held) : int32
+{
+    Thunk $thunk;
+    unsafe {
+        $thunk = assume<Thunk>($held);
+    }
+    return $thunk->run();
+}
+
+function from_both_arms(bool $c) : int32
+{
+    Thunk $t;
+    if ($c) {
+        $t = Thunk(1);
+    } else {
+        $t = Thunk(2);
+    }
+    return $t->run();
+}
+
+Thunk $kept = Thunk(7);
+echo from_assume(erased::from($kept));
+echo from_both_arms(true);
+echo from_both_arms(false);

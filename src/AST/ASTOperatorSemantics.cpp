@@ -417,8 +417,8 @@ namespace AST
             return binary_skips_rhs(op->type) || op->is_identity_comparison();
         }
 
-        // a float meeting another number, which codegen promotes both sides of. no `**` - that arm
-        // round-trips through `llvm.pow` for integers only - and no `^`
+        // a float meeting another number, which codegen promotes both sides of. no `**` -
+        // integer exponentiation has no meaning on a float - and no `^`
         const auto numeric = [](const ValueType &type) {
             return type.is_numeric_type() || type.is_boolean_type();
         };

@@ -1,0 +1,13 @@
+// a static on a generic owner is per instantiation, and its type is the owner's T, not
+// the template's. `Pool<int64>::$last` used to ICE lowering T
+struct Pool<T> {
+    static T $last;
+}
+
+Pool<int64>::$last = 7;
+echo Pool<int64>::$last;
+echo Pool<int32>::$last;
+
+Pool<int32>::$last = 9;
+echo Pool<int64>::$last;
+echo Pool<int32>::$last;

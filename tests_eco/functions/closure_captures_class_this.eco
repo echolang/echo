@@ -1,0 +1,21 @@
+// a class `$this` is captured as a handle, so the closure can outlive the method.
+// capturing the borrow printed 0 once the receiver was dropped
+
+class Counter
+{
+    int32 $hits;
+
+    function make() : function<int32()>
+    {
+        return function() : int32 { return $this->hits; };
+    }
+}
+
+function run() : function<int32()>
+{
+    Counter $c = Counter(7);
+    return $c->make();
+}
+
+function<int32()> $f = run();
+echo $f();

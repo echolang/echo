@@ -1,6 +1,7 @@
 #include "AST/ASTInstantiation.h"
 
 #include "AST/ASTArgumentBind.h"
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTCFunction.h"
 #include "AST/ASTLiteralTyping.h"
 
@@ -24,6 +25,51 @@ namespace AST
             result.fit = InstantiationFit::t_no;
             result.blame = blame;
             return result;
+        }
+
+        bool fits_existing_binding(
+            const ValueType &param,
+            const ValueType &argument,
+            const TypeSubstitution &bindings,
+            TypeRegistry &registry
+        )
+        {
+            const ValueType expected = substitute_type(param, bindings, registry);
+            if (contains_type_param(expected)) {
+                return false;
+            }
+
+            const ArgumentFit fit = argument_fit(argument, nullptr, expected);
+            return fit != ArgumentFit::t_none && fit != ArgumentFit::t_conversion;
+        }
+
+        bool binding_conflict(
+            const ValueType &param,
+            const ValueType &argument,
+            const TypeSubstitution &bindings,
+            const TypeParamDecl *&conflicting_param,
+            ValueType &conflicting_bound
+        )
+        {
+            TypeSubstitution fresh;
+            if (!unify_type(param, argument, fresh)) {
+                return false;
+            }
+
+            for (const auto &binding : fresh.bindings) {
+                const ValueType *existing = bindings.lookup(binding.first);
+                if (existing == nullptr
+                    || contains_type_param(*existing)
+                    || *existing == binding.second) {
+                    continue;
+                }
+
+                conflicting_param = binding.first;
+                conflicting_bound = *existing;
+                return true;
+            }
+
+            return false;
         }
     }
 
@@ -312,6 +358,13 @@ namespace AST
         // reports the argument
         std::optional<size_t> mismatched_argument;
 
+        // a later typed argument that would bind a parameter already seated to a different
+        // concrete type. deferred literals stay on mismatched_argument so a huge one can still
+        // IntegerOverflow against the instance
+        std::optional<size_t> conflicting_argument;
+        const TypeParamDecl *conflicting_param = nullptr;
+        ValueType conflicting_bound;
+
         // did an argument with no type yet decline to bind anything? it is the difference between
         // the two unresolved blames: a parameter nothing *can* bind is a "cannot infer", while one
         // that an untyped argument would have bound is a not-yet, and the fixpoint answers it
@@ -391,8 +444,10 @@ namespace AST
         if (infer_from_arguments) {
 
             // a receiver's type is declared: `map<string, int64> $m` says V, the `5` in `$m[$k] = 5`
-            // does not. later inference must not replace it. asked of has_receiver()
-            const size_t authoritative = (tmpl->has_receiver() && !tmpl->args.empty()) ? 1 : 0;
+            // does not. later inference must not replace it. operators are free functions, so
+            // has_receiver() is false; argument 0 is still the container the author typed
+            const size_t authoritative =
+                ((tmpl->has_receiver() || tmpl->is_operator()) && !tmpl->args.empty()) ? 1 : 0;
 
             // **two passes, and the second one is the arguments with no opinion.**
             //
@@ -443,17 +498,17 @@ namespace AST
                 if (write_back_only_new) {
                     TypeSubstitution attempt = result.bindings;
 
-                    if (!unify_type(tmpl->args[i]->type(), argument_type, attempt)
-                        && !mismatched_argument.has_value()) {
-                        mismatched_argument = i;
-                    }
-
-                    for (const auto &binding : attempt.bindings) {
-                        if (!result.bindings.covers(binding.first)) {
-                            result.bindings.bind(binding.first, binding.second);
+                    if (unify_type(tmpl->args[i]->type(), argument_type, attempt)) {
+                        for (const auto &binding : attempt.bindings) {
+                            if (!result.bindings.covers(binding.first)) {
+                                result.bindings.bind(binding.first, binding.second);
+                            }
                         }
                     }
 
+                    // a deferred literal does not unseat a concrete binding and does not
+                    // reject the template. TypeChecker types it at whatever the others
+                    // decided - wrap, promotion, IntegerOverflow, InvalidTypeConversion
                     return;
                 }
 
@@ -463,13 +518,48 @@ namespace AST
                 const TypeSubstitution decided =
                     i >= authoritative ? result.bindings : TypeSubstitution();
 
-                if (!unify_type(tmpl->args[i]->type(), argument_type, result.bindings)
-                    && !mismatched_argument.has_value()) {
-                    mismatched_argument = i;
-                }
+                const bool mismatched = !unify_type(
+                    tmpl->args[i]->type(), argument_type, result.bindings);
 
                 for (const auto &binding : decided.bindings) {
                     result.bindings.bind(binding.first, binding.second);
+                }
+
+                if (!mismatched) {
+                    return;
+                }
+
+                if (fits_existing_binding(
+                        tmpl->args[i]->type(), argument_type, result.bindings, registry)) {
+                    return;
+                }
+
+                // a receiver/operator argument 0 that already named a concrete instance:
+                // TypeChecker reports the write. while a parameter is still open, later
+                // arguments must still bind it
+                if (authoritative > 0) {
+                    const ValueType expected = substitute_type(
+                        tmpl->args[i]->type(), result.bindings, registry);
+                    if (!contains_type_param(expected)) {
+                        return;
+                    }
+                }
+
+                if (!mismatched_argument.has_value()) {
+                    mismatched_argument = i;
+                }
+
+                if (conflicting_argument.has_value()) {
+                    return;
+                }
+
+                if (binding_conflict(
+                        tmpl->args[i]->type(),
+                        argument_type,
+                        result.bindings,
+                        conflicting_param,
+                        conflicting_bound)) {
+                    conflicting_argument = i;
                 }
             };
 
@@ -569,6 +659,11 @@ namespace AST
             result.param = tmpl->type_parameters[*violation];
             result.bound = bound_types[*violation];
             result.constraint_spelling = judged.spelling;
+        } else if (conflicting_argument.has_value()) {
+            result.blame = InstantiationBlame::t_conflicting_binding;
+            result.argument = *conflicting_argument;
+            result.param = conflicting_param;
+            result.bound = conflicting_bound;
         } else if (mismatched_argument.has_value()) {
             result.blame = InstantiationBlame::t_argument_shape;
             result.argument = *mismatched_argument;

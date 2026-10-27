@@ -1,15 +1,5 @@
-// `**` on integers, which lowers to llvm.pow through the same resolver every #[intrinsic]
-// declaration goes through
-//
-// this had no e2e coverage at all, which is how the site came to ask LLVM for `llvm.pow.f64.f64` -
-// a two-entry overload vector handed to an intrinsic with one overload type, producing a mangled
-// name LLVM never defines. the value happened to survive the JIT, so nothing pointed at it
-//
-// the operator's own semantics are unchanged and deliberately not asserted beyond this: both
-// operands are widened to double, the intrinsic is called, and the result converted back to the
-// **operation's own type**. that last part used to be a hardcoded i32 whatever the operands were, so
-// `int64 $wide = 2 ** 40;` lost its top bits - and the two conversions read the operand's signedness
-// now, for the same reason the comparisons do
+// integer `**` is exponentiation by squaring, at the operation's own type. `2 ** 40` used to
+// round-trip through llvm.pow and land in i32, so the top bits vanished
 
 int32 $square = 2 ** 10;
 int32 $cube = 3 ** 3;
@@ -19,13 +9,18 @@ echo $square;
 echo $cube;
 echo $unit;
 
-// wider than an i32 can hold, and exactly representable in a double, so the round trip is not what
-// is being tested here - the type the result lands in is
-int64 $wide = 2 ** 40;
+int64 $base = 2;
+int64 $exp = 40;
+echo $base ** $exp;
 
-echo $wide;
+uint64 $ubase = 3;
+uint64 $uexp = 5;
+echo $ubase ** $uexp;
 
-// an unsigned operand takes uitofp/fptoui rather than the signed pair
-uint64 $unsigned = 3 ** 5;
+// a runtime exponent, so the loop is in the IR rather than folded to a constant
+function raise(int32 $base, int32 $exp) : int32
+{
+    return $base ** $exp;
+}
 
-echo $unsigned;
+echo raise(2, 10);

@@ -1,0 +1,9 @@
+mode: build
+flags: --optimize none
+
+--- OUT --->
+8
+--- UNIT_IR --->
+CHECK: @_add1
+CHECK: readonly
+CHECK: ret i32

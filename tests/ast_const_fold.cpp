@@ -170,11 +170,15 @@ TEST_CASE("arithmetic folds, and an overflow is refused rather than wrapped", "[
     REQUIRE(fold_value("int32", "1 % 0").result == ConstFoldResult::Result::t_refused);
 }
 
-TEST_CASE("`**` is not folded, because codegen would not agree", "[const_fold]")
+TEST_CASE("`**` folds as integer exponentiation", "[const_fold]")
 {
-    // it round-trips through double and llvm.pow, so an integer answer here would differ silently for
-    // any input where that loses precision
-    REQUIRE(fold_value("int32", "2 ** 3").result == ConstFoldResult::Result::t_refused);
+    REQUIRE(fold_value("int32", "2 ** 3").bits == 8);
+    REQUIRE(fold_value("int32", "2 ** 10").bits == 1024);
+    REQUIRE(fold_value("int32", "5 ** 0").bits == 1);
+    REQUIRE(fold_value("int32", "2 ** -1").bits == 0);
+
+    // overflow is a refusal, matching `const(255 + 1)` at uint8
+    REQUIRE(fold_value("int32", "2 ** 31").result == ConstFoldResult::Result::t_refused);
 }
 
 TEST_CASE("a comparison folds, and reads the operand type's own signedness", "[const_fold]")

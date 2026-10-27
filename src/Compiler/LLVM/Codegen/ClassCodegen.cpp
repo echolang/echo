@@ -553,7 +553,7 @@ llvm::Value *ClassCodegen::gen_iface_recast(
     auto *entry_type = _ctx.types->conformance_entry_llvm_type();
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
 
-    const AST::ValueType dest = to.is_wrapped_optional()
+    const AST::ValueType dest = to.is_nullable()
         ? AST::ValueType::make_non_nullable(to)
         : to;
 
@@ -636,20 +636,27 @@ llvm::Value *ClassCodegen::gen_iface_recast(
         ok_payload = handle;
     }
 
-    // a hit is a new owner of the same object. the miss path plants an absent optional and
-    // must not increment: OwnershipPass cannot copy the operand unconditionally when the
-    // result may own nothing
+    // a hit is a new owner of the same object. the miss path plants absence and must not
+    // increment: OwnershipPass cannot copy the operand unconditionally when the result may
+    // own nothing
     ok_payload = gen_retain_value(ok_payload, dest);
 
-    llvm::StructType *opt_ty = _ctx.types->optional_llvm_type(to, *_ctx.current_cmp_unit);
-    llvm::Value *ok_wrapped = llvm::UndefValue::get(opt_ty);
-    ok_wrapped = _ctx.builder->CreateInsertValue(
-        ok_wrapped,
-        llvm::ConstantInt::getTrue(*_ctx.llvm_context),
-        { AST::k_optional_has_index },
-        "recast.has");
-    ok_wrapped = _ctx.builder->CreateInsertValue(
-        ok_wrapped, ok_payload, { AST::k_optional_value_index }, "recast.val");
+    llvm::Value *ok_result = ok_payload;
+    llvm::Type *result_ty = ok_payload->getType();
+    if (to.is_wrapped_optional()) {
+        llvm::StructType *opt_ty = _ctx.types->optional_llvm_type(to, *_ctx.current_cmp_unit);
+        llvm::Value *ok_wrapped = llvm::UndefValue::get(opt_ty);
+        ok_wrapped = _ctx.builder->CreateInsertValue(
+            ok_wrapped,
+            llvm::ConstantInt::getTrue(*_ctx.llvm_context),
+            { AST::k_optional_has_index },
+            "recast.has");
+        ok_wrapped = _ctx.builder->CreateInsertValue(
+            ok_wrapped, ok_payload, { AST::k_optional_value_index }, "recast.val");
+        ok_result = ok_wrapped;
+        result_ty = opt_ty;
+    }
+
     _ctx.builder->CreateBr(done_block);
     llvm::BasicBlock *ok_end = _ctx.builder->GetInsertBlock();
 
@@ -659,8 +666,8 @@ llvm::Value *ClassCodegen::gen_iface_recast(
     llvm::BasicBlock *miss_end = _ctx.builder->GetInsertBlock();
 
     _ctx.set_insert_point(done_block);
-    llvm::PHINode *result = _ctx.builder->CreatePHI(opt_ty, 2, "recast.result");
-    result->addIncoming(ok_wrapped, ok_end);
+    llvm::PHINode *result = _ctx.builder->CreatePHI(result_ty, 2, "recast.result");
+    result->addIncoming(ok_result, ok_end);
     result->addIncoming(absent, miss_end);
     return result;
 }

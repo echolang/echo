@@ -1,0 +1,30 @@
+// a match arm that leaves does not join. assigning on every completing arm seats
+// the local for the code after the match
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+enum Kind
+{
+    case a;
+    case b;
+}
+
+function f(Kind $k) : int32
+{
+    Node $n;
+    match ($k) {
+        .a => { $n = Node(1); },
+        else => { return 0; },
+    }
+    return $n->tag;
+}
+
+echo f(Kind::a());
+echo f(Kind::b());

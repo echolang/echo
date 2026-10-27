@@ -32,7 +32,6 @@
 #include "Compiler/LLVM/Codegen/AbiTableCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
-#include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
@@ -101,7 +100,7 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     if (recast.result == AST::CastLookup::Result::t_ok
         && recast.plan.kind == AST::CastKind::t_interface_recast) {
         _ctx.push_scalar(_ctx.classes->gen_iface_recast(
-            _ctx.materialize(value, "recast"), from, to, to.is_wrapped_optional(),
+            _ctx.materialize(value, "recast"), from, to, to.is_nullable(),
             AST::location_of_expression(&node)));
         return;
     }
@@ -419,44 +418,17 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     : _ctx.builder->CreateSRem(left, right));
                 break;
             case Token::Type::t_op_pow:
-                {
-                    // im kinda just copying the behavior of C with clang here
-                    // cast all values to double and then call the pow intrinsic
-                    // cast the result back to the original type
-                    //
-                    // routed through the one resolver rather than reaching for the intrinsic
-                    // directly. this site used to hand getDeclaration a two-element overload vector
-                    // for `llvm.pow`, which has one overload type - the same bug TypeLowering had,
-                    // and the reason both now ask the same question in one place
-                    llvm::Type *double_type = llvm::Type::getDoubleTy(*_ctx.llvm_context);
-                    llvm::FunctionType *pow_type = llvm::FunctionType::get(double_type, {double_type, double_type}, false);
-
-                    std::string failure;
-                    llvm::Function *fun = declare_intrinsic(_ctx.current_module(), "llvm.pow", pow_type, failure);
-
-                    if (!fun) {
-                        throw _ctx.error(fmt::format("Cannot lower the '**' operator: {}", failure));
-                    }
-
-                    // both conversions read the operation's signedness, and the result goes back to the
-                    // operation's *own* type. this used to widen signed unconditionally and truncate to
-                    // `i32` whatever the operands were, so `int64 $x = 2 ** 40;` lost the top bits
-                    std::vector<llvm::Value *> args;
-                    args.push_back(is_unsigned
-                        ? _ctx.builder->CreateUIToFP(left, double_type)
-                        : _ctx.builder->CreateSIToFP(left, double_type));
-                    args.push_back(is_unsigned
-                        ? _ctx.builder->CreateUIToFP(right, double_type)
-                        : _ctx.builder->CreateSIToFP(right, double_type));
-
-                    llvm::Value *result = _ctx.builder->CreateCall(fun, args);
-                    llvm::Type *int_type = _ctx.types->get_llvm_type(op_type, *_ctx.current_cmp_unit);
-
-                    _ctx.push_scalar(is_unsigned
-                        ? _ctx.builder->CreateFPToUI(result, int_type)
-                        : _ctx.builder->CreateFPToSI(result, int_type));
-                }
+            {
+                // at the operation's type, so `int64 $w = 2 ** 40` raises in i64 rather
+                // than overflowing the literals' int32
+                llvm::Value *base = _ctx.types->coerce_value(
+                    CodegenValue::scalar(left), AST::value_type_of(lhsret), op_type, *_ctx.current_cmp_unit).scalar();
+                llvm::Value *exp = _ctx.types->coerce_value(
+                    CodegenValue::scalar(right), AST::value_type_of(rhsret), op_type, *_ctx.current_cmp_unit).scalar();
+                _ctx.push_scalar(gen_integer_pow(
+                    _ctx, base, exp, is_unsigned, node.op_node->token_literal));
                 break;
+            }
             // **the bitwise five.** four of them are sign-agnostic and lower to one instruction each.
             //
             // `&` is the one with a grammar note attached: `&$x` lexes as an address-of and `& $x` as

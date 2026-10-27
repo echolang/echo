@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] shared_type_param_disagrees.eco:11:6
+
+  Type parameter 'T' of 'pick' is bound to 'int32' but argument 2 has type 'int64'
+
+  10 | 
+  11 | echo pick($small, $big);
+     :      ^^^^
+  12 | 
+
+1 error, nothing was compiled.

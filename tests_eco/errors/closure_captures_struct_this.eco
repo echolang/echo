@@ -1,0 +1,13 @@
+struct Counter
+{
+    int32 $hits;
+
+    function make() : function<int32()>
+    {
+        return function() : int32 { return $this->hits; };
+    }
+}
+
+Counter $c = Counter(7);
+function<int32()> $f = $c->make();
+echo $f();

@@ -1,6 +1,7 @@
 #include "AST/ASTOwnership.h"
 
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTBuiltin.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCast.h"
 #include "AST/ASTBundle.h"
@@ -181,7 +182,7 @@ namespace
             return false;
         }
 
-        if (lookup.plan.kind == CastKind::t_interface_recast && to.is_wrapped_optional()) {
+        if (lookup.plan.kind == CastKind::t_interface_recast && to.is_nullable()) {
             return false;
         }
 
@@ -1617,6 +1618,12 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl, const std::
         return;
     }
 
+    // a `$__litN` dies with the statement. assert compiles it out in release, so the
+    // join sees a move on only the debug arm - there is no user local left to leak
+    if (decl->statement_temp) {
+        return;
+    }
+
     _collector.collect_issue<Issue::ConditionalMove>(
         code_ref_for(decl->token_varname), fmt::format(
             "'{}' owns a resource and is moved out of on only one branch, so nothing would destroy it "
@@ -1734,6 +1741,12 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // *reads* a value, and argument_forwards is what lets a borrow or a window (`string::view`)
             // travel past here. `echo sum(Point(3, 4))` binds around `sum(...)`; `f(&make())` binds
             // at the statement
+            //
+            // `assert` is compiled out in release, condition included. a move inside it is the
+            // same leak `||` already refuses: the tree says the value was moved, emission disagrees
+            const bool assert_condition = is_assert_call(*call);
+            const FlowFacts before_assert = _flow;
+
             for (size_t i = 0; i < call->arguments.size(); i++) {
                 const VarDeclNode *param = nullptr;
                 ValueType wanted = ValueType::make_unknown();
@@ -1746,6 +1759,32 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 }
 
                 call->arguments[i] = resolve_value_arrival(call->arguments[i], wanted, param, ValueDestination::t_argument);
+            }
+
+            if (assert_condition) {
+                std::unordered_set<const VarDeclNode *> temps_moved;
+
+                for (const VarDeclNode *decl : _flow.moved) {
+                    if (decl->statement_temp && before_assert.moved.count(decl) == 0) {
+                        temps_moved.insert(decl);
+                    }
+                }
+
+                std::vector<FlowFacts> joining;
+                joining.push_back(before_assert);
+                joining.push_back(std::move(_flow));
+                join_exclusive(
+                    before_assert,
+                    std::move(joining),
+                    "Move it before the 'assert', whose condition does not run in a release build.");
+
+                // a `$__litN` that the condition moved: keep it moved so the scope does not
+                // drop it after the callee already took it. TemporaryBind children of the
+                // assert never reach here
+                for (const VarDeclNode *decl : temps_moved) {
+                    _flow.moved.insert(decl);
+                    _flow.maybe_moved.erase(decl);
+                }
             }
 
             // **a print call is the last owner of what it printed.** every other by-value argument hands
@@ -3311,6 +3350,10 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
         return;
     }
 
+    // the access's type, substituted through the owner. parse and clone already filled
+    // `resolved`; this is the same identity, so a missed fill cannot lower `T`
+    ValueType stored = static_property_stored_type(node.owner, node.decl, _collector.type_registry);
+
     // written at the type rather than at the access that asked - see TypeHomeScope for why that is a
     // soundness rule and not a tidiness one. the property's own `$name` positions the body either way,
     // so unlike a deinit there is nothing here that a missing home would leave unanswered
@@ -3322,7 +3365,7 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
     // the initializer, if one was written. a static with none is simply zero - the global is
     // zero-initialized, except a type with no zero value, refused here
     if (node.decl->init_expr == nullptr) {
-        if (auto refusal = extern_interface_zero_refusal(node.result_type())) {
+        if (auto refusal = extern_interface_zero_refusal(stored)) {
             _collector.collect_issue<Issue::GenericError>(code_ref_for(site), *refusal);
         }
     }
@@ -3348,6 +3391,7 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
         // previous value owed an ending
         auto &target = _current_module->nodes.emplace_back<StaticPropertyExprNode>(
             node.token_name, node.owner, node.decl, node.index);
+        target.resolved = stored;
 
         // **an instantiation clones the initializer; a plain type moves it.**
         //
@@ -3397,7 +3441,7 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
     // **when** it runs is this subsystem's own answer, and the one thing a local does not need:
     // Compiler::LLVM::StaticStorageCodegen pushes this function onto an intrusive chain as the value
     // is seated, and `main`'s epilogue walks it - LIFO, so reverse of initialization
-    if (needs_destruction(node.decl->type())) {
+    if (needs_destruction(stored)) {
         auto &decl = begin_synthesized_decl(
             fmt::format("$static_deinit{}", node.index), site);
         const BodyMutationScope mutating(*this, decl);
@@ -3407,11 +3451,12 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
 
         auto &place = _current_module->nodes.emplace_back<StaticPropertyExprNode>(
             node.token_name, node.owner, node.decl, node.index);
+        place.resolved = stored;
 
         place.init = built.init;
 
         std::vector<NodeReference> drops;
-        emit_drop_of_place(&place, node.decl->type(), site, drops);
+        emit_drop_of_place(&place, stored, site, drops);
 
         for (auto &drop : drops) {
             decl.body->children.push_back(drop);
@@ -3624,6 +3669,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     // in another file, and a body built around an assumption held somewhere else is exactly how this
     // line came to write through a handle that was never allocated
     auto &this_decl = declare_constructor_this(*_current_module, self_type, at.value());
+    this_decl.declaring_function = _current_function;
     body.add_vardecl(this_decl);
 
     // **a tagged optional copies its payload only when it has one.** the tag is copied either way, and the

@@ -51,6 +51,7 @@ namespace
     }
 
     const ValueType int32 = EchoTests::prim(ValueTypePrimitive::t_int32);
+    const ValueType int64 = EchoTests::prim(ValueTypePrimitive::t_int64);
     const ValueType float64 = EchoTests::prim(ValueTypePrimitive::t_float64);
     const ValueType boolean = EchoTests::prim(ValueTypePrimitive::t_bool);
 }
@@ -71,6 +72,79 @@ TEST_CASE("Arguments that decide every parameter name an instance", "[instantiat
 
     // declaration order, not the order unification happened to bind in
     REQUIRE(inst.type_arguments == std::vector<ValueType>{int32, float64});
+}
+
+TEST_CASE("A later argument cannot replace a concrete binding", "[instantiation][generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function choose<T>(T $a, T $b) : T { return $b; }\n");
+
+    const auto inst = can_instantiate(
+        template_named(*bundle, "choose"), {int32, int64}, bundle->collector.type_registry);
+
+    REQUIRE(inst.fit == InstantiationFit::t_no);
+    REQUIRE(inst.blame == InstantiationBlame::t_conflicting_binding);
+    REQUIRE(inst.argument == 1);
+    REQUIRE(inst.param != nullptr);
+    REQUIRE(inst.param->name == "T");
+    REQUIRE(inst.bound == int32);
+    REQUIRE(inst.decided);
+    REQUIRE(inst.type_arguments == std::vector<ValueType>{int32});
+}
+
+TEST_CASE("A later argument may wrap or widen into an existing binding", "[instantiation][generics]")
+{
+    // `.ok($s)` at `result<string?, E>`: T is already string?, the argument is string.
+    // unify sees two concretes; argument_fit sees a wrap, so the instance stays
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function choose<T>(T $a, T $b) : T { return $b; }\n");
+
+    const ValueType opt_i32 = bundle->collector.type_registry.get_or_create_optional(int32);
+
+    const auto wrapped = can_instantiate(
+        template_named(*bundle, "choose"), {opt_i32, int32}, bundle->collector.type_registry);
+
+    REQUIRE(wrapped.fit == InstantiationFit::t_yes);
+    REQUIRE(wrapped.type_arguments == std::vector<ValueType>{opt_i32});
+
+    const auto promoted = can_instantiate(
+        template_named(*bundle, "choose"), {int64, int32}, bundle->collector.type_registry);
+
+    REQUIRE(promoted.fit == InstantiationFit::t_yes);
+    REQUIRE(promoted.type_arguments == std::vector<ValueType>{int64});
+
+    // `$m['a'] = 5`: the 5 is deferred, V is already int64 from the receiver
+    const auto deferred_widen = can_instantiate(
+        template_named(*bundle, "choose"),
+        {int64, int32},
+        bundle->collector.type_registry,
+        {},
+        ValueType::make_unknown(),
+        {false, true});
+
+    REQUIRE(deferred_widen.fit == InstantiationFit::t_yes);
+    REQUIRE(deferred_widen.type_arguments == std::vector<ValueType>{int64});
+}
+
+TEST_CASE("A deferred literal that disagrees still leaves the instance decided", "[instantiation][generics]")
+{
+    // pick($small, 9223372036854775807): T is int32 from the typed argument. the
+    // literal is TypeChecker's IntegerOverflow against that instance, so this
+    // is t_yes - a conversion, not a shape that cannot instantiate
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function choose<T>(T $a, T $b) : T { return $b; }\n");
+
+    const auto inst = can_instantiate(
+        template_named(*bundle, "choose"),
+        {int32, int64},
+        bundle->collector.type_registry,
+        {},
+        ValueType::make_unknown(),
+        {false, true});
+
+    REQUIRE(inst.fit == InstantiationFit::t_yes);
+    REQUIRE(inst.decided);
+    REQUIRE(inst.type_arguments == std::vector<ValueType>{int32});
 }
 
 TEST_CASE("A different argument count is not a candidate at all", "[instantiation][generics]")

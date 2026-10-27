@@ -1,0 +1,20 @@
+// a nested closure that uses an outer uninit local must not erase it for the
+// rest of the outer body
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+function f() : void
+{
+    Node $n;
+    function<void()> $c = function() : void { echo $n->tag; };
+    echo $n->tag;
+}
+
+f();

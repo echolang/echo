@@ -82,7 +82,15 @@ std::vector<std::string> AST::FunctionDeclNode::written_parameter_spellings() co
             spelling += ": ";
         }
 
-        spelling += args[i]->type().get_type_desciption();
+        // `read` rewrites the pointee to const at parse; the keyword already said that, so
+        // printing `read const T&` is one fact twice
+        AST::ValueType shown = args[i]->type();
+        if (effect == AST::AccessEffect::t_read && shown.is_pointer() && shown.pointee().is_const()) {
+            shown = AST::ValueType::make_pointer(
+                AST::ValueType::make_mutable(shown.pointee()),
+                shown.is_nullable());
+        }
+        spelling += shown.get_type_desciption();
 
         // a labelled parameter's `$name` is not how a caller writes it, so it belongs next to the
         // label in the signature a diagnostic shows. an unlabelled one stays `int32` as it always

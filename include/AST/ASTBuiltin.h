@@ -14,6 +14,7 @@
 namespace AST
 {
     class Collector;
+    class FunctionCallExprNode;
     class FunctionDeclNode;
 
     // the compiler builtins a function declaration can be bound to with `#[echoc::builtin: ...]`
@@ -284,6 +285,13 @@ namespace AST
     // rather than letting it fail deep inside codegen
     bool is_known_builtin(const std::string &name);
     BuiltinKind builtin_kind_for(const std::string &name);
+
+    // **is this the `assert` builtin?** one owner, two spellings: a bound declaration,
+    // and a call that may still be unresolved (`lookup_name() == "assert"`). OperatorRewriter
+    // hoists into the call so the condition vanishes in release; OwnershipPass refuses a
+    // move inside it. a second predicate is how those two drift
+    bool is_assert_builtin(const FunctionDeclNode *decl);
+    bool is_assert_call(const FunctionCallExprNode &node);
 
     // **which argument is the message, if any?** the position `die`/`assert` fold into the abort
     // text along with the source location when that argument is a literal.

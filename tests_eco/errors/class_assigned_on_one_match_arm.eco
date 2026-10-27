@@ -1,0 +1,28 @@
+// a class local assigned on only one match arm is still null on the others
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+enum Kind
+{
+    case a;
+    case b;
+}
+
+function f(Kind $k) : void
+{
+    Node $n;
+    match ($k) {
+        .a => { $n = Node(1); },
+        else => {},
+    }
+    echo $n->tag;
+}
+
+f(Kind::a());

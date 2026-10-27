@@ -1,0 +1,16 @@
+// hydrahon / libmysql: a collection literal inside assert is a `$__litN` that
+// dies with the statement. compiling the assert out in release does not leak it
+
+function has_one(array<int32> $xs) : bool
+{
+    return $xs[0] == 1;
+}
+
+function has_a(map<string, int32> $m) : bool
+{
+    return $m['a'] == 1;
+}
+
+assert(has_one([1]));
+assert(has_a(['a' => 1]));
+echo 9;

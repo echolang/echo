@@ -14,6 +14,7 @@
 #include "AST/ASTNullability.h"
 #include "AST/GuardNode.h"
 #include "AST/ASTOperatorSemantics.h"
+#include "AST/ASTBuiltin.h"
 #include "AST/ASTVariadic.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTSourceToken.h"
@@ -946,11 +947,12 @@ void OperatorRewriter::value_edges_except_untyped_collections(std::vector<ExprNo
 
 void OperatorRewriter::bind_call_arguments(
     std::vector<ExprNode *> &arguments,
-    const TokenReference &at
+    const TokenReference &at,
+    bool hoist_into_call
 )
 {
     // a statement child leaves `$__lit` in `_hoisted` for visitScope
-    if (_in_scope_statement) {
+    if (_in_scope_statement && !hoist_into_call) {
         value_edges_except_untyped_collections(arguments);
         return;
     }
@@ -970,7 +972,7 @@ void OperatorRewriter::bind_call_arguments(
 void OperatorRewriter::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
     type_edges(node.explicit_type_args);
-    bind_call_arguments(node.arguments, node.token_function_name);
+    bind_call_arguments(node.arguments, node.token_function_name, is_assert_call(node));
 }
 
 void OperatorRewriter::visit_indirect_call_expr(IndirectCallExprNode &node)

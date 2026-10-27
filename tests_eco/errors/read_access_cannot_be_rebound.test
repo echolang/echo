@@ -1,0 +1,76 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  read_access_cannot_be_rebound.eco:11:12
+
+  Invalid type conversion: cannot implicitly convert 'const int32' to 'int32&'
+
+  10 | {
+  11 |     int32& $y = $x;
+     :            ^^
+  12 |     $y = 99;
+
+[error] InvalidTypeConversion  read_access_cannot_be_rebound.eco:19:10
+
+  Invalid type conversion: cannot implicitly convert 'const Box' to 'Box&'
+
+  18 | {
+  19 |     Box& $y = $b;
+     :          ^^
+  20 |     $y->set(99);
+
+[error] ConstViolation  read_access_cannot_be_rebound.eco:25:50
+
+  Const violation: cannot write through 'const int32&' - its pointee is const
+
+  24 | {
+  25 |     function<void()> $f = function() : void { $x = 99; };
+     :                                                  ^
+  26 |     $f();
+
+[error] InvalidTypeConversion  read_access_cannot_be_rebound.eco:31:16
+
+  Invalid type conversion: cannot implicitly convert 'const int32&' to 'ptr<int32>'
+
+  30 | {
+  31 |     ptr<int32> $p = $x:$;
+     :                ^^
+  32 |     $p = 99;
+
+[error] InvalidTypeConversion  read_access_cannot_be_rebound.eco:37:13
+
+  Invalid type conversion: cannot assign 'const int32&' to 'ptr<int32>'
+
+  36 | {
+  37 |     G::$p:$ = $x:$;
+     :             ^
+  38 |     poke();
+
+[error] InvalidTypeConversion  read_access_cannot_be_rebound.eco:41:40
+
+  Invalid type conversion: cannot return 'const int32' from a function declared 'int32&'
+
+  40 | 
+  41 | function id(read int32& $a) : int32& { return $a; }
+     :                                        ^^^^^^
+  42 | 
+
+[error] ConstViolation  read_access_cannot_be_rebound.eco:54:26
+
+  Const violation: cannot write through 'const int32&' - its pointee is const
+
+  53 |     match ($e) {
+  54 |         .one($n) => { $n = 99; }
+     :                          ^
+  55 |         else => {}
+
+[error] read_access_cannot_be_rebound.eco:61:21
+
+  cannot convert 'const int32&' to 'ptr<int32>' - that drops the pointee's const
+
+  60 | {
+  61 |     ptr<int32> $p = ptr<int32>($x:$);
+     :                     ^^^
+  62 |     $p = 99;
+
+8 errors, nothing was compiled.

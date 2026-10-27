@@ -372,6 +372,7 @@ namespace
         ctor.body = &ctor_body;
 
         auto &this_vardecl = AST::declare_constructor_this(module, *ctor.return_type, name_token);
+        this_vardecl.declaring_function = &ctor;
         ctor.body->add_vardecl(this_vardecl);
 
         const std::vector<AST::VarDeclNode *> params = AST::implicit_constructor_parameters(type);

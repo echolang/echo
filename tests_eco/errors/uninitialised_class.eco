@@ -1,0 +1,7 @@
+class Node
+{
+    int32 $tag;
+}
+
+Node $n;
+echo $n->tag;

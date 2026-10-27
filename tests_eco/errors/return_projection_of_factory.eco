@@ -1,0 +1,21 @@
+class Box
+{
+    int32 $n;
+
+    constructor(int32 $n) { $this->n = $n; }
+
+    function slot() : int32& { return $this->n; }
+}
+
+function make() : Box
+{
+    return Box(1);
+}
+
+function dangle() : int32&
+{
+    Box $b = make();
+    return $b->slot();
+}
+
+echo dangle();

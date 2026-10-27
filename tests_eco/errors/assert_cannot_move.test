@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConditionalMove  assert_cannot_move.eco:18:9
+
+  '$box' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it before the 'assert', whose condition does not run in a release build.
+
+  17 | {
+  18 |     Res $box = Res(7);
+     :         ^^^^
+  19 |     assert(consume(mv $box));
+
+1 error, nothing was compiled.

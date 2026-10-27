@@ -40,6 +40,7 @@ void Parser::push_implicit_param(
 {
     auto token = payload.context.make_virtual_token(name, Token::Type::t_varname, at);
     auto *vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(token, type_node);
+    vardecl->declaring_function = payload.context.current_function_ptr;
 
     // ahead of everything the caller wrote. FunctionDeclNode::clone clones args before the body
     // precisely so the body's references rebind to the cloned declaration
@@ -197,6 +198,29 @@ bool Parser::parse_parameter_list(
 
             param->takes_ownership = takes_ownership;
             param->access_effect = access_effect;
+
+            // `read T&` is `const T&` to every later pass: `const function` already works this
+            // way for `$this`, and that is the one owner of "may this place be written". the
+            // keyword stays on access_effect so `readonly` and AccessPass still have a declared
+            // read to check. skip a pointee that is already const - `read const T&` is one fact
+            if (access_effect == AST::AccessEffect::t_read
+                && param->has_type()
+                && param->type().is_pointer()
+                && !param->type().pointee().is_const()) {
+                const AST::ValueType written = param->type();
+                const AST::TypeNode *from = param->type_node();
+                auto &const_node = payload.context.emplace_node<AST::TypeNode>(
+                    AST::ValueType::make_pointer(
+                        AST::ValueType::make_const(written.pointee()),
+                        written.is_nullable()));
+                if (from->type_token.has_value()) {
+                    const_node.type_token.emplace(from->type_token.value());
+                }
+                const_node.written_names = from->written_names;
+                const_node.written_spelling = from->written_spelling;
+                param->set_type_node(&const_node);
+            }
+
             if (label.has_value()) {
                 param->label_token.emplace(label.value());
             }

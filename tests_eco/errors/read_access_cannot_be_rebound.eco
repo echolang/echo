@@ -1,0 +1,75 @@
+// `read T&` is `const T&` to the type system. rebound as mutable it used to compile, emit
+// `readonly`, and print 1 under `run` / 99 under `--optimize none`. each function is one
+// escape from the B60 table
+
+struct G { static ptr<int32> $p; }
+
+function poke() : void { G::$p = 99; }
+
+function rebound(read int32& $x) : void
+{
+    int32& $y = $x;
+    $y = 99;
+}
+
+struct Box { int32 $n; function set(int32 $v) : void { $this->n = $v; } }
+
+function through_local(read Box& $b) : void
+{
+    Box& $y = $b;
+    $y->set(99);
+}
+
+function captured(read int32& $x) : void
+{
+    function<void()> $f = function() : void { $x = 99; };
+    $f();
+}
+
+function into_ptr(read int32& $x) : void
+{
+    ptr<int32> $p = $x:$;
+    $p = 99;
+}
+
+function via_static(read int32& $x) : void
+{
+    G::$p:$ = $x:$;
+    poke();
+}
+
+function id(read int32& $a) : int32& { return $a; }
+
+function through_return(read int32& $x) : void
+{
+    int32& $y = id($x);
+    $y = 99;
+}
+
+enum E { case one(int32 $n); case two; }
+
+function through_match(read E& $e) : void
+{
+    match ($e) {
+        .one($n) => { $n = 99; }
+        else => {}
+    }
+}
+
+function drop_const(read int32& $x) : void
+{
+    ptr<int32> $p = ptr<int32>($x:$);
+    $p = 99;
+}
+
+int32 $v = 1;
+rebound(&$v);
+through_local(Box(1));
+captured(&$v);
+into_ptr(&$v);
+via_static(&$v);
+through_return(&$v);
+E $e = E::one(1);
+through_match($e);
+drop_const(&$v);
+echo $v;

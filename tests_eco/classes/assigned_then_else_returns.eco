@@ -1,0 +1,25 @@
+// an else that leaves the function does not join. the then-assignment seats
+// the local for the code after the if
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+function f(bool $c) : int32
+{
+    Node $n;
+    if ($c) {
+        $n = Node(1);
+    } else {
+        return 0;
+    }
+    return $n->tag;
+}
+
+echo f(true);
+echo f(false);

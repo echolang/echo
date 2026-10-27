@@ -1,0 +1,11 @@
+// a static `array<T>` on a generic owner. teardown used to be written for `array<T>`
+// itself, which has no layout
+struct Bag<T> {
+    static array<T> $items;
+}
+
+Bag<int32>::$items->push(5);
+Bag<int32>::$items->push(9);
+echo Bag<int32>::$items->count();
+echo Bag<int32>::$items[0];
+echo Bag<int64>::$items->count();

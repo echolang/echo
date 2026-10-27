@@ -1,0 +1,23 @@
+// a guard's else must leave. an assignment there cannot seat the success path
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+function f(Node? $maybe) : int32
+{
+    Node $n;
+    guard $maybe else {
+        $n = Node(1);
+        return 0;
+    }
+    echo $n->tag;
+    return 1;
+}
+
+f(null);

@@ -1,0 +1,9 @@
+// integer `**` overflow is a debug trap, matching division by zero. a function keeps
+// the operands from folding, so the runtime path is the one that fires
+function raise(int32 $base, int32 $exp) : int32
+{
+    return $base ** $exp;
+}
+
+echo raise(2, 10);
+echo raise(2, 31);

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] uninitialised_class.eco:7:6
+
+  '$n' has type 'Node' which owns a resource, so it needs an initializer
+
+  6 | Node $n;
+  7 | echo $n->tag;
+    :      ^^
+  8 | 
+
+1 error, nothing was compiled.

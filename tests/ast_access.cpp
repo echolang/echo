@@ -37,6 +37,24 @@ TEST_CASE("an access effect is read off the parameter it was written on", "[acce
     REQUIRE(access_effect_of(*kernel, 0) == AccessEffect::t_read);
     REQUIRE(access_effect_of(*kernel, 1) == AccessEffect::t_inout);
     REQUIRE(access_effect_of(*kernel, 2) == AccessEffect::t_out);
+
+    // `read` rewrites the pointee to const at parse, so the type system owns "may this be written"
+    REQUIRE(kernel->args[0]->type().is_pointer());
+    REQUIRE(kernel->args[0]->type().pointee().is_const());
+    REQUIRE_FALSE(kernel->args[1]->type().pointee().is_const());
+}
+
+TEST_CASE("`read T&` collides with `const T&` and not with `T&`", "[access]")
+{
+    auto with_const = EchoTests::tests_make_parsed_bundle(
+        "function g(read int32& $x) : void {}\n"
+        "function g(const int32& $x) : void {}\n");
+    REQUIRE(with_const->collector.has_critical_issues());
+
+    auto with_mutable = EchoTests::tests_make_parsed_bundle(
+        "function g(read int32& $x) : void {}\n"
+        "function g(int32& $x) : void {}\n");
+    REQUIRE_FALSE(with_mutable->collector.has_critical_issues());
 }
 
 TEST_CASE("a parameter with no effect written takes none", "[access]")

@@ -1,0 +1,28 @@
+// a break does not fall through to the successor. assigning on the else path
+// seats the local for the return that only that path reaches
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+function f(bool $c) : int32
+{
+    Node $n;
+    while (true) {
+        if ($c) {
+            break;
+        } else {
+            $n = Node(1);
+        }
+        return $n->tag;
+    }
+    return 0;
+}
+
+echo f(false);
+echo f(true);

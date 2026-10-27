@@ -1,0 +1,35 @@
+// visu Slot: assume copies a handle that still lives in the erased cell.
+// a local filled from that, then a projection returned, is not a dangle
+
+class Slot
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    public function get() : int32&
+    {
+        return $this->n;
+    }
+}
+
+function through_assume(erased $held) : int32&
+{
+    unsafe {
+        Slot $slot = assume<Slot>($held);
+        return $slot->get();
+    }
+}
+
+Slot $kept = Slot(3);
+erased $held = erased::from($kept);
+
+unsafe {
+    int32& $n = through_assume($held);
+    $n = 9;
+}
+
+echo $kept->n;

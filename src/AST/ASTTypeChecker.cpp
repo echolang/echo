@@ -2,6 +2,7 @@
 
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCollectionLiteral.h"
+#include "AST/ASTClassLocals.h"
 #include "AST/ASTConstruction.h"
 #include "AST/ASTEnumMap.h"
 #include "AST/ASTAtomics.h"
@@ -33,9 +34,11 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/GuardNode.h"
 #include "AST/IfStatementNode.h"
+
 #include "AST/WhileStatementNode.h"
 #include "AST/ForStatementNode.h"
 #include "AST/ReturnNode.h"
+#include "AST/ReleaseNode.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
@@ -241,6 +244,7 @@ void TypeChecker::run()
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
         accept_semantic_roots(*module_ptr, *this, _current_file);
+        AST::check_class_locals(*module_ptr, _collector);
         AST::check_enum_maps(_collector, *module_ptr);
     }
 }
@@ -770,6 +774,13 @@ void TypeChecker::visitReturn(ReturnNode &node)
 void TypeChecker::check_bool_condition(ExprNode *condition, const char *kind, const TokenReference &at)
 {
     if (condition == nullptr) {
+        return;
+    }
+
+    if (is_written_null(condition)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            "'null' needs a destination that can be absent - a typed variable, a parameter, or a comparison");
         return;
     }
 
@@ -1897,6 +1908,13 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                 continue;
             }
 
+            if (is_written_null(arg)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(location_of_expression(arg)),
+                    "'null' needs a destination that can be absent - a typed variable, a parameter, or a comparison");
+                continue;
+            }
+
             // **a tagged optional over a primitive prints its payload**, whether or not it is there - the
             // peel `echo` has always performed. asked of AST::echo_printed_type_of, which is also
             // what the printers emit through: this arm decides what is *accepted* and that table
@@ -2095,6 +2113,23 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         && function_pointer_promotes_raw_storage(node.expr->result_type(), node.cast_to)) {
         report_unsafe_function_pointer(
             node.expr->result_type(), node.cast_to, location_of_expression(node.expr));
+    }
+
+    // a written `$x as T` / `T(...)` that drops pointee const on a borrow. `read T&`
+    // rewrites to `const T&`, so this is const's question. `ptr<const T>` stays a raw
+    // address. OwnershipPass plants the same TypeCastNode shape (implicit=false, no
+    // written_to) to strip const for teardown; that is not a conversion the author wrote
+    if (!node.is_implcit && node.written_to != nullptr && node.expr != nullptr
+        && node.cast_to.is_pointer() && !node.cast_to.pointee().is_const()) {
+        const ValueType from = node.expr->result_type();
+        if (from.is_pointer() && !from.is_nullable() && from.pointee().is_const()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(location_of_expression(&node)),
+                fmt::format(
+                    "cannot convert '{}' to '{}' - that drops the pointee's const",
+                    from.get_type_desciption(),
+                    node.cast_to.get_type_desciption()));
+        }
     }
 
     // CastResolution reports every written-cast refusal and sets plan_decided. a generic

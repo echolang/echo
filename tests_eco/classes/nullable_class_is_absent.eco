@@ -1,0 +1,10 @@
+// a class handle's T? is a real empty value. the zero is absence, not uninit
+class Hatak
+{
+    int32 $id;
+}
+
+Hatak? $h;
+if ($h == null) {
+    echo 1;
+}

@@ -669,6 +669,7 @@ static void parse_constructor(
     // method's `$this`, which is a borrow parameter - a constructor hands back a new instance
     auto &this_vardecl = AST::declare_constructor_this(
         payload.context.module, *ctor_decl->return_type, name_token);
+    this_vardecl.declaring_function = ctor_decl;
 
     // the parameters' frame is where this constructor ends: a name resolved past it belongs to
     // another function's storage - see ScopeNode::lookup_variable

@@ -1,5 +1,6 @@
 #include "AST/ASTPlaceExpr.h"
 
+#include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -64,6 +65,22 @@ ExprNode *place_anchor(ExprNode *expr)
             case NodeType::n_expr_move:
                 expr = static_cast<MoveExprNode *>(expr)->operand;
                 break;
+
+            case NodeType::n_expr_retain:
+                expr = static_cast<RetainExprNode *>(expr)->operand;
+                break;
+
+            case NodeType::n_type_cast:
+            {
+                auto *cast = static_cast<TypeCastNode *>(expr);
+
+                if (!cast->is_implcit) {
+                    return nullptr;
+                }
+
+                expr = cast->expr;
+                break;
+            }
 
             case NodeType::n_expr_deref:
                 expr = static_cast<DerefExprNode *>(expr)->operand;
@@ -211,6 +228,54 @@ bool is_pointer_typed_parameter(const VarDeclNode *decl, const FunctionDeclNode 
     return false;
 }
 
+// a body local of `function`, not a parameter and not file-scope / another body
+bool is_function_local(const VarDeclNode *decl, FunctionDeclNode *function)
+{
+    if (decl == nullptr || function == nullptr) {
+        return false;
+    }
+
+    if (decl->declaring_function != function) {
+        return false;
+    }
+
+    for (VarDeclNode *arg : function->args) {
+        if (arg == decl) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// `$this->view()` / `assume<T>($held)` copy a handle that still lives elsewhere.
+// a constructor, a factory, or no initializer is the last handle
+bool copies_live_handle(const VarDeclNode *decl)
+{
+    if (decl == nullptr || decl->init_expr == nullptr) {
+        return false;
+    }
+
+    ExprNode *init = strip_implicit_casts(decl->init_expr);
+
+    if (init == nullptr || init->get_node_type() != NodeType::n_expr_call) {
+        return false;
+    }
+
+    const FunctionDeclNode *callee = static_cast<FunctionCallExprNode *>(init)->decl;
+
+    if (callee == nullptr) {
+        return false;
+    }
+
+    if (callee->is_builtin() && callee->builtin.has_value()
+        && builtin_kind_for(callee->builtin.value()) == BuiltinKind::t_assume) {
+        return true;
+    }
+
+    return callee->has_receiver();
+}
+
 // a class handle names a heap object. `&$box` is still the slot on the frame;
 // `$box->n` / `$box->slot()` name the payload, which other handles may keep
 bool is_class_handle(const VarDeclNode *decl)
@@ -330,6 +395,25 @@ VarDeclNode *names_callee_frame_storage_through_call(
         if (VarDeclNode *root = names_callee_frame_storage_walk(
                 borrowed_through_deref((*arguments)[i]), function, argument_visited)) {
             if (is_class_handle(root) && !is_borrow_of_same_class(result, root)) {
+                // a parameter / `$this` / file-scope outlives the call. a constructor or
+                // factory here is the last handle. a method / assume copies one that still
+                // lives elsewhere. follow copies (`Box $local = $param`) onto that source
+                VarDeclNode *source = root;
+
+                while (is_function_local(source, function) && source->init_expr != nullptr) {
+                    VarDeclNode *from = place_root_of(source->init_expr);
+
+                    if (from == nullptr || from == source) {
+                        break;
+                    }
+
+                    source = from;
+                }
+
+                if (is_function_local(source, function) && !copies_live_handle(source)) {
+                    return root;
+                }
+
                 continue;
             }
 

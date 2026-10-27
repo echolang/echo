@@ -28,6 +28,7 @@
 #include "AST/NullNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTTypeParam.h"
 #include "AST/ASTVisibility.h"
 
 #include "External/infint.h"
@@ -1114,6 +1115,9 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
 
     auto &node = payload.context.emplace_node<AST::StaticPropertyExprNode>(
         name_token, owner, found->second, found->first);
+
+    node.resolved = AST::static_property_stored_type(
+        owner, found->second, payload.collector.type_registry);
 
     return &node;
 }

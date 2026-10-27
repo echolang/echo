@@ -83,8 +83,17 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         }
 
         const bool consumes_const = param.is_const() || position == UnifyPosition::t_level;
+        const ValueType incoming = consumes_const ? ValueType::make_mutable(arg) : arg;
 
-        out.bind(decl, consumes_const ? ValueType::make_mutable(arg) : arg);
+        // a later argument must not replace a concrete binding. `pick($int32, $int64)` used
+        // to instantiate `pick<int32>` and silently narrow the int64
+        if (const ValueType *existing = out.lookup(decl)) {
+            if (!contains_type_param(*existing)) {
+                return *existing == incoming;
+            }
+        }
+
+        out.bind(decl, incoming);
         return true;
     }
 

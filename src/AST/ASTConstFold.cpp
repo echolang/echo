@@ -310,18 +310,68 @@ namespace
                 return checked(lhs >> rhs);
             }
 
-            // **`**` is deliberately not folded.** ExprCodegen lowers it by casting both operands to
-            // double, calling llvm.pow and casting back to the operand type - so an integer answer worked
-            // out here would differ from the emitted one for any input where that round trip loses
-            // precision, and it would differ *silently*. the round trip is the reason, not the width it
-            // lands in.
-            //
-            // the bitwise five above are folded because codegen lowers all five. that pairing is the rule
-            // rather than a coincidence: a symbol folded here and thrown on there makes a `const if` and
-            // the `if` beside it take different arms, so the two halves move together or not at all
+            case Token::Type::t_op_pow: {
+                // integer exponentiation by squaring, matching ExprCodegen. a negative
+                // exponent answers 0; overflow is a refusal, for mul's reason
+                if (size.is_signed && static_cast<int64_t>(rhs) < 0) {
+                    return checked(0);
+                }
+
+                const auto mul = [&](uint64_t a, uint64_t b) -> std::optional<uint64_t> {
+                    if (size.is_signed) {
+                        int64_t out = 0;
+                        if (__builtin_mul_overflow(static_cast<int64_t>(a), static_cast<int64_t>(b), &out)) {
+                            return std::nullopt;
+                        }
+
+                        return static_cast<uint64_t>(out);
+                    }
+
+                    uint64_t out = 0;
+                    if (__builtin_mul_overflow(a, b, &out)) {
+                        return std::nullopt;
+                    }
+
+                    return out;
+                };
+
+                uint64_t result = 1;
+                uint64_t cur = lhs;
+                uint64_t exp = rhs;
+
+                while (exp != 0) {
+                    if ((exp & 1u) != 0) {
+                        const std::optional<uint64_t> grown = mul(result, cur);
+                        if (!grown.has_value()) {
+                            return ConstFoldResult::refused(fmt::format(
+                                "this overflows a '{}' - a 'const' value is refused rather than wrapped.",
+                                type.get_type_desciption()));
+                        }
+
+                        result = *grown;
+                    }
+
+                    exp >>= 1;
+                    if (exp == 0) {
+                        break;
+                    }
+
+                    const std::optional<uint64_t> squared = mul(cur, cur);
+                    if (!squared.has_value()) {
+                        return ConstFoldResult::refused(fmt::format(
+                            "this overflows a '{}' - a 'const' value is refused rather than wrapped.",
+                            type.get_type_desciption()));
+                    }
+
+                    cur = *squared;
+                }
+
+                return checked(result);
+            }
+
             default:
                 return ConstFoldResult::refused(fmt::format(
-                    "'{}' is not something the compiler folds. `+ - * / % & | ^ << >>`, the comparisons "
+                    "'{}' is not something the compiler folds. `+ - * / % ** & | ^ << >>`, the comparisons "
                     "and `&&`/`||` are.", spelling));
         }
     }

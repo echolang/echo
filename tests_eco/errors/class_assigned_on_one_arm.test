@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] class_assigned_on_one_arm.eco:20:10
+
+  '$n' has type 'Node' which owns a resource, so it needs an initializer
+
+  19 |     }
+  20 |     echo $n->tag;
+     :          ^^
+  21 | }
+
+1 error, nothing was compiled.

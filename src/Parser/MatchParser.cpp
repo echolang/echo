@@ -110,6 +110,7 @@ AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload, AST::TypeNode 
     // not. the same placeholder an ordinary `$x = f()` is parsed with
     auto &subject_type = payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_unknown());
     auto &subject = payload.context.emplace_node<AST::VarDeclNode>(subject_token, &subject_type);
+    subject.declaring_function = payload.context.current_function_ptr;
     subject.init_expr = subject_expr;
 
     auto &node = payload.context.emplace_node<AST::MatchExprNode>(&subject, match_token);
@@ -182,6 +183,7 @@ AST::MatchExprNode *Parser::parse_match(Parser::Payload &payload, AST::TypeNode 
 
                     bindings.push_back(
                         &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), &binding_type));
+                    bindings.back()->declaring_function = payload.context.current_function_ptr;
                     cursor.skip();
 
                     if (cursor.is_type(Token::Type::t_comma)) {

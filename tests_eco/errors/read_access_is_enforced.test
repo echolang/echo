@@ -19,4 +19,13 @@ expect: fail
      :            ^^^^
   26 | }
 
-2 errors, nothing was compiled.
+[error] InvalidTypeConversion  read_access_is_enforced.eco:25:5
+
+  Invalid type conversion: cannot implicitly convert 'const Box' to 'Box&'
+
+  24 | {
+  25 |     mutate($src);
+     :     ^^^^^^
+  26 | }
+
+3 errors, nothing was compiled.

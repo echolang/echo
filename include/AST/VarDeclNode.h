@@ -13,6 +13,7 @@
 namespace AST
 {
     class ExprNode;
+    class FunctionDeclNode;
 
     class VarDeclNode : public Node
     {
@@ -105,6 +106,11 @@ namespace AST
         // a collection-literal hoist `$__litN`. last mention is a handover even off `return`:
         // the temp dies with the statement, so a by-value argument takes it rather than a copy
         bool statement_temp = false;
+
+        // the function whose body declared this local. null at file scope, and on a property.
+        // parameters point at the function too; `is_function_local` still excludes them via args.
+        // rebound on clone, same as FunctionDeclNode::enclosing_function
+        FunctionDeclNode *declaring_function = nullptr;
 
         // written `forEvent: string $name`: the call site must use `forEvent:`, not `$name:` and not
         // a positional. empty means the parameter may be positional or `$name:`.

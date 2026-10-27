@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] return_projection_of_assigned_local.eco:14:5
+
+  cannot return the address of local '$b' - its storage ends with the call
+
+  13 |     $b = Box(1);
+  14 |     return $b->slot();
+     :     ^^^^^^
+  15 | }
+
+1 error, nothing was compiled.

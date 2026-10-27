@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] class_assigned_only_in_guard_else.eco:19:10
+
+  '$n' has type 'Node' which owns a resource, so it needs an initializer
+
+  18 |     }
+  19 |     echo $n->tag;
+     :          ^^
+  20 |     return 1;
+
+1 error, nothing was compiled.

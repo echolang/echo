@@ -1,0 +1,11 @@
+// two typed arguments of equal standing cannot bind T to two different concretes.
+// `pick($int32, $int64)` used to instantiate `pick<int32>` and silently narrow
+function pick<T>(T $a, T $b) : T
+{
+    return $a;
+}
+
+int32 $small = 1;
+int64 $big = 2;
+
+echo pick($small, $big);

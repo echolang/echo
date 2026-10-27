@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] bare_null.eco:1:6
+
+  'null' needs a destination that can be absent - a typed variable, a parameter, or a comparison
+
+  1 | echo null;
+    :      ^^^^
+  2 | 
+
+1 error, nothing was compiled.

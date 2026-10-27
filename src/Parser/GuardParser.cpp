@@ -146,6 +146,7 @@ AST::GuardNode *Parser::parse_guard(
         }
 
         failure = &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), nullptr);
+        failure->declaring_function = payload.context.current_function_ptr;
         cursor.skip();
 
         if (!cursor.is_type(Token::Type::t_close_paren)) {

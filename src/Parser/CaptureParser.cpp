@@ -144,8 +144,31 @@ static bool add_capture(
     // null. unknown rather than a refusal: the failure has already been reported at the declaration, and
     // "no information" is what every pass below reads an unresolved type as - the same answer
     // VarRefNode::result_type gives for the same declaration
-    const AST::ValueType captured_type =
+    AST::ValueType captured_type =
         vardecl->has_type() ? vardecl->type() : AST::ValueType::make_unknown();
+
+    // `$this` is a borrow of the receiver. capturing the address dangles the moment the
+    // method returns. a class handle retains; any other pointee has to be copied first
+    if (vardecl->token_varname.value() == "$this" && captured_type.is_pointer()) {
+        const AST::ValueType owned = AST::value_type_of(captured_type);
+
+        if (owned.is_class()) {
+            captured_type = owned;
+        }
+        else {
+            const char *kind = owned.has_complex_type()
+                ? AST::type_kind_keyword(owned.get_complex_type()->kind)
+                : "value";
+            const char *article = (kind[0] == 'e' || kind[0] == 'i') ? "an" : "a";
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(at),
+                fmt::format(
+                    "a closure cannot capture `$this` of {} {} - the borrow ends with the method. "
+                    "Copy the receiver into a local first, then capture that.",
+                    article, kind));
+            return false;
+        }
+    }
 
     const AST::ValueType env_type = env_param->type();
     AST::ComplexType *environment = env_type.get_complex_type();
@@ -177,6 +200,15 @@ static bool add_capture(
             auto &outer_var = payload.context.emplace_node<AST::VarNode>(vardecl, at);
             auto &outer_ref = payload.context.emplace_node<AST::VarRefNode>(&outer_var);
             captured_place = &outer_ref;
+
+            // `$this` is a borrow; deref so the capture copies the class handle (a retain)
+            // rather than the address. rederive_stale_capture_types reads the place's type
+            if (vardecl->token_varname.value() == "$this"
+                && vardecl->has_type()
+                && vardecl->type().is_pointer()
+                && AST::value_type_of(vardecl->type()).is_class()) {
+                captured_place = &payload.context.emplace_node<AST::DerefExprNode>(captured_place);
+            }
         }
 
         if (listed != nullptr && listed->mv.has_value()) {

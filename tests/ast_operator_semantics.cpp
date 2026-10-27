@@ -206,7 +206,7 @@ TEST_CASE("binary_has_builtin_meaning keeps a BinaryExprNode when the parser sho
         { Token::Type::t_op_add, value(s.f64), value(s.i32), true, "a float meeting a number promotes" },
         { Token::Type::t_op_div, value(s.f64), value(s.f64), true, "and divides" },
         { Token::Type::t_logical_leq, value(s.f64), value(s.f64), true, "and orders" },
-        { Token::Type::t_op_pow, value(s.f64), value(s.f64), false, "`**` round-trips through llvm.pow for integers only" },
+        { Token::Type::t_op_pow, value(s.f64), value(s.f64), false, "`**` is integer exponentiation" },
 
         // **the bitwise five are integer-only, and structurally so**: a float falls out of the integer arm
         // and lands on `is_comparison()`, so nothing enumerates which symbols it may not have and an

@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] closure_captures_enum_this.eco:7:44
+
+  a closure cannot capture `$this` of an enum - the borrow ends with the method. Copy the receiver into a local first, then capture that.
+
+  6 |     {
+  7 |         return function() : int32 { return $this->value(); };
+    :                                            ^^^^^
+  8 |     }
+
+[error] UnexpectedToken  closure_captures_enum_this.eco:7:49
+
+  Unexpected token 'accessorlr (->)' found
+
+  6 |     {
+  7 |         return function() : int32 { return $this->value(); };
+    :                                                 ^^ unexpected here
+  8 |     }
+
+2 errors, nothing was compiled.

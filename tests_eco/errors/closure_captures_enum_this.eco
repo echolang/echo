@@ -1,0 +1,13 @@
+enum Counter : int32
+{
+    case hits = 7;
+
+    function make() : function<int32()>
+    {
+        return function() : int32 { return $this->value(); };
+    }
+}
+
+Counter $c = Counter::hits;
+function<int32()> $f = $c->make();
+echo $f();

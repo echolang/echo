@@ -16,6 +16,16 @@ namespace AST
 {
     class VarDeclNode;
     class FunctionDeclNode;
+    class TypeRegistry;
+
+    // the stored type of `(owner, decl)`. the declaration lives on the template, so
+    // `Pool<int64>::$last` still says `T` until this substitutes through the owner.
+    // parse, clone, and ensure_static_init all ask this; `resolved` is the filled answer
+    ValueType static_property_stored_type(
+        const ValueType &owner,
+        const VarDeclNode *decl,
+        TypeRegistry &registry
+    );
 
     // `Session::$count` - a read or a write of storage the *type* owns.
     //
@@ -45,6 +55,10 @@ namespace AST
         // the declaration, which lives on the template - see ComplexType::static_properties. null only
         // while a parse failed, and every reader guards the pointer for that reason
         VarDeclNode *decl = nullptr;
+
+        // the declared type, substituted through `owner`. unknown until parse (or clone) fills it;
+        // result_type() falls back to `decl->type()` only when this is still unknown
+        ValueType resolved;
 
         // the property's position in its owner's static list. half the identity of the global's symbol,
         // paired with the owner's mangled token - so a rename of the property is a different symbol and

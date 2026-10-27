@@ -157,7 +157,8 @@ namespace AST
         // those wrap the argument themselves
         void bind_call_arguments(
             std::vector<ExprNode *> &arguments,
-            const TokenReference &at
+            const TokenReference &at,
+            bool hoist_into_call = false
         );
 
         // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.

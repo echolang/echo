@@ -96,6 +96,7 @@ Node *StaticPropertyExprNode::clone(CloneContext &cc) const
     // be several. the declaration is *not* rebound: it lives on the template and is shared, which
     // is the same arrangement a method's declaration has
     c->owner = cc.substitute(c->owner);
+    c->resolved = static_property_stored_type(c->owner, c->decl, cc.registry);
 
     return c;
 }
@@ -525,6 +526,7 @@ Node *VarDeclNode::clone(CloneContext &cc) const
     c->_type_node = cc.child(c->_type_node);
     c->init_expr = cc.child(c->init_expr);
     c->points_to = cc.rebind(c->points_to);
+    c->declaring_function = cc.rebind(c->declaring_function);
     return c;
 }
 

@@ -1,0 +1,23 @@
+// a class local assigned on only one arm is still null on the other. reading
+// it afterwards is the same hole as never assigning
+
+class Node
+{
+    int32 $tag;
+
+    constructor(int32 $tag)
+    {
+        $this->tag = $tag;
+    }
+}
+
+function f(bool $c) : void
+{
+    Node $n;
+    if ($c) {
+        $n = Node(1);
+    }
+    echo $n->tag;
+}
+
+f(true);

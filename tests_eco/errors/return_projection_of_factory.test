@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] return_projection_of_factory.eco:18:5
+
+  cannot return the address of local '$b' - its storage ends with the call
+
+  17 |     Box $b = make();
+  18 |     return $b->slot();
+     :     ^^^^^^
+  19 | }
+
+1 error, nothing was compiled.

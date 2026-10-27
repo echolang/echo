@@ -1,0 +1,25 @@
+// `$iface as Class?` is fallible: a miss is null, not a die. the class-handle `T?` is a
+// flag, not a wrapped pair, so the recast miss path has to plant a null handle
+
+interface Vessel
+{
+    function id() : int32;
+}
+
+class Hatak : Vessel
+{
+    int32 $n;
+    function id() : int32 { return $this->n; }
+}
+
+class Other : Vessel
+{
+    int32 $n;
+    function id() : int32 { return $this->n; }
+}
+
+Vessel $v = Hatak(1);
+Hatak? $h = $v as Hatak?;
+echo $h?->id() ?? -1;
+Other? $o = $v as Other?;
+echo $o?->id() ?? -1;

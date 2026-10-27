@@ -33,6 +33,16 @@ namespace Compiler::LLVM
         unsigned shifted_width,
         const TokenReference &at
     );
+
+    // integer `**`: exponentiation by squaring. a negative exponent answers 0. overflow
+    // traps in a debug build and wraps in release, same gate as the two checks above
+    llvm::Value *gen_integer_pow(
+        CodegenContext &ctx,
+        llvm::Value *base,
+        llvm::Value *exponent,
+        bool is_unsigned,
+        const TokenReference &at
+    );
 };
 
 #endif

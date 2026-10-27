@@ -174,6 +174,7 @@ static AST::ExprNode *bind_incdec_target(
     // infer_declaration_type collapses `void&` / `unknown&` to unknown, which is what keeps
     // rederive_stale_variable_types asking rather than freezing a `void&`
     auto &tmp = payload.context.emplace_node<AST::VarDeclNode>(name_token, nullptr);
+    tmp.declaring_function = payload.context.current_function_ptr;
     tmp.init_expr = &addr;
     tmp.set_type_node(&payload.context.emplace_node<AST::TypeNode>(
         AST::infer_declaration_type(addr, false)));
@@ -483,6 +484,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
     }
 
     vardecl = &payload.context.emplace_node<AST::VarDeclNode>(nametoken, type);
+    vardecl->declaring_function = payload.context.current_function_ptr;
 
     // emplace rather than assign: TokenReference has no copy assignment, which is why every optional
     // of one in the tree is filled this way

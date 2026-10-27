@@ -74,6 +74,7 @@ AST::ForeachNode *Parser::parse_foreach(Parser::Payload &payload)
         // untyped: AST::ForeachLowering fills in the type node once the key type is known. a key is
         // always by value, so no binding mode is read for it
         node.key = &payload.context.emplace_node<AST::VarDeclNode>(key_token, nullptr);
+        node.key->declaring_function = payload.context.current_function_ptr;
     }
 
     // the binding mode, in this order and only this order: `const` then `&`
@@ -136,6 +137,7 @@ AST::ForeachNode *Parser::parse_foreach(Parser::Payload &payload)
     }
 
     node.element = &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), element_type);
+    node.element->declaring_function = payload.context.current_function_ptr;
     cursor.skip();
 
     if (!cursor.is_type(Token::Type::t_close_paren)) {

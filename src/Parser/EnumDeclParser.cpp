@@ -202,6 +202,7 @@ void build_enum_case_body(
 
     AST::VarDeclNode &value = AST::declare_constructor_this(
         payload.context.module, *constructor.return_type, at);
+    value.declaring_function = &constructor;
     body.add_vardecl(value);
 
     // the discriminant, written first so a reader of `-p ast-resolved` sees the case being chosen
@@ -785,6 +786,7 @@ void synthesize_open_from(
 
     AST::VarDeclNode &value = AST::declare_constructor_this(
         payload.context.module, *decl.return_type, at);
+    value.declaring_function = &decl;
     decl.body->add_vardecl(value);
 
     decl.body->children.push_back(AST::make_ref(

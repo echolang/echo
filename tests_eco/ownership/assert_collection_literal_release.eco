@@ -1,0 +1,16 @@
+// the same literals as assert_collection_literal, compiled out in release.
+// wrapping them as children of the assert is what keeps the counter at zero
+
+function has_one(array<int32> $xs) : bool
+{
+    return $xs[0] == 1;
+}
+
+function has_a(map<string, int32> $m) : bool
+{
+    return $m['a'] == 1;
+}
+
+assert(has_one([1]));
+assert(has_a(['a' => 1]));
+echo 9;

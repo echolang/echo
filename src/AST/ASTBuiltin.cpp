@@ -2,6 +2,7 @@
 
 #include "AST/ASTCollector.h"
 #include "AST/ASTVisibility.h"
+#include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeNode.h"
 
@@ -84,6 +85,23 @@ AST::BuiltinKind AST::builtin_kind_for(const std::string &name)
     auto it = builtin_table().find(name);
     assert(it != builtin_table().end() && "builtin_kind_for called with a name is_known_builtin rejected");
     return it->second;
+}
+
+bool AST::is_assert_builtin(const FunctionDeclNode *decl)
+{
+    return decl != nullptr
+        && decl->is_builtin()
+        && decl->builtin.has_value()
+        && builtin_kind_for(decl->builtin.value()) == BuiltinKind::t_assert;
+}
+
+bool AST::is_assert_call(const FunctionCallExprNode &node)
+{
+    if (is_assert_builtin(node.decl)) {
+        return true;
+    }
+
+    return node.decl == nullptr && node.lookup_name() == "assert";
 }
 
 AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)

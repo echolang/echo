@@ -1,0 +1,23 @@
+// an `assert` condition is compiled out in release, so a move inside it would leak.
+// the same refusal `||` already has
+
+class Res
+{
+    int32 $tag;
+    destructor() { echo $this->tag; }
+}
+
+function consume(mv Res $r) : bool
+{
+    echo 100;
+    return true;
+}
+
+function f() : void
+{
+    Res $box = Res(7);
+    assert(consume(mv $box));
+    echo 200;
+}
+
+f();

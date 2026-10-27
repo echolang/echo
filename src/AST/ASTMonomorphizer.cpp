@@ -115,6 +115,26 @@ namespace AST
             // Box<T> - only as Box<int32> after the factory is cloned for int32
             return std::nullopt;
 
+        case InstantiationBlame::t_conflicting_binding:
+        {
+            const std::string got = inst.argument < call->arguments.size()
+                    && call->arguments[inst.argument] != nullptr
+                ? call->arguments[inst.argument]->result_type().get_type_desciption()
+                : "unknown";
+            const std::string param_name = inst.param != nullptr ? inst.param->name : "?";
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(mod, call->token_function_name),
+                fmt::format(
+                    "Type parameter '{}' of '{}' is bound to '{}' but argument {} has type '{}'",
+                    param_name,
+                    tmpl->func_name(),
+                    inst.bound.get_type_desciption(),
+                    tmpl->user_arg_number(inst.argument),
+                    got));
+            is_error = true;
+            return std::nullopt;
+        }
+
         case InstantiationBlame::t_argument_shape:
             // an argument no substitution can make fit, which is AST::TypeChecker's diagnostic
             // against the instance rather than ours - it numbers the argument and names both types.

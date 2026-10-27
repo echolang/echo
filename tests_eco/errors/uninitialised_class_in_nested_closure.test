@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] uninitialised_class_in_nested_closure.eco:16:52
+
+  '$n' has type 'Node' which owns a resource, so it needs an initializer
+
+  15 |     Node $n;
+  16 |     function<void()> $c = function() : void { echo $n->tag; };
+     :                                                    ^^
+  17 |     echo $n->tag;
+
+[error] uninitialised_class_in_nested_closure.eco:17:10
+
+  '$n' has type 'Node' which owns a resource, so it needs an initializer
+
+  16 |     function<void()> $c = function() : void { echo $n->tag; };
+  17 |     echo $n->tag;
+     :          ^^
+  18 | }
+
+2 errors, nothing was compiled.
