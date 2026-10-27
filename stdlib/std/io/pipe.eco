@@ -1,0 +1,181 @@
+/**
+ * The two ends of a pipe: one you read from, one you write into.
+ *
+ * Owned, like `file`, and closed when the last handle goes. Neither seeks (a pipe has no position),
+ * which is why these are their own types.
+ *
+ * Nothing in this module makes one. `std::process` does, for a child's piped stdin, stdout and
+ * stderr:
+ *
+ *     std::process::command $c = std::process::command('ls', ['-1']);
+ *     $c->stdout(.piped);
+ *
+ *     std::process::child $ch = guard $c->spawn() else ($e) { die("ls: {$e}"); };
+ *     std::io::pipe_reader $out = $ch->stdout() ?? die('stdout was piped');
+ *
+ *     string $text = guard $out->readall() else ($e) { die("read: {$e}"); };
+ *
+ * **`close()` on a `pipe_writer` is how the other side sees end of input.** A child reading its stdin
+ * until EOF waits for exactly that.
+ */
+
+namespace std::io;
+
+public class pipe_reader
+{
+    private raw_end $end;
+    private readwin $rin;
+
+    internal constructor(raw_end $end)
+    {
+        $this->end = $end;
+        $this->rin = readwin();
+    }
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    /**
+     * Up to `$count` bytes into `$dst`. 0 at end of input.
+     */
+    function read(ptr<uint8> $dst, usize $count) : result<usize, ioerror>
+    {
+        if (!$this->end->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        return read_from($this->end, $this->rin, $dst, $count);
+    }
+
+    /**
+     * The next line without its newline, or `null` at end of input with nothing read.
+     */
+    function readline() : result<string?, ioerror>
+    {
+        if (!$this->end->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        return readline_from($this->end, $this->rin);
+    }
+
+    /**
+     * Everything up to end of input.
+     */
+    function readall() : result<string, ioerror>
+    {
+        if (!$this->end->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        return readall_from($this->end, $this->rin);
+    }
+
+    /**
+     * Closes this end. Bytes still buffered here are dropped. Safe to call twice.
+     */
+    function close() : void
+    {
+        $this->rin->drop();
+        $this->end->close();
+    }
+
+    // what `std::process` hands a child or drains. the read window is this type's: bytes already
+    // pulled into it are gone from the pipe, which is why a caller asks `pending` first
+    internal const function end() : raw_end
+    {
+        return $this->end;
+    }
+
+    internal const function pending() : usize
+    {
+        return $this->rin->pending();
+    }
+
+    // the bytes the window already holds, moved onto `$out`
+    internal function take_pending(string& $out) : void
+    {
+        $this->rin->take_pending($out);
+    }
+}
+
+public class pipe_writer
+{
+    private raw_end $end;
+    private writewin $wout;
+
+    internal constructor(raw_end $end)
+    {
+        $this->end = $end;
+        $this->wout = writewin();
+    }
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    function write(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+    {
+        if (!$this->end->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        return write_to($this->end, $this->wout, $src, $count);
+    }
+
+    function write(const string& $text) : result<usize, ioerror>
+    {
+        return $this->write($text->data(), $text->size());
+    }
+
+    /**
+     * `$text` and a line feed. A pipe carries bytes, so this is `\n` on every platform.
+     */
+    function writeline(const string& $text) : result<usize, ioerror>
+    {
+        usize $n = guard $this->write($text) else ($e) {
+            return .error($e);
+        }
+
+        usize $nl = guard $this->write('\n') else ($e) {
+            return .error($e);
+        }
+
+        return .ok($n + $nl);
+    }
+
+    /**
+     * Writes whatever the window is still holding.
+     */
+    function flush() : result<usize, ioerror>
+    {
+        if (!$this->end->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        return flush_write($this->end, $this->wout);
+    }
+
+    /**
+     * Flushes, then closes: end of input for whoever reads the other side. A failed flush is
+     * dropped here, as `file::close` drops it: call `flush()` first when the bytes matter. Safe to
+     * call twice.
+     */
+    function close() : void
+    {
+        if (!$this->end->is_open()) {
+            return;
+        }
+
+        result<usize, ioerror> $ignored = flush_write($this->end, $this->wout);
+        $this->end->close();
+    }
+
+    internal const function end() : raw_end
+    {
+        return $this->end;
+    }
+}

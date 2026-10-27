@@ -70,6 +70,10 @@ const char *Compiler::runtime_symbol_name(RuntimeSymbol symbol)
         case RuntimeSymbol::t_dlopen: return "dlopen";
         case RuntimeSymbol::t_dlsym: return "dlsym";
         case RuntimeSymbol::t_setmode: return "_setmode";
+        case RuntimeSymbol::t_signal: return "signal";
+        case RuntimeSymbol::t_darwin_errno: return "__error";
+        case RuntimeSymbol::t_errno_location: return "__errno_location";
+        case RuntimeSymbol::t_ucrt_errno: return "_errno";
         case RuntimeSymbol::t_count: break;
     }
 

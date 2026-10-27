@@ -331,7 +331,7 @@ private function copy_by_reading(int32 $in, int32 $out) : result<bool, ioerror>
             return .ok(true);
         }
 
-        usize $put = guard raw_write_all($out, ptr<const uint8>($buf:$), $got as usize) else ($e) {
+        usize $put = guard raw_write_all(raw_end($out), ptr<const uint8>($buf:$), $got as usize) else ($e) {
             return .error($e);
         }
     }

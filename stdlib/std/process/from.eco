@@ -1,0 +1,16 @@
+/**
+ * An exit status as text: `exit 3`, or `signal 15`.
+ *
+ * In `str` like every other `str::from` overload, so `"{$status}"` interpolates one.
+ */
+
+namespace str;
+
+public function from(const std::process::exit_status& $s) : string
+{
+    int32 $code = guard $s->code() else {
+        return concat('signal ', from($s->signal() ?? 0));
+    }
+
+    return concat('exit ', from($code));
+}

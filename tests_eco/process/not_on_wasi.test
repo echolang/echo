@@ -1,0 +1,24 @@
+mode: build
+flags: --target-os wasi
+expect: fail
+
+--- OUT --->
+[error] UnknownFunction  not_on_wasi.eco:4:42
+
+  The function 'command' could not be found
+
+  3 | 
+  4 | std::process::command $c = std::process::command('anything');
+    :                                          ^^^^^^^
+  5 | 
+
+[error] not_on_wasi.eco:4:15
+
+  Unknown type 'std::process::command'
+
+  3 | 
+  4 | std::process::command $c = std::process::command('anything');
+    :               ^^^^^^^
+  5 | 
+
+2 errors, nothing was compiled.

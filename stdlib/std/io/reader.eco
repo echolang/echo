@@ -12,27 +12,27 @@ namespace std::io;
 
 public class reader
 {
-    private int32 $fd;
+    private raw_end $io;
     private readwin $rin;
 
     constructor(stream $src)
     {
-        $this->fd = $src->fd();
+        $this->io = raw_end($src->fd());
         $this->rin = readwin();
     }
 
     function read(ptr<uint8> $dst, usize $count) : result<usize, ioerror>
     {
-        return read_from($this->fd, $this->rin, $dst, $count);
+        return read_from($this->io, $this->rin, $dst, $count);
     }
 
     function readline() : result<string?, ioerror>
     {
-        return readline_from($this->fd, $this->rin);
+        return readline_from($this->io, $this->rin);
     }
 
     function readall() : result<string, ioerror>
     {
-        return readall_from($this->fd, $this->rin);
+        return readall_from($this->io, $this->rin);
     }
 }

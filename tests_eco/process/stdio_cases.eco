@@ -1,0 +1,3 @@
+// `.merge` is a stderr case. naming it at stdin is a type error, not a debug-only assert
+std::process::command $c = std::process::command('x');
+$c->stdin(.merge);

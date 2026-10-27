@@ -1,0 +1,8 @@
+flags: --target-os windows
+
+--- OUT --->
+--- IR --->
+CHECK: declare i32 @WaitForMultipleObjects(
+CHECK: declare i32 @UpdateProcThreadAttribute(
+CHECK: declare i32 @CreateProcessW(
+CHECK: declare ptr @CreateNamedPipeW(

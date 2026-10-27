@@ -1,0 +1,73 @@
+// a child's exit code, its two output streams captured apart, input fed to it, and its arguments arriving
+// exactly as written. the child is this same binary run with a role, so the case means the same thing on
+// every host, including Windows, where the arguments are quoted into one command line and split again
+
+if (std::env::argc() > 1) {
+    string $role = str::from(std::env::arg(1)->cstr());
+
+    if ($role == 'exit3') {
+        std::env::exit(3);
+    }
+
+    if ($role == 'both') {
+        std::io::print('to stdout\n');
+        std::io::eprint('to stderr\n');
+        return 0;
+    }
+
+    if ($role == 'cat') {
+        std::io::reader $in = std::io::reader(std::io::stdin);
+        string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+        std::io::print($all);
+        return 0;
+    }
+
+    if ($role == 'args') {
+        usize $i = 2;
+        while ($i < std::env::argc()) {
+            std::io::print(str::concat(str::concat('[', str::from(std::env::arg($i)->cstr())), ']\n'));
+            $i = $i + 1;
+        }
+        return 0;
+    }
+
+    die('unknown role');
+}
+
+string $self = std::env::exe();
+
+std::process::exit_status $s = guard std::process::command($self, ['exit3'])->status() else ($e) {
+    die("exit3: {$e}");
+}
+
+echo "status: {$s} success={$s->success()} code={$s->code() ?? -1} signal-null={$s->signal() == null}";
+
+std::process::output $o = guard std::process::command($self, ['both'])->output() else ($e) {
+    die("both: {$e}");
+}
+
+std::io::print(str::concat('out: ', $o->stdout));
+std::io::print(str::concat('err: ', $o->stderr));
+echo "both: {$o->status}";
+
+std::process::output $c = guard std::process::command($self, ['cat'])->output('line one\nline two\n') else ($e) {
+    die("cat: {$e}");
+}
+
+std::io::print($c->stdout);
+
+std::process::output $a = guard std::process::command($self, ['args', 'plain', 'two words', '', 'quote"inside', 'back\\slash', 'trail\\', 'x\\"y z'])->output() else ($e) {
+    die("args: {$e}");
+}
+
+std::io::print($a->stdout);
+
+// a second wait answers the status the first one collected
+std::process::child $twice = guard std::process::command($self, ['exit3'])->spawn() else ($e) {
+    die("spawn: {$e}");
+}
+
+std::process::exit_status $first = guard $twice->wait() else ($e) { die("wait: {$e}"); };
+std::process::exit_status $second = guard $twice->wait() else ($e) { die("wait again: {$e}"); };
+std::process::exit_status? $polled = guard $twice->try_wait() else ($e) { die("try_wait: {$e}"); };
+echo "waited: {$first} {$second} polled-known={$polled != null}";

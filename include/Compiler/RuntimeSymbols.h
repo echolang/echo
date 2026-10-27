@@ -46,6 +46,10 @@ namespace Compiler
         t_dlopen,
         t_dlsym,
         t_setmode,
+        t_signal,
+        t_darwin_errno,
+        t_errno_location,
+        t_ucrt_errno,
         t_count
     };
 

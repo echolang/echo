@@ -1,0 +1,22 @@
+mode: build
+
+--- OUT --->
+to stdout
+to stderr
+merged stderr empty: true
+discarded: true true exit 0
+before
+cherry
+apple
+banana
+after
+CHERRY
+APPLE
+BANANA
+AFTER
+CHERRY
+APPLE
+BANANA
+producer: exit 0 consumer: exit 0
+WRITTEN BY HAND
+by hand: exit 0

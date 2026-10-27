@@ -1,0 +1,14 @@
+--- OUT --->
+1
+--- IR --->
+CHECK: define i32 @main(
+CHECK-DARWIN: call ptr @signal(i32 13, ptr inttoptr (i64 1 to ptr))
+CHECK-LINUX: call ptr @signal(i32 13, ptr inttoptr (i64 1 to ptr))
+CHECK-DARWIN: call i32 @fflush(ptr null)
+CHECK-LINUX: call i32 @fflush(ptr null)
+CHECK-DARWIN: br i1 %write.negative, label %write.failed, label %write.ok
+CHECK-LINUX: br i1 %write.negative, label %write.failed, label %write.ok
+CHECK-DARWIN: call void @__eco_stdio_write_failed(i32 1)
+CHECK-LINUX: call void @__eco_stdio_write_failed(i32 1)
+CHECK-NOT-WINDOWS: @signal(
+CHECK-NOT-WINDOWS: @__eco_stdio_write_failed

@@ -291,6 +291,7 @@ namespace AST
             case BuiltinKind::t_process_argv:
             case BuiltinKind::t_process_envp:
             case BuiltinKind::t_exit:
+            case BuiltinKind::t_stdio_write_failed:
             case BuiltinKind::t_cold_die:
             case BuiltinKind::t_atomic_load:
             case BuiltinKind::t_atomic_store:

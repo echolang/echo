@@ -48,6 +48,7 @@ namespace
             { "process_argv", AST::BuiltinKind::t_process_argv },
             { "process_envp", AST::BuiltinKind::t_process_envp },
             { "exit", AST::BuiltinKind::t_exit },
+            { "stdio_write_failed", AST::BuiltinKind::t_stdio_write_failed },
             { "cold_die", AST::BuiltinKind::t_cold_die },
             { "hash_seed", AST::BuiltinKind::t_hash_seed },
             { "atomic_load", AST::BuiltinKind::t_atomic_load },
@@ -161,6 +162,7 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_stdio_write_failed:
         case AST::BuiltinKind::t_cold_die:
         case AST::BuiltinKind::t_atomic_load:
         case AST::BuiltinKind::t_atomic_store:
@@ -191,7 +193,8 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
 {
     // no tail, for builtin_message_index's reason
     switch (kind) {
-        // `assert` is deliberately not here: it returns when it holds
+        // `assert` is deliberately not here: it returns when it holds. `stdio_write_failed` is not either:
+        // it stops only when the write it is told about broke stdout or stderr
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
@@ -199,6 +202,7 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
             return true;
 
         case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_stdio_write_failed:
         case AST::BuiltinKind::t_crash_set_hook:
         case AST::BuiltinKind::t_crash_take_hook:
         case AST::BuiltinKind::t_crash_default_hook:
@@ -275,6 +279,7 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_stdio_write_failed:
         case AST::BuiltinKind::t_cold_die:
         case AST::BuiltinKind::t_assert:
         case AST::BuiltinKind::t_crash_set_hook:
@@ -383,6 +388,7 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_crash_take_hook:
         case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_stdio_write_failed:
         case AST::BuiltinKind::t_atomic_load:
         case AST::BuiltinKind::t_atomic_store:
         case AST::BuiltinKind::t_atomic_add:
@@ -423,6 +429,7 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_stdio_write_failed:
         case AST::BuiltinKind::t_crash_set_hook:
         case AST::BuiltinKind::t_crash_take_hook:
         case AST::BuiltinKind::t_crash_default_hook:

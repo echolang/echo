@@ -205,6 +205,10 @@ namespace AST
         // missing return; AST::scope_exit_kind gives it the arm `t_die` has instead
         t_exit,
 
+        // a write the stdlib made failed: on a row that ignores SIGPIPE, exit 141 if `$fd` is stdout
+        // or stderr and errno is EPIPE. a builtin so `echo` and `std::io` share ProcessCodegen's helper
+        t_stdio_write_failed,
+
         // `die` for a stdlib check that has to stay inlinable. one cold, argument-free stop per message;
         // the happy path is a compare and a branch. message is a literal, no location
         t_cold_die,

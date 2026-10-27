@@ -1,0 +1,136 @@
+/**
+ * Which file a program name means.
+ *
+ * The one place a name becomes a path, on every platform. A name holding a path separator is that path,
+ * made absolute against this process's working directory, so `dir()` cannot change which program runs.
+ * A bare name is looked up in the PATH the **child** will have, entry by entry. The current directory is
+ * never searched, and an empty PATH entry is skipped.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+#[if: os == windows]
+private const PATH_LIST_SEPARATOR = ';';
+#[else]
+private const PATH_LIST_SEPARATOR = ':';
+#[end]
+
+internal function find_program(const string& $name, const string& $search) : result<string, ioerror>
+{
+    if ($name->empty()) {
+        return .error(ioerror(std::io::ENOENT));
+    }
+
+    if (has_separator($name)) {
+        if (is_absolute($name)) {
+            return .ok($name);
+        }
+
+        string $cwd = std::env::cwd();
+        return .ok(std::env::join($cwd->view(), $name->view()));
+    }
+
+    // a file that is there but may not be run is remembered, so the answer is `denied()` when
+    // nothing later on the PATH is runnable either
+    bool $denied = false;
+
+    // what each PATH entry is searched for: on Windows a bare `tool` is `tool.exe`
+    string $file = $name;
+
+#[if: os == windows]
+    if (!has_extension($name)) {
+        $file = str::concat($name, '.exe');
+    }
+#[end]
+
+    foreach (str::split($search, PATH_LIST_SEPARATOR) as $dir) {
+        if ($dir->size == 0) {
+            continue;
+        }
+
+        string $candidate = std::env::join($dir, $file->view());
+
+        std::io::fileinfo $info = guard std::io::info($candidate) else ($e) {
+            continue;
+        }
+
+        if ($info->kind != std::io::filekind::file) {
+            continue;
+        }
+
+#[if: os == windows]
+        return .ok($candidate);
+#[else]
+        if (std::io::c_access($candidate->cstr(), X_OK) == 0) {
+            return .ok($candidate);
+        }
+
+        $denied = true;
+#[end]
+    }
+
+    if ($denied) {
+        return .error(ioerror(std::io::EACCES));
+    }
+
+    return .error(ioerror(std::io::ENOENT));
+}
+
+private function has_separator(const string& $s) : bool
+{
+    usize $i = 0;
+
+    while ($i < $s->size()) {
+        if (std::env::is_separator($s->byte($i))) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+private function is_absolute(const string& $s) : bool
+{
+    if ($s->empty()) {
+        return false;
+    }
+
+    if (std::env::is_separator($s->byte(0))) {
+        return true;
+    }
+
+#[if: os == windows]
+    // `C:\x`. a bare `C:x` is relative to that drive's own directory, which is not absolute either
+    return $s->size() > 2 && $s->byte(1) == 58 && std::env::is_separator($s->byte(2));
+#[else]
+    return false;
+#[end]
+}
+
+#[if: os == windows]
+// a `.` after the last separator. `tool` gets `.exe`, `tool.exe` and `build.cmd` are used as written
+private function has_extension(const string& $s) : bool
+{
+    usize $i = $s->size();
+
+    while ($i > 0) {
+        uint8 $b = $s->byte($i - 1);
+
+        if ($b == 46) {
+            return true;
+        }
+
+        if (std::env::is_separator($b)) {
+            return false;
+        }
+
+        $i = $i - 1;
+    }
+
+    return false;
+}
+#[end]

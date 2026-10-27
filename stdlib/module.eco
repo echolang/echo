@@ -34,6 +34,11 @@
 #[sources: "std/embed/*.eco"]
 #[sources: "std/time/*.eco"]
 
+// a child process. wasi has none, and iOS refuses to start one
+#[if: os != wasi && os != ios]
+#[sources: "std/process/*.eco"]
+#[end]
+
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
 // `runtime: process` is the JIT half: there is no loadable `libpthread.so` on
 // modern Linux, and the symbols are already mapped. Native `build` still gets `-lpthread`.

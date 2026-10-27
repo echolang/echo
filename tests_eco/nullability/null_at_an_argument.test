@@ -29,9 +29,9 @@ CHECK: load i96, ptr %arg.slot1
 CHECK: call i32 @_x_ofZZMQMLC5Point(i96
 CHECK: call i32 @_node_tagZZMQLC4Node(ptr null)
 // a member call's written null is argument 1, behind the receiver, and takes the same route
-CHECK: load i64, ptr %arg.slot10
+CHECK: load i64, ptr %arg.slot
 CHECK: call i32 @_M5Store_readingZZMRBMLC5StoreZMQMLPi(ptr %s, i64
 // and a constructor's, which is where this was first seen to crash
-CHECK: load i64, ptr %arg.slot12
+CHECK: load i64, ptr %arg.slot
 CHECK: call void @_RowZZMQMLPi(ptr noalias sret(%Row)
 CHECK: i64

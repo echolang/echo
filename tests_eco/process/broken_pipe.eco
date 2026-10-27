@@ -1,0 +1,69 @@
+// a reader that goes away. a command ignores SIGPIPE, so a write into a closed pipe fails, and a failed
+// write to stdout or stderr then exits 141, quietly, the status the signal would have meant. Windows has
+// no SIGPIPE and its writes just fail, so there the program runs to its end
+//
+// the second half is the other direction: a child gets SIGPIPE back at its default, or a pipeline it
+// runs would never stop. `yes` writes forever unless that signal ends it
+
+if (std::env::argc() > 1) {
+    string $role = str::from(std::env::arg(1)->cstr());
+
+    // one line, then wait for stdin to close, then one more. a loop that filled the stdio
+    // buffer made printf itself fail; the hole is a short program whose buffer never fills
+    if ($role == 'echo') {
+        echo 1;
+    }
+    else {
+        std::io::println('a line');
+    }
+
+    std::io::reader $in = std::io::reader(std::io::stdin);
+    string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+
+    if ($role == 'echo') {
+        echo 2;
+    }
+    else {
+        std::io::println('another');
+    }
+
+    return 0;
+}
+
+#[if: os == windows]
+string $closed_reader_ends = 'exit 0';
+#[else]
+string $closed_reader_ends = 'exit 141';
+#[end]
+
+function after_first_line(const string& $role) : string
+{
+    std::process::command $c = std::process::command(std::env::exe(), [$role]);
+    $c->stdin(.piped);
+    $c->stdout(.piped);
+    std::process::child $child = guard $c->spawn() else ($e) { die("spawn: {$e}"); };
+
+    std::io::pipe_reader $out = $child->stdout() ?? die('stdout was piped');
+    string? $line = guard $out->readline() else ($e) { die("readline: {$e}"); };
+    $out->close();
+
+    // stdout first, so the second write fails; then stdin, so the child proceeds to it
+    std::io::pipe_writer $in = $child->stdin() ?? die('stdin was piped');
+    $in->close();
+
+    std::process::exit_status $s = guard $child->wait() else ($e) { die("wait: {$e}"); };
+    return str::from($s);
+}
+
+string $by_echo = after_first_line('echo');
+string $by_println = after_first_line('println');
+echo "echo into a closed pipe ends as expected: {$by_echo == $closed_reader_ends}";
+echo "println into a closed pipe ends as expected: {$by_println == $closed_reader_ends}";
+
+#[if: os == windows]
+echo 'a child pipeline stops: true';
+#[else]
+std::process::output $yes = guard std::process::command('sh', ['-c', 'yes | head -1'])->output() else ($e) { die("sh: {$e}"); };
+bool $stopped = $yes->stdout == 'y\n' && $yes->status->success();
+echo "a child pipeline stops: {$stopped}";
+#[end]

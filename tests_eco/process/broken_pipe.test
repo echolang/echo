@@ -1,0 +1,6 @@
+mode: build
+
+--- OUT --->
+echo into a closed pipe ends as expected: true
+println into a closed pipe ends as expected: true
+a child pipeline stops: true

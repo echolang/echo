@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/Codegen/ProcessCodegen.h"
+#include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/RuntimeSymbols.h"
 
@@ -29,6 +30,16 @@ namespace
     constexpr uint64_t k_wasi_libc_ionbf = 2;
 
     constexpr uint64_t k_ucrt_o_binary = 0x8000;
+
+    // Darwin and Linux, the only rows that ignore SIGPIPE: signal 13, `SIG_IGN` 1, EPIPE 32, and 141
+    // the status a shell reports for a process SIGPIPE killed
+    constexpr const char *k_stdio_write_failed = "__eco_stdio_write_failed";
+    constexpr uint64_t k_sigpipe = 13;
+    constexpr uint64_t k_sig_ign = 1;
+    constexpr uint64_t k_epipe = 32;
+    constexpr uint64_t k_sigpipe_exit_status = 141;
+    constexpr uint64_t k_stdout_fd = 1;
+    constexpr uint64_t k_last_stdio_fd = 2;
 };
 
 llvm::GlobalVariable *ProcessCodegen::get_or_create_argc()
@@ -240,6 +251,125 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
 
     unbuffer_stdio();
     binary_stdio();
+    ignore_sigpipe();
+}
+
+bool ProcessCodegen::ignores_sigpipe() const
+{
+    return _ctx.options.codegen.sigpipe_policy() == Compiler::SigpipePolicy::t_ignore;
+}
+
+void ProcessCodegen::ignore_sigpipe()
+{
+    if (!ignores_sigpipe()) {
+        return;
+    }
+
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::Type *ptr = _ctx.opaque_ptr_type();
+
+    // `signal`: one call, no struct whose layout differs per libc, same disposition
+    llvm::FunctionCallee sig = _ctx.libc_callee(Compiler::RuntimeSymbol::t_signal, ptr, { i32, ptr });
+    llvm::Value *ignore = llvm::ConstantExpr::getIntToPtr(
+        llvm::ConstantInt::get(_ctx.size_int_ty(), k_sig_ign), ptr);
+
+    _ctx.builder->CreateCall(sig, { llvm::ConstantInt::get(i32, k_sigpipe), ignore });
+}
+
+llvm::Value *ProcessCodegen::gen_errno_location()
+{
+    Compiler::RuntimeSymbol symbol = Compiler::RuntimeSymbol::t_errno_location;
+
+    switch (_ctx.options.codegen.errno_source()) {
+        case Compiler::ErrnoSource::t_darwin_error: symbol = Compiler::RuntimeSymbol::t_darwin_errno; break;
+        case Compiler::ErrnoSource::t_errno_location: symbol = Compiler::RuntimeSymbol::t_errno_location; break;
+        case Compiler::ErrnoSource::t_ucrt_errno: symbol = Compiler::RuntimeSymbol::t_ucrt_errno; break;
+    }
+
+    llvm::FunctionCallee location = _ctx.libc_callee(symbol, _ctx.opaque_ptr_type(), {});
+
+    return _ctx.builder->CreateCall(location, {}, "errno.slot");
+}
+
+llvm::Function *ProcessCodegen::get_or_create_stdio_write_failed()
+{
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(k_stdio_write_failed)) {
+        return existing;
+    }
+
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+
+    llvm::Function *fn = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), { i32 }, false),
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        k_stdio_write_failed,
+        _ctx.current_module());
+
+    // cold and out of line, for `mem::cold_die`'s reason: the caller's happy path is a compare and a
+    // branch, and the inliner weighs nothing more at every `echo`
+    fn->addFnAttr(llvm::Attribute::Cold);
+    fn->addFnAttr(llvm::Attribute::NoInline);
+    fn->addFnAttr(llvm::Attribute::NoUnwind);
+
+    llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
+
+    llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn);
+    llvm::BasicBlock *check = llvm::BasicBlock::Create(*_ctx.llvm_context, "stdio", fn);
+    llvm::BasicBlock *stop = llvm::BasicBlock::Create(*_ctx.llvm_context, "broken", fn);
+    llvm::BasicBlock *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
+
+    // unsigned, so a negative descriptor is not stdio either
+    _ctx.set_insert_point(entry);
+    llvm::Value *is_stdio = _ctx.builder->CreateICmpULE(
+        fn->getArg(0), llvm::ConstantInt::get(i32, k_last_stdio_fd), "is.stdio");
+    _ctx.builder->CreateCondBr(is_stdio, check, done);
+
+    _ctx.set_insert_point(check);
+    llvm::Value *code = _ctx.builder->CreateLoad(i32, gen_errno_location(), "errno");
+    llvm::Value *broken = _ctx.builder->CreateICmpEQ(code, llvm::ConstantInt::get(i32, k_epipe), "is.epipe");
+    _ctx.builder->CreateCondBr(broken, stop, done);
+
+    // nothing is printed: the stream a message would go to may be the very one that just closed, and a
+    // reader that went away on purpose (`| head`) is not an error the program has to report
+    _ctx.set_insert_point(stop);
+    _ctx.abort->gen_exit(llvm::ConstantInt::get(i32, k_sigpipe_exit_status));
+
+    _ctx.set_insert_point(done);
+    _ctx.builder->CreateRetVoid();
+
+    return fn;
+}
+
+void ProcessCodegen::gen_stdout_write_check(llvm::Value *result)
+{
+    if (!ignores_sigpipe()) {
+        return;
+    }
+
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
+
+    llvm::BasicBlock *failed = llvm::BasicBlock::Create(*_ctx.llvm_context, "write.failed", fn);
+    llvm::BasicBlock *ok = llvm::BasicBlock::Create(*_ctx.llvm_context, "write.ok", fn);
+
+    llvm::Value *negative = _ctx.builder->CreateICmpSLT(
+        result, llvm::ConstantInt::get(result->getType(), 0), "write.negative");
+    _ctx.builder->CreateCondBr(negative, failed, ok);
+
+    _ctx.set_insert_point(failed);
+    _ctx.builder->CreateCall(get_or_create_stdio_write_failed(), { llvm::ConstantInt::get(i32, k_stdout_fd) });
+    _ctx.builder->CreateBr(ok);
+
+    _ctx.set_insert_point(ok);
+}
+
+void ProcessCodegen::gen_stdio_write_failed(llvm::Value *fd)
+{
+    if (!ignores_sigpipe()) {
+        return;
+    }
+
+    _ctx.builder->CreateCall(get_or_create_stdio_write_failed(), { fd });
 }
 
 llvm::Value *ProcessCodegen::load_platform_envp()

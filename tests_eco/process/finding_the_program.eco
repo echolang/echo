@@ -1,0 +1,106 @@
+// which file a program name means, and what is refused before anything runs. a bare name is looked up on
+// the PATH the child will have (never this process's when the command set one, and never the current
+// directory). a NUL, or an environment key that is empty or holds `=`, is refused with nothing spawned
+
+if (std::env::argc() > 1) {
+    std::io::print('tool ran\n');
+    return 0;
+}
+
+function refusal(std::process::command $c) : string
+{
+    return match ($c->status()) {
+        .ok($s) => "ran: {$s}",
+        .error($e) => "refused: {$e}",
+    };
+}
+
+function missing(std::process::command $c) : bool
+{
+    return match ($c->status()) {
+        .ok($s) => false,
+        .error($e) => $e->missing(),
+    };
+}
+
+int32 $pid = std::env::pid();
+string $dir = std::env::join(std::env::tmp(), "eco_process_find_{$pid}");
+bool $made = guard std::io::mkdir($dir) else ($e) { die("mkdir: {$e}"); };
+
+#[if: os == windows]
+string $tool_file = std::env::join($dir->view(), 'tool.exe');
+#[else]
+string $tool_file = std::env::join($dir->view(), 'tool');
+#[end]
+
+bool $copied = guard std::io::copy(std::env::exe(), $tool_file) else ($e) { die("copy: {$e}"); };
+
+// found on the child's PATH
+std::process::command $found = std::process::command('tool', ['hello']);
+$found->env('PATH', $dir);
+std::process::output $o = guard $found->output() else ($e) { die("tool: {$e}"); };
+std::io::print($o->stdout);
+
+// and only there: this process's PATH does not hold the directory
+bool $not_ours = missing(std::process::command('tool', ['hello']));
+echo "not on our PATH: missing={$not_ours}";
+
+// a path is used as written
+std::process::output $direct = guard std::process::command($tool_file, ['hello'])->output() else ($e) { die("direct: {$e}"); };
+std::io::print($direct->stdout);
+
+// a file that is there but cannot be run. POSIX finds it and is denied; on Windows a bare name means
+// `plain.exe`, which is not there
+string $plain = std::env::join($dir->view(), 'plain');
+usize $wrote = guard std::io::writefile($plain, 'not a program\n') else ($e) { die("plain: {$e}"); };
+std::process::command $not_runnable = std::process::command('plain');
+$not_runnable->env('PATH', $dir);
+
+#[if: os == windows]
+bool $denied = missing($not_runnable);
+#[else]
+bool $denied = match ($not_runnable->status()) {
+    .ok($s) => false,
+    .error($e) => $e->denied(),
+};
+#[end]
+echo "not runnable as expected: {$denied}";
+
+bool $unknown = missing(std::process::command('surely-not-a-program-eco'));
+echo "unknown name: missing={$unknown}";
+bool $empty = missing(std::process::command(''));
+echo "empty name: missing={$empty}";
+
+std::process::command $empty_path = std::process::command('tool');
+$empty_path->env('PATH', '');
+bool $empty_is_missing = missing($empty_path);
+echo "empty PATH: missing={$empty_is_missing}";
+
+echo refusal(std::process::command($tool_file, ['a\0b']));
+
+std::process::command $eq = std::process::command($tool_file);
+$eq->env('A=B', 'x');
+echo refusal($eq);
+
+std::process::command $empty_key = std::process::command($tool_file);
+$empty_key->env('', 'x');
+echo refusal($empty_key);
+
+std::process::command $in_and_input = std::process::command($tool_file);
+$in_and_input->stdin(.piped);
+echo match ($in_and_input->output('x')) {
+    .ok($o) => "ran: {$o->status}",
+    .error($e) => "refused: {$e}",
+};
+
+std::process::command $bad_dir = std::process::command($tool_file, ['hello']);
+$bad_dir->dir(std::env::join($dir->view(), 'not-a-directory'));
+bool $refused = match ($bad_dir->status()) {
+    .ok($s) => false,
+    .error($e) => true,
+};
+echo "missing working directory refused: {$refused}";
+
+bool $gone1 = guard std::io::remove($tool_file) else ($e) { die("rm: {$e}"); };
+bool $gone2 = guard std::io::remove($plain) else ($e) { die("rm: {$e}"); };
+bool $gone3 = guard std::io::rmdir($dir) else ($e) { die("rmdir: {$e}"); };

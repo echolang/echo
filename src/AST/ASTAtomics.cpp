@@ -53,6 +53,7 @@ namespace AST
             case BuiltinKind::t_process_argv:
             case BuiltinKind::t_process_envp:
             case BuiltinKind::t_exit:
+            case BuiltinKind::t_stdio_write_failed:
             case BuiltinKind::t_cold_die:
             case BuiltinKind::t_simd_splat:
             case BuiltinKind::t_simd_load:

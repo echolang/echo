@@ -16,7 +16,7 @@ public const DS = "\u{5C}";
 public const DS = "/";
 #[end]
 
-private function is_separator(uint8 $b) : bool
+internal function is_separator(uint8 $b) : bool
 {
 #[if: os == windows]
     if ($b == BACKSLASH) {

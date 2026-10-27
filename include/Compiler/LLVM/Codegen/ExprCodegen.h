@@ -233,6 +233,7 @@ namespace Compiler::LLVM
         // difference is that the code is a runtime value rather than a compile-time message, so this is
         // the one stop site whose argument has to be evaluated
         void gen_exit_builtin(AST::FunctionCallExprNode &node);
+        void gen_stdio_write_failed_builtin(AST::FunctionCallExprNode &node);
 
         // `echo` of a string or a string view: a length-counted write(2) rather than a printf, because
         // the bytes are not NUL-terminated in general. the codegen half of the rule

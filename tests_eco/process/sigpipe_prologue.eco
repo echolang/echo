@@ -1,0 +1,5 @@
+// what a command's prologue does about SIGPIPE, and where a failed write to stdout goes. on Darwin and
+// Linux the signal is ignored before the first statement, and a failed `echo` asks
+// `__eco_stdio_write_failed`. Windows has no SIGPIPE, so neither is there and its IR is what it always was
+
+echo 1;

@@ -1,0 +1,4 @@
+// wasi has no processes to start, so the namespace is not there to name: a program that needs one says so
+// at compile time, before anything tries to spawn
+
+std::process::command $c = std::process::command('anything');

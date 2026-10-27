@@ -435,7 +435,8 @@ namespace Compiler::LLVM
 
         // `write(fd, ptr, len)` on POSIX, `_write` on Windows UCRT. POSIX length
         // is size_t; Windows truncates to i32 because that is the CRT's count
-        void emit_libc_write(int fd, llvm::Value *ptr, llvm::Value *len)
+        // answers what the write returned, negative on failure, for a caller that has a use for it
+        llvm::Value *emit_libc_write(int fd, llvm::Value *ptr, llvm::Value *len)
         {
             llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
             llvm::Type *opaque_ptr = opaque_ptr_type();
@@ -443,14 +444,13 @@ namespace Compiler::LLVM
 
             if (targeting_windows()) {
                 llvm::Value *count = builder->CreateTrunc(len, i32, "write.n");
-                builder->CreateCall(
+                return builder->CreateCall(
                     libc_callee(RuntimeSymbol::t_win_write, i32, { i32, opaque_ptr, i32 }),
                     { fd_val, ptr, count });
-                return;
             }
 
             llvm::Type *count_ty = size_int_ty();
-            builder->CreateCall(
+            return builder->CreateCall(
                 libc_callee(RuntimeSymbol::t_write, count_ty, { i32, opaque_ptr, count_ty }),
                 { fd_val, ptr, as_size(len) });
         }

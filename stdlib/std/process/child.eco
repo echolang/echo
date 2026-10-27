@@ -1,0 +1,176 @@
+/**
+ * A running child process, and the ends of its pipes.
+ *
+ * **Dropping one does nothing to the process.** It keeps running, and nothing waits for it: wait for a
+ * child whose end you care about. On POSIX a child nobody waited for stays in the process table until this
+ * process exits.
+ *
+ * Waiting is remembered: a second `wait()` hands back the same status, and `try_wait()` after a
+ * finished wait answers it too.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+public class child
+{
+    private int32 $pid;
+
+    // the process HANDLE on Windows, closed when the last handle to this child goes. null on POSIX
+    private ptr<uint8> $process;
+
+    private exit_status? $ended;
+
+    private std::io::pipe_writer? $in;
+    private std::io::pipe_reader? $out;
+    private std::io::pipe_reader? $err;
+
+    internal constructor(
+        int32 $pid,
+        ptr<uint8> $process,
+        std::io::pipe_writer? $in,
+        std::io::pipe_reader? $out,
+        std::io::pipe_reader? $err
+    )
+    {
+        $this->pid = $pid;
+        $this->process:$ = $process;
+        $this->ended = null;
+        $this->in = $in;
+        $this->out = $out;
+        $this->err = $err;
+    }
+
+    destructor()
+    {
+        sys_release($this->process);
+    }
+
+    /**
+     * The child's process id.
+     */
+    const function id() : int32
+    {
+        return $this->pid;
+    }
+
+    /**
+     * The write end of the child's stdin, when it was `.piped`. `close()` it to send end of input.
+     */
+    function stdin() : std::io::pipe_writer?
+    {
+        return $this->in;
+    }
+
+    /**
+     * The read end of the child's stdout, when it was `.piped`.
+     */
+    function stdout() : std::io::pipe_reader?
+    {
+        return $this->out;
+    }
+
+    /**
+     * The read end of the child's stderr, when it was `.piped`.
+     */
+    function stderr() : std::io::pipe_reader?
+    {
+        return $this->err;
+    }
+
+    /**
+     * Waits for the child to end.
+     *
+     * Closes the child's piped stdin first: a child reading until end of input would otherwise wait for
+     * this process while this process waits for it.
+     */
+    function wait() : result<exit_status, ioerror>
+    {
+        $this->close_stdin();
+
+        exit_status? $now = guard $this->settle(true) else ($e) {
+            return .error($e);
+        }
+
+        exit_status $done = guard $now else {
+            return .error(ioerror(std::io::EINVAL));
+        }
+
+        return .ok($done);
+    }
+
+    /**
+     * How the child ended, or `null` while it is still running. Never blocks.
+     */
+    function try_wait() : result<exit_status?, ioerror>
+    {
+        return $this->settle(false);
+    }
+
+    /**
+     * Stops the child at once: `SIGKILL`, or `TerminateProcess` on Windows. Asking after it already
+     * ended is fine. It still has to be waited for.
+     */
+    function kill() : status<ioerror>
+    {
+        if ($this->ended != null) {
+            return .ok;
+        }
+
+        return sys_kill($this->pid, $this->process);
+    }
+
+    /**
+     * Reads the child's piped stdout and stderr to the end, both at once, then waits for it.
+     *
+     * Closes a piped stdin first, for `wait()`'s reason. A stream that was not piped reads as empty.
+     */
+    function wait_with_output() : result<output, ioerror>
+    {
+        return $this->finish('');
+    }
+
+    // `output($input)`'s half: `$input` goes into the piped stdin while stdout and stderr are drained, so
+    // a child that answers as it reads cannot stall on a full pipe in either direction
+    internal function finish(const string& $input) : result<output, ioerror>
+    {
+        std::io::pipe_writer? $in = $this->in;
+
+        if ($input->empty()) {
+            $this->close_stdin();
+            $in = null;
+        }
+
+        drained $d = guard drain($in, $input, $this->out, $this->err) else ($e) {
+            return .error($e);
+        }
+
+        exit_status $done = guard $this->wait() else ($e) {
+            return .error($e);
+        }
+
+        return .ok(output($done, $d->out, $d->err));
+    }
+
+    private function close_stdin() : void
+    {
+        $this->in?->close();
+    }
+
+    // the status if it is known, asking the platform once and remembering a final answer
+    private function settle(bool $block) : result<exit_status?, ioerror>
+    {
+        if ($this->ended != null) {
+            return .ok($this->ended);
+        }
+
+        exit_status? $now = guard sys_wait($this->pid, $this->process, $block) else ($e) {
+            return .error($e);
+        }
+
+        $this->ended = $now;
+
+        return .ok($now);
+    }
+}

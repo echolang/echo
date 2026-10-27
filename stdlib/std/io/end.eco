@@ -1,0 +1,232 @@
+/**
+ * What a read or write window fills from and drains into.
+ *
+ * A descriptor everywhere, and on Windows also an overlapped pipe handle. A child we drain is opened
+ * overlapped so two pipes can be waited on at once, and that handle cannot go through the CRT's
+ * `_read`. The windows in buf.eco talk to an end, never a descriptor.
+ *
+ * **`raw_read` and `raw_write` keep the `read(2)` contract:** a count, or -1 with errno set.
+ * `last_error()` is the one place a failure is read. The handle arm translates `GetLastError`
+ * into errno before it answers.
+ *
+ * Passed by value: on POSIX it is one `int32`, so an end costs what the descriptor it replaced did.
+ */
+
+namespace std::io;
+
+internal struct raw_end
+{
+    // -1 once closed, and when this end is a handle
+    int32 $fd;
+
+#[if: os == windows]
+    // an overlapped pipe handle, and the manual-reset event its I/O waits on. null for a descriptor
+    ptr<uint8> $handle;
+    ptr<uint8> $event;
+#[end]
+
+    constructor(int32 $fd)
+    {
+        $this->fd = $fd;
+
+#[if: os == windows]
+        $this->handle:$ = null;
+        $this->event:$ = null;
+#[end]
+    }
+
+    const function is_open() : bool
+    {
+#[if: os == windows]
+        if ($this->handle:$ != null) {
+            return true;
+        }
+#[end]
+
+        return $this->fd >= 0;
+    }
+
+    /**
+     * Closes the descriptor or handle and marks this end closed. Safe to call twice.
+     */
+    function close() : void
+    {
+#[if: os == windows]
+        if ($this->handle:$ != null) {
+            c_CloseHandle($this->handle);
+            c_CloseHandle($this->event);
+            $this->handle:$ = null;
+            $this->event:$ = null;
+            return;
+        }
+#[end]
+
+        if ($this->fd < 0) {
+            return;
+        }
+
+        c_close($this->fd);
+        $this->fd = -1;
+    }
+}
+
+#[if: os == windows]
+/**
+ * An end over an overlapped pipe handle this now owns, with a fresh event to wait on.
+ */
+internal function overlapped_end(ptr<uint8> $handle) : result<raw_end, ioerror>
+{
+    ptr<uint8> $event = c_CreateEventW(ptr<uint8>(null), 1, 0, ptr<uint16>(null));
+
+    if ($event:$ == null) {
+        ioerror $e = win32_ioerror();
+        c_CloseHandle($handle);
+        return .error($e);
+    }
+
+    raw_end $end = raw_end(-1);
+    $end->handle:$ = $handle;
+    $end->event:$ = $event;
+
+    return .ok($end);
+}
+#[end]
+
+#[inline]
+internal function raw_read(raw_end $e, ptr<uint8> $dst, usize $count) : isize
+{
+#[if: os == windows]
+    if ($e->handle:$ != null) {
+        return overlapped_io($e, $dst, $count, true);
+    }
+#[end]
+
+    return c_read($e->fd, $dst, $count);
+}
+
+#[inline]
+internal function raw_write(raw_end $e, ptr<const uint8> $src, usize $count) : isize
+{
+#[if: os == windows]
+    if ($e->handle:$ != null) {
+        return overlapped_io($e, ptr<uint8>($src:$), $count, false);
+    }
+#[end]
+
+    isize $n = c_write($e->fd, $src, $count);
+
+    if ($n < 0) {
+        // a closed stdout or stderr ends a command here, quietly, the way `echo` into one does
+        // any other failure comes back to the caller as an ordinary error
+        stdio_write_failed($e->fd);
+    }
+
+    return $n;
+}
+
+internal function raw_seek(raw_end $e, int64 $offset, int32 $whence) : int64
+{
+#[if: os == windows]
+    if ($e->handle:$ != null) {
+        set_errno(ESPIPE);
+        return -1;
+    }
+#[end]
+
+    return c_lseek($e->fd, $offset, $whence);
+}
+
+/**
+ * After a write that failed: on a platform where a command ignores SIGPIPE, exits 141 when `$fd` is
+ * stdout or stderr and errno says EPIPE, and returns otherwise. Returns at once everywhere else.
+ *
+ * A builtin so this module and `echo` share one rule.
+ */
+#[echoc::builtin: stdio_write_failed]
+internal function stdio_write_failed(int32 $fd) : void;
+
+internal function set_errno(int32 $code) : void
+{
+    ptr<int32> $slot = c_errno_location();
+    $slot = $code;
+}
+
+#[if: os == windows]
+// one OVERLAPPED. `Internal`/`InternalHigh` are ULONG_PTR, so the struct is 32 bytes on a 64-bit target
+internal struct overlapped
+{
+    usize $internal = 0;
+    usize $internal_high = 0;
+    uint32 $offset = 0;
+    uint32 $offset_high = 0;
+    ptr<uint8> $event;
+
+    constructor(ptr<uint8> $event)
+    {
+        $this->event:$ = $event;
+    }
+}
+
+// one ReadFile or WriteFile on an overlapped handle, waited for, so the caller sees a synchronous
+// count. a broken pipe is the end of input on a read, and EPIPE on a write: the two answers `read(2)`
+// and `write(2)` give for a pipe whose other end is gone
+private function overlapped_io(raw_end $e, ptr<uint8> $buf, usize $count, bool $reading) : isize
+{
+    uint32 $want = pipe_io_count($count);
+    overlapped $ov = overlapped($e->event);
+    uint32 $done = 0;
+    int32 $ok = 0;
+
+    if ($reading) {
+        $ok = c_ReadFile($e->handle, $buf, $want, &$done, &$ov);
+    }
+    else {
+        $ok = c_WriteFile($e->handle, ptr<const uint8>($buf:$), $want, &$done, &$ov);
+    }
+
+    if ($ok == 0) {
+        uint32 $w = c_GetLastError();
+
+        if ($w != ERROR_IO_PENDING) {
+            return overlapped_failure($w, $reading);
+        }
+
+        if (c_GetOverlappedResult($e->handle, &$ov, &$done, 1) == 0) {
+            return overlapped_failure(c_GetLastError(), $reading);
+        }
+    }
+
+    return $done as isize;
+}
+
+private function overlapped_failure(uint32 $w, bool $reading) : isize
+{
+    if (is_broken_pipe($w)) {
+        if ($reading) {
+            return 0;
+        }
+
+        set_errno(EPIPE);
+        return -1;
+    }
+
+    set_errno(win32_ioerror_of($w)->code);
+    return -1;
+}
+
+// a broken pipe is the far side going away: end of input on a read, a reader that stopped on a write
+internal function is_broken_pipe(uint32 $w) : bool
+{
+    return $w == ERROR_BROKEN_PIPE || $w == ERROR_NO_DATA || $w == ERROR_HANDLE_EOF;
+}
+
+// `$count` as the DWORD one ReadFile or WriteFile asks for, never past `PIPE_IO_MAX`
+internal function pipe_io_count(usize $count) : uint32
+{
+    if ($count < PIPE_IO_MAX as usize) {
+        return $count as uint32;
+    }
+
+    return PIPE_IO_MAX;
+}
+#[end]

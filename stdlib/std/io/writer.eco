@@ -15,12 +15,12 @@ namespace std::io;
 
 public class writer
 {
-    private int32 $fd;
+    private raw_end $io;
     private writewin $wout;
 
     constructor(stream $dst)
     {
-        $this->fd = $dst->fd();
+        $this->io = raw_end($dst->fd());
         $this->wout = writewin();
     }
 
@@ -39,12 +39,12 @@ public class writer
     {
         c_fflush(null);
 
-        return flush_write($this->fd, $this->wout);
+        return flush_write($this->io, $this->wout);
     }
 
     function write(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
     {
-        return write_to($this->fd, $this->wout, $src, $count);
+        return write_to($this->io, $this->wout, $src, $count);
     }
 
     function write(const string& $text) : result<usize, ioerror>

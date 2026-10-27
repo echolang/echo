@@ -1,8 +1,8 @@
 stdlib: off
 flags: --explain prune
+expect: 42
 
 --- OUT --->
-42
 [prune]
   3 function definitions, 2 reachable from main
     _reachedZZMLPi

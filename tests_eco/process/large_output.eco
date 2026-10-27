@@ -1,0 +1,50 @@
+// more than a pipe holds, on stdout and stderr at once, and more than a pipe holds going in. a child that
+// fills one stream while nobody reads it stops until somebody does, so both are read as they become
+// ready, while the input is written, or this case never finishes
+
+if (std::env::argc() > 1) {
+    string $role = str::from(std::env::arg(1)->cstr());
+
+    if ($role == 'flood') {
+        string $chunk = str::repeat('x', 1000);
+        usize $i = 0;
+        while ($i < 300) {
+            std::io::print($chunk);
+            std::io::eprint($chunk);
+            $i = $i + 1;
+        }
+        return 0;
+    }
+
+    if ($role == 'cat') {
+        std::io::reader $in = std::io::reader(std::io::stdin);
+        string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+        std::io::print($all);
+        return 0;
+    }
+
+    if ($role == 'take5') {
+        uint8[5] $buf;
+        std::io::reader $in = std::io::reader(std::io::stdin);
+        usize $got = guard $in->read(&$buf[0], 5) else ($e) { die("stdin: {$e}"); };
+        std::io::print(str::from(ptr<const uint8>(&$buf[0]), $got));
+        return 0;
+    }
+
+    die('unknown role');
+}
+
+string $self = std::env::exe();
+
+std::process::output $flood = guard std::process::command($self, ['flood'])->output() else ($e) { die("flood: {$e}"); };
+echo "flood: {$flood->stdout->size()} {$flood->stderr->size()} {$flood->status}";
+
+string $input = str::repeat('0123456789', 50000);
+std::process::output $echoed = guard std::process::command($self, ['cat'])->output($input) else ($e) { die("cat: {$e}"); };
+bool $same = $echoed->stdout == $input;
+echo "echoed: {$echoed->stdout->size()} same={$same} {$echoed->status}";
+
+// the child stops reading after five bytes and exits. the rest of the input has nowhere to go, and
+// that is not an error to report
+std::process::output $early = guard std::process::command($self, ['take5'])->output($input) else ($e) { die("take5: {$e}"); };
+echo "took: {$early->stdout} {$early->status}";

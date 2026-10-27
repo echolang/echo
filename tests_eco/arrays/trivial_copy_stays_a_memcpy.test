@@ -12,7 +12,10 @@
 #
 # an `array<T>` is three words, over Compiler::LLVM::return_abi_for's two-register line, so the constructor
 # answers `void` and writes through the `sret` slot its caller allocated
-CHECK: define linkonce_odr dso_local void @_arrayZZMRBCLC5arrayIMLPiEGMLPi(ptr noalias sret(%"array<int32>")
+#
+# the slot's type is not spelled: the mangled name already says `array<int32>`, and what the merged module
+# calls that struct depends on which other units instantiate it - `%"array<int32>"` or a bare `%0`
+CHECK: define linkonce_odr dso_local void @_arrayZZMRBCLC5arrayIMLPiEGMLPi(ptr noalias sret(
 CHECK-NOT: br i1
 CHECK: call void @_M5array_fit
 CHECK: call void @_M5array_extend

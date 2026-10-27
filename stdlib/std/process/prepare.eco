@@ -1,0 +1,200 @@
+/**
+ * What a platform spawn is handed: every string checked, the environment built, the program found.
+ *
+ * All of it happens before any OS call, so a command that cannot run is refused with nothing to undo.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+internal struct prepared
+{
+    // what to execute: absolute, or the program as written when that already holds a path
+    string $path;
+
+    // argv[0] is the program as written, the way a shell passes it
+    array<string> $argv;
+
+    // `KEY=VALUE`, in the order the child sees them
+    array<string> $envp;
+
+    string? $cwd;
+}
+
+internal function prepare(const command& $c) : result<prepared, ioerror>
+{
+    if (is_refused($c)) {
+        return .error(ioerror(std::io::EINVAL));
+    }
+
+    array<string> $envp = child_environment($c);
+
+    string $path = guard find_program($c->program, child_path($envp)) else ($e) {
+        return .error($e);
+    }
+
+    array<string> $argv = array<string>();
+    $argv->reserve($c->arguments->count() + 1);
+    $argv[] = terminated($c->program);
+
+    foreach ($c->arguments as const &$a) {
+        $argv[] = terminated($a);
+    }
+
+    // built in the return, so every local is handed over
+    return .ok(prepared(terminated($path), $argv, $envp, terminated_cwd($c)));
+}
+
+private function terminated_cwd(const command& $c) : string?
+{
+    string $dir = guard $c->cwd else {
+        return null;
+    }
+
+    return terminated($dir);
+}
+
+// whether this command cannot be handed to the platform at all. a NUL would end a C string early
+// and run a different program, or the same one with an argument cut short, so it is refused;
+// a key that is empty or holds `=` would be read back as a different variable
+private function is_refused(const command& $c) : bool
+{
+    if (has_nul($c->program)) {
+        return true;
+    }
+
+    foreach ($c->arguments as const &$a) {
+        if (has_nul($a)) {
+            return true;
+        }
+    }
+
+    foreach ($c->edits as const &$e) {
+        if ($e->key->empty() || has_nul($e->key) || $e->key->contains('=')) {
+            return true;
+        }
+
+        string $v = guard $e->value else {
+            continue;
+        }
+
+        if (has_nul($v)) {
+            return true;
+        }
+    }
+
+    string $dir = guard $c->cwd else {
+        return false;
+    }
+
+    return has_nul($dir);
+}
+
+private function has_nul(const string& $s) : bool
+{
+    return mem::find_byte($s->data(), 0, $s->size()) != $s->size();
+}
+
+// a string `cstr()` can hand to C. a substring shares its parent's bytes and has no terminator of its own
+internal function terminated(const string& $s) : string
+{
+    if ($s->terminated()) {
+        return $s;
+    }
+
+    return $s->clone();
+}
+
+// environment keys are case-insensitive on Windows, so `env('path', ...)` replaces the inherited `Path`;
+// everywhere else `PATH` and `path` are two variables
+internal function same_key(string::view $a, string::view $b) : bool
+{
+#[if: os == windows]
+    return str::iequals($a, $b);
+#[else]
+    return $a->equals($b);
+#[end]
+}
+
+// the environment the child starts with: this process's, or nothing after `env_clear()`, then every edit.
+// the last edit to a key decides it, so `env('X', 'a')` then `env_remove('X')` leaves no `X`
+private function child_environment(const command& $c) : array<string>
+{
+    array<env_edit> $last = array<env_edit>();
+
+    foreach ($c->edits as $e) {
+        bool $replaced = false;
+
+        foreach ($last as &$l) {
+            if (same_key($l->key->view(), $e->key->view())) {
+                $l = $e;
+                $replaced = true;
+                break;
+            }
+        }
+
+        if (!$replaced) {
+            $last[] = $e;
+        }
+    }
+
+    array<string> $out = array<string>();
+
+    if (!$c->cleared) {
+        foreach (std::env::vars() as $key => $value) {
+            if (!edited($last, $key)) {
+                $out[] = entry($key, $value);
+            }
+        }
+    }
+
+    foreach ($last as $e) {
+        string $v = guard $e->value else {
+            continue;
+        }
+
+        $out[] = entry($e->key->view(), $v->view());
+    }
+
+    return $out;
+}
+
+private function edited(const array<env_edit>& $last, string::view $key) : bool
+{
+    foreach ($last as $e) {
+        if (same_key($e->key->view(), $key)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+private function entry(string::view $key, string::view $value) : string
+{
+    str::text $t = str::text();
+    $t->reserve($key->size + 1 + $value->size);
+    $t->append($key);
+    $t->push(61);
+    $t->append($value);
+
+    return $t->take();
+}
+
+// the PATH the child will have, which is the one its program is found on. a cleared environment with
+// no PATH of its own falls back to this process's, so `env_clear()` does not make every bare name missing
+private function child_path(const array<string>& $envp) : string
+{
+    foreach ($envp as $e) {
+        string::view $v = $e->view();
+
+        if ($v->size >= 5 && same_key($v->sub(0, 4), 'PATH') && $v->byte(4) == 61) {
+            return string($v->sub(5, $v->size - 5));
+        }
+    }
+
+    string::view $inherited = std::env::var('PATH') ?? '';
+
+    return string($inherited);
+}

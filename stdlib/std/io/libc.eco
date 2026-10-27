@@ -311,6 +311,16 @@ internal extern {
     function SetFileInformationByHandle as c_SetFileInformationByHandle(
         ptr<uint8> $h, int32 $class, ptr<basic_info> $info, uint32 $size) : int32;
     function CopyFileW as c_CopyFileW(ptr<uint16> $from, ptr<uint16> $to, int32 $fail_if_exists) : int32;
+
+    // an overlapped pipe end, read and written through `raw_end`. kernel32, so no JIT pin either
+    function ReadFile as c_ReadFile(
+        ptr<uint8> $h, ptr<uint8> $buf, uint32 $count, ptr<uint32> $done, ptr<overlapped> $ov) : int32;
+    function WriteFile as c_WriteFile(
+        ptr<uint8> $h, ptr<const uint8> $buf, uint32 $count, ptr<uint32> $done, ptr<overlapped> $ov) : int32;
+    function GetOverlappedResult as c_GetOverlappedResult(
+        ptr<uint8> $h, ptr<overlapped> $ov, ptr<uint32> $done, int32 $wait) : int32;
+    function CreateEventW as c_CreateEventW(
+        ptr<uint8> $security, int32 $manual_reset, int32 $initial, ptr<uint16> $name) : ptr<uint8>;
 }
 
 // BY_HANDLE_FILE_INFORMATION. a FILETIME is two DWORDs and 4-byte aligned, so it is spelled as
@@ -456,6 +466,8 @@ internal const int32 EEXIST = 20;
 internal const int32 ENOTDIR = 54;
 internal const int32 EISDIR = 31;
 internal const int32 EINVAL = 28;
+internal const int32 EPIPE = 64;
+internal const int32 ESPIPE = 70;
 #[else]
 internal const int32 EPERM = 1;
 internal const int32 ENOENT = 2;
@@ -466,6 +478,8 @@ internal const int32 EEXIST = 17;
 internal const int32 ENOTDIR = 20;
 internal const int32 EISDIR = 21;
 internal const int32 EINVAL = 22;
+internal const int32 ESPIPE = 29;
+internal const int32 EPIPE = 32;
 #[end]
 
 // the file-type half of a mode. the same numbers on Darwin, Linux and wasi-libc
@@ -600,6 +614,12 @@ internal const uint32 ERROR_ALREADY_EXISTS = 183;
 internal const uint32 ERROR_FILENAME_EXCED_RANGE = 206;
 internal const uint32 ERROR_DIRECTORY = 267;
 internal const uint32 ERROR_PRIVILEGE_NOT_HELD = 1314;
+internal const uint32 ERROR_HANDLE_EOF = 38;
+internal const uint32 ERROR_BROKEN_PIPE = 109;
+internal const uint32 ERROR_NO_DATA = 232;
+internal const uint32 ERROR_IO_PENDING = 997;
+// the most one overlapped ReadFile or WriteFile is asked for. a DWORD count, kept well inside it
+internal const uint32 PIPE_IO_MAX = 1073741824;
 #[end]
 
 /**
@@ -618,8 +638,13 @@ internal function last_error() : ioerror
 #[if: os == windows]
 internal function win32_ioerror() : ioerror
 {
-    uint32 $w = c_GetLastError();
+    return win32_ioerror_of(c_GetLastError());
+}
 
+// the errno a Win32 error code reads as. one table, so a caller holding a code it already read
+// cannot map it differently from one asking `GetLastError` now
+internal function win32_ioerror_of(uint32 $w) : ioerror
+{
     if ($w == ERROR_FILE_NOT_FOUND || $w == ERROR_PATH_NOT_FOUND || $w == ERROR_INVALID_DRIVE
         || $w == ERROR_BAD_NETPATH || $w == ERROR_BAD_NET_NAME || $w == ERROR_FILENAME_EXCED_RANGE) {
         return ioerror(ENOENT);

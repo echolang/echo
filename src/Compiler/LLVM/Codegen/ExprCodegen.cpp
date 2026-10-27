@@ -714,7 +714,17 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 arg_value
             };
 
-            _ctx.builder->CreateCall(_ctx.current_module()->getFunction("printf"), ArgsV);
+            llvm::Value *printed_count = _ctx.builder->CreateCall(
+                _ctx.current_module()->getFunction("printf"), ArgsV);
+
+            // stdout is fully buffered when piped: printf copies into the FILE buffer and returns a
+            // positive count. the write that can EPIPE is the flush; string echo already flushes then write(2)
+            llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+            llvm::Value *flushed = _ctx.builder->CreateCall(
+                _ctx.libc_callee(Compiler::RuntimeSymbol::t_fflush, i32, { _ctx.opaque_ptr_type() }),
+                { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())) });
+            _ctx.process->gen_stdout_write_check(
+                _ctx.builder->CreateOr(printed_count, flushed, "echo.wrote"));
         }
     }
 
@@ -1101,6 +1111,10 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             gen_exit_builtin(node);
             return;
 
+        case AST::BuiltinKind::t_stdio_write_failed:
+            gen_stdio_write_failed_builtin(node);
+            return;
+
         case AST::BuiltinKind::t_cold_die:
             gen_cold_die_builtin(node);
             return;
@@ -1199,17 +1213,21 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
         _ctx.libc_callee(Compiler::RuntimeSymbol::t_fflush, i32, { _ctx.opaque_ptr_type() }),
         { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())) });
 
-    _ctx.emit_libc_write(1, bytes, size);
+    llvm::Value *wrote_bytes = _ctx.emit_libc_write(1, bytes, size);
 
     // the trailing newline every other `echo` conversion carries, so one statement behaves one way
     // whatever it is handed. writing it separately rather than copying the bytes to append it: the
     // bytes may be a shared substring, and there is nowhere to put a longer copy
     const std::string_view newline = _ctx.options.codegen.line_ending();
 
-    _ctx.emit_libc_write(
+    llvm::Value *wrote_newline = _ctx.emit_libc_write(
         1,
         _ctx.builder->CreateGlobalStringPtr(newline, "echo.nl"),
         llvm::ConstantInt::get(_ctx.size_int_ty(), newline.size()));
+
+    // one check for both: a write after a broken pipe fails with EPIPE too, and the or of two counts is
+    // negative exactly when either is, so an `echo` costs one cold branch
+    _ctx.process->gen_stdout_write_check(_ctx.builder->CreateOr(wrote_bytes, wrote_newline, "echo.wrote"));
 }
 
 void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
@@ -1392,6 +1410,7 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_stdio_write_failed:
         case AST::BuiltinKind::t_cold_die:
         case AST::BuiltinKind::t_atomic_load:
         case AST::BuiltinKind::t_atomic_store:
@@ -1636,6 +1655,18 @@ void ExprCodegen::gen_exit_builtin(AST::FunctionCallExprNode &node)
     // pushes nothing and terminates the block, like `die` - the two ways a program stops share one
     // owner, so the `unreachable` and the NoReturn on the symbol are decided in one place
     _ctx.abort->gen_exit(code);
+}
+
+void ExprCodegen::gen_stdio_write_failed_builtin(AST::FunctionCallExprNode &node)
+{
+    // one int32 descriptor, already coerced by AST::CallResolver. pushes nothing: the declaration is void
+    node.arguments[0]->accept(*_ctx.visitor);
+
+    llvm::Value *fd = _ctx.types->coerce_value(
+        _ctx.pop_value(), node.arguments[0]->result_type(),
+        AST::ValueType(AST::ValueTypePrimitive::t_int32), *_ctx.current_cmp_unit).scalar();
+
+    _ctx.process->gen_stdio_write_failed(fd);
 }
 
 void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)

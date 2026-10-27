@@ -1,0 +1,440 @@
+/**
+ * Reading a child's stdout and stderr to the end, at the same time, while feeding its stdin.
+ *
+ * At the same time is the point. A pipe holds a few dozen kilobytes; a child that fills its stderr while
+ * this process waits on its stdout stops until somebody reads, and nobody will. So the three ends are
+ * served as each becomes ready, and only end of input on both read ends finishes the drain, which is
+ * also why a child is waited for only after this.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+internal struct drained
+{
+    string $out;
+    string $err;
+}
+
+// bytes a reader's window already pulled out of the pipe belong at the front of what it says
+private function start_text(std::io::pipe_reader? $r) : string
+{
+    string $text = '';
+    std::io::pipe_reader $reader = guard $r else {
+        return $text;
+    }
+
+    $reader->take_pending($text);
+
+    return $text;
+}
+
+// spare room at the end of `$text` for one more read. the string doubles as it grows, so a stream that
+// says little costs a small block and a long one is still read in large pieces
+private function make_room(string& $text) : void
+{
+    if ($text->room() < std::io::IO_BUF) {
+        $text->reserve($text->size() + std::io::IO_BUF);
+    }
+}
+
+// a closed end stands for a stream that was not piped
+private function end_of(std::io::pipe_reader? $r) : std::io::raw_end
+{
+    std::io::pipe_reader $reader = guard $r else {
+        return std::io::raw_end(-1);
+    }
+
+    return $reader->end();
+}
+
+private function end_of_writer(std::io::pipe_writer? $w) : std::io::raw_end
+{
+    std::io::pipe_writer $writer = guard $w else {
+        return std::io::raw_end(-1);
+    }
+
+    return $writer->end();
+}
+
+#[if: family != windows]
+
+// a failed read or write that only means "not now"
+private function transient(int32 $code) : bool
+{
+    return $code == EINTR || $code == std::thread::EAGAIN;
+}
+
+// one read straight into the end of `$text`. at end of input `$r` is closed and `$end` with it, which is
+// how a finished stream drops out of the poll
+private function pump(std::io::pipe_reader? $r, std::io::raw_end& $end, string& $text) : status<ioerror>
+{
+    make_room($text);
+
+    isize $n = std::io::raw_read($end, $text->spare(), $text->room());
+
+    if ($n > 0) {
+        $text->commit($n as usize);
+        return .ok;
+    }
+
+    if ($n == 0) {
+        $r?->close();
+        $end = std::io::raw_end(-1);
+        return .ok;
+    }
+
+    ioerror $e = std::io::last_error();
+
+    if (transient($e->code)) {
+        return .ok;
+    }
+
+    return .error($e);
+}
+
+// `$input` was handed over only when it is not empty: `child::finish` closes the child's stdin itself
+// otherwise
+internal function drain(
+    std::io::pipe_writer? $in,
+    const string& $input,
+    std::io::pipe_reader? $out,
+    std::io::pipe_reader? $err
+) : result<drained, ioerror>
+{
+    string $out_text = start_text($out);
+    string $err_text = start_text($err);
+
+    std::io::raw_end $in_end = end_of_writer($in);
+    std::io::raw_end $out_end = end_of($out);
+    std::io::raw_end $err_end = end_of($err);
+    usize $written = 0;
+
+    if ($in_end->is_open()) {
+        // non-blocking, so a child that stops reading cannot stall the two reads beside it. the end is
+        // this process's alone and closes below, so nobody else sees the flag
+        int32 $flags = c_fcntl($in_end->fd, F_GETFL, [0]);
+        c_fcntl($in_end->fd, F_SETFL, [$flags | O_NONBLOCK]);
+    }
+
+    pollfd[3] $fds;
+
+    while ($in_end->is_open() || $out_end->is_open() || $err_end->is_open()) {
+        // a negative descriptor is skipped by `poll`, which is how a finished end drops out
+        $fds[0] = pollfd($in_end->fd, POLLOUT, 0);
+        $fds[1] = pollfd($out_end->fd, POLLIN, 0);
+        $fds[2] = pollfd($err_end->fd, POLLIN, 0);
+
+        if (c_poll(&$fds[0], 3, -1) < 0) {
+            ioerror $e = std::io::last_error();
+
+            if ($e->code == EINTR) {
+                continue;
+            }
+
+            return .error($e);
+        }
+
+        if ($in_end->is_open() && $fds[0]->revents != 0) {
+            ptr<const uint8> $src = $input->data();
+            isize $n = std::io::raw_write($in_end, $src:$ + $written, $input->size() - $written);
+
+            if ($n > 0) {
+                $written = $written + ($n as usize);
+            }
+            else {
+                ioerror $e = std::io::last_error();
+
+                // a child that stopped reading its input before the end has said what it wanted;
+                // that is not this process's error to report
+                if ($e->code == std::io::EPIPE) {
+                    $written = $input->size();
+                }
+                else if (!transient($e->code)) {
+                    return .error($e);
+                }
+            }
+
+            if ($written >= $input->size()) {
+                $in?->close();
+                $in_end = std::io::raw_end(-1);
+            }
+        }
+
+        if ($out_end->is_open() && $fds[1]->revents != 0) {
+            guard pump($out, $out_end, $out_text) else ($e) {
+                return .error($e);
+            }
+        }
+
+        if ($err_end->is_open() && $fds[2]->revents != 0) {
+            guard pump($err, $err_end, $err_text) else ($e) {
+                return .error($e);
+            }
+        }
+    }
+
+    return .ok(drained($out_text, $err_text));
+}
+
+#[end]
+
+#[if: os == windows]
+
+// one overlapped operation on one end: what it is reading into or writing from, and whether the kernel
+// still owns the OVERLAPPED. the struct lives in the caller's frame, which is why it is never moved
+private struct pending_io
+{
+    bool $open;
+    bool $busy;
+}
+
+// gives up on an operation still in flight and waits until the kernel lets go of its OVERLAPPED, so an
+// early return never leaves the kernel writing into a frame that is gone
+private function abandon(std::io::raw_end $end, ptr<std::io::overlapped> $ov, pending_io& $state) : void
+{
+    if (!$state->busy) {
+        return;
+    }
+
+    uint32 $done = 0;
+    c_CancelIoEx($end->handle, $ov);
+    std::io::c_GetOverlappedResult($end->handle, $ov, &$done, 1);
+    $state->busy = false;
+}
+
+// starts one read into the spare room at the end of `$text`. answers false once the pipe is at its end
+private function start_read(
+    std::io::raw_end $end,
+    ptr<std::io::overlapped> $ov,
+    pending_io& $state,
+    string& $text
+) : result<bool, ioerror>
+{
+    make_room($text);
+
+    uint32 $got = 0;
+
+    if (std::io::c_ReadFile($end->handle, $text->spare(), std::io::pipe_io_count($text->room()), &$got, $ov) == 0) {
+        uint32 $w = std::io::c_GetLastError();
+
+        if (std::io::is_broken_pipe($w)) {
+            return .ok(false);
+        }
+
+        if ($w != std::io::ERROR_IO_PENDING) {
+            return .error(std::io::win32_ioerror_of($w));
+        }
+    }
+
+    // finished at once or not, the event says so and the result is collected the same way
+    $state->busy = true;
+
+    return .ok(true);
+}
+
+// collects a finished read. answers false at end of input
+private function finish_read(
+    std::io::raw_end $end,
+    ptr<std::io::overlapped> $ov,
+    pending_io& $state,
+    string& $text
+) : result<bool, ioerror>
+{
+    uint32 $got = 0;
+    $state->busy = false;
+
+    if (std::io::c_GetOverlappedResult($end->handle, $ov, &$got, 0) == 0) {
+        uint32 $w = std::io::c_GetLastError();
+
+        if (std::io::is_broken_pipe($w)) {
+            return .ok(false);
+        }
+
+        return .error(std::io::win32_ioerror_of($w));
+    }
+
+    if ($got == 0) {
+        return .ok(false);
+    }
+
+    $text->commit($got as usize);
+
+    return .ok(true);
+}
+
+internal function drain(
+    std::io::pipe_writer? $in,
+    const string& $input,
+    std::io::pipe_reader? $out,
+    std::io::pipe_reader? $err
+) : result<drained, ioerror>
+{
+    string $out_text = start_text($out);
+    string $err_text = start_text($err);
+
+    std::io::raw_end $in_end = end_of_writer($in);
+    std::io::raw_end $out_end = end_of($out);
+    std::io::raw_end $err_end = end_of($err);
+
+    std::io::overlapped $in_ov = std::io::overlapped($in_end->event);
+    std::io::overlapped $out_ov = std::io::overlapped($out_end->event);
+    std::io::overlapped $err_ov = std::io::overlapped($err_end->event);
+
+    pending_io $in_state = pending_io($in_end->handle:$ != null, false);
+    pending_io $out_state = pending_io($out_end->handle:$ != null, false);
+    pending_io $err_state = pending_io($err_end->handle:$ != null, false);
+
+    usize $written = 0;
+    ptr<uint8>[3] $events = [ptr<uint8>(null), ptr<uint8>(null), ptr<uint8>(null)];
+    int32[3] $which = [0, 0, 0];
+
+    while ($in_state->open || $out_state->open || $err_state->open) {
+        // keep one operation in flight on every end still open
+        if ($in_state->open && !$in_state->busy) {
+            ptr<const uint8> $src = $input->data();
+            uint32 $want = std::io::pipe_io_count($input->size() - $written);
+            uint32 $sent = 0;
+
+            if (std::io::c_WriteFile($in_end->handle, $src:$ + $written, $want, &$sent, &$in_ov) == 0) {
+                uint32 $w = std::io::c_GetLastError();
+
+                if (std::io::is_broken_pipe($w)) {
+                    $in_state->open = false;
+                    $in?->close();
+                }
+                else if ($w != std::io::ERROR_IO_PENDING) {
+                    abandon($out_end, &$out_ov, $out_state);
+                    abandon($err_end, &$err_ov, $err_state);
+                    return .error(std::io::win32_ioerror_of($w));
+                }
+                else {
+                    $in_state->busy = true;
+                }
+            }
+            else {
+                $in_state->busy = true;
+            }
+        }
+
+        if ($out_state->open && !$out_state->busy) {
+            bool $out_more = guard start_read($out_end, &$out_ov, $out_state, $out_text) else ($e) {
+                abandon($in_end, &$in_ov, $in_state);
+                abandon($err_end, &$err_ov, $err_state);
+                return .error($e);
+            }
+
+            $out_state->open = $out_more;
+
+            if (!$out_state->open) {
+                $out?->close();
+            }
+        }
+
+        if ($err_state->open && !$err_state->busy) {
+            bool $err_more = guard start_read($err_end, &$err_ov, $err_state, $err_text) else ($e) {
+                abandon($in_end, &$in_ov, $in_state);
+                abandon($out_end, &$out_ov, $out_state);
+                return .error($e);
+            }
+
+            $err_state->open = $err_more;
+
+            if (!$err_state->open) {
+                $err?->close();
+            }
+        }
+
+        uint32 $count = 0;
+
+        if ($in_state->busy) {
+            $events[$count as usize]:$ = $in_end->event;
+            $which[$count as usize] = 0;
+            $count = $count + 1;
+        }
+
+        if ($out_state->busy) {
+            $events[$count as usize]:$ = $out_end->event;
+            $which[$count as usize] = 1;
+            $count = $count + 1;
+        }
+
+        if ($err_state->busy) {
+            $events[$count as usize]:$ = $err_end->event;
+            $which[$count as usize] = 2;
+            $count = $count + 1;
+        }
+
+        if ($count == 0) {
+            continue;
+        }
+
+        uint32 $ready = c_WaitForMultipleObjects($count, &$events[0], 0, std::thread::WIN_INFINITE);
+
+        if ($ready >= $count) {
+            ioerror $e = std::io::win32_ioerror();
+            abandon($in_end, &$in_ov, $in_state);
+            abandon($out_end, &$out_ov, $out_state);
+            abandon($err_end, &$err_ov, $err_state);
+            return .error($e);
+        }
+
+        int32 $slot = $which[$ready as usize];
+
+        if ($slot == 0) {
+            uint32 $sent = 0;
+            $in_state->busy = false;
+
+            if (std::io::c_GetOverlappedResult($in_end->handle, &$in_ov, &$sent, 0) == 0) {
+                uint32 $w = std::io::c_GetLastError();
+
+                if (!std::io::is_broken_pipe($w)) {
+                    abandon($out_end, &$out_ov, $out_state);
+                    abandon($err_end, &$err_ov, $err_state);
+                    return .error(std::io::win32_ioerror_of($w));
+                }
+
+                $written = $input->size();
+            }
+            else {
+                $written = $written + ($sent as usize);
+            }
+
+            if ($written >= $input->size()) {
+                $in_state->open = false;
+                $in?->close();
+            }
+        }
+        else if ($slot == 1) {
+            bool $out_more = guard finish_read($out_end, &$out_ov, $out_state, $out_text) else ($e) {
+                abandon($in_end, &$in_ov, $in_state);
+                abandon($err_end, &$err_ov, $err_state);
+                return .error($e);
+            }
+
+            $out_state->open = $out_more;
+
+            if (!$out_state->open) {
+                $out?->close();
+            }
+        }
+        else {
+            bool $err_more = guard finish_read($err_end, &$err_ov, $err_state, $err_text) else ($e) {
+                abandon($in_end, &$in_ov, $in_state);
+                abandon($out_end, &$out_ov, $out_state);
+                return .error($e);
+            }
+
+            $err_state->open = $err_more;
+
+            if (!$err_state->open) {
+                $err?->close();
+            }
+        }
+    }
+
+    return .ok(drained($out_text, $err_text));
+}
+
+#[end]

@@ -1,0 +1,235 @@
+/**
+ * The Windows command line: one string the child splits again.
+ *
+ * Each argument is quoted the way `CommandLineToArgvW` reads it back. A `.bat` or `.cmd` is run by
+ * cmd.exe, which parses that string a second time, so those arguments are escaped for cmd as well.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+#[if: os == windows]
+
+// `CommandLineToArgvW` reads this back as `$arg`: n backslashes before a quote become 2n+1 and the quote is
+// literal, n at the end of a quoted word become 2n so the closing quote survives, and an empty word is `""`
+private function quote_argument(const string& $arg, str::text& $out) : void
+{
+    bool $quote = $arg->empty();
+    usize $i = 0;
+
+    while ($i < $arg->size()) {
+        uint8 $b = $arg->byte($i);
+
+        if ($b == 32 || $b == 9 || $b == 10 || $b == 11 || $b == 34) {
+            $quote = true;
+        }
+
+        $i = $i + 1;
+    }
+
+    if (!$quote) {
+        $out->append($arg);
+        return;
+    }
+
+    $out->push(34);
+    usize $backslashes = 0;
+    $i = 0;
+
+    while ($i < $arg->size()) {
+        uint8 $b = $arg->byte($i);
+
+        if ($b == 92) {
+            $backslashes = $backslashes + 1;
+        }
+        else {
+            if ($b == 34) {
+                push_repeated($out, 92, $backslashes * 2 + 1);
+            }
+            else {
+                push_repeated($out, 92, $backslashes);
+            }
+
+            $backslashes = 0;
+            $out->push($b);
+        }
+
+        $i = $i + 1;
+    }
+
+    push_repeated($out, 92, $backslashes * 2);
+    $out->push(34);
+}
+
+private function push_repeated(str::text& $out, uint8 $b, usize $count) : void
+{
+    usize $i = 0;
+
+    while ($i < $count) {
+        $out->push($b);
+        $i = $i + 1;
+    }
+}
+
+// a byte cmd.exe may give a meaning to when it is unquoted. every ASCII symbol counts unless it is known to
+// be inert, which is the safe direction to be wrong in: an extra quote changes nothing a batch file sees
+private function cmd_needs_quotes(uint8 $b) : bool
+{
+    if ($b >= 128) {
+        return false;
+    }
+
+    if (($b >= 48 && $b <= 57) || ($b >= 65 && $b <= 90) || ($b >= 97 && $b <= 122)) {
+        return false;
+    }
+
+    // # $ * + - . / : ? @ \ _
+    return !($b == 35 || $b == 36 || $b == 42 || $b == 43 || $b == 45 || $b == 46 || $b == 47 || $b == 58
+        || $b == 63 || $b == 64 || $b == 92 || $b == 95);
+}
+
+// one argument for a batch file, which cmd.exe expands before the batch file sees it. quoted when anything
+// in it could mean something to cmd, `"` doubled, and every `%` broken up as `%%cd:~,%` (an empty
+// substring of `%cd%`), so `%PATH%` reaches the script as text. a newline or a carriage return cannot
+// be carried through cmd at all, and is refused
+private function quote_batch_argument(const string& $arg, str::text& $out) : bool
+{
+    bool $quote = $arg->empty() || $arg->byte($arg->size() - 1) == 92;
+    usize $i = 0;
+
+    while ($i < $arg->size()) {
+        uint8 $b = $arg->byte($i);
+
+        if ($b == 10 || $b == 13) {
+            return false;
+        }
+
+        if (cmd_needs_quotes($b) || $b < 32) {
+            $quote = true;
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($quote) {
+        $out->push(34);
+    }
+
+    usize $backslashes = 0;
+    $i = 0;
+
+    while ($i < $arg->size()) {
+        uint8 $b = $arg->byte($i);
+
+        if ($b == 92) {
+            $backslashes = $backslashes + 1;
+        }
+        else {
+            if ($b == 34) {
+                push_repeated($out, 92, $backslashes);
+                $out->push(34);
+            }
+            else if ($b == 37) {
+                $out->append('%%cd:~,');
+            }
+
+            $backslashes = 0;
+        }
+
+        $out->push($b);
+        $i = $i + 1;
+    }
+
+    if ($quote) {
+        push_repeated($out, 92, $backslashes);
+        $out->push(34);
+    }
+
+    return true;
+}
+
+private function is_batch(const string& $path) : bool
+{
+    string $lower = str::lower($path);
+
+    return $lower->ends('.bat') || $lower->ends('.cmd');
+}
+
+// `C:\Windows\System32\cmd.exe`, from the system directory. PATH and `ComSpec` are this process's
+// environment, and either could point anywhere
+private function system_cmd() : result<string, ioerror>
+{
+    std::env::wide_string $buf = std::env::wide_string();
+
+    if (!$buf->resize(std::io::MAX_PATH as usize)) {
+        return .error(ioerror(std::io::ENOMEM));
+    }
+
+    uint32 $n = c_GetSystemDirectoryW($buf->data(), std::io::MAX_PATH);
+
+    if ($n == 0 || $n >= std::io::MAX_PATH) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    string $dir = guard std::env::wide_to_utf8($buf->data(), $n as int32) else {
+        return .error(std::io::win32_ioerror());
+    }
+
+    return .ok(std::env::join($dir->view(), 'cmd.exe'));
+}
+
+// the program to start and the line it is handed. a batch file is cmd.exe's, with the script and its
+// arguments as one `/c` string
+internal function command_line(const prepared& $p, string& $application) : result<string, ioerror>
+{
+    str::text $line = str::text();
+
+    if (is_batch($p->path)) {
+        // a quote in the script's own path cannot be escaped inside the `/c` string
+        if ($p->path->contains('"')) {
+            return .error(ioerror(std::io::EINVAL));
+        }
+
+        string $cmd = guard system_cmd() else ($e) {
+            return .error($e);
+        }
+
+        $application = $cmd;
+        $line->append('cmd.exe /e:ON /v:OFF /d /c ""');
+        $line->append($p->path);
+        $line->push(34);
+
+        usize $i = 1;
+
+        while ($i < $p->argv->count()) {
+            $line->push(32);
+
+            if (!quote_batch_argument($p->argv[$i], $line)) {
+                return .error(ioerror(std::io::EINVAL));
+            }
+
+            $i = $i + 1;
+        }
+
+        $line->push(34);
+
+        return .ok($line->take());
+    }
+
+    $application = $p->path;
+    usize $i = 0;
+
+    while ($i < $p->argv->count()) {
+        if ($i > 0) {
+            $line->push(32);
+        }
+
+        quote_argument($p->argv[$i], $line);
+        $i = $i + 1;
+    }
+
+    return .ok($line->take());
+}
+
+#[end]

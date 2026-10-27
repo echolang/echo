@@ -1,7 +1,7 @@
 /**
- * The read and write windows `file`, `reader` and `writer` share.
+ * The read and write windows `file`, `reader`, `writer` and the two pipe ends share.
  *
- * Not a surface. A fill, a flush, a newline scan - one copy, so the two types cannot drift.
+ * Not a surface. A fill, a flush, a newline scan: one copy, so the types sharing it cannot drift.
  */
 
 namespace std::io;
@@ -17,9 +17,22 @@ internal struct readwin
         $this->pos = 0;
     }
 
-    function pending() : usize
+    const function pending() : usize
     {
         return $this->buf->size() - $this->pos;
+    }
+
+    // the bytes this window holds and nobody has read, moved onto the end of `$out`
+    function take_pending(string& $out) : void
+    {
+        usize $left = $this->pending();
+
+        if ($left > 0) {
+            ptr<const uint8> $src = $this->buf->data();
+            $out->append($src:$ + $this->pos, $left);
+        }
+
+        $this->drop();
     }
 
     function drop() : void
@@ -50,12 +63,12 @@ internal function as_usize(isize $n) : usize
     return $out;
 }
 
-internal function raw_write_all(int32 $fd, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+internal function raw_write_all(raw_end $io, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
 {
     usize $done = 0;
 
     while ($done < $count) {
-        isize $got = c_write($fd, $src:$ + $done, $count - $done);
+        isize $got = raw_write($io, $src:$ + $done, $count - $done);
 
         if ($got <= 0) {
             return .error(last_error());
@@ -67,7 +80,7 @@ internal function raw_write_all(int32 $fd, ptr<const uint8> $src, usize $count) 
     return .ok($count);
 }
 
-internal function fill_read(int32 $fd, readwin& $w) : result<usize, ioerror>
+internal function fill_read(raw_end $io, readwin& $w) : result<usize, ioerror>
 {
     if ($w->pending() == 0) {
         $w->drop();
@@ -77,7 +90,7 @@ internal function fill_read(int32 $fd, readwin& $w) : result<usize, ioerror>
 
     ptr<uint8> $dst = $w->buf->spare();
     usize $room = $w->buf->room();
-    isize $got = c_read($fd, $dst, $room);
+    isize $got = raw_read($io, $dst, $room);
 
     if ($got < 0) {
         return .error(last_error());
@@ -89,7 +102,7 @@ internal function fill_read(int32 $fd, readwin& $w) : result<usize, ioerror>
     return .ok($n);
 }
 
-internal function flush_write(int32 $fd, writewin& $w) : result<usize, ioerror>
+internal function flush_write(raw_end $io, writewin& $w) : result<usize, ioerror>
 {
     usize $n = $w->buf->size();
 
@@ -99,7 +112,7 @@ internal function flush_write(int32 $fd, writewin& $w) : result<usize, ioerror>
 
     // **clear only after the bytes landed.** a failed write(2) would otherwise forget what never
     // reached the kernel, and file.close / writer.~ throw that result away
-    usize $wrote = guard raw_write_all($fd, $w->buf->data(), $n) else ($e) {
+    usize $wrote = guard raw_write_all($io, $w->buf->data(), $n) else ($e) {
         return .error($e);
     }
 
@@ -108,21 +121,21 @@ internal function flush_write(int32 $fd, writewin& $w) : result<usize, ioerror>
     return .ok($wrote);
 }
 
-internal function write_to(int32 $fd, writewin& $w, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+internal function write_to(raw_end $io, writewin& $w, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
 {
     if ($count == 0) {
         return .ok(0);
     }
 
     if ($w->buf->size() == 0 && $count >= IO_BUF) {
-        return raw_write_all($fd, $src, $count);
+        return raw_write_all($io, $src, $count);
     }
 
     usize $done = 0;
 
     while ($done < $count) {
         if ($w->buf->room() == 0) {
-            usize $flushed = guard flush_write($fd, $w) else ($e) {
+            usize $flushed = guard flush_write($io, $w) else ($e) {
                 return .error($e);
             }
 
@@ -143,7 +156,7 @@ internal function write_to(int32 $fd, writewin& $w, ptr<const uint8> $src, usize
     return .ok($count);
 }
 
-internal function read_from(int32 $fd, readwin& $w, ptr<uint8> $dst, usize $count) : result<usize, ioerror>
+internal function read_from(raw_end $io, readwin& $w, ptr<uint8> $dst, usize $count) : result<usize, ioerror>
 {
     usize $done = 0;
 
@@ -154,7 +167,7 @@ internal function read_from(int32 $fd, readwin& $w, ptr<uint8> $dst, usize $coun
             usize $need = $count - $done;
 
             if ($need >= IO_BUF) {
-                isize $got = c_read($fd, $dst:$ + $done, $need);
+                isize $got = raw_read($io, $dst:$ + $done, $need);
 
                 if ($got < 0) {
                     return .error(last_error());
@@ -168,7 +181,7 @@ internal function read_from(int32 $fd, readwin& $w, ptr<uint8> $dst, usize $coun
                 continue;
             }
 
-            usize $got = guard fill_read($fd, $w) else ($e) {
+            usize $got = guard fill_read($io, $w) else ($e) {
                 return .error($e);
             }
 
@@ -211,7 +224,7 @@ internal function without_trailing_cr(const string& $s) : string
     return $s->sub(0, $n - 1);
 }
 
-internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerror>
+internal function readline_from(raw_end $io, readwin& $w) : result<string?, ioerror>
 {
     string $line = '';
     bool $any = false;
@@ -247,7 +260,7 @@ internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerro
 
         $w->drop();
 
-        usize $got = guard fill_read($fd, $w) else ($e) {
+        usize $got = guard fill_read($io, $w) else ($e) {
             return .error($e);
         }
 
@@ -263,18 +276,10 @@ internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerro
     }
 }
 
-internal function readall_from(int32 $fd, readwin& $w) : result<string, ioerror>
+internal function readall_from(raw_end $io, readwin& $w) : result<string, ioerror>
 {
     string $out = '';
-
-    usize $left = $w->pending();
-
-    if ($left > 0) {
-        ptr<const uint8> $src = $w->buf->data();
-        $out->append($src:$ + $w->pos, $left);
-        $w->drop();
-    }
-
+    $w->take_pending($out);
     $out->reserve(IO_BUF);
 
     while (true) {
@@ -284,7 +289,7 @@ internal function readall_from(int32 $fd, readwin& $w) : result<string, ioerror>
 
         ptr<uint8> $dst = $out->spare();
         usize $room = $out->room();
-        isize $got = c_read($fd, $dst, $room);
+        isize $got = raw_read($io, $dst, $room);
 
         if ($got < 0) {
             return .error(last_error());
@@ -300,7 +305,7 @@ internal function readall_from(int32 $fd, readwin& $w) : result<string, ioerror>
     return .ok($out);
 }
 
-internal function rewind_unread(int32 $fd, readwin& $w) : result<usize, ioerror>
+internal function rewind_unread(raw_end $io, readwin& $w) : result<usize, ioerror>
 {
     usize $unread = $w->pending();
 
@@ -311,7 +316,7 @@ internal function rewind_unread(int32 $fd, readwin& $w) : result<usize, ioerror>
     }
 
     int64 $delta = $unread;
-    int64 $at = c_lseek($fd, 0 - $delta, SEEK_CUR);
+    int64 $at = raw_seek($io, 0 - $delta, SEEK_CUR);
 
     if ($at < 0) {
         return .error(last_error());

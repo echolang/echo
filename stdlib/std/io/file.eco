@@ -9,14 +9,14 @@ namespace std::io;
 
 public class file : contract::iterable<string>
 {
-    private int32 $fd;
+    private raw_end $io;
     private readwin $rin;
     private writewin $wout;
     private ioerror? $err;
 
     private constructor(int32 $fd)
     {
-        $this->fd = $fd;
+        $this->io = raw_end($fd);
         $this->rin = readwin();
         $this->wout = writewin();
         $this->err = null;
@@ -44,13 +44,12 @@ public class file : contract::iterable<string>
      */
     function close() : void
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return;
         }
 
-        result<usize, ioerror> $ignored = flush_write($this->fd, $this->wout);
-        c_close($this->fd);
-        $this->fd = -1;
+        result<usize, ioerror> $ignored = flush_write($this->io, $this->wout);
+        $this->io->close();
     }
 
     /**
@@ -58,11 +57,11 @@ public class file : contract::iterable<string>
      */
     function flush() : result<usize, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
-        return flush_write($this->fd, $this->wout);
+        return flush_write($this->io, $this->wout);
     }
 
     /**
@@ -70,20 +69,20 @@ public class file : contract::iterable<string>
      */
     const function fd() : int32
     {
-        return $this->fd;
+        return $this->io->fd;
     }
 
     function write(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
-        usize $rewound = guard rewind_unread($this->fd, $this->rin) else ($e) {
+        usize $rewound = guard rewind_unread($this->io, $this->rin) else ($e) {
             return .error($e);
         }
 
-        return write_to($this->fd, $this->wout, $src, $count);
+        return write_to($this->io, $this->wout, $src, $count);
     }
 
     function write(const string& $text) : result<usize, ioerror>
@@ -93,7 +92,7 @@ public class file : contract::iterable<string>
 
     function read(ptr<uint8> $dst, usize $count) : result<usize, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
@@ -101,12 +100,12 @@ public class file : contract::iterable<string>
             return .error($e);
         }
 
-        return read_from($this->fd, $this->rin, $dst, $count);
+        return read_from($this->io, $this->rin, $dst, $count);
     }
 
     function readall() : result<string, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
@@ -114,12 +113,12 @@ public class file : contract::iterable<string>
             return .error($e);
         }
 
-        return readall_from($this->fd, $this->rin);
+        return readall_from($this->io, $this->rin);
     }
 
     function readline() : result<string?, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
@@ -127,12 +126,12 @@ public class file : contract::iterable<string>
             return .error($e);
         }
 
-        return readline_from($this->fd, $this->rin);
+        return readline_from($this->io, $this->rin);
     }
 
     function seek(int64 $offset, whence $from) : result<int64, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
@@ -140,11 +139,11 @@ public class file : contract::iterable<string>
             return .error($e);
         }
 
-        usize $rewound = guard rewind_unread($this->fd, $this->rin) else ($e) {
+        usize $rewound = guard rewind_unread($this->io, $this->rin) else ($e) {
             return .error($e);
         }
 
-        int64 $at = c_lseek($this->fd, $offset, whence_of($from));
+        int64 $at = c_lseek($this->io->fd, $offset, whence_of($from));
 
         if ($at < 0) {
             return .error(last_error());
@@ -155,11 +154,11 @@ public class file : contract::iterable<string>
 
     function position() : result<int64, ioerror>
     {
-        if ($this->fd < 0) {
+        if (!$this->io->is_open()) {
             return .error(ioerror(EBADF));
         }
 
-        int64 $kern = c_lseek($this->fd, 0, SEEK_CUR);
+        int64 $kern = c_lseek($this->io->fd, 0, SEEK_CUR);
 
         if ($kern < 0) {
             return .error(last_error());
@@ -183,7 +182,7 @@ public class file : contract::iterable<string>
             return .error($e);
         }
 
-        return stat_fd($this->fd);
+        return stat_fd($this->io->fd);
     }
 
     function size() : result<int64, ioerror>
@@ -218,6 +217,22 @@ public class file : contract::iterable<string>
     internal function note_error(ioerror $e) : void
     {
         $this->err = $e;
+    }
+
+    // the descriptor handed to somebody else (a child process) at the position this program sees it:
+    // the write window flushed, and bytes read ahead of the program given back. a descriptor that cannot
+    // seek and holds read-ahead cannot be handed over without losing it, which is EINVAL
+    internal function settle() : status<ioerror>
+    {
+        guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        guard rewind_unread($this->io, $this->rin) else {
+            return .error(ioerror(EINVAL));
+        }
+
+        return .ok;
     }
 }
 

@@ -1,0 +1,17 @@
+mode: build
+
+--- OUT --->
+status: exit 3 success=false code=3 signal-null=true
+out: to stdout
+err: to stderr
+both: exit 0
+line one
+line two
+[plain]
+[two words]
+[]
+[quote"inside]
+[back\slash]
+[trail\]
+[x\"y z]
+waited: exit 3 exit 3 polled-known=true

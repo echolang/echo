@@ -58,7 +58,7 @@ public struct stream
 
         // short writes are the normal case on a pipe. fire-and-forget still has to retry them;
         // ignoring a failed write(2) is a different sentence from writing some of the bytes
-        result<usize, ioerror> $ignored = raw_write_all($this->fd, $b, $count);
+        result<usize, ioerror> $ignored = raw_write_all(raw_end($this->fd), $b, $count);
     }
 
     /**

@@ -28,7 +28,9 @@ CHECK-WINDOWS: call i32 @_write(i32 1, ptr
 # put a longer copy when the bytes may be a shared substring
 CHECK: @echo.nl
 
-# the primitive path is untouched: `echo 42` still goes through the printf table
+# the primitive path still goes through the printf table, then flushes so a piped stdout
+# sees EPIPE on this statement rather than at process exit
 CHECK: call i32 (ptr, ...) @printf
+CHECK: call i32 @fflush(ptr null)
 
 CHECK: ret i32 0

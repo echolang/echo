@@ -1,0 +1,581 @@
+/**
+ * Spawning, waiting and killing on Windows.
+ *
+ * `CreateProcessW` with an explicit list of the handles the child inherits: its three standard streams
+ * and nothing else, so two spawns running at once on two threads cannot hand each other's pipes to the
+ * wrong child.
+ *
+ * **A piped stream is a named pipe whose end in this process is overlapped**, which is what lets `output()`
+ * wait on stdout and stderr at once. The child's end is an ordinary synchronous handle, because that is
+ * what every program reading its stdin expects. The one place that matters is `.pipe($r)`: the reader is
+ * this process's overlapped end, and handing it to a second child as a plain stdin is not something a
+ * synchronous reader survives. So the second child gets a fresh synchronous pipe, and a detached thread
+ * copies the first child's output into it until end of input.
+ *
+ * The command line is one string, built by `command_line` in quote.eco.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+#[if: os == windows]
+
+/**
+ * The pipe names this process has handed out. Unique per process; `FILE_FLAG_FIRST_PIPE_INSTANCE` refuses
+ * a name somebody else already holds, and a refused name is retried with the next number.
+ */
+private struct pipe_names
+{
+    static atomic<uint64> $next = atomic<uint64>(0);
+}
+
+/**
+ * Everything one spawn opened or allocated, closed and freed on every way out of it. The handles this
+ * process keeps are released only when they were not handed to a `child`.
+ */
+#[unique]
+private struct spawn_scratch
+{
+    // the child's three standard handles, inheritable. a `.merge` stderr is the stdout handle again, so
+    // it is closed once
+    ptr<uint8>[3] $theirs;
+
+    // this process's ends of `.piped` streams
+    ptr<uint8>[3] $mine;
+    bool $handed_over;
+
+    ptr<uint8> $attributes;
+    bool $attributes_live;
+
+    constructor()
+    {
+        $this->theirs = [ptr<uint8>(null), ptr<uint8>(null), ptr<uint8>(null)];
+        $this->mine = [ptr<uint8>(null), ptr<uint8>(null), ptr<uint8>(null)];
+        $this->handed_over = false;
+        $this->attributes:$ = null;
+        $this->attributes_live = false;
+    }
+
+    destructor()
+    {
+        if ($this->attributes_live) {
+            c_DeleteProcThreadAttributeList($this->attributes);
+        }
+
+        if ($this->attributes:$ != null) {
+            mem::free<uint8>($this->attributes);
+        }
+
+        usize $i = 0;
+
+        while ($i < 3) {
+            if ($this->theirs[$i]:$ != null && !($i == 2 && $this->theirs[2]:$ == $this->theirs[1]:$)) {
+                std::io::c_CloseHandle($this->theirs[$i]);
+            }
+
+            if (!$this->handed_over && $this->mine[$i]:$ != null) {
+                std::io::c_CloseHandle($this->mine[$i]);
+            }
+
+            $i = $i + 1;
+        }
+    }
+}
+
+private function invalid(ptr<uint8> $h) : bool
+{
+    return $h:$ == null || std::io::invalid_handle($h);
+}
+
+// a handle the child may inherit, duplicated from one this process holds. the original is left alone
+private function inheritable_copy(ptr<uint8> $h) : result<ptr<uint8>, ioerror>
+{
+    ptr<uint8> $copy = ptr<uint8>(null);
+    ptr<uint8> $self = c_GetCurrentProcess();
+
+    if (c_DuplicateHandle($self, $h, $self, &$copy, 0, 1, DUPLICATE_SAME_ACCESS) == 0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    return .ok($copy);
+}
+
+private struct win_pipe
+{
+    ptr<uint8> $mine;
+    ptr<uint8> $theirs;
+}
+
+// a named pipe: this process's end overlapped, the child's end synchronous and inheritable
+private function open_pipe(bool $child_reads) : result<win_pipe, ioerror>
+{
+    uint32 $access = PIPE_ACCESS_INBOUND;
+    uint32 $theirs_access = GENERIC_WRITE;
+
+    if ($child_reads) {
+        $access = PIPE_ACCESS_OUTBOUND;
+        $theirs_access = GENERIC_READ;
+    }
+
+    uint32 $tries = 0;
+
+    while ($tries < 16) {
+        uint64 $n = pipe_names::$next->add(1);
+        string $name = str::concat(
+            str::concat('\\\\.\\pipe\\__eco_', str::from(std::env::pid())),
+            str::concat('_', str::from($n)));
+
+        std::env::wide_string $wide = std::env::wide_string();
+        if (!$wide->load_utf8($name)) {
+            return .error(std::io::wide_error());
+        }
+
+        ptr<uint8> $mine = c_CreateNamedPipeW(
+            $wide->data(),
+            $access | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+            PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            PIPE_BUFFER_BYTES,
+            PIPE_BUFFER_BYTES,
+            0,
+            ptr<uint8>(null));
+
+        if (invalid($mine)) {
+            // another holder of this name: take the next number
+            if (std::io::c_GetLastError() == std::io::ERROR_ACCESS_DENIED) {
+                $tries = $tries + 1;
+                continue;
+            }
+
+            return .error(std::io::win32_ioerror());
+        }
+
+        security_attributes $sa = security_attributes();
+        ptr<uint8> $theirs = std::io::c_CreateFileW(
+            $wide->data(),
+            $theirs_access,
+            0,
+            ptr<uint8>(&$sa),
+            std::io::OPEN_EXISTING,
+            0,
+            ptr<uint8>(null));
+
+        if (invalid($theirs)) {
+            ioerror $e = std::io::win32_ioerror();
+            std::io::c_CloseHandle($mine);
+            return .error($e);
+        }
+
+        return .ok(win_pipe($mine, $theirs));
+    }
+
+    return .error(ioerror(std::io::EEXIST));
+}
+
+// the handle one standard stream of the child gets, and the end this process keeps when it is piped
+private function arrange(spawn_scratch& $s, usize $target, stdio $how) : status<ioerror>
+{
+    match ($how) {
+        .inherit => {
+            uint32 $which = STD_INPUT_HANDLE;
+
+            if ($target == 1) {
+                $which = STD_OUTPUT_HANDLE;
+            }
+            else if ($target == 2) {
+                $which = STD_ERROR_HANDLE;
+            }
+
+            ptr<uint8> $own = c_GetStdHandle($which);
+
+            // a process with no console has no standard handle to pass on, and the child starts without one
+            if (!invalid($own)) {
+                ptr<uint8> $copy = guard inheritable_copy($own) else ($e) {
+                    return .error($e);
+                }
+
+                $s->theirs[$target]:$ = $copy;
+            }
+        },
+        .piped => {
+            win_pipe $p = guard open_pipe($target == 0) else ($e) {
+                return .error($e);
+            }
+
+            $s->theirs[$target]:$ = $p->theirs;
+            $s->mine[$target]:$ = $p->mine;
+        },
+        .discard => {
+            std::env::wide_string $wide = std::env::wide_string();
+            string $nul = 'NUL';
+            if (!$wide->load_utf8($nul)) {
+                return .error(std::io::wide_error());
+            }
+
+            security_attributes $sa = security_attributes();
+            ptr<uint8> $h = std::io::c_CreateFileW(
+                $wide->data(),
+                GENERIC_READ | GENERIC_WRITE,
+                std::io::FILE_SHARE_ALL,
+                ptr<uint8>(&$sa),
+                std::io::OPEN_EXISTING,
+                0,
+                ptr<uint8>(null));
+
+            if (invalid($h)) {
+                return .error(std::io::win32_ioerror());
+            }
+
+            $s->theirs[$target]:$ = $h;
+        },
+        .merge => {
+            $s->theirs[2]:$ = $s->theirs[1];
+        },
+        .file($f) => {
+            ptr<uint8> $copy = guard inheritable_copy(std::io::c_get_osfhandle($f->fd())) else ($e) {
+                return .error($e);
+            }
+
+            $s->theirs[$target]:$ = $copy;
+        },
+        .pipe($r) => {
+            ptr<uint8> $relayed = guard relay($r->end()) else ($e) {
+                return .error($e);
+            }
+
+            $s->theirs[$target]:$ = $relayed;
+        },
+    }
+
+    return .ok;
+}
+
+// a synchronous pipe the next child reads, fed from `$from` by a detached thread until end of input. the
+// thread holds its own duplicate of the overlapped handle, so closing the reader here does not stop it
+private function relay(std::io::raw_end $from) : result<ptr<uint8>, ioerror>
+{
+    ptr<uint8> $read = ptr<uint8>(null);
+    ptr<uint8> $write = ptr<uint8>(null);
+    security_attributes $sa = security_attributes();
+
+    if (c_CreatePipe(&$read, &$write, &$sa, 0) == 0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    ptr<uint8> $self = c_GetCurrentProcess();
+    ptr<uint8> $source = ptr<uint8>(null);
+
+    if (c_DuplicateHandle($self, $from->handle, $self, &$source, 0, 0, DUPLICATE_SAME_ACCESS) == 0) {
+        ioerror $e = std::io::win32_ioerror();
+        std::io::c_CloseHandle($read);
+        std::io::c_CloseHandle($write);
+        return .error($e);
+    }
+
+    // only the child reads the read end; this process's copy of it must not stay inheritable
+    std::io::raw_end $in = guard std::io::overlapped_end($source) else ($e) {
+        std::io::c_CloseHandle($read);
+        std::io::c_CloseHandle($write);
+        return .error($e);
+    }
+
+    std::thread::handle $worker = guard std::thread::spawn(function() : void {
+        relay_copy($in, $write);
+    }) else ($e) {
+        std::io::raw_end $owned = $in;
+        $owned->close();
+        std::io::c_CloseHandle($read);
+        std::io::c_CloseHandle($write);
+        return .error(ioerror($e->code));
+    }
+
+    $worker->detach();
+
+    return .ok($read);
+}
+
+private function relay_copy(std::io::raw_end $from, ptr<uint8> $to) : void
+{
+    std::io::raw_end $source = $from;
+    uint8[8192] $buf;
+
+    while (true) {
+        isize $n = std::io::raw_read($source, &$buf[0], 8192);
+
+        if ($n <= 0) {
+            break;
+        }
+
+        usize $done = 0;
+        bool $broken = false;
+
+        while ($done < ($n as usize)) {
+            uint32 $wrote = 0;
+            ptr<uint8> $at = &$buf[$done];
+
+            if (std::io::c_WriteFile($to, ptr<const uint8>($at:$), ($n as usize - $done) as uint32, &$wrote, ptr<std::io::overlapped>(null)) == 0) {
+                $broken = true;
+                break;
+            }
+
+            $done = $done + ($wrote as usize);
+        }
+
+        if ($broken) {
+            break;
+        }
+    }
+
+    $source->close();
+    std::io::c_CloseHandle($to);
+}
+
+// `KEY=VALUE\0...\0\0` in UTF-16, which is what `CREATE_UNICODE_ENVIRONMENT` reads
+private function environment_block(const array<string>& $envp, array<uint16>& $block) : bool
+{
+    foreach ($envp as $entry) {
+        std::env::wide_string $wide = std::env::wide_string();
+
+        if (!$wide->load_utf8($entry)) {
+            return false;
+        }
+
+        // `count()` includes the terminator, which is the separator this block wants
+        ptr<uint16> $units = $wide->data();
+        arr::extend_from<uint16>($block, ptr<const uint16>($units:$), $wide->count());
+    }
+
+    // an empty environment is still two terminators
+    if ($envp->count() == 0) {
+        $block[] = 0;
+    }
+
+    $block[] = 0;
+
+    return true;
+}
+
+internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $err) : result<child, ioerror>
+{
+    spawn_scratch $s = spawn_scratch();
+
+    guard arrange($s, 0, $in) else ($e) {
+        return .error($e);
+    }
+
+    guard arrange($s, 1, $out) else ($e) {
+        return .error($e);
+    }
+
+    guard arrange($s, 2, $err) else ($e) {
+        return .error($e);
+    }
+
+    string $application = '';
+    string $line = guard command_line($p, $application) else ($e) {
+        return .error($e);
+    }
+
+    std::env::wide_string $wide_application = std::env::wide_string();
+    std::env::wide_string $wide_line = std::env::wide_string();
+
+    if (!$wide_application->load_utf8(terminated($application)) || !$wide_line->load_utf8(terminated($line))) {
+        return .error(std::io::wide_error());
+    }
+
+    array<uint16> $environment = array<uint16>();
+
+    if (!environment_block($p->envp, $environment)) {
+        return .error(std::io::wide_error());
+    }
+
+    // never loaded, and so a null directory, when the child starts where this process is
+    std::env::wide_string $wide_cwd = std::env::wide_string();
+
+    if (!wide_cwd_of($p, $wide_cwd)) {
+        return .error(std::io::wide_error());
+    }
+
+    // the inherited handles, each once: a merged stderr is the stdout handle, and a list naming one twice
+    // is refused
+    ptr<uint8>[3] $list = [ptr<uint8>(null), ptr<uint8>(null), ptr<uint8>(null)];
+    usize $count = 0;
+    usize $i = 0;
+
+    while ($i < 3) {
+        ptr<uint8> $h = $s->theirs[$i];
+
+        if ($h:$ != null && !($i == 2 && $h:$ == $s->theirs[1]:$)) {
+            $list[$count]:$ = $h;
+            $count = $count + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    startup_info $startup = startup_info();
+    $startup->flags = STARTF_USESTDHANDLES;
+    $startup->stdin:$ = $s->theirs[0];
+    $startup->stdout:$ = $s->theirs[1];
+    $startup->stderr:$ = $s->theirs[2];
+
+    uint32 $flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+
+    // always a list, empty included: `bInheritHandles` without one leaks every inheritable handle
+    usize $size = 0;
+    c_InitializeProcThreadAttributeList(ptr<uint8>(null), 1, 0, &$size);
+
+    $s->attributes:$ = mem::alloc<uint8>($size);
+    if ($s->attributes:$ == null) {
+        mem::out_of_memory();
+    }
+
+    if (c_InitializeProcThreadAttributeList($s->attributes, 1, 0, &$size) == 0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    $s->attributes_live = true;
+
+    if (c_UpdateProcThreadAttribute(
+            $s->attributes,
+            0,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            ptr<uint8>(&$list[0]),
+            $count * mem::size<ptr<uint8>>(),
+            ptr<uint8>(null),
+            ptr<usize>(null)) == 0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    $startup->attributes:$ = $s->attributes;
+
+    process_information $info = process_information();
+
+    int32 $created = c_CreateProcessW(
+        $wide_application->data(),
+        $wide_line->data(),
+        ptr<uint8>(null),
+        ptr<uint8>(null),
+        1,
+        $flags,
+        $environment->data(),
+        $wide_cwd->data(),
+        &$startup,
+        &$info);
+
+    if ($created == 0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    std::io::c_CloseHandle($info->thread);
+
+    std::io::pipe_writer? $stdin = null;
+    std::io::pipe_reader? $stdout = null;
+    std::io::pipe_reader? $stderr = null;
+
+    if ($s->mine[0]:$ != null) {
+        ptr<uint8> $h = $s->mine[0];
+        $s->mine[0]:$ = null;
+        std::io::raw_end $end = guard std::io::overlapped_end($h) else ($e) {
+            abort_spawned($info->process);
+            return .error($e);
+        }
+        $stdin = std::io::pipe_writer($end);
+    }
+
+    if ($s->mine[1]:$ != null) {
+        ptr<uint8> $h = $s->mine[1];
+        $s->mine[1]:$ = null;
+        std::io::raw_end $end = guard std::io::overlapped_end($h) else ($e) {
+            abort_spawned($info->process);
+            return .error($e);
+        }
+        $stdout = std::io::pipe_reader($end);
+    }
+
+    if ($s->mine[2]:$ != null) {
+        ptr<uint8> $h = $s->mine[2];
+        $s->mine[2]:$ = null;
+        std::io::raw_end $end = guard std::io::overlapped_end($h) else ($e) {
+            abort_spawned($info->process);
+            return .error($e);
+        }
+        $stderr = std::io::pipe_reader($end);
+    }
+
+    $s->handed_over = true;
+
+    return .ok(child($info->pid as int32, $info->process, $stdin, $stdout, $stderr));
+}
+
+// CreateProcess already succeeded: stop the child and drop the process handle so a failed event does
+// not leave a running process and a leaked HANDLE
+private function abort_spawned(ptr<uint8> $process) : void
+{
+    c_TerminateProcess($process, 1);
+    std::thread::c_WaitForSingleObject($process, std::thread::WIN_INFINITE);
+    std::io::c_CloseHandle($process);
+}
+
+// `$p`'s working directory into `$wide`, which stays unloaded when there is none
+private function wide_cwd_of(const prepared& $p, std::env::wide_string& $wide) : bool
+{
+    string $dir = guard $p->cwd else {
+        return true;
+    }
+
+    return $wide->load_utf8($dir);
+}
+
+internal function sys_wait(int32 $pid, ptr<uint8> $process, bool $block) : result<exit_status?, ioerror>
+{
+    uint32 $ms = 0;
+
+    if ($block) {
+        $ms = std::thread::WIN_INFINITE;
+    }
+
+    uint32 $waited = std::thread::c_WaitForSingleObject($process, $ms);
+
+    if ($waited == WAIT_TIMEOUT) {
+        return .ok(null);
+    }
+
+    if ($waited != WAIT_OBJECT_0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    uint32 $code = 0;
+
+    if (c_GetExitCodeProcess($process, &$code) == 0) {
+        return .error(std::io::win32_ioerror());
+    }
+
+    return .ok(exit_status($code as int32, null));
+}
+
+internal function sys_kill(int32 $pid, ptr<uint8> $process) : status<ioerror>
+{
+    if (c_TerminateProcess($process, 1) != 0) {
+        return .ok;
+    }
+
+    ioerror $e = std::io::win32_ioerror();
+
+    // a process that already ended refuses to be terminated; it is not running, which was the point
+    if (std::thread::c_WaitForSingleObject($process, 0) == WAIT_OBJECT_0) {
+        return .ok;
+    }
+
+    return .error($e);
+}
+
+internal function sys_release(ptr<uint8> $process) : void
+{
+    if ($process:$ != null) {
+        std::io::c_CloseHandle($process);
+    }
+}
+
+#[end]

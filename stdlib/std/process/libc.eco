@@ -1,0 +1,258 @@
+/**
+ * Every C symbol `std::process` binds, in one file.
+ *
+ * A C symbol may only be declared once per module, so they are gathered here. `internal`: the rest of
+ * the namespace names them, a program does not.
+ *
+ * The spawn calls take their file-actions and attribute objects by address, and those objects are a
+ * pointer on Darwin and a struct of a few hundred bytes on glibc. Nothing here declares their layout:
+ * `spawn_scratch` holds each as a block of bytes that the `_init` call fills and the `_destroy` call
+ * empties.
+ */
+
+namespace std::process;
+
+#[if: family != windows]
+internal extern {
+    function posix_spawn as c_posix_spawn(
+        ptr<int32> $pid,
+        ptr<const uint8> $path,
+        ptr<uint8> $actions,
+        ptr<uint8> $attr,
+        ptr<ptr<const uint8>> $argv,
+        ptr<ptr<const uint8>> $envp
+    ) : int32;
+
+    function posix_spawn_file_actions_init as c_actions_init(ptr<uint8> $actions) : int32;
+    function posix_spawn_file_actions_destroy as c_actions_destroy(ptr<uint8> $actions) : int32;
+    function posix_spawn_file_actions_adddup2 as c_actions_dup2(ptr<uint8> $actions, int32 $fd, int32 $to) : int32;
+    function posix_spawn_file_actions_addopen as c_actions_open(
+        ptr<uint8> $actions, int32 $fd, ptr<const uint8> $path, int32 $flags, uint32 $mode) : int32;
+    function posix_spawn_file_actions_addchdir_np as c_actions_chdir(
+        ptr<uint8> $actions, ptr<const uint8> $path) : int32;
+
+    function posix_spawnattr_init as c_attr_init(ptr<uint8> $attr) : int32;
+    function posix_spawnattr_destroy as c_attr_destroy(ptr<uint8> $attr) : int32;
+    // `short` flags
+    function posix_spawnattr_setflags as c_attr_setflags(ptr<uint8> $attr, int16 $flags) : int32;
+    function posix_spawnattr_setsigdefault as c_attr_setsigdefault(ptr<uint8> $attr, ptr<uint8> $set) : int32;
+    function posix_spawnattr_setsigmask as c_attr_setsigmask(ptr<uint8> $attr, ptr<uint8> $set) : int32;
+
+    function sigemptyset as c_sigemptyset(ptr<uint8> $set) : int32;
+    function sigaddset as c_sigaddset(ptr<uint8> $set, int32 $signal) : int32;
+
+    function waitpid as c_waitpid(int32 $pid, ptr<int32> $status, int32 $options) : int32;
+    function kill as c_kill(int32 $pid, int32 $signal) : int32;
+
+    function pipe as c_pipe(ptr<int32> $fds) : int32;
+    function fcntl as c_fcntl(int32 $fd, int32 $cmd, variadic_args $args) : int32;
+    function poll as c_poll(ptr<pollfd> $fds, uint32 $count, int32 $timeout) : int32;
+}
+#[end]
+
+#[if: family == linux]
+internal extern {
+    function pipe2 as c_pipe2(ptr<int32> $fds, int32 $flags) : int32;
+}
+#[end]
+
+#[if: family == darwin]
+internal extern {
+    // keeps a descriptor open across `POSIX_SPAWN_CLOEXEC_DEFAULT`: how an inherited stdio stream survives it
+    function posix_spawn_file_actions_addinherit_np as c_actions_inherit(ptr<uint8> $actions, int32 $fd) : int32;
+}
+#[end]
+
+// one `struct pollfd`: the same 8 bytes on Darwin and Linux
+internal struct pollfd
+{
+    int32 $fd = -1;
+    int16 $events = 0;
+    int16 $revents = 0;
+}
+
+internal const int32 SIGKILL = 9;
+internal const int32 SIGPIPE = 13;
+internal const int32 WNOHANG = 1;
+internal const int32 X_OK = 1;
+internal const int32 EINTR = 4;
+
+internal const int16 POLLIN = 1;
+internal const int16 POLLOUT = 4;
+
+internal const int32 F_SETFD = 2;
+internal const int32 F_GETFL = 3;
+internal const int32 F_SETFL = 4;
+internal const int32 FD_CLOEXEC = 1;
+
+internal const int16 POSIX_SPAWN_SETSIGDEF = 4;
+internal const int16 POSIX_SPAWN_SETSIGMASK = 8;
+
+#[if: family == darwin]
+// every descriptor not named in the file actions closes in the child. what makes `pipe` + `FD_CLOEXEC`
+// race-free here, where there is no `pipe2`
+internal const int16 POSIX_SPAWN_CLOEXEC_DEFAULT = 16384;
+internal const int32 O_NONBLOCK = 4;
+#[elif: family == linux]
+internal const int16 POSIX_SPAWN_CLOEXEC_DEFAULT = 0;
+internal const int32 O_NONBLOCK = 2048;
+#[end]
+
+#[if: os == windows]
+// kernel32. `CreateFileW`, `CloseHandle`, `GetLastError`, `ReadFile`, `WriteFile`, `GetOverlappedResult` and
+// `CreateEventW` are std::io's, and `WaitForSingleObject` std::thread's, named through them: a C symbol is
+// declared once per module
+internal extern {
+    function CreateProcessW as c_CreateProcessW(
+        ptr<uint16> $application,
+        ptr<uint16> $command_line,
+        ptr<uint8> $process_security,
+        ptr<uint8> $thread_security,
+        int32 $inherit_handles,
+        uint32 $flags,
+        ptr<uint16> $environment,
+        ptr<uint16> $directory,
+        ptr<startup_info> $startup,
+        ptr<process_information> $info
+    ) : int32;
+
+    function CreateNamedPipeW as c_CreateNamedPipeW(
+        ptr<uint16> $name,
+        uint32 $open_mode,
+        uint32 $pipe_mode,
+        uint32 $max_instances,
+        uint32 $out_buffer,
+        uint32 $in_buffer,
+        uint32 $timeout,
+        ptr<uint8> $security
+    ) : ptr<uint8>;
+
+    function CreatePipe as c_CreatePipe(
+        ptr<ptr<uint8>> $read, ptr<ptr<uint8>> $write, ptr<security_attributes> $security, uint32 $size) : int32;
+
+    function DuplicateHandle as c_DuplicateHandle(
+        ptr<uint8> $source_process,
+        ptr<uint8> $source,
+        ptr<uint8> $target_process,
+        ptr<ptr<uint8>> $target,
+        uint32 $access,
+        int32 $inherit,
+        uint32 $options
+    ) : int32;
+
+    function GetCurrentProcess as c_GetCurrentProcess() : ptr<uint8>;
+    function GetStdHandle as c_GetStdHandle(uint32 $which) : ptr<uint8>;
+    function GetSystemDirectoryW as c_GetSystemDirectoryW(ptr<uint16> $buf, uint32 $size) : uint32;
+
+    function InitializeProcThreadAttributeList as c_InitializeProcThreadAttributeList(
+        ptr<uint8> $list, uint32 $count, uint32 $flags, ptr<usize> $size) : int32;
+    function UpdateProcThreadAttribute as c_UpdateProcThreadAttribute(
+        ptr<uint8> $list,
+        uint32 $flags,
+        usize $attribute,
+        ptr<uint8> $value,
+        usize $size,
+        ptr<uint8> $previous,
+        ptr<usize> $return_size
+    ) : int32;
+    function DeleteProcThreadAttributeList as c_DeleteProcThreadAttributeList(ptr<uint8> $list) : void;
+
+    function WaitForMultipleObjects as c_WaitForMultipleObjects(
+        uint32 $count, ptr<ptr<uint8>> $handles, int32 $wait_all, uint32 $ms) : uint32;
+    function GetExitCodeProcess as c_GetExitCodeProcess(ptr<uint8> $process, ptr<uint32> $code) : int32;
+    function TerminateProcess as c_TerminateProcess(ptr<uint8> $process, uint32 $code) : int32;
+    function CancelIoEx as c_CancelIoEx(ptr<uint8> $handle, ptr<std::io::overlapped> $ov) : int32;
+}
+
+// STARTUPINFOEXW on a 64-bit target: STARTUPINFOW's 104 bytes, then the attribute list. 112 bytes
+internal struct startup_info
+{
+    uint32 $cb = 112;
+    uint32 $pad0 = 0;
+    ptr<uint8> $reserved;
+    ptr<uint8> $desktop;
+    ptr<uint8> $title;
+    uint32 $x = 0;
+    uint32 $y = 0;
+    uint32 $x_size = 0;
+    uint32 $y_size = 0;
+    uint32 $x_chars = 0;
+    uint32 $y_chars = 0;
+    uint32 $fill = 0;
+    uint32 $flags = 0;
+    uint16 $show = 0;
+    uint16 $reserved2_size = 0;
+    uint32 $pad1 = 0;
+    ptr<uint8> $reserved2;
+    ptr<uint8> $stdin;
+    ptr<uint8> $stdout;
+    ptr<uint8> $stderr;
+    ptr<uint8> $attributes;
+
+    constructor()
+    {
+        $this->reserved:$ = null;
+        $this->desktop:$ = null;
+        $this->title:$ = null;
+        $this->reserved2:$ = null;
+        $this->stdin:$ = null;
+        $this->stdout:$ = null;
+        $this->stderr:$ = null;
+        $this->attributes:$ = null;
+    }
+}
+
+// PROCESS_INFORMATION. 24 bytes
+internal struct process_information
+{
+    ptr<uint8> $process;
+    ptr<uint8> $thread;
+    uint32 $pid = 0;
+    uint32 $tid = 0;
+
+    constructor()
+    {
+        $this->process:$ = null;
+        $this->thread:$ = null;
+    }
+}
+
+// SECURITY_ATTRIBUTES asking for an inheritable handle. 24 bytes
+internal struct security_attributes
+{
+    uint32 $length = 24;
+    uint32 $pad0 = 0;
+    ptr<uint8> $descriptor;
+    int32 $inherit = 1;
+    uint32 $pad1 = 0;
+
+    constructor()
+    {
+        $this->descriptor:$ = null;
+    }
+}
+
+internal const uint32 STARTF_USESTDHANDLES = 256;
+internal const uint32 CREATE_UNICODE_ENVIRONMENT = 1024;
+internal const uint32 EXTENDED_STARTUPINFO_PRESENT = 524288;
+internal const usize PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 131074;
+
+internal const uint32 PIPE_ACCESS_INBOUND = 1;
+internal const uint32 PIPE_ACCESS_OUTBOUND = 2;
+internal const uint32 FILE_FLAG_FIRST_PIPE_INSTANCE = 524288;
+internal const uint32 FILE_FLAG_OVERLAPPED = 1073741824;
+internal const uint32 PIPE_REJECT_REMOTE_CLIENTS = 8;
+internal const uint32 PIPE_BUFFER_BYTES = 65536;
+
+internal const uint32 GENERIC_READ = 2147483648;
+internal const uint32 GENERIC_WRITE = 1073741824;
+internal const uint32 DUPLICATE_SAME_ACCESS = 2;
+
+// `(DWORD)-10`, `-11`, `-12`
+internal const uint32 STD_INPUT_HANDLE = 4294967286;
+internal const uint32 STD_OUTPUT_HANDLE = 4294967285;
+internal const uint32 STD_ERROR_HANDLE = 4294967284;
+
+internal const uint32 WAIT_OBJECT_0 = 0;
+internal const uint32 WAIT_TIMEOUT = 258;
+#[end]

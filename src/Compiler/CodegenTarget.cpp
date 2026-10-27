@@ -167,6 +167,40 @@ StdioUnbuffering CodegenTarget::stdio_unbuffering() const
     return StdioUnbuffering::t_none;
 }
 
+SigpipePolicy CodegenTarget::sigpipe_policy() const
+{
+    if (is_library()) {
+        return SigpipePolicy::t_default;
+    }
+
+    switch (_os) {
+        case TargetOs::t_darwin: return SigpipePolicy::t_ignore;
+        case TargetOs::t_ios: return SigpipePolicy::t_ignore;
+        case TargetOs::t_linux: return SigpipePolicy::t_ignore;
+        case TargetOs::t_windows: return SigpipePolicy::t_default;
+        case TargetOs::t_wasi: return SigpipePolicy::t_default;
+        case TargetOs::t_other: return SigpipePolicy::t_default;
+    }
+
+    assert(false && "unhandled TargetOs in sigpipe_policy");
+    return SigpipePolicy::t_default;
+}
+
+ErrnoSource CodegenTarget::errno_source() const
+{
+    switch (_os) {
+        case TargetOs::t_darwin: return ErrnoSource::t_darwin_error;
+        case TargetOs::t_ios: return ErrnoSource::t_darwin_error;
+        case TargetOs::t_linux: return ErrnoSource::t_errno_location;
+        case TargetOs::t_windows: return ErrnoSource::t_ucrt_errno;
+        case TargetOs::t_wasi: return ErrnoSource::t_errno_location;
+        case TargetOs::t_other: return ErrnoSource::t_errno_location;
+    }
+
+    assert(false && "unhandled TargetOs in errno_source");
+    return ErrnoSource::t_errno_location;
+}
+
 EntropySource CodegenTarget::entropy_source() const
 {
     switch (_os) {

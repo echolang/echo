@@ -53,6 +53,27 @@ namespace Compiler
         t_wasi_libc_stdout,
     };
 
+    // what a write into a pipe whose reader is gone does to a program
+    enum class SigpipePolicy
+    {
+        // the platform's own default: SIGPIPE kills the process, or there is no SIGPIPE at all
+        t_default,
+        // the command's prologue ignores SIGPIPE: a write fails with EPIPE, and a failed write to
+        // stdout or stderr then exits 141. a child gets the default back
+        t_ignore,
+    };
+
+    // where each libc parks errno's address
+    enum class ErrnoSource
+    {
+        // `__error`
+        t_darwin_error,
+        // `__errno_location`: glibc, musl and wasi-libc
+        t_errno_location,
+        // `_errno`
+        t_ucrt_errno,
+    };
+
     // where the per-process hash seed comes from. none of these can block or fail once a process is running
     enum class EntropySource
     {
@@ -172,6 +193,11 @@ namespace Compiler
 
         EnvironSource environ_source() const;
         StdioUnbuffering stdio_unbuffering() const;
+
+        // per program: a library is loaded into somebody else's process, and that process's signal
+        // disposition is the host's to choose
+        SigpipePolicy sigpipe_policy() const;
+        ErrnoSource errno_source() const;
         EntropySource entropy_source() const;
         HostSymbolLookup host_symbol_lookup() const;
 

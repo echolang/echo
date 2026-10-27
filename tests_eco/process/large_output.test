@@ -1,0 +1,6 @@
+mode: build
+
+--- OUT --->
+flood: 300000 300000 exit 0
+echoed: 500000 same=true exit 0
+took: 01234 exit 0

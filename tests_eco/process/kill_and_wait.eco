@@ -1,0 +1,32 @@
+// a child that is still running, stopped, and waited for. the child blocks reading a stdin this program
+// never closes, so it is running for as long as this program says. how a killed child reads back:
+// POSIX reports the signal, Windows the code `TerminateProcess` gave it
+
+if (std::env::argc() > 1) {
+    std::io::reader $in = std::io::reader(std::io::stdin);
+    string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+    return 0;
+}
+
+#[if: os == windows]
+string $killed_as = 'exit 1';
+#[else]
+string $killed_as = 'signal 9';
+#[end]
+
+std::process::command $blocked = std::process::command(std::env::exe(), ['block']);
+$blocked->stdin(.piped);
+std::process::child $c = guard $blocked->spawn() else ($e) { die("spawn: {$e}"); };
+
+std::process::exit_status? $running = guard $c->try_wait() else ($e) { die("try_wait: {$e}"); };
+echo "still running: {$running == null}";
+
+guard $c->kill() else ($e) { die("kill: {$e}"); }
+
+std::process::exit_status $s = guard $c->wait() else ($e) { die("wait: {$e}"); };
+string $shown = str::from($s);
+echo "killed: {$shown == $killed_as} success={$s->success()}";
+
+// it already ended: stopping it again is not an error
+guard $c->kill() else ($e) { die("kill again: {$e}"); }
+echo 'kill after the end: ok';

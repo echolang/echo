@@ -1,0 +1,6 @@
+mode: build
+
+--- OUT --->
+still running: true
+killed: true success=false
+kill after the end: ok

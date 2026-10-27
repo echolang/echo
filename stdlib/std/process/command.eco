@@ -1,0 +1,328 @@
+/**
+ * Starting another program.
+ *
+ * A `command` is the description: program, arguments, environment, working directory, and where each of
+ * the three standard streams goes. Nothing runs until one of the three terminals asks:
+ *
+ * - `status()` runs it with the streams inherited and waits for it to end;
+ * - `output()` runs it with stdout and stderr captured, and hands both back with the status;
+ * - `spawn()` starts it and hands back a `child` to talk to and wait for.
+ *
+ *     std::process::output $o = guard std::process::command('git', ['status', '--short'])->output()
+ *         else ($e) { die("git: {$e}"); };
+ *
+ * The program is found on the **child's** `PATH` (the one `env('PATH', ...)` set, or the inherited one)
+ * and never in the current directory. A program written with a path separator is used as written, made
+ * absolute against this process's working directory first, so `dir()` decides where the child runs, not
+ * which program it is.
+ */
+
+namespace std::process;
+
+use std::io::ioerror;
+
+/**
+ * Where the child's stdin comes from.
+ */
+public enum stdin
+{
+    // the same stream this process has
+    case inherit;
+
+    // a pipe this process writes: `child::stdin()`
+    case piped;
+
+    // nowhere: the null device
+    case discard;
+
+    // an open file, at the position this program sees it
+    case file(std::io::file $f);
+
+    // the read end of another child's piped stdout, so two children are joined directly
+    case pipe(std::io::pipe_reader $r);
+}
+
+/**
+ * Where the child's stdout goes.
+ */
+public enum stdout
+{
+    case inherit;
+    case piped;
+    case discard;
+    case file(std::io::file $f);
+}
+
+/**
+ * Where the child's stderr goes. `.merge` sends it wherever stdout went.
+ */
+public enum stderr
+{
+    case inherit;
+    case piped;
+    case discard;
+    case merge;
+    case file(std::io::file $f);
+}
+
+// the cases `arrange` matches on, after each public setter has already named its own type
+internal enum stdio
+{
+    case inherit;
+    case piped;
+    case discard;
+    case merge;
+    case file(std::io::file $f);
+    case pipe(std::io::pipe_reader $r);
+}
+
+// one environment edit, in the order they were made. a null value removes the variable
+internal struct env_edit
+{
+    string $key;
+    string? $value;
+}
+
+public struct command
+{
+    internal string $program;
+    internal array<string> $arguments = array<string>();
+    internal array<env_edit> $edits = array<env_edit>();
+    internal bool $cleared = false;
+    internal string? $cwd = null;
+
+    // null until set, so a terminal can tell "the caller chose this" from its own default
+    internal stdin? $in = null;
+    internal stdout? $out = null;
+    internal stderr? $err = null;
+
+    constructor(string $program)
+    {
+        $this->program = $program;
+    }
+
+    constructor(string $program, array<string> $arguments)
+    {
+        $this->program = $program;
+        $this->arguments = $arguments;
+    }
+
+    /**
+     * One more argument, after the ones already given.
+     */
+    function arg(string $argument) : void
+    {
+        $this->arguments[] = $argument;
+    }
+
+    /**
+     * More arguments, after the ones already given.
+     */
+    function args(array<string> $arguments) : void
+    {
+        $this->arguments->extend($arguments);
+    }
+
+    /**
+     * Sets `$key` to `$value` in the child's environment.
+     */
+    function env(string $key, string $value) : void
+    {
+        $this->edits[] = env_edit($key, $value);
+    }
+
+    /**
+     * Removes `$key` from the child's environment.
+     */
+    function env_remove(string $key) : void
+    {
+        $this->edits[] = env_edit($key, null);
+    }
+
+    /**
+     * Starts the child with an empty environment. `env` calls after this still apply.
+     */
+    function env_clear() : void
+    {
+        $this->cleared = true;
+        $this->edits->clear();
+    }
+
+    /**
+     * The directory the child starts in. The program itself is still found as described above.
+     */
+    function dir(string $path) : void
+    {
+        $this->cwd = $path;
+    }
+
+    /**
+     * Where the child's stdin comes from.
+     */
+    function stdin(stdin $from) : void
+    {
+        $this->in = $from;
+    }
+
+    /**
+     * Where the child's stdout goes.
+     */
+    function stdout(stdout $to) : void
+    {
+        $this->out = $to;
+    }
+
+    /**
+     * Where the child's stderr goes. `.merge` sends it wherever stdout went.
+     */
+    function stderr(stderr $to) : void
+    {
+        $this->err = $to;
+    }
+
+    /**
+     * Starts the child. Streams the caller did not choose are inherited.
+     */
+    const function spawn() : result<child, ioerror>
+    {
+        return start($this, $this->in ?? .inherit, $this->out ?? .inherit, $this->err ?? .inherit);
+    }
+
+    /**
+     * Runs the child and waits for it to end. Streams the caller did not choose are inherited.
+     */
+    const function status() : result<exit_status, ioerror>
+    {
+        child $c = guard $this->spawn() else ($e) {
+            return .error($e);
+        }
+
+        return $c->wait();
+    }
+
+    /**
+     * Runs the child with stdout and stderr captured, unless the caller chose otherwise, and waits for it.
+     * Stdin is inherited unless chosen.
+     */
+    const function output() : result<output, ioerror>
+    {
+        child $c = guard start($this, $this->in ?? .inherit, $this->out ?? .piped, $this->err ?? .piped) else ($e) {
+            return .error($e);
+        }
+
+        return $c->wait_with_output();
+    }
+
+    /**
+     * `output()`, with `$input` written to the child's stdin and stdin then closed. The writing happens
+     * while stdout and stderr are being read, so a child that answers as it reads cannot stall.
+     */
+    const function output(const string& $input) : result<output, ioerror>
+    {
+        if ($this->in != null) {
+            return .error(ioerror(std::io::EINVAL));
+        }
+
+        child $c = guard start($this, .piped, $this->out ?? .piped, $this->err ?? .piped) else ($e) {
+            return .error($e);
+        }
+
+        return $c->finish($input);
+    }
+}
+
+private function stdio_of_in(stdin $s) : stdio
+{
+    return match ($s) {
+        .inherit => .inherit,
+        .piped => .piped,
+        .discard => .discard,
+        .file($f) => .file($f),
+        .pipe($r) => .pipe($r),
+    };
+}
+
+private function stdio_of_out(stdout $s) : stdio
+{
+    return match ($s) {
+        .inherit => .inherit,
+        .piped => .piped,
+        .discard => .discard,
+        .file($f) => .file($f),
+    };
+}
+
+private function stdio_of_err(stderr $s) : stdio
+{
+    return match ($s) {
+        .inherit => .inherit,
+        .piped => .piped,
+        .discard => .discard,
+        .merge => .merge,
+        .file($f) => .file($f),
+    };
+}
+
+// the order every platform follows: validate and resolve before touching anything, then flush what
+// this process has buffered so an inherited stdout stays in order, then let the platform spawn
+private function start(const command& $c, stdin $in, stdout $out, stderr $err) : result<child, ioerror>
+{
+    prepared $p = guard prepare($c) else ($e) {
+        return .error($e);
+    }
+
+    stdio $in_how = stdio_of_in($in);
+    stdio $out_how = stdio_of_out($out);
+    stdio $err_how = stdio_of_err($err);
+
+    guard handed_over_as_is($in_how) else ($e) {
+        return .error($e);
+    }
+
+    guard handed_over_as_is($out_how) else ($e) {
+        return .error($e);
+    }
+
+    guard handed_over_as_is($err_how) else ($e) {
+        return .error($e);
+    }
+
+    std::io::c_fflush(null);
+
+    child $spawned = guard sys_spawn($p, $in_how, $out_how, $err_how) else ($e) {
+        return .error($e);
+    }
+
+    // the child has its own copy of a `.pipe` reader's end now. closing this process's is what lets it
+    // see end of input when the child writing the other side finishes
+    match ($in) {
+        .pipe($r) => {
+            $r->close();
+        },
+        else => {
+        },
+    }
+
+    return .ok($spawned);
+}
+
+// a stream the child is handed as it stands: an open file at the position this program sees it, and a
+// pipe nothing has read ahead of. a pipe cannot be rewound, so bytes already read out of it would be lost
+// to the child
+private function handed_over_as_is(stdio $s) : status<ioerror>
+{
+    match ($s) {
+        .file($f) => {
+            return $f->settle();
+        },
+        .pipe($r) => {
+            if ($r->pending() > 0) {
+                return .error(ioerror(std::io::EINVAL));
+            }
+        },
+        else => {
+        },
+    }
+
+    return .ok;
+}

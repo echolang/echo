@@ -51,6 +51,13 @@ namespace Compiler::LLVM
         // a native lib copies the host's exported cell at load so host and plugin hash the same key
         llvm::Value *gen_hash_seed(const llvm::Twine &name);
 
+        // **the one owner of what a failed write to stdout or stderr does.** a negative `result` on a
+        // row that ignores SIGPIPE branches to `__eco_stdio_write_failed`. emits nothing on any other row
+        void gen_stdout_write_check(llvm::Value *result);
+
+        // the `stdio_write_failed` builtin: the same helper, after a write the stdlib already knows failed
+        void gen_stdio_write_failed(llvm::Value *fd);
+
     private:
         CodegenContext &_ctx;
 
@@ -89,6 +96,10 @@ namespace Compiler::LLVM
         void unbuffer_stdio();
 
         void binary_stdio();
+        void ignore_sigpipe();
+        bool ignores_sigpipe() const;
+        llvm::Function *get_or_create_stdio_write_failed();
+        llvm::Value *gen_errno_location();
     };
 };
 

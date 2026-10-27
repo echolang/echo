@@ -1,0 +1,15 @@
+mode: build
+
+--- OUT --->
+tool ran
+not on our PATH: missing=true
+tool ran
+not runnable as expected: true
+unknown name: missing=true
+empty name: missing=true
+empty PATH: missing=true
+refused: Invalid argument
+refused: Invalid argument
+refused: Invalid argument
+refused: Invalid argument
+missing working directory refused: true

@@ -1,0 +1,80 @@
+/**
+ * How a child process ended, and what it printed on the way.
+ */
+
+namespace std::process;
+
+/**
+ * How a child ended: it exited with a code, or a signal stopped it.
+ *
+ * Exactly one of `code()` and `signal()` is set. On Windows there are no signals, so a process that was
+ * killed reports the code `TerminateProcess` gave it.
+ */
+public struct exit_status
+{
+    private int32? $exit_code;
+    private int32? $by_signal;
+
+    internal constructor(int32? $code, int32? $signal)
+    {
+        $this->exit_code = $code;
+        $this->by_signal = $signal;
+    }
+
+    /**
+     * True when the child exited with code 0.
+     */
+    const function success() : bool
+    {
+        int32 $code = guard $this->exit_code else {
+            return false;
+        }
+
+        return $code == 0;
+    }
+
+    /**
+     * The exit code, or `null` when a signal stopped the child.
+     */
+    const function code() : int32?
+    {
+        return $this->exit_code;
+    }
+
+    /**
+     * The signal that stopped the child, or `null` when it exited. Always `null` on Windows.
+     */
+    const function signal() : int32?
+    {
+        return $this->by_signal;
+    }
+}
+
+/**
+ * What `command::output()` collects: how the child ended, and everything it wrote to stdout and stderr.
+ *
+ * The two streams are bytes, held in a `string` the way `std::io::readfile` holds a file. A stream that
+ * was not piped (inherited, discarded or redirected) reads as empty.
+ */
+public struct output
+{
+    exit_status $status;
+    string $stdout;
+    string $stderr;
+}
+
+#[if: family != windows]
+// what `waitpid` reports, read the way `WIFEXITED` / `WEXITSTATUS` / `WTERMSIG` read it. the encoding is
+// the same on Darwin and Linux: the low seven bits are the signal, 0 meaning a normal exit with the code
+// in the next byte. a stopped child (0x7f) is never reported, since nothing here asks `WUNTRACED`
+internal function decode_wait_status(int32 $raw) : exit_status
+{
+    int32 $signal = $raw & 127;
+
+    if ($signal == 0) {
+        return exit_status(($raw >> 8) & 255, null);
+    }
+
+    return exit_status(null, $signal);
+}
+#[end]

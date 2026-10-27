@@ -1,0 +1,3 @@
+// the Linux arm of std::process, lowered on whatever machine runs the suite. a stdlib function is lowered
+// whether or not anything calls it, so naming nothing is enough, and calling nothing keeps the case
+// runnable on a host the arm is not for

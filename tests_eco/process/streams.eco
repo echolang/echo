@@ -1,0 +1,92 @@
+// where each standard stream goes: merged, discarded, a file at the position this program sees it, a pipe
+// joining two children directly, and a pipe this program drives by hand
+
+if (std::env::argc() > 1) {
+    string $role = str::from(std::env::arg(1)->cstr());
+
+    if ($role == 'both') {
+        std::io::print('to stdout\n');
+        std::io::eprint('to stderr\n');
+        return 0;
+    }
+
+    if ($role == 'lines') {
+        std::io::print('cherry\napple\nbanana\n');
+        return 0;
+    }
+
+    if ($role == 'upper') {
+        std::io::reader $in = std::io::reader(std::io::stdin);
+        string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+        std::io::print(str::upper($all));
+        return 0;
+    }
+
+    die('unknown role');
+}
+
+string $self = std::env::exe();
+
+// stderr into stdout: one stream, nothing left on the other
+std::process::command $merged = std::process::command($self, ['both']);
+$merged->stderr(.merge);
+std::process::output $m = guard $merged->output() else ($e) { die("merge: {$e}"); };
+std::io::print($m->stdout);
+echo "merged stderr empty: {$m->stderr->empty()}";
+
+// both to the null device
+std::process::command $quiet = std::process::command($self, ['both']);
+$quiet->stdout(.discard);
+$quiet->stderr(.discard);
+std::process::output $q = guard $quiet->output() else ($e) { die("discard: {$e}"); };
+echo "discarded: {$q->stdout->empty()} {$q->stderr->empty()} {$q->status}";
+
+int32 $pid = std::env::pid();
+string $path = std::env::join(std::env::tmp(), "eco_process_streams_{$pid}.txt");
+
+// a child writing into a file this program is also writing: the bytes this program buffered land first
+std::io::file $out = guard std::io::create($path) else ($e) { die("create: {$e}"); };
+usize $before = guard $out->write('before\n') else ($e) { die("write: {$e}"); };
+std::process::command $into = std::process::command($self, ['lines']);
+$into->stdout(.file($out));
+std::process::exit_status $into_status = guard $into->status() else ($e) { die("into: {$e}"); };
+usize $after = guard $out->write('after\n') else ($e) { die("write: {$e}"); };
+$out->close();
+string $written = guard std::io::readfile($path) else ($e) { die("readfile: {$e}"); };
+std::io::print($written);
+
+// a child reading a file this program already read a line of: it starts where this program stopped, even
+// though this program's read window holds the rest
+std::io::file $from = guard std::io::open($path, .read) else ($e) { die("open: {$e}"); };
+string? $first = guard $from->readline() else ($e) { die("readline: {$e}"); };
+std::process::command $rest = std::process::command($self, ['upper']);
+$rest->stdin(.file($from));
+std::process::output $r = guard $rest->output() else ($e) { die("rest: {$e}"); };
+std::io::print($r->stdout);
+$from->close();
+bool $removed = guard std::io::remove($path) else ($e) { die("remove: {$e}"); };
+
+// two children joined directly: the first one's stdout is the second one's stdin
+std::process::command $producer = std::process::command($self, ['lines']);
+$producer->stdout(.piped);
+std::process::child $a = guard $producer->spawn() else ($e) { die("producer: {$e}"); };
+std::process::command $consumer = std::process::command($self, ['upper']);
+$consumer->stdin(.pipe($a->stdout() ?? die('stdout was piped')));
+std::process::output $joined = guard $consumer->output() else ($e) { die("consumer: {$e}"); };
+std::process::exit_status $a_done = guard $a->wait() else ($e) { die("wait: {$e}"); };
+std::io::print($joined->stdout);
+echo "producer: {$a_done} consumer: {$joined->status}";
+
+// both ends by hand: write, close for end of input, read it all back
+std::process::command $by_hand = std::process::command($self, ['upper']);
+$by_hand->stdin(.piped);
+$by_hand->stdout(.piped);
+std::process::child $h = guard $by_hand->spawn() else ($e) { die("by hand: {$e}"); };
+std::io::pipe_writer $w = $h->stdin() ?? die('stdin was piped');
+usize $sent = guard $w->writeline('written by hand') else ($e) { die("writeline: {$e}"); };
+$w->close();
+std::io::pipe_reader $rd = $h->stdout() ?? die('stdout was piped');
+string $back = guard $rd->readall() else ($e) { die("readall: {$e}"); };
+std::process::exit_status $h_done = guard $h->wait() else ($e) { die("wait: {$e}"); };
+std::io::print($back);
+echo "by hand: {$h_done}";

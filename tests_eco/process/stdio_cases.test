@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownStaticFunction  stdio_cases.eco:3:12
+
+  The type 'std::process::stdin' has no static function named 'merge'
+
+  2 | std::process::command $c = std::process::command('x');
+  3 | $c->stdin(.merge);
+    :            ^^^^^
+  4 | 
+
+  help: a static function is declared 'static function' in the type's body and called on the type itself. an ordinary method is reached through a value instead, with '->'
+
+1 error, nothing was compiled.
