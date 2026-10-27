@@ -552,7 +552,12 @@ Node *GenericValueExprNode::clone(CloneContext &cc) const
         if (bound != nullptr && bound->is_const_value()) {
             LiteralIntExprNode *literal = cc.make<LiteralIntExprNode>(
                 this, token_name, bound->const_value_primitive());
-            literal->override_literal_value = std::to_string(bound->const_value_bits());
+            if (ValueType(bound->const_value_primitive()).is_signed_integer()) {
+                literal->override_literal_value =
+                    std::to_string(static_cast<int64_t>(bound->const_value_bits()));
+            } else {
+                literal->override_literal_value = std::to_string(bound->const_value_bits());
+            }
             return literal;
         }
     }

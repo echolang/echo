@@ -1,0 +1,4 @@
+// omitting the `;` after a constant must not swallow the next statement
+const L = 10
+echo L;
+echo 99;

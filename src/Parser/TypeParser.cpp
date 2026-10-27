@@ -123,7 +123,7 @@ static bool cursor_is_integer_literal(Parser::Cursor &cursor)
         || cursor.is_type(Token::Type::t_binary_literal);
 }
 
-static bool skip_type_shape(Parser::Cursor &cursor);
+bool Parser::skip_type_shape(Parser::Cursor &cursor);
 
 // skips a comma-separated list of type shapes, up to but not through whatever closes it. the grammar
 // has two such lists - a callable's parameters and a generic argument list - and they differ in
@@ -148,7 +148,7 @@ static bool skip_type_list(Parser::Cursor &cursor, IsEnd is_end)
 
 // advances past one type if the tokens form one. shape only: no lookup, no nodes. mirrors
 // parse_value_type, including the cursor's `>>` split, so `Box<Box<int32>>` ends in one place
-static bool skip_type_shape(Parser::Cursor &cursor)
+bool Parser::skip_type_shape(Parser::Cursor &cursor)
 {
     if (cursor.is_type(Token::Type::t_const)) {
         cursor.skip();
@@ -591,7 +591,7 @@ enum class IntegerConstRead
 
 static IntegerConstRead take_integer_const(
     Parser::Payload &payload,
-    uint64_t &bits
+    AST::IntegerTokenBits &bits
 )
 {
     auto &cursor = payload.cursor;
@@ -602,7 +602,7 @@ static IntegerConstRead take_integer_const(
     const TokenReference token = cursor.current();
     cursor.skip();
 
-    const std::optional<uint64_t> parsed = AST::integer_token_bits(token);
+    const std::optional<AST::IntegerTokenBits> parsed = AST::integer_token_bits(token);
     if (!parsed.has_value()) {
         return IntegerConstRead::t_invalid;
     }
@@ -640,20 +640,20 @@ static AST::ValueType parse_const_generic_arg(
     auto &cursor = payload.cursor;
     const bool was_integer = cursor_is_integer_literal(cursor);
     const TokenReference integer_token = was_integer ? cursor.current() : at;
-    uint64_t bits = 0;
+    AST::IntegerTokenBits bits;
 
     switch (take_integer_const(payload, bits)) {
     case IntegerConstRead::t_ok:
         // overflow is asked here because this is the token; intern/allows is the owner of
         // whether the bits *fit*, and of which primitive they become
-        if (param != nullptr && !AST::const_generic_bits_fit(param->value_type, bits)) {
+        if (param != nullptr && !AST::const_generic_token_fits(param->value_type, bits)) {
             payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
                 payload.context.code_ref(integer_token),
-                AST::const_generic_overflow_sentence(param->value_type, bits));
+                AST::const_generic_token_refusal(param->value_type, bits));
             return AST::ValueType::make_unknown();
         }
 
-        return AST::ValueType::make_const_value(AST::ValueTypePrimitive::t_int32, bits);
+        return AST::intern_const_generic_token(bits);
 
     case IntegerConstRead::t_invalid:
         payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -710,11 +710,19 @@ static std::optional<AST::ValueType> parse_simd_type(
     AST::ValueType length = AST::ValueType::make_unknown();
     const bool was_integer = cursor_is_integer_literal(cursor);
     const TokenReference integer_token = was_integer ? cursor.current() : at;
-    uint64_t bits = 0;
+    AST::IntegerTokenBits bits;
 
     switch (take_integer_const(payload, bits)) {
     case IntegerConstRead::t_ok:
-        length = AST::ValueType::make_const_value(AST::ValueTypePrimitive::t_usize, bits);
+        if (!AST::const_generic_token_fits(AST::ValueType(AST::ValueTypePrimitive::t_usize), bits)) {
+            payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+                payload.context.code_ref(integer_token),
+                AST::const_generic_token_refusal(
+                    AST::ValueType(AST::ValueTypePrimitive::t_usize), bits));
+            return std::nullopt;
+        }
+        length = AST::ValueType::make_const_value(
+            AST::ValueTypePrimitive::t_usize, AST::integer_token_stored_bits(bits));
         break;
 
     case IntegerConstRead::t_invalid:
@@ -757,11 +765,19 @@ static AST::ValueType parse_array_suffix(Parser::Payload &payload, AST::ValueTyp
         AST::ValueType length = AST::ValueType::make_unknown();
         const bool was_integer = cursor_is_integer_literal(cursor);
         const TokenReference integer_token = was_integer ? cursor.current() : at;
-        uint64_t bits = 0;
+        AST::IntegerTokenBits bits;
 
         switch (take_integer_const(payload, bits)) {
         case IntegerConstRead::t_ok:
-            length = AST::ValueType::make_const_value(AST::ValueTypePrimitive::t_usize, bits);
+            if (!AST::const_generic_token_fits(AST::ValueType(AST::ValueTypePrimitive::t_usize), bits)) {
+                payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+                    payload.context.code_ref(integer_token),
+                    AST::const_generic_token_refusal(
+                        AST::ValueType(AST::ValueTypePrimitive::t_usize), bits));
+                return AST::ValueType::make_unknown();
+            }
+            length = AST::ValueType::make_const_value(
+                AST::ValueTypePrimitive::t_usize, AST::integer_token_stored_bits(bits));
             break;
 
         case IntegerConstRead::t_invalid:
@@ -914,21 +930,22 @@ static AST::ValueType parse_generic_application(
         const size_t violation = *judged.violation;
         const auto *param = template_ct->type_parameters[violation];
 
-        if (param->is_value_param()
-            && args[violation].is_const_value()
-            && !AST::const_generic_bits_fit(param->value_type, args[violation].const_value_bits())) {
-            payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
-                payload.context.code_ref(name_token),
-                AST::const_generic_overflow_sentence(
-                    param->value_type, args[violation].const_value_bits()));
-        } else {
-            payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
-                payload.context.code_ref(name_token),
-                "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
-                "' is constrained to '" + param->constraint_spelling +
-                "' but was given '" + args[violation].get_type_desciption() + "'"
-            );
+        if (param->is_value_param() && args[violation].is_const_value()) {
+            const AST::IntegerTokenBits written = AST::bits_of_const_value(args[violation]);
+            if (!AST::const_generic_token_fits(param->value_type, written)) {
+                payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+                    payload.context.code_ref(name_token),
+                    AST::const_generic_token_refusal(param->value_type, written));
+                return AST::ValueType::make_unknown();
+            }
         }
+
+        payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
+            payload.context.code_ref(name_token),
+            "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
+            "' is constrained to '" + param->constraint_spelling +
+            "' but was given '" + args[violation].get_type_desciption() + "'"
+        );
         return AST::ValueType::make_unknown();
     }
 

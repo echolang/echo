@@ -65,6 +65,9 @@ namespace AST
             // is this statement the declaration itself? **only a declaration may be typed *from* its
             // entries** - an assignment writes storage somebody else already named
             bool declares = false;
+
+            // assignment LHS when the dest is not a variable. expansion dest-types from this
+            ExprNode *assign_target = nullptr;
         };
 
         static Destination destination_of(Node *statement);

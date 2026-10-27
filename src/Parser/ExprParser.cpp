@@ -1894,10 +1894,9 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             }
 
             // `&$a[]` borrows the slot an append just grew, to be filled field by field - it does
-            // not read what is in it. see AST::IndexExprNode::slot_is_bound, whose other setter is
-            // the assignment target in Parser::parse_varexpr
+            // not read what is in it. IndexExprNode::bind_slot is the one writer
             if (target->get_node_type() == AST::NodeType::n_expr_index) {
-                static_cast<AST::IndexExprNode *>(target)->slot_is_bound = true;
+                static_cast<AST::IndexExprNode *>(target)->bind_slot();
             }
 
             // **the destination decides.** a `weak<T>` slot, parameter, field or return type is asking for

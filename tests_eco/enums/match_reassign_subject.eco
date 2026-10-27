@@ -1,0 +1,20 @@
+// reassigning the match subject while a payload binding is live. the subject is copied
+// when an arm may write it, so the binding still names the payload
+enum State
+{
+    case running(string $job);
+    case idle;
+}
+
+State $s = State::running('PAYLOAD_AAAAAAAA_BBBBBBBB_CCCCCCCC');
+match ($s) {
+    .running($job) => {
+        $s = State::idle();
+        string $noise = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+        echo "job=[{$job}]";
+        echo "noise=[{$noise}]";
+    },
+    .idle => {
+        echo 'idle';
+    },
+};

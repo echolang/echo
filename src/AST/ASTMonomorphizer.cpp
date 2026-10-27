@@ -24,6 +24,7 @@
 
 #include <fmt/core.h>
 
+#include <cstdint>
 #include <algorithm>
 #include <ranges>
 #include <cstdlib>
@@ -90,14 +91,18 @@ namespace AST
             return std::nullopt;
 
         case InstantiationBlame::t_constraint:
-            if (inst.param->is_value_param()
-                && inst.bound.is_const_value()
-                && !const_generic_bits_fit(inst.param->value_type, inst.bound.const_value_bits())) {
-                _collector.collect_issue<Issue::IntegerOverflow>(
-                    code_ref_for(mod, call->token_function_name),
-                    const_generic_overflow_sentence(
-                        inst.param->value_type, inst.bound.const_value_bits()));
-            } else {
+            if (inst.param->is_value_param() && inst.bound.is_const_value()) {
+                const IntegerTokenBits written = bits_of_const_value(inst.bound);
+                if (!const_generic_token_fits(inst.param->value_type, written)) {
+                    _collector.collect_issue<Issue::IntegerOverflow>(
+                        code_ref_for(mod, call->token_function_name),
+                        const_generic_token_refusal(inst.param->value_type, written));
+                    is_error = true;
+                    return std::nullopt;
+                }
+            }
+
+            {
                 _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(
                     code_ref_for(mod, call->token_function_name),
                     "Type parameter '" + inst.param->name + "' of '" + tmpl->func_name() +

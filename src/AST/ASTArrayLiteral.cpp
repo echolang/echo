@@ -68,10 +68,13 @@ bool AST::bind_array_literal_to(
         return false;
     }
 
-    // idempotent, so the round that binds it and every round after read the same answer. the expansion
-    // is decided against this type, and a second opinion arriving later would decide it twice
-    if (!literal->bound_type.has_value()) {
+    // a later destination (a field, an element) may be more specific than the first element's
+    // default. rebind until expansion has decided, so `$s->f = [7, 8]` at `array<int64>` wins
+    bool changed = false;
+    if (!literal->bound_type.has_value()
+        || (!literal->expansion_decided && *literal->bound_type != wanted)) {
         literal->bound_type = wanted;
+        changed = true;
     }
 
     if (fill.kind == CollectionFill::Kind::t_inline
@@ -79,12 +82,12 @@ bool AST::bind_array_literal_to(
         || fill.kind == CollectionFill::Kind::t_index) {
         if (!is_undetermined_type(fill.element)) {
             for (ExprNode *element : literal->elements) {
-                bind_collection_literal_to(element, fill.element, collector);
+                changed = bind_collection_literal_to(element, fill.element, collector) || changed;
             }
         }
     }
 
-    return true;
+    return changed;
 }
 
 AST::ArrayLiteralLookup AST::array_literal_type_for(

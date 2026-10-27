@@ -1,0 +1,9 @@
+// `Type::$xs[] =` is the append write, the same as `->$push`
+struct Holder
+{
+    static array<int32> $xs;
+}
+
+Holder::$xs[] = 4;
+echo Holder::$xs[0];
+echo Holder::$xs->count();

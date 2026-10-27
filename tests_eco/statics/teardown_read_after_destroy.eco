@@ -1,0 +1,24 @@
+// a destructor of an earlier static that reads a later one used to load freed bytes.
+// teardown marks the guard dead and every mode aborts on the next load
+class Box
+{
+    string $name;
+    destructor()
+    {
+        echo "drop {$this->name}";
+        echo Second::$b->name;
+    }
+}
+
+class First
+{
+    static Box $a = Box('first');
+}
+
+class Second
+{
+    static Box $b = Box('second');
+}
+
+echo First::$a->name;
+echo Second::$b->name;

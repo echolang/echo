@@ -1984,6 +1984,10 @@ namespace AST
     // ptr<int32> is passed to `function box<T>(T $v)`
     ValueType value_type_of(const ValueType &type);
 
+    // T& names T; ptr<T> is an address and is left alone. weak of `&$this` and guard of `T?&`
+    // both ask, so a second peel of a nullable pointer cannot silently appear in one of them
+    ValueType borrow_target_of(const ValueType &type);
+
     // the type ultimately addressed, following every pointer level rather than one
     //
     // deliberately separate from value_type_of, which is the *read* rule and must stay at one

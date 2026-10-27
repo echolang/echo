@@ -1,0 +1,11 @@
+// a `T?&` parameter guards: the borrow is not nullable, the payload is
+function f(const int32?& $s) : int32
+{
+    int32 $q = guard $s else { return 0; }
+    return $q;
+}
+
+int32? $n = 7;
+echo f($n);
+int32? $gone = null;
+echo f($gone);

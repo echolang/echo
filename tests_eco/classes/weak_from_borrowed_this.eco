@@ -1,0 +1,22 @@
+// a class borrow at a `weak<T>` destination peels to the handle
+class Node
+{
+    weak<Node> $parent = null;
+
+    function attach(Node& $child) : void
+    {
+        $child->parent = &$this;
+    }
+}
+
+function link(Node& $from, Node& $to) : void
+{
+    $to->parent = &$from;
+}
+
+Node $a = Node();
+Node $b = Node();
+link($a, $b);
+echo $b->parent == null;
+$a->attach($b);
+echo $b->parent == null;

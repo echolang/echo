@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnexpectedToken  unterminated_struct_body.eco:2:20
+
+  Unexpected token 'unknown' found. Expected 'close_brace '}''
+
+  1 | // a struct whose body never closes used to register with no diagnostic and exit 0
+  2 | struct S { int32 $x;
+    :                    ^ expected close_brace '}'
+  3 | 
+
+1 error, nothing was compiled.

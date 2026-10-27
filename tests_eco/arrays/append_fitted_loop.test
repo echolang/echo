@@ -1,0 +1,8 @@
+flags: --optimize whole --release
+
+--- OUT --->
+63
+--- IR --->
+CHECK: define noundef i32 @main(
+CHECK-NOT: alloca %"array<int64>"
+CHECK: ret i32 0

@@ -162,6 +162,8 @@ AST::ConstDeclNode *Parser::parse_constdecl(
         cursor.skip();
     }
 
+    const_node.token_end = cursor.position();
+
     // where the name goes: a struct's member surface, or the namespace the file declares into. The member
     // surface is the same namespace a nested type's constructors land in, which is what makes `buffer::MAX`
     // resolve with no expression grammar of its own
@@ -198,4 +200,50 @@ AST::ConstDeclNode *Parser::parse_constdecl(
     target->push_symbol(std::make_unique<AST::Symbol>(&const_node));
 
     return &const_node;
+}
+
+void Parser::skip_parsed_constdecl(Parser::Payload &payload, AST::TypeDeclNode *owner)
+{
+    auto &cursor = payload.cursor;
+    const auto start = cursor.snapshot();
+
+    if (!cursor.is_type(Token::Type::t_const)) {
+        cursor.skip_statement();
+        return;
+    }
+
+    cursor.skip();
+
+    if (!constdecl_omits_its_type(cursor)) {
+        skip_type_shape(cursor);
+    }
+
+    if (!cursor.is_type(Token::Type::t_identifier)) {
+        cursor.restore(start);
+        cursor.skip_statement();
+        return;
+    }
+
+    const std::string &name = cursor.current().value();
+    AST::Namespace *from = owner != nullptr
+        ? AST::member_surface_namespace(payload.collector.namespaces, owner->complex_type())
+        : payload.context.current_namespace;
+    AST::Symbol *symbol = from == nullptr
+        ? nullptr
+        : payload.collector.namespaces.find_symbol(name, *from);
+
+    if (symbol == nullptr || !symbol->node.has_type<AST::ConstDeclNode>()) {
+        cursor.restore(start);
+        cursor.skip_statement();
+        return;
+    }
+
+    const size_t token_end = symbol->node.get<AST::ConstDeclNode>().token_end;
+    if (token_end == 0 || token_end < cursor.position()) {
+        cursor.restore(start);
+        cursor.skip_statement();
+        return;
+    }
+
+    cursor.seek(token_end);
 }

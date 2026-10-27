@@ -1,0 +1,7 @@
+// a negative at an unsigned const parameter is refused, not wrapped to MAX_USIZE
+struct U<const usize N>
+{
+    const function n() : usize { return N; }
+}
+
+echo U<-1>()->n();

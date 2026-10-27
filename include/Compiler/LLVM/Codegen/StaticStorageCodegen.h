@@ -57,10 +57,10 @@ namespace Compiler::LLVM
         // struct field's is: a rename is a different symbol and a reorder is not
         llvm::GlobalVariable *storage_for(AST::StaticPropertyExprNode &node, const std::string &symbol);
 
-        // the word beside it: 0, a tid token, or ~0. a word rather than an i8 so the in-progress
-        // state can name its owner, which is what keeps the documented recursion answer from
-        // becoming a pthread_once deadlock. a tid that is 0 or ~0 is stored as 1 so it cannot
-        // look uninitialized or finished
+        // the word beside it: 0, a tid token, ~0 (done), or ~1 (torn down). a word rather than
+        // an i8 so the in-progress state can name its owner. a tid that is 0, ~0 or ~1 is stored
+        // as 1 so it cannot look uninitialized, finished, or dead. ~1 is set at fini; the fast
+        // path still compares only against ~0
         llvm::GlobalVariable *guard_for(const std::string &symbol);
 
         // the slow path: CAS 0 → self, run the body, store ~0. one function for the

@@ -53,21 +53,24 @@ bool AST::bind_map_literal_to(
         return false;
     }
 
-    if (!literal->bound_type.has_value()) {
+    bool changed = false;
+    if (!literal->bound_type.has_value()
+        || (!literal->expansion_decided && *literal->bound_type != wanted)) {
         literal->bound_type = wanted;
+        changed = true;
     }
 
     for (MapLiteralExprNode::Entry &entry : literal->entries) {
         if (!is_undetermined_type(fill.key)) {
-            bind_collection_literal_to(entry.key, fill.key, collector);
+            changed = bind_collection_literal_to(entry.key, fill.key, collector) || changed;
         }
 
         if (!is_undetermined_type(fill.value)) {
-            bind_collection_literal_to(entry.value, fill.value, collector);
+            changed = bind_collection_literal_to(entry.value, fill.value, collector) || changed;
         }
     }
 
-    return true;
+    return changed;
 }
 
 AST::MapLiteralLookup AST::map_literal_type_for(

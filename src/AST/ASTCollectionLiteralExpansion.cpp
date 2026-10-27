@@ -84,7 +84,7 @@ CollectionLiteralExpansion::Destination CollectionLiteralExpansion::destination_
         }
 
         if (assign->target == nullptr || assign->target->get_node_type() != NodeType::n_varref) {
-            return {nullptr, literal, &assign->value_expr};
+            return {nullptr, literal, &assign->value_expr, false, assign->target};
         }
 
         return {place_root_of(assign->target), literal, &assign->value_expr};
@@ -509,6 +509,13 @@ bool CollectionLiteralExpansion::expand_statement(
 
     if (destination.literal == nullptr || destination.literal->expansion_decided) {
         return false;
+    }
+
+    if (destination.assign_target != nullptr) {
+        const ValueType dest = value_result_type(*destination.assign_target);
+        if (!is_undetermined_type(dest)) {
+            bind_collection_literal_to(*destination.slot, dest, _collector);
+        }
     }
 
     // **mutable variable storage is filled in place.** everything else hoists: a const name cannot

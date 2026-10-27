@@ -1,0 +1,2 @@
+// a struct whose body never closes used to register with no diagnostic and exit 0
+struct S { int32 $x;

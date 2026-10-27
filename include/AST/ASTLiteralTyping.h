@@ -29,8 +29,18 @@ namespace AST
 
     // **the bits a written integer token holds.** one owner so a const-generic argument, an array
     // length and a call's explicit type argument cannot disagree about what the digits mean. the
-    // token's *type* chooses the radix - hex and binary are not prefixes on `t_integer_literal`
-    std::optional<uint64_t> integer_token_bits(const TokenReference &token);
+    // token's *type* chooses the radix - hex and binary are not prefixes on `t_integer_literal`.
+    // a leading `-` is the sign (`S<-3>`): `magnitude` is the digits, never wrapped through unsigned
+    struct IntegerTokenBits
+    {
+        uint64_t magnitude = 0;
+        bool negative = false;
+    };
+
+    std::optional<IntegerTokenBits> integer_token_bits(const TokenReference &token);
+
+    // two's-complement bits for a const-generic intern: `0 - magnitude` when negative
+    uint64_t integer_token_stored_bits(const IntegerTokenBits &value);
 
     // **is this literal's type a default nobody chose?**
     //

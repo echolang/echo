@@ -9,6 +9,8 @@
 #include "Lexer.h"
 #include "AST/TypeNode.h"
 
+#include <cstddef>
+
 namespace AST
 {
     class ExprNode;
@@ -69,6 +71,11 @@ namespace AST
 
         // raw `/** ... */` above the declaration. taken at parse so it cannot attach to the next one
         std::string doc_comment;
+
+        // exclusive index in the module token collection, after the initializer and an optional `;`.
+        // the body pass seeks here instead of skip_statement(), which would eat the next statement
+        // when the semicolon was omitted (`const L = 10` then `echo L;`)
+        size_t token_end = 0;
 
         ConstDeclNode(TokenReference token_name, TypeNode *type) :
             _type_node(type), token_name(token_name)

@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
 
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 
 #include "AST/FunctionDeclNode.h"
@@ -22,6 +23,20 @@ namespace Compiler::LLVM
         constexpr const char *k_chain_head_symbol = "__eco_static_chain";
         constexpr const char *k_teardown_symbol = "__eco_static_teardown";
         constexpr const char *k_once_symbol = "__eco_static_once";
+
+        // ~0 is done (fast path). ~1 is torn down: the slow path sees it, the fast path
+        // does not pay a second compare. 0 is uninitialized, 1 is a tid that collided with a sentinel
+        constexpr uint64_t k_guard_done = static_cast<uint64_t>(-1);
+        constexpr uint64_t k_guard_dead = static_cast<uint64_t>(-2);
+
+        void abort_if_guard_dead(CodegenContext &ctx, llvm::Value *seen, llvm::Value *dead_tok)
+        {
+            ctx.abort->gen_abort_if(
+                ctx.builder->CreateICmpEQ(seen, dead_tok, "is.dead"),
+                "fatal error",
+                "a static was read after it was torn down",
+                "static_dead");
+        }
 
         // `{ ptr next, ptr fn }` - one node per static that owes a teardown, pushed by its init function
         // after the value is seated. **an intrusive node rather than a list the runtime allocates**,
@@ -89,7 +104,8 @@ namespace Compiler::LLVM
         llvm::Type *void_ty = llvm::Type::getVoidTy(*_ctx.llvm_context);
         llvm::Type *ptr = _ctx.opaque_ptr_type();
         llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-        llvm::Constant *done_tok = llvm::ConstantInt::get(i64, static_cast<uint64_t>(-1));
+        llvm::Constant *done_tok = llvm::ConstantInt::get(i64, k_guard_done);
+        llvm::Constant *dead_tok = llvm::ConstantInt::get(i64, k_guard_dead);
         llvm::Constant *one = llvm::ConstantInt::get(i64, 1);
         auto *body_ty = llvm::FunctionType::get(void_ty, false);
 
@@ -115,6 +131,7 @@ namespace Compiler::LLVM
             _ctx.builder->SetInsertPoint(entry);
             llvm::LoadInst *seen = _ctx.builder->CreateLoad(i64, guard, "seen");
             seen->setAlignment(_ctx.layout().getABITypeAlign(i64));
+            abort_if_guard_dead(_ctx, seen, dead_tok);
             llvm::Value *is_done = _ctx.builder->CreateICmpEQ(seen, done_tok, "is.done");
             llvm::Value *in_flight = _ctx.builder->CreateICmpNE(
                 seen, llvm::ConstantInt::get(i64, 0), "in.flight");
@@ -159,11 +176,14 @@ namespace Compiler::LLVM
                 _ctx.libc_callee(Compiler::RuntimeSymbol::t_pthread_self, i64, {}), {}, "self");
             _ctx.needs_pthread = true;
         }
-        // 0 is uninitialized and ~0 is done. a tid that collides with either would skip
-        // the initializer or look finished. 1 is neither sentinel
+        // 0 is uninitialized, ~0 is done, ~1 is torn down. a tid that collides with any
+        // would skip the initializer, look finished, or abort as dead. 1 is none of those
         llvm::Value *tid_is_sentinel = _ctx.builder->CreateOr(
-            _ctx.builder->CreateICmpEQ(self, llvm::ConstantInt::get(i64, 0), "tid.zero"),
-            _ctx.builder->CreateICmpEQ(self, done_tok, "tid.done"),
+            _ctx.builder->CreateOr(
+                _ctx.builder->CreateICmpEQ(self, llvm::ConstantInt::get(i64, 0), "tid.zero"),
+                _ctx.builder->CreateICmpEQ(self, done_tok, "tid.done"),
+                "tid.zero.or.done"),
+            _ctx.builder->CreateICmpEQ(self, dead_tok, "tid.dead"),
             "tid.sentinel");
         llvm::Value *token = _ctx.builder->CreateSelect(tid_is_sentinel, one, self, "token");
         _ctx.builder->CreateBr(loop);
@@ -172,6 +192,7 @@ namespace Compiler::LLVM
         llvm::LoadInst *seen = _ctx.builder->CreateLoad(i64, guard, "seen");
         seen->setAtomic(llvm::AtomicOrdering::Acquire);
         seen->setAlignment(_ctx.layout().getABITypeAlign(i64));
+        abort_if_guard_dead(_ctx, seen, dead_tok);
         llvm::Value *is_done = _ctx.builder->CreateICmpEQ(seen, done_tok, "is.done");
         llvm::Value *is_self = _ctx.builder->CreateICmpEQ(seen, token, "is.self");
         llvm::Value *mine_or_done = _ctx.builder->CreateOr(is_done, is_self, "mine.or.done");
@@ -250,7 +271,7 @@ namespace Compiler::LLVM
         _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
 
         llvm::GlobalVariable *guard = guard_for(symbol);
-        llvm::Constant *done_tok = llvm::ConstantInt::get(i64, static_cast<uint64_t>(-1));
+        llvm::Constant *done_tok = llvm::ConstantInt::get(i64, k_guard_done);
 
         // **the fast path stays one load.** inlining the owner-token dance everywhere is
         // fifteen blocks per static; routing every access through the helper puts a call in front
@@ -296,9 +317,35 @@ namespace Compiler::LLVM
             llvm::Value *next_slot = _ctx.builder->CreateStructGEP(node_type, link, 0, "link.next");
             llvm::Value *fn_slot = _ctx.builder->CreateStructGEP(node_type, link, 1, "link.fn");
 
-            // store the fn slot plainly, then publish the head. threaded rows CAS;
-            // a row without OS threads is a load and a store
-            _ctx.builder->CreateStore(end, fn_slot);
+            // store a fini that runs deinit, zeros storage, then marks the guard dead so a
+            // later load cannot treat the corpse as initialized
+            const std::string fini_symbol = symbol + ".fini";
+            llvm::Function *fini = _ctx.current_module()->getFunction(fini_symbol);
+            if (fini == nullptr) {
+                fini = llvm::Function::Create(
+                    llvm::FunctionType::get(void_ty, false),
+                    llvm::GlobalValue::LinkOnceODRLinkage,
+                    fini_symbol,
+                    _ctx.current_module());
+
+                llvm::IRBuilderBase::InsertPointGuard fini_point(*_ctx.builder);
+                _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+                auto *fini_entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fini);
+                _ctx.builder->SetInsertPoint(fini_entry);
+                _ctx.builder->CreateCall(end);
+                llvm::GlobalVariable *storage = storage_for(node, symbol);
+                _ctx.builder->CreateStore(
+                    llvm::Constant::getNullValue(storage->getValueType()), storage);
+                llvm::StoreInst *dead = _ctx.builder->CreateStore(
+                    llvm::ConstantInt::get(i64, k_guard_dead), guard);
+                if (threaded) {
+                    dead->setAtomic(llvm::AtomicOrdering::Release);
+                }
+                dead->setAlignment(_ctx.layout().getABITypeAlign(i64));
+                _ctx.builder->CreateRetVoid();
+            }
+
+            _ctx.builder->CreateStore(fini, fn_slot);
 
             if (!threaded) {
                 llvm::LoadInst *cur = _ctx.builder->CreateLoad(ptr, head, "chain");

@@ -84,8 +84,8 @@ namespace AST
         Collector &collector,
         const CollectionLiteralExprNode &shape);
 
-    // **the dest-typed bind, array first.** answers whether `expr` is a collection literal this
-    // call typed. a pack at `variadic_args` is bind_array_literal_to's and this answers false.
+    // **the dest-typed bind, array first.** answers whether this call wrote a bound_type.
+    // a pack at `variadic_args` is bind_array_literal_to's and this answers false.
     // recurses into nested collection literals from collection_fill_of
     bool bind_collection_literal_to(ExprNode *expr, const ValueType &destination, Collector &collector);
 

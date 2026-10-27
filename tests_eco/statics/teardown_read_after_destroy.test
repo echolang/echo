@@ -1,0 +1,10 @@
+expect: fail
+
+--- OUT --->
+first
+second
+drop second
+second
+drop first
+fatal error: a static was read after it was torn down
+  at <runtime>:0

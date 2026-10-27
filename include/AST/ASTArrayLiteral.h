@@ -39,7 +39,8 @@ namespace AST
         const ArrayLiteralExprNode &literal, const CoreTypes &core, TypeRegistry &types);
 
     // dest-type an array literal from a parameter. a borrow peels to the collection. refuses unknown.
-    // `variadic_args` is a pack, not a collection: answers false, elements keep their own types
+    // `variadic_args` is a pack, not a collection: answers false, elements keep their own types.
+    // true when this call wrote a bound_type (or a nested one)
     bool bind_array_literal_to(ExprNode *expr, const ValueType &destination, Collector &collector);
 };
 

@@ -1,0 +1,10 @@
+// `$h as C?` is the wrap `C? $w = $h` already does
+class C
+{
+    int32 $n;
+}
+
+C $h = C(1);
+C? $w = $h as C?;
+echo $w == null;
+echo ($w ?? C(0))->n;

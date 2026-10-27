@@ -1,0 +1,2 @@
+// a class whose body never closes is the same walk as a struct
+class C { int32 $x;

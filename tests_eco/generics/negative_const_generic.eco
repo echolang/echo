@@ -1,0 +1,8 @@
+// a glued `-N` in a const-generic argument is the signed value, not uint64 wrap of it
+struct S<const int32 N>
+{
+    const function n() : int32 { return N; }
+}
+
+echo S<-3>()->n();
+echo S<-1>()->n();

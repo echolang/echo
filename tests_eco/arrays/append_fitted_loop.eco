@@ -1,0 +1,11 @@
+// a fitted array's append loop must SROA the unique buffer into registers.
+// taking array& on a noinline grow helper parks it on the stack and the
+// compare-and-store pays three loads a turn
+array<int64> $a = array<int64>();
+$a->fit(64);
+usize $i = 0;
+while ($i < 64) {
+    $a[] = $i;
+    $i = $i + 1;
+}
+echo $a[63];

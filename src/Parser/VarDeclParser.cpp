@@ -431,10 +431,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
             // `$a[] = 5` legal where `echo $a[]` is not. not set on `++`: that path takes the
             // address of the element and writes through the pointer, so the bracket is a read
             if (target->get_node_type() == AST::NodeType::n_expr_index) {
-                auto *index = static_cast<AST::IndexExprNode *>(target);
-
-                index->slot_is_bound = true;
-                index->is_assignment_target = true;
+                static_cast<AST::IndexExprNode *>(target)->bind_slot(/*assignment=*/true);
             }
 
             // a declaration is the other case and binds instead, which is why the init_expr path

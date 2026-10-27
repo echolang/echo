@@ -1,0 +1,10 @@
+// an array literal at a field takes the field's element type
+struct S
+{
+    array<int64> $f;
+}
+
+S $s = S([]);
+$s->f = [7, 8];
+echo $s->f[0];
+echo $s->f[1];

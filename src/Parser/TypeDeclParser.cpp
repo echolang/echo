@@ -1458,14 +1458,26 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     };
 
     // and the three shapes that are refused *with a body* - a nested type, a constructor, a destructor.
-    // consuming them is the half most likely to drift, since the wording was already shared and the two
-    // skips were not: a copy that forgets skip_till_end_of_scope reads the refused member's own body as
-    // more members and reports every statement in it
+    // skip_balanced_group walks that body from its `{`; skip_till_end_of_scope starts *inside* a scope,
+    // so sitting on the member's `{` it treats the type body's `}` as that close and the closed flag
+    // below never sees it
     auto refuse_braced_member = [&](const std::string &shape) {
         refuse_member_shape(cursor.current(), shape);
-        cursor.skip_until({ Token::Type::t_open_brace });
-        cursor.skip_till_end_of_scope();
+        cursor.skip_until({
+            Token::Type::t_open_brace,
+            Token::Type::t_semicolon,
+            Token::Type::t_close_brace,
+        });
+        if (cursor.is_type(Token::Type::t_open_brace)) {
+            cursor.skip_balanced_group(Token::Type::t_open_brace, Token::Type::t_close_brace);
+        } else if (cursor.is_type(Token::Type::t_semicolon)) {
+            cursor.skip();
+        }
     };
+
+    // running out is not a close: the `}` arm is the only one that sets this. a file that ends
+    // inside the body used to fall out of `is_done()` and register the type with no diagnostic
+    bool closed = false;
 
     while (!cursor.is_done()) {
         // **the member's visibility, read ahead of the dispatch below and not inside one of its arms.**
@@ -1676,7 +1688,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 parse_constdecl(payload, struct_node, visibility);
             }
             else {
-                cursor.try_skip_to_next_statement();
+                skip_parsed_constdecl(payload, struct_node);
             }
         }
         else if (starts_vardecl(payload)) {
@@ -1811,24 +1823,26 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         }
         else if (cursor.is_type(Token::Type::t_close_brace)) {
             cursor.skip();
+            closed = true;
             break;
         }
 
         else {
             payload.collect_unexpected_token(Token::Type::t_unknown);
 
-            // when we encounter an unexpected token, we skip until we find a semicolon or a brace
-            // in the hopes that there is    simply a typo in the code or something minor that we can recover
-            // from we might have to skip till the end of the scope otherwise..
-            cursor.skip(); // always skip the token causing the issue
+            // recover to the next statement or brace, and consume only a `;`. a `}` closes this
+            // body, and the arm above is waiting for it - eating it here is how a refused member
+            // used to report a missing close on the real one
+            cursor.skip();
             cursor.skip_until({ Token::Type::t_semicolon, Token::Type::t_open_brace, Token::Type::t_close_brace });
-
-            // if we find a semicolon or a close brace, we skip it in the hopes that afterwards we can
-            // continue parsing
-            if (cursor.is_type({ Token::Type::t_semicolon, Token::Type::t_close_brace })) {
+            if (cursor.is_type(Token::Type::t_semicolon)) {
                 cursor.skip();
             }
         }
+    }
+
+    if (!closed) {
+        payload.collect_unexpected_token(Token::Type::t_close_brace);
     }
 
     struct_node->mark_members_collected();

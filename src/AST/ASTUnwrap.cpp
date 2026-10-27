@@ -378,6 +378,17 @@ AST::UnwrapLookup AST::unwrap_plan_for(
         return lookup;
     }
 
+    // `T?&` / `const T?&`: the borrow is not nullable, the payload is. borrow_target_of
+    // is the same peel `&$this` at a weak dest uses
+    const AST::ValueType through = AST::borrow_target_of(subject);
+    if (through.is_nullable() && through != subject) {
+        AST::UnwrapLookup lookup;
+        lookup.result = AST::UnwrapLookup::Result::t_ok;
+        lookup.plan.kind = AST::UnwrapSource::t_builtin_nullable;
+        lookup.plan.payload_type = AST::unwrapped_type_of(through);
+        return lookup;
+    }
+
     // not settled yet - a type parameter awaiting substitution, or a call that has not resolved. asking
     // again next round is the answer, and it must not read as a refusal
     if (AST::is_undetermined_type(subject)) {

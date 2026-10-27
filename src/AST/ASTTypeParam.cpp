@@ -1,6 +1,7 @@
 #include "AST/ASTTypeParam.h"
 
 #include "AST/ASTConformance.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/FunctionDeclNode.h"
 
 #include <cassert>
@@ -53,21 +54,96 @@ bool AST::constraint_admits(const std::vector<ValueType> &constraint, const Valu
     return false;
 }
 
-bool AST::const_generic_bits_fit(const ValueType &dest, uint64_t bits)
+AST::ValueType AST::intern_const_generic_token(const IntegerTokenBits &value)
+{
+    const uint64_t bits = integer_token_stored_bits(value);
+    if (value.negative) {
+        return ValueType::make_const_value(ValueTypePrimitive::t_int64, bits);
+    }
+
+    if (value.magnitude > 2147483647ull) {
+        return ValueType::make_const_value(ValueTypePrimitive::t_uint64, bits);
+    }
+
+    return ValueType::make_const_value(ValueTypePrimitive::t_int32, bits);
+}
+
+AST::IntegerTokenBits AST::bits_of_const_value(const ValueType &type)
+{
+    IntegerTokenBits value;
+    if (!type.is_const_value()) {
+        return value;
+    }
+
+    const uint64_t bits = type.const_value_bits();
+    if (ValueType(type.const_value_primitive()).is_signed_integer()) {
+        if (static_cast<int64_t>(bits) < 0) {
+            value.negative = true;
+            value.magnitude = 0ull - bits;
+            return value;
+        }
+    }
+
+    value.magnitude = bits;
+    return value;
+}
+
+bool AST::const_generic_token_fits(const ValueType &dest, const IntegerTokenBits &value)
 {
     if (!dest.is_integer_type()) {
         return false;
     }
 
-    return bits <= get_integer_size(dest.get_primitive_type()).get_max_positive_value();
+    const IntegerSize size = get_integer_size(dest.get_primitive_type());
+    if (value.negative) {
+        if (!size.is_signed) {
+            return false;
+        }
+
+        // magnitude of the most-negative value is 2^(bits-1)
+        const uint64_t limit = 1ULL << (size.bit_width() - 1);
+        return value.magnitude <= limit;
+    }
+
+    return value.magnitude <= size.get_max_positive_value();
+}
+
+std::string AST::const_generic_token_refusal(const ValueType &dest, const IntegerTokenBits &value)
+{
+    const IntegerSize size = get_integer_size(dest.get_primitive_type());
+    const std::string written = value.negative
+        ? fmt::format("-{}", value.magnitude)
+        : fmt::format("{}", value.magnitude);
+
+    if (value.negative && !size.is_signed) {
+        return fmt::format(
+            "The literal '{}' is negative, so it cannot be a '{}'. The minimum value is '0'.",
+            written,
+            get_primitive_name(dest.get_primitive_type()));
+    }
+
+    if (value.negative) {
+        return fmt::format(
+            "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.",
+            written,
+            get_primitive_name(dest.get_primitive_type()),
+            size.get_max_negative_value());
+    }
+
+    return const_generic_overflow_sentence(dest, value.magnitude);
 }
 
 AST::ValueType AST::retype_const_generic(const TypeParamDecl &param, ValueType arg)
 {
     if (param.is_value_param() && arg.is_const_value() && param.value_type.is_integer_type()
         && ValueType(arg.const_value_primitive()).is_integer_type()) {
+        const IntegerTokenBits written = bits_of_const_value(arg);
+        if (!const_generic_token_fits(param.value_type, written)) {
+            return arg;
+        }
+
         return ValueType::make_const_value(
-            param.value_type.get_primitive_type(), arg.const_value_bits());
+            param.value_type.get_primitive_type(), integer_token_stored_bits(written));
     }
 
     return arg;
@@ -87,8 +163,11 @@ bool AST::TypeParamDecl::allows(const ValueType &type) const
 {
     if (param_kind == TypeParamKind::t_value) {
         if (type.is_const_value()) {
-            return ValueType(type.const_value_primitive()).is_integer_type()
-                && const_generic_bits_fit(value_type, type.const_value_bits());
+            if (!ValueType(type.const_value_primitive()).is_integer_type()) {
+                return false;
+            }
+
+            return const_generic_token_fits(value_type, bits_of_const_value(type));
         }
 
         if (type.is_type_param() && type.get_type_param()->is_value_param()) {

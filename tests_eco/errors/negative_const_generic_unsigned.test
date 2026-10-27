@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] IntegerOverflow  negative_const_generic_unsigned.eco:7:6
+
+  Integer overflow: The literal '-1' is negative, so it cannot be a 'usize'. The minimum value is '0'.
+
+  6 | 
+  7 | echo U<-1>()->n();
+    :      ^
+  8 | 
+
+1 error, nothing was compiled.

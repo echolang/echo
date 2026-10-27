@@ -27,6 +27,7 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
+#include "Parser/ConstDeclParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/OperatorDeclParser.h"
 #include "Parser/TestDeclParser.h"
@@ -74,6 +75,10 @@ void Parser::finish_place_statement(Parser::Payload &payload, AST::ScopeNode &sc
     // **the same tail Parser::parse_varexpr runs** over a `$var`-rooted target: can this be written to,
     // and at what type. the only difference between the two statements is what the chain is rooted in -
     // a call rather than a name - which is not a difference either question acts on
+    if (target->get_node_type() == AST::NodeType::n_expr_index) {
+        static_cast<AST::IndexExprNode *>(target)->bind_slot(/*assignment=*/true);
+    }
+
     AST::ExprNode *value = parse_assigned_value(payload, target, assign_token);
 
     if (value == nullptr) {
@@ -316,11 +321,9 @@ AST::ScopeNode & Parser::parse_scope(
             // declaration steals it
             Parser::take_pending_doc(payload);
 
-            // the whole statement, not "on to the next terminator": the declaration pass read this one
-            // in full, so its shape is known-good, and a value containing a braced group - a closure
-            // literal, which that pass refuses but only *after* reading it - has a `;` inside it that
-            // is not this statement's
-            cursor.skip_statement();
+            // the declaration pass recorded token_end. skip_statement() would eat the next
+            // statement when the `;` was omitted (`const L = 10` then `echo L;`)
+            skip_parsed_constdecl(payload);
         }
 
         // var declaration

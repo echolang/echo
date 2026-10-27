@@ -387,7 +387,8 @@ namespace AST
         // the rule over a type the caller already holds. result_type() needs the operand's type either
         // way, and deriving it twice walks the operand's subtree twice - a `->` chain re-walks per link
         bool denotes_weak_reference(const ValueType &operand_type) const {
-            return weak_wanted && (operand_type.is_class() || operand_type.is_type_param());
+            const ValueType counted = borrow_target_of(operand_type);
+            return weak_wanted && (counted.is_class() || counted.is_type_param());
         }
 
         bool denotes_weak_reference() const {
@@ -1115,6 +1116,14 @@ namespace AST
         // both flags stay: `slot_is_bound` answers "may this bracket be something other than a read",
         // which the append form needs at both positions, and this answers "is there an `=` behind it"
         bool is_assignment_target = false;
+
+        // the one writer of the two flags above. assignment is the left of `=`; `&$a[]` is not
+        void bind_slot(bool assignment = false) {
+            slot_is_bound = true;
+            if (assignment) {
+                is_assignment_target = true;
+            }
+        }
 
         // true for `$a[]`, which names the slot after the last one rather than an existing element
         bool is_append() const {

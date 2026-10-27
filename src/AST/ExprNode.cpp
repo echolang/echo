@@ -281,7 +281,7 @@ AST::ValueType AST::AddrOfExprNode::result_type() const
     const ValueType operand_type = operand->result_type();
 
     if (denotes_weak_reference(operand_type)) {
-        return ValueType::make_weak(operand_type);
+        return ValueType::make_weak(borrow_target_of(operand_type));
     }
 
     // `&$x` yields the non-nullable borrow `T&`, which widens implicitly to `ptr<T>`. that one

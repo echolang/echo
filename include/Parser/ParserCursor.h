@@ -65,6 +65,15 @@ namespace Parser
             return is_done() ? 0 : range_size() - _index;
         }
 
+        inline size_t position() const {
+            return _index;
+        }
+
+        inline void seek(size_t index) {
+            _index = std::min(index, range_size());
+            _shr_split_index = (size_t)-1;
+        }
+
         inline bool is_empty() const {
             return range_size() == 0;
         }

@@ -19,4 +19,13 @@ expect: fail
      :     ^^^^^^^^^^^
   10 | 
 
-2 errors, nothing was compiled.
+[error] enum_body_refusals.eco:12:5
+
+  'E' is an enum, so it cannot declare a constant. An enum holds `case` declarations, and the functions, operators and statics it answers with.
+
+  11 |     // `E::name` already denotes a case, so a constant beside them would make one spelling mean two
+  12 |     const LIMIT = 4;
+     :     ^^^^^
+  13 | }
+
+3 errors, nothing was compiled.

@@ -217,8 +217,14 @@ namespace AST
                 // from result_type(), so arguments_are_determined below already holds the call for it
                 bind_shorthand_to(arguments[i], expected);
 
-                if (bind_collection_literal_to(arguments[i], expected, collector)) {
-                    waiting_on_a_literal = true;
+                // bind answers whether bound_type changed; waiting is whether expansion still owes
+                // a name. a pack is dest-typed and done - nothing hoists it
+                bind_collection_literal_to(arguments[i], expected, collector);
+                if (CollectionLiteralExprNode *literal = collection_literal_of(arguments[i])) {
+                    const ArrayLiteralExprNode *array = array_literal_of(arguments[i]);
+                    if ((array == nullptr || !array->is_variadic_pack) && !literal->expansion_decided) {
+                        waiting_on_a_literal = true;
+                    }
                 }
 
                 // asked only of a literal nobody has typed, so a round that runs again over a settled

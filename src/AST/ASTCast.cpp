@@ -105,8 +105,17 @@ namespace AST
             return CastLookup::ok(CastKind::t_interface_recast);
         }
 
-        if (arrival_wraps_optional(from, to)) {
-            return CastLookup::ok(CastKind::t_optional_wrap);
+        // tagged T? and flag-nullable C? are one wrap. arrival_wraps_optional stays the
+        // tagged-pair question argument_fit / coerce_value ask; a class handle has no pair
+        if (to.is_nullable() && !from.is_nullable()) {
+            if (to.is_wrapped_optional()) {
+                return CastLookup::ok(CastKind::t_optional_wrap);
+            }
+
+            const ValueType inner = ValueType::make_non_nullable(to);
+            if (from == inner || is_implicitly_convertible(from, inner)) {
+                return CastLookup::ok(CastKind::t_optional_wrap);
+            }
         }
 
         // the same peel CallResolver uses at an argument. a second copy of it is the

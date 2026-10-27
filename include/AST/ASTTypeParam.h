@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTLiteralTyping.h"
 #include "AST/ASTValueType.h"
 #include "Token.h"
 
@@ -39,10 +40,16 @@ namespace AST
     // still the sole owner of "is this type argument allowed" - two callers, one rule
     bool constraint_admits(const std::vector<ValueType> &constraint, const ValueType &type);
 
-    // do these bits sit inside `dest`, a value parameter's integer type. asked by TypeParamDecl::allows
-    // so a `tiny<300>` over `const uint8 N` is refused at the argument rather than interned as bits
-    // the body cannot hold
-    bool const_generic_bits_fit(const ValueType &dest, uint64_t bits);
+    // intern a written integer as a const-generic argument: negatives as int64, values that
+    // do not fit int32 as uint64, so a later `allows` can still see the sign
+    ValueType intern_const_generic_token(const IntegerTokenBits &value);
+
+    // reverse of intern_const_generic_token. unsigned wrap for the magnitude of INT64_MIN
+    IntegerTokenBits bits_of_const_value(const ValueType &type);
+
+    // the one fit check: `S<-3>` refuses an unsigned dest by the written sign, not by wrapping
+    bool const_generic_token_fits(const ValueType &dest, const IntegerTokenBits &value);
+    std::string const_generic_token_refusal(const ValueType &dest, const IntegerTokenBits &value);
 
     // **a written integer at a value parameter.** literals intern as int32; the parameter
     // says usize. one retype so a function's explicit `splat<uint8, 16>` and a struct's

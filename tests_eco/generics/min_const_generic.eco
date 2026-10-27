@@ -1,0 +1,7 @@
+// INT64_MIN as a const-generic argument: magnitude is 2^63, interned without signed negation
+struct S<const int64 N>
+{
+    const function n() : int64 { return N; }
+}
+
+echo S<-9223372036854775808>()->n();

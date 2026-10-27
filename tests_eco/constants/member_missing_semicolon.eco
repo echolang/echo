@@ -1,0 +1,8 @@
+// omitting the `;` after a type-member constant must not swallow the next member
+struct S
+{
+    const MAX = 4
+    function f() : int32 { return self::MAX; }
+}
+
+echo S()->f();

@@ -36,6 +36,11 @@ namespace Parser
         AST::TypeDeclNode *owner,
         VisibilityPrefix visibility
     );
+
+    // body pass: step over a constant the declaration pass already parsed, landing at token_end
+    // so a missing `;` cannot swallow the next statement. `owner` is the same pointer
+    // parse_constdecl took, so the lookup uses the member surface inside a type
+    void skip_parsed_constdecl(Payload &payload, AST::TypeDeclNode *owner = nullptr);
 };
 
 #endif

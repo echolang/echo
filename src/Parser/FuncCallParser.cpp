@@ -90,7 +90,7 @@ static bool parse_explicit_type_args(
             const TokenReference token = cursor.current();
             cursor.skip();
 
-            const std::optional<uint64_t> bits = AST::integer_token_bits(token);
+            const std::optional<AST::IntegerTokenBits> bits = AST::integer_token_bits(token);
             if (!bits.has_value()) {
                 if (!speculative) {
                     payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -101,8 +101,7 @@ static bool parse_explicit_type_args(
             }
 
             AST::TypeNode &node = payload.context.emplace_node<AST::TypeNode>(
-                AST::ValueType::make_const_value(
-                    AST::ValueTypePrimitive::t_int32, *bits),
+                AST::intern_const_generic_token(*bits),
                 token);
             type_args.push_back(&node);
         } else if (value_param != nullptr) {

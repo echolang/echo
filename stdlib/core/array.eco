@@ -866,11 +866,19 @@ operator<T> (const array<T>& $a)[usize $index] : const T&
  * *initialization*: there is no old value there, so none is torn down. That is the compiler's rule
  * (`AssignNode::is_initialization`), not this function's, but it is the reason this function is
  * allowed to hand back a slot it has not filled.
+ *
+ * **`#[inline]`**, and growth only when the slot is missing: `grow_by`'s while inlined into
+ * every append kept a cap phi of "fitted or grown", so a reserved fill never proved realloc
+ * dead. The missing-room arm still calls `grow_by(1)`, which owns overflow and doubling.
  */
+#[inline]
 operator<T> (array<T>& $a)[] : T&
 {
-    $a->grow_by(1);
-    $a->len = $a->len + 1;
+    usize $len = $a->len;
+    if ($len >= $a->storage->capacity()) {
+        $a->grow_by(1);
+    }
 
-    return $a->storage->at($a->len - 1);
+    $a->len = $len + 1;
+    return $a->storage->at($len);
 }

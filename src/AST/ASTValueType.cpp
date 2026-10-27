@@ -1003,6 +1003,15 @@ AST::ValueType AST::value_type_of(const ValueType &type)
     return type.is_pointer() ? type.pointee() : type;
 }
 
+AST::ValueType AST::borrow_target_of(const ValueType &type)
+{
+    if (type.is_pointer() && !type.is_nullable()) {
+        return type.pointee();
+    }
+
+    return type;
+}
+
 AST::ValueType AST::target_type_of(const ValueType &type)
 {
     ValueType target = type;

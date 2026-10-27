@@ -1618,7 +1618,7 @@ void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
     // lowering: `&$obj` on a class hands back the block the handle names, having taken a weak reference
     // to it, and the slot the handle happened to be sitting in is not part of the answer
     if (node.denotes_weak_reference()) {
-        const AST::ValueType class_type = node.operand->result_type();
+        const AST::ValueType class_type = AST::borrow_target_of(node.operand->result_type());
 
         LValue place = _ctx.lvalues->gen_lvalue(*node.operand);
         llvm::Value *handle = _ctx.lvalues->gen_load(place, "obj").scalar();

@@ -43,7 +43,7 @@ namespace AST
             || type == Token::Type::t_binary_literal;
     }
 
-    std::optional<uint64_t> integer_token_bits(const TokenReference &token)
+    std::optional<IntegerTokenBits> integer_token_bits(const TokenReference &token)
     {
         if (!token_is_integer_literal(token.type())) {
             return std::nullopt;
@@ -52,6 +52,12 @@ namespace AST
         const std::string &written = token.value();
         int base = 10;
         const char *digits = written.c_str();
+        bool negative = false;
+
+        if (*digits == '-') {
+            negative = true;
+            digits++;
+        }
 
         if (token.type() == Token::Type::t_hex_literal) {
             base = 16;
@@ -62,6 +68,9 @@ namespace AST
                 return std::nullopt;
             }
             digits = written.c_str() + 2;
+            if (*digits == '-') {
+                return std::nullopt;
+            }
         }
 
         if (*digits == '\0') {
@@ -76,7 +85,20 @@ namespace AST
             return std::nullopt;
         }
 
-        return static_cast<uint64_t>(parsed);
+        // a negative whose magnitude does not fit int64 cannot be stored as two's complement bits
+        if (negative && parsed > (1ULL << 63)) {
+            return std::nullopt;
+        }
+
+        IntegerTokenBits value;
+        value.magnitude = static_cast<uint64_t>(parsed);
+        value.negative = negative && parsed != 0;
+        return value;
+    }
+
+    uint64_t integer_token_stored_bits(const IntegerTokenBits &value)
+    {
+        return value.negative ? (0ull - value.magnitude) : value.magnitude;
     }
 
     // ---------------------------------------------------------------------------
@@ -893,11 +915,9 @@ namespace AST
             // collection literals have no type of their own. a return, a match arm, a `??` fallback
             // and a written `as` are destinations the declaration walk never sees, so this is the
             // round that tells `['a' => [1, 2]]` it fills a `map<string, array<int32>>`
-            if (CollectionLiteralExprNode *literal = collection_literal_of(slot)) {
-                if (!literal->bound_type.has_value()
-                    && bind_collection_literal_to(slot, destination, _collector)) {
-                    changed = true;
-                }
+            if (collection_literal_of(slot)
+                && bind_collection_literal_to(slot, destination, _collector)) {
+                changed = true;
             }
 
             // `$row[] = 'Desk'` is a write through a place, not a call, so CallResolver never

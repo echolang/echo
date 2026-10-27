@@ -77,6 +77,10 @@ namespace Parser
     // a type and then report a missing one
     bool constdecl_omits_its_type(Cursor &cursor);
 
+    // how far a written type extends, shape only. the body pass skip of a parsed constant uses
+    // this to walk an optional type the same way starts_constdecl did
+    bool skip_type_shape(Cursor &cursor);
+
     AST::TypeNode *parse_type(Payload &payload);
 
     // silent: a name the type grammar would read as a primitive (`usize`, `int32`, …).
