@@ -1,0 +1,17 @@
+enum Node
+{
+    case leaf(int32 $n);
+    indirect case box(Node $inner);
+}
+
+function read(const Node& $n) : int32
+{
+    return match ($n) {
+        Node::leaf($v) => $v,
+        Node::box($inner) => read($inner),
+    };
+}
+
+Node $a = .box(.leaf(5));
+Node $b = mv $a;
+echo read($b);

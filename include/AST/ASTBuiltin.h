@@ -163,6 +163,14 @@ namespace AST
         t_realloc_bytes,
         t_free_bytes,
 
+        // free the heap cell of an indirect enum case. planted in the synthesized deinit,
+        // not a name a program can write
+        t_enum_indirect_free,
+
+        // allocate that cell. planted after the tag write in the case constructor and at
+        // the start of each heap-case copy branch
+        t_enum_indirect_alloc,
+
         // how many allocations the three above have outstanding. reads the counter the seam maintains,
         // which is what makes a leak something the corpus can *assert* rather than infer from destructor
         // output - the same argument t_weak_count is here for, one level further down

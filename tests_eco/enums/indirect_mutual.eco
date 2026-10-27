@@ -1,0 +1,23 @@
+enum A
+{
+    case done(int32 $n);
+    indirect case wrap(B $b);
+}
+
+enum B
+{
+    case leaf(A $a);
+}
+
+function read(const A& $a) : int32
+{
+    return match ($a) {
+        A::done($n) => $n,
+        A::wrap($b) => match ($b) {
+            B::leaf($inner) => read($inner),
+        },
+    };
+}
+
+A $a = .wrap(B::leaf(.done(11)));
+echo read($a);

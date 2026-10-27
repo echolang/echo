@@ -532,3 +532,48 @@ TEST_CASE("open integer enum refusals", "[enum]")
         REQUIRE(has_issue_containing(*bundle, "need distinct values"));
     }
 }
+
+TEST_CASE("an indirect case records the flag and breaks a layout cycle", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Node {\n"
+        "    case leaf(int32 $n);\n"
+        "    indirect case binary(Node $left, Node $right);\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ComplexType &type = type_named(bundle->modules.find_module("test"), "Node")->complex_type();
+    REQUIRE_FALSE(type.find_enum_case("leaf")->is_indirect);
+    REQUIRE(type.find_enum_case("binary")->is_indirect);
+    REQUIRE(type.has_indirect_case());
+    REQUIRE(enum_payload_is_heap(*type.find_enum_case("binary")));
+    REQUIRE(classify_copy(type_named(bundle->modules.find_module("test"), "Node")->value_type())
+        == CopyKind::t_synthesizable);
+    REQUIRE(needs_destruction(type_named(bundle->modules.find_module("test"), "Node")->value_type()));
+}
+
+TEST_CASE("an indirect unique payload makes the enum uncopyable", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[unique]\n"
+        "struct Handle { int32 $id; }\n"
+        "enum Hold { indirect case box(Handle $h); }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    REQUIRE(classify_copy(type_named(bundle->modules.find_module("test"), "Hold")->value_type())
+        == CopyKind::t_none);
+}
+
+TEST_CASE("indirect on a payload-free case is refused", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum E { indirect case leaf; }\n");
+    REQUIRE(has_issue_containing(*bundle, "has no payload, so it cannot be indirect"));
+}
+
+TEST_CASE("an inline self-payload names indirect case", "[enum]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "enum Node { case leaf; case binary(Node $left, Node $right); }\n");
+    REQUIRE(has_issue_containing(*bundle, "Write 'indirect case' for a heap payload"));
+}

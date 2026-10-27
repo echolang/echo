@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace Compiler::LLVM
@@ -82,8 +83,37 @@ void fill_structure_body(
         uint64_t max_size = 0;
         uint64_t max_align = 1;
 
+        llvm::Type *ptr_ty = llvm::PointerType::get(context, 0);
+        const uint64_t ptr_size = layout.getTypeAllocSize(ptr_ty);
+        const uint64_t ptr_align = layout.getABITypeAlign(ptr_ty).value();
+
+        Structure &packed = body_of();
+        packed.packed_payload = true;
+        packed.property_byte_offset.assign(type.property_count(), 0);
+        packed.property_in_heap.assign(type.property_count(), 0);
+        packed.enum_heap_cell.assign(type.enum_cases().size(), nullptr);
+        packed.property_case_ordinal.assign(type.property_count(), ~uint32_t{0});
+
         for (const AST::ComplexType::EnumCase &entry : type.enum_cases()) {
             if (!entry.has_payload()) {
+                continue;
+            }
+
+            for (size_t i = 0; i < entry.payload_field_count; i++) {
+                packed.property_case_ordinal[entry.first_payload_property + i] =
+                    static_cast<uint32_t>(entry.ordinal);
+            }
+
+            // an indirect case's cell contains this enum, which is still opaque. measuring it
+            // now is a 0-size layout and a GEP offset that is not the overlay. the overlay
+            // contribution is one pointer; the cell is built after this enum has a body
+            if (AST::enum_payload_is_heap(entry)) {
+                for (size_t i = 0; i < entry.payload_field_count; i++) {
+                    packed.property_in_heap[entry.first_payload_property + i] = 1;
+                }
+
+                max_size = std::max<uint64_t>(max_size, ptr_size);
+                max_align = std::max<uint64_t>(max_align, ptr_align);
                 continue;
             }
 
@@ -110,9 +140,37 @@ void fill_structure_body(
             max_align = std::max<uint64_t>(max_align, case_layout->getAlignment().value());
         }
 
-        Structure &packed = body_of();
-        packed.packed_payload = true;
-        packed.property_byte_offset.assign(type.property_count(), 0);
+        auto finish_heap_cells = [&]() {
+            // the enum has a body now, so a recursive payload can be measured. identified rather
+            // than a literal: a literal of still-opaque elements uniqued as size 0
+            for (const AST::ComplexType::EnumCase &entry : type.enum_cases()) {
+                if (!AST::enum_payload_is_heap(entry)) {
+                    continue;
+                }
+
+                std::vector<llvm::Type *> field_types;
+                field_types.reserve(entry.payload_field_count);
+
+                for (size_t i = 0; i < entry.payload_field_count; i++) {
+                    const size_t prop_i = entry.first_payload_property + i;
+                    field_types.push_back(require_lowered(
+                        lower, type.get_property_type(prop_i), type, prop_i, ctx));
+                }
+
+                llvm::StructType *cell_ty = llvm::StructType::create(
+                    context,
+                    field_types,
+                    "eco.enum.cell." + type.name.value_or("anon") + "." + std::to_string(entry.ordinal));
+                packed.enum_heap_cell[entry.ordinal] = cell_ty;
+
+                const llvm::StructLayout *cell_layout = layout.getStructLayout(cell_ty);
+
+                for (size_t i = 0; i < entry.payload_field_count; i++) {
+                    const size_t prop_i = entry.first_payload_property + i;
+                    packed.property_byte_offset[prop_i] = cell_layout->getElementOffset(i);
+                }
+            }
+        };
 
         // a payload of only zero-sized fields still overlays: the AST has slots, the LLVM
         // type is just the tag, and the offset table names the one-past-the-tag address a
@@ -124,10 +182,15 @@ void fill_structure_body(
             }
 
             const uint64_t payload_start = layout.getTypeAllocSize(packed.llvm_struct);
+            packed.packed_payload_offset = payload_start;
+
             for (size_t i = 1; i < type.property_count(); i++) {
-                packed.property_byte_offset[i] = payload_start + relative[i];
+                if (!packed.property_lives_in_heap(i)) {
+                    packed.property_byte_offset[i] = payload_start + relative[i];
+                }
             }
 
+            finish_heap_cells();
             return;
         }
 
@@ -140,10 +203,15 @@ void fill_structure_body(
         }
 
         const uint64_t payload_start = layout.getStructLayout(packed.llvm_struct)->getElementOffset(1);
+        packed.packed_payload_offset = payload_start;
+
         for (size_t i = 1; i < type.property_count(); i++) {
-            packed.property_byte_offset[i] = payload_start + relative[i];
+            if (!packed.property_lives_in_heap(i)) {
+                packed.property_byte_offset[i] = payload_start + relative[i];
+            }
         }
 
+        finish_heap_cells();
         return;
     }
 

@@ -1,0 +1,16 @@
+enum Node
+{
+    case leaf(int32 $n);
+    indirect case binary(Node $left, Node $right);
+}
+
+function eval(const Node& $n) : int32
+{
+    return match ($n) {
+        Node::leaf($v) => $v,
+        Node::binary($l, $r) => eval($l) + eval($r),
+    };
+}
+
+Node $t = .binary(.leaf(1), .leaf(2));
+echo eval($t);

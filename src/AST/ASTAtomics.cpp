@@ -45,6 +45,8 @@ namespace AST
             case BuiltinKind::t_alloc_bytes:
             case BuiltinKind::t_realloc_bytes:
             case BuiltinKind::t_free_bytes:
+            case BuiltinKind::t_enum_indirect_free:
+            case BuiltinKind::t_enum_indirect_alloc:
             case BuiltinKind::t_live_allocations:
             case BuiltinKind::t_process_argc:
             case BuiltinKind::t_hash_seed:

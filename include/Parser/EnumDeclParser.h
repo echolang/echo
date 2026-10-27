@@ -14,7 +14,15 @@ namespace Parser
     // than a contextual word, unlike `constructor` beside it: `case timeout(int32 $a);` and a statement
     // calling a function named `timeout` are the same tokens, and only the keyword tells them apart
     inline bool starts_enum_case(const Cursor &cursor) {
-        return cursor.is_type(Token::Type::t_case);
+        if (cursor.is_type(Token::Type::t_case)) {
+            return true;
+        }
+
+        // contextual `indirect case`, same recognition as `map` in this body. `indirect` stays
+        // an ordinary identifier everywhere else
+        return cursor.is_type(Token::Type::t_identifier)
+            && cursor.current().value() == "indirect"
+            && cursor.peek_is_type(1, Token::Type::t_case);
     }
 
     // **appends `__tag`, and must be called before the first case is read** - the discriminant is
@@ -27,7 +35,8 @@ namespace Parser
     // 256 cases is refused here, naming `: int32` as the answer
     void declare_enum_tag(Payload &payload, AST::TypeDeclNode *enum_node);
 
-    // reads one case, cursor on the `case` keyword, and consumes through its `;`.
+    // reads one case, cursor on `case` or on contextual `indirect` immediately before it,
+    // and consumes through its `;`.
     //
     // **parsed in both passes and recorded in one**, which is the rule the whole type body follows: the
     // two walks must agree about where a member ends, so the consuming half is unconditional and

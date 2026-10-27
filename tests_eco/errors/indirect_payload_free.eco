@@ -1,0 +1,6 @@
+enum E
+{
+    indirect case leaf;
+}
+
+echo 1;

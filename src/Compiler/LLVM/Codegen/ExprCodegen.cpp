@@ -33,6 +33,7 @@
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "eco.h"
+#include "Compiler/LLVM/Codegen/EnumIndirect.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
@@ -1074,6 +1075,14 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             gen_raw_memory_builtin(node, kind);
             return;
 
+        case AST::BuiltinKind::t_enum_indirect_free:
+            gen_enum_indirect_free(node);
+            return;
+
+        case AST::BuiltinKind::t_enum_indirect_alloc:
+            gen_enum_indirect_alloc(node);
+            return;
+
         case AST::BuiltinKind::t_live_allocations:
             gen_live_allocations_builtin(node);
             return;
@@ -1375,6 +1384,8 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_enum_indirect_free:
+        case AST::BuiltinKind::t_enum_indirect_alloc:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_hash_seed:
@@ -1529,6 +1540,22 @@ void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::B
         CodegenValue::scalar(block), block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
 }
 
+void ExprCodegen::gen_enum_indirect_free(AST::FunctionCallExprNode &node)
+{
+    LValue place = _ctx.lvalues->gen_place(*node.arguments[0]);
+    const Structure &structure = _ctx.lvalues->structure_of(
+        place.storage_type.get_complex_type(), place.storage_type);
+    EnumIndirect::free_cell(_ctx, structure, place);
+}
+
+void ExprCodegen::gen_enum_indirect_alloc(AST::FunctionCallExprNode &node)
+{
+    LValue place = _ctx.lvalues->gen_place(*node.arguments[0]);
+    const Structure &structure = _ctx.lvalues->structure_of(
+        place.storage_type.get_complex_type(), place.storage_type);
+    EnumIndirect::alloc_cell(_ctx, structure, place);
+}
+
 void ExprCodegen::gen_live_allocations_builtin(AST::FunctionCallExprNode &node)
 {
     // no argument check: the declaration takes none, so AST::CallResolver already refused every call
@@ -1620,7 +1647,9 @@ void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
     if (node.denotes_weak_reference()) {
         const AST::ValueType class_type = AST::borrow_target_of(node.operand->result_type());
 
-        LValue place = _ctx.lvalues->gen_lvalue(*node.operand);
+        // gen_place peels a T& operand to the T's slot, so `&$this` / `&$from` load the
+        // handle rather than the borrow parameter
+        LValue place = _ctx.lvalues->gen_place(*node.operand);
         llvm::Value *handle = _ctx.lvalues->gen_load(place, "obj").scalar();
 
         _ctx.push_scalar(_ctx.classes->gen_weak_of(handle, class_type));

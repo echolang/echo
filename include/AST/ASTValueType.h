@@ -1362,6 +1362,11 @@ namespace AST
             // `value()` the integer. codegen's switch default, never an addCase
             bool is_open_remainder = false;
 
+            // the payload lives in a header-free heap cell, and the overlay holds a pointer.
+            // leaves of sibling cases stay inline. a flag beside is_open_remainder, copied with
+            // the case table onto every instantiation
+            bool is_indirect = false;
+
             bool has_payload() const {
                 return payload_field_count > 0;
             }
@@ -1401,6 +1406,18 @@ namespace AST
 
             return false;
         }
+
+        // any case whose payload is a heap cell. asks enum_payload_is_heap, so a change
+        // to that question cannot miss this reader. walks the template during intern
+        bool has_indirect_case() const;
+
+        // the case whose payload range holds this property, or null. `__tag` belongs to none.
+        // reads the template's case table: an instantiation interned while a case was still
+        // being parsed would otherwise walk heap fields as inline
+        const EnumCase *case_owning_property(size_t property_index) const;
+
+        // the skip sites share: this property is a heap-cell field of an indirect case
+        bool property_is_heap_payload(size_t property_index) const;
 
         // Parser::finalize_enum's write, after the case list is complete. ordinal is
         // EnumCase::ordinal, which is also the index in `_enum_cases`
@@ -1628,6 +1645,27 @@ namespace AST
 
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };
+
+    // **is this case's payload a heap cell?** the one reader. layout, copy, destruction and
+    // codegen all ask it
+    inline bool enum_payload_is_heap(const ComplexType::EnumCase &entry) {
+        return entry.is_indirect;
+    }
+
+    inline bool ComplexType::has_indirect_case() const {
+        for (const EnumCase &entry : template_or_self()->enum_cases()) {
+            if (enum_payload_is_heap(entry)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    inline bool ComplexType::property_is_heap_payload(size_t property_index) const {
+        const EnumCase *owner = case_owning_property(property_index);
+        return owner != nullptr && enum_payload_is_heap(*owner);
+    }
 
     // the three that read the *layout*, so they sit here rather than in the class body: ComplexType is
     // declared after ValueType, and a member function cannot reach into an incomplete type. still inline,

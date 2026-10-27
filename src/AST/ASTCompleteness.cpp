@@ -161,6 +161,14 @@ namespace
             }
         }
 
+        if (named.is_enum()) {
+            return fmt::format(
+                "'{}' contains itself through '{}' - a case payload is stored inline, so a cycle "
+                "has no size. Write 'indirect case' for a heap payload.",
+                named.get_type_desciption(),
+                closing.get_type_desciption());
+        }
+
         return fmt::format(
             "'{}' contains itself through '{}' - a struct field is stored inline, so a cycle "
             "has no size. Use a class, or 'ptr<{}>'.",
@@ -215,6 +223,10 @@ namespace
         path.push_back(type);
         std::optional<std::string> refusal;
         for (size_t i = 0; i < ct->property_count(); i++) {
+            if (ct->property_is_heap_payload(i)) {
+                continue;
+            }
+
             refusal = walk_layout(ct->get_property_type(i), path);
             if (refusal.has_value()) {
                 break;

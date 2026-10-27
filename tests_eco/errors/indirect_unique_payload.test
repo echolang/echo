@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCopy  indirect_unique_payload.eco:14:11
+
+  'Hold' owns a resource and cannot be copied implicitly at this declaration.
+
+  13 | Hold $a = .box(Handle(1));
+  14 | Hold $b = $a;
+     :           ^^
+  15 | 
+
+  help: Write 'mv $a' to transfer ownership, take a borrow ('Hold&') if the value is only being read, or give 'Hold' a copy constructor ('constructor(Hold& $other)').
+
+1 error, nothing was compiled.

@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] enum_layout_cycle_suggests_indirect.eco:5:22
+
+  'Node' contains itself through 'Node' - a case payload is stored inline, so a cycle has no size. Write 'indirect case' for a heap payload.
+
+  4 |     case leaf;
+  5 |     case binary(Node $left, Node $right);
+    :                      ^^^^^^^^^^
+  6 | }
+
+[error] enum_layout_cycle_suggests_indirect.eco:5:34
+
+  'Node' contains itself through 'Node' - a case payload is stored inline, so a cycle has no size. Write 'indirect case' for a heap payload.
+
+  4 |     case leaf;
+  5 |     case binary(Node $left, Node $right);
+    :                                  ^^^^^^^^
+  6 | }
+
+2 errors, nothing was compiled.

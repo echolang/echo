@@ -4,6 +4,8 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/FunctionDeclNode.h"
 
+#include <vector>
+
 AST::FunctionDeclNode *AST::copy_constructor_for(const AST::ValueType &type)
 {
     if (!type.has_complex_type()) {
@@ -35,21 +37,53 @@ bool AST::is_copy_function(const FunctionDeclNode *decl)
 
 namespace
 {
+    using namespace AST;
+
+    struct CopyWalk
+    {
+        std::vector<const AST::ComplexType *> stack;
+
+        bool visiting(const AST::ComplexType *ct) const
+        {
+            for (const AST::ComplexType *seen : stack) {
+                if (seen == ct) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        AST::CopyKind classify(const AST::ValueType &type);
+        AST::CopyKind fold(const AST::ComplexType *ct);
+        bool source_may_be_const(const AST::ValueType &type);
+    };
+
     // **the one walk**: a struct is copied by copying each of its properties, so its answer is the fold
     // of theirs. the copying counterpart of ASTDestruction.cpp's body_needs_destruction, and the same
     // shape - the walk lives here, the classifier below owns the guards that decide whether to reach it
     //
     // asked through the same classifier the ownership pass switches on, so "has somebody said how this
     // is copied" cannot come apart from "what does copying it do"
-    AST::CopyKind fold_property_copies(const AST::ComplexType *ct)
+    //
+    // a heap payload of this type (or of a mutual partner already on the stack) is this type's
+    // own answer, the class-handle termination: skip would hide a unique or mutable-copy field
+    AST::CopyKind CopyWalk::fold(const AST::ComplexType *ct)
     {
-        bool anything_to_arrange = false;
+        if (visiting(ct)) {
+            return AST::CopyKind::t_synthesizable;
+        }
+
+        stack.push_back(ct);
+
+        bool anything_to_arrange = ct->has_indirect_case();
 
         for (size_t i = 0; i < ct->property_count(); i++) {
-            switch (AST::classify_copy(ct->get_property_type(i))) {
+            switch (classify(ct->get_property_type(i))) {
                 // one property with no rule is enough: it would be copied as bytes alongside the ones
                 // that do have one, leaving two owners of one resource
                 case AST::CopyKind::t_none:
+                    stack.pop_back();
                     return AST::CopyKind::t_none;
 
                 // a property that copies as bytes says nothing about the struct holding it - a struct
@@ -69,11 +103,11 @@ namespace
             }
         }
 
+        stack.pop_back();
         return anything_to_arrange ? AST::CopyKind::t_synthesizable : AST::CopyKind::t_bytes;
     }
-};
 
-AST::CopyKind AST::classify_copy(const AST::ValueType &type)
+AST::CopyKind CopyWalk::classify(const AST::ValueType &type)
 {
     // a layout cycle has no size, so it has no copy. AST::layout_cycle_refusal is the sentence;
     // TypeChecker reports it. the fold below would otherwise walk `Node?` into `Node` forever
@@ -133,7 +167,7 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
     }
 
     if (type.is_inline_array()) {
-        switch (AST::classify_copy(type.array_element())) {
+        switch (classify(type.array_element())) {
         case AST::CopyKind::t_bytes:
             return AST::CopyKind::t_bytes;
 
@@ -169,12 +203,12 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
         return AST::CopyKind::t_none;
     }
 
-    return fold_property_copies(ct);
+    return fold(ct);
 }
 
-bool AST::copy_source_may_be_const(const AST::ValueType &type)
+bool CopyWalk::source_may_be_const(const AST::ValueType &type)
 {
-    switch (AST::classify_copy(type)) {
+    switch (classify(type)) {
         // nothing is called, so there is nothing to be refused by. bytes are read wherever they sit, and
         // a retain writes a count inside the block rather than through the handle it was handed
         case AST::CopyKind::t_bytes:
@@ -199,12 +233,20 @@ bool AST::copy_source_may_be_const(const AST::ValueType &type)
         {
             const AST::ComplexType *ct = type.get_complex_type();
 
+            if (visiting(ct)) {
+                return true;
+            }
+
+            stack.push_back(ct);
+
             for (size_t i = 0; i < ct->property_count(); i++) {
-                if (!AST::copy_source_may_be_const(ct->get_property_type(i))) {
+                if (!source_may_be_const(ct->get_property_type(i))) {
+                    stack.pop_back();
                     return false;
                 }
             }
 
+            stack.pop_back();
             return true;
         }
 
@@ -216,8 +258,20 @@ bool AST::copy_source_may_be_const(const AST::ValueType &type)
         // the loop copies each element the way that element is copied, so a const source is
         // readable exactly when T is
         case AST::CopyKind::t_elements:
-            return AST::copy_source_may_be_const(type.array_element());
+            return source_may_be_const(type.array_element());
     }
 
     return true;
+}
+
+};
+
+AST::CopyKind AST::classify_copy(const AST::ValueType &type)
+{
+    return CopyWalk{}.classify(type);
+}
+
+bool AST::copy_source_may_be_const(const AST::ValueType &type)
+{
+    return CopyWalk{}.source_may_be_const(type);
 }

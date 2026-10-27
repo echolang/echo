@@ -1,0 +1,33 @@
+struct Fat
+{
+    int64 $a;
+    int64 $b;
+    int64 $c;
+    int64 $d;
+}
+
+enum Slim
+{
+    case small(int32 $n);
+    indirect case heavy(Fat $f);
+}
+
+enum Wide
+{
+    case small(int32 $n);
+    case heavy(Fat $f);
+}
+
+echo mem::size<Slim>();
+echo mem::size<Wide>();
+echo mem::size<Slim>() < mem::size<Wide>();
+
+echo match (Slim::small(7)) {
+    Slim::small($n) => $n,
+    Slim::heavy($f) => 0,
+};
+
+echo match (Slim::heavy(Fat(1, 2, 3, 4))) {
+    Slim::small($n) => 0 as int64,
+    Slim::heavy($f) => $f->d,
+};

@@ -180,6 +180,37 @@ void read_case_value(
         : value.int64_value();
 }
 
+AST::FunctionDeclNode &ensure_enum_indirect_alloc(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *enum_node,
+    const AST::ValueType &self_value_type,
+    const TokenReference &at
+)
+{
+    AST::ComplexType &owner = enum_node->complex_type();
+
+    for (AST::FunctionDeclNode *method : owner.methods()) {
+        if (method->builtin == "enum_indirect_alloc") {
+            return *method;
+        }
+    }
+
+    auto name = payload.context.make_virtual_token(
+        "$enum_indirect_alloc", Token::Type::t_identifier, at);
+    AST::FunctionDeclNode &decl = Parser::begin_synthesized_enum_function(
+        payload, owner, name, AST::MemberKind::t_method, AST::ValueType::make_void());
+    decl.builtin = "enum_indirect_alloc";
+
+    auto &self_type = payload.context.emplace_node<AST::TypeNode>(
+        AST::ValueType::make_pointer(self_value_type, false));
+    auto &param = payload.context.emplace_node<AST::VarDeclNode>(
+        payload.context.make_virtual_token("$this", Token::Type::t_varname, at),
+        &self_type);
+    decl.args.push_back(&param);
+    owner.add_method(&decl);
+    return decl;
+}
+
 // **the body of a case constructor, which is a constructor body in every respect but its name.**
 //
 // so it is built out of AST::declare_constructor_this and AST::close_constructor_body rather than out
@@ -193,7 +224,8 @@ void build_enum_case_body(
     AST::TypeDeclNode *enum_node,
     AST::FunctionDeclNode &constructor,
     AST::ScopeNode &body,
-    const AST::ComplexType::EnumCase &entry
+    const AST::ComplexType::EnumCase &entry,
+    const AST::ValueType &self_value_type
 )
 {
     const TokenReference at = constructor.declaration_site_token();
@@ -224,6 +256,17 @@ void build_enum_case_body(
     // fresh storage: the local was declared one statement ago and holds nothing owed an end
     tag_write->is_initialization = true;
     body.children.push_back(AST::make_ref(*tag_write));
+
+    if (AST::enum_payload_is_heap(entry)) {
+        AST::FunctionDeclNode &alloc = ensure_enum_indirect_alloc(
+            payload, enum_node, self_value_type, at);
+        body.children.push_back(AST::make_ref(
+            AST::make_resolved_member_call(
+                payload.context.module,
+                &alloc,
+                at,
+                &AST::local_place(payload.context.module, value))));
+    }
 
     // and the payload, through the same AST::seat_property_from_parameter the field-wise constructor
     // seats a struct's properties with - the pointer binding, the initialization and the hand-over are
@@ -391,6 +434,13 @@ void Parser::parse_enum_case(
     auto &cursor = payload.cursor;
     AST::ComplexType &owner = enum_node->complex_type();
 
+    bool is_indirect = false;
+
+    if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "indirect") {
+        cursor.skip();
+        is_indirect = true;
+    }
+
     cursor.skip(); // `case`
 
     if (!payload.expect_token(Token::Type::t_identifier)) {
@@ -494,6 +544,7 @@ void Parser::parse_enum_case(
     entry.first_payload_property = enum_node->properties().size();
     entry.payload_field_count = constructor != nullptr ? constructor->args.size() : 0;
     entry.has_explicit_discriminant = value_token.has_value();
+    entry.is_indirect = is_indirect;
 
     if (constructor != nullptr) {
         for (const AST::VarDeclNode *field : constructor->args) {
@@ -512,6 +563,16 @@ void Parser::parse_enum_case(
             "A case cannot carry a payload and a backing value.");
     }
 
+    if (is_indirect && !entry.has_payload()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            fmt::format(
+                "'{}' has no payload, so it cannot be indirect - only a case that carries values "
+                "has a cell to place on the heap.",
+                name_token.value()));
+        entry.is_indirect = false;
+    }
+
     owner.add_enum_case(entry);
 
     // a payload case is never the leftover - a leftover cannot carry a payload - so its constructor
@@ -521,7 +582,12 @@ void Parser::parse_enum_case(
             payload.collector, payload.context.code_ref(name_token), constructor, owner);
 
         build_enum_case_body(
-            payload, enum_node, *constructor, *constructor->body, owner.enum_cases().back());
+            payload,
+            enum_node,
+            *constructor,
+            *constructor->body,
+            owner.enum_cases().back(),
+            self_value_type);
     }
 }
 
@@ -654,7 +720,7 @@ void complete_payload_free_constructors(
             &decl,
             owner);
 
-        build_enum_case_body(payload, enum_node, decl, *decl.body, entry);
+        build_enum_case_body(payload, enum_node, decl, *decl.body, entry, self_value_type);
     }
 }
 

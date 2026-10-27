@@ -3093,6 +3093,8 @@ void OwnershipPass::emit_enum_case_drops(
     const TokenReference &at
 )
 {
+    FunctionDeclNode *free_callee = nullptr;
+
     for (const ComplexType::EnumCase &entry : ct->enum_cases()) {
         std::vector<NodeReference> case_drops;
 
@@ -3108,6 +3110,23 @@ void OwnershipPass::emit_enum_case_drops(
 
             std::vector<std::string> path{ prop.name };
             emit_drop(root, path, prop.type, case_drops);
+        }
+
+        if (enum_payload_is_heap(entry)) {
+            if (free_callee == nullptr) {
+                ComplexType *layout = const_cast<ComplexType *>(ct);
+                auto &decl = begin_synthesized_decl("$enum_indirect_free", at);
+                decl.builtin = "enum_indirect_free";
+                decl.member_kind = MemberKind::t_method;
+                decl.owner_type = layout;
+                decl.return_type = &_current_module->nodes.emplace_back<TypeNode>(
+                    ValueType::make_void());
+                add_borrow_parameter(decl, "$this", ValueType::make_complex(layout), at);
+                free_callee = &decl;
+            }
+
+            case_drops.push_back(make_ref(
+                emit_resolved_member_call(free_callee, at, make_place(root, {}))));
         }
 
         // a case that owns nothing reaches no new code at all - not even an empty branch. the same
@@ -3763,8 +3782,29 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     }
 
     // and the enum's, one per case that has a payload, for the same reason and read off `$other` for
-    // the same one: it is `$other`'s payload each branch copies
+    // the same one: it is `$other`'s payload each branch copies. a heap case plants the cell
+    // first, so the field writes GEP a live overlay rather than allocating from property_place
+    FunctionDeclNode *alloc_callee = nullptr;
+
     for (const auto &[entry, scope] : case_scopes) {
+        if (enum_payload_is_heap(*entry)) {
+            if (alloc_callee == nullptr) {
+                auto &alloc = begin_synthesized_decl("$enum_indirect_alloc", at.value());
+                alloc.builtin = "enum_indirect_alloc";
+                alloc.member_kind = MemberKind::t_method;
+                alloc.owner_type = ct;
+                alloc.return_type = &_current_module->nodes.emplace_back<TypeNode>(
+                    ValueType::make_void());
+                add_borrow_parameter(alloc, "$this", ValueType::make_complex(ct), at.value());
+                alloc_callee = &alloc;
+            }
+
+            scope->children.insert(
+                scope->children.begin(),
+                make_ref(emit_resolved_member_call(
+                    alloc_callee, at.value(), make_place(&this_decl, {}))));
+        }
+
         body.children.push_back(
             make_ref(branch_when_case(&other_decl, ct, entry->discriminant, scope, at.value())));
     }

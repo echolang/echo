@@ -1,0 +1,13 @@
+enum Node
+{
+    case leaf(int32 $n);
+    indirect case binary(Node $left, Node $right);
+}
+
+function build() : void
+{
+    Node $t = .binary(.leaf(1), .leaf(2));
+}
+
+build();
+echo mem::live_allocations();

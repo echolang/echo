@@ -1,0 +1,14 @@
+// an indirect unique payload is uncopyable at the use, not inside $copy
+#[unique]
+struct Handle
+{
+    int32 $id;
+}
+
+enum Hold
+{
+    indirect case box(Handle $h);
+}
+
+Hold $a = .box(Handle(1));
+Hold $b = $a;

@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <vector>
 
 namespace Compiler::LLVM
@@ -45,6 +46,23 @@ namespace Compiler::LLVM
         bool has_packed_payload() const {
             return packed_payload;
         }
+
+        // packed enum: byte offset of the overlay payload region. an indirect case stores its
+        // cell pointer here. 0 when there is no packed payload
+        uint64_t packed_payload_offset = 0;
+
+        // per AST property: 1 when this payload field lives in a heap cell. empty when none do
+        std::vector<char> property_in_heap;
+
+        bool property_lives_in_heap(size_t index) const {
+            return index < property_in_heap.size() && property_in_heap[index] != 0;
+        }
+
+        // per enum case ordinal: LLVM struct of an indirect case's cell, or null
+        std::vector<llvm::StructType *> enum_heap_cell;
+
+        // per AST property: the case ordinal that owns it, or ~0u for `__tag`
+        std::vector<uint32_t> property_case_ordinal;
 
         // a class only: the heap block wrapping that payload, and the per-class identity global
         // both null for a struct, which has no block and no runtime metadata at all. see

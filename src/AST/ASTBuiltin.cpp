@@ -41,6 +41,8 @@ namespace
             { "alloc_bytes", AST::BuiltinKind::t_alloc_bytes },
             { "realloc_bytes", AST::BuiltinKind::t_realloc_bytes },
             { "free_bytes", AST::BuiltinKind::t_free_bytes },
+            { "enum_indirect_free", AST::BuiltinKind::t_enum_indirect_free },
+            { "enum_indirect_alloc", AST::BuiltinKind::t_enum_indirect_alloc },
             { "live_allocations", AST::BuiltinKind::t_live_allocations },
             { "process_argc", AST::BuiltinKind::t_process_argc },
             { "process_argv", AST::BuiltinKind::t_process_argv },
@@ -151,6 +153,8 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_enum_indirect_free:
+        case AST::BuiltinKind::t_enum_indirect_alloc:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_hash_seed:
@@ -218,6 +222,8 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_enum_indirect_free:
+        case AST::BuiltinKind::t_enum_indirect_alloc:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_hash_seed:
@@ -289,6 +295,8 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_enum_indirect_free:
+        case AST::BuiltinKind::t_enum_indirect_alloc:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_hash_seed:
@@ -363,6 +371,8 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_enum_indirect_free:
+        case AST::BuiltinKind::t_enum_indirect_alloc:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_hash_seed:
@@ -436,6 +446,8 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_enum_indirect_free:
+        case AST::BuiltinKind::t_enum_indirect_alloc:
         case AST::BuiltinKind::t_live_allocations:
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_hash_seed:

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] indirect_payload_free.eco:3:19
+
+  'leaf' has no payload, so it cannot be indirect - only a case that carries values has a cell to place on the heap.
+
+  2 | {
+  3 |     indirect case leaf;
+    :                   ^^^^
+  4 | }
+
+1 error, nothing was compiled.

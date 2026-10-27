@@ -1,0 +1,16 @@
+enum Tree<T>
+{
+    case leaf(T $v);
+    indirect case node(Tree<T> $left, Tree<T> $right);
+}
+
+function sum(const Tree<int32>& $t) : int32
+{
+    return match ($t) {
+        Tree<int32>::leaf($v) => $v,
+        Tree<int32>::node($l, $r) => sum($l) + sum($r),
+    };
+}
+
+Tree<int32> $t = .node(.leaf(3), .leaf(4));
+echo sum($t);

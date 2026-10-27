@@ -1,0 +1,8 @@
+// a case payload is stored inline, so Node inside Node has no size
+enum Node
+{
+    case leaf;
+    case binary(Node $left, Node $right);
+}
+
+echo 1;

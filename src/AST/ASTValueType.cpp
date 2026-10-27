@@ -769,6 +769,14 @@ void AST::TypeRegistry::derive_instantiation(
     inst->is_unique = tmpl->is_unique;
     inst->is_atomic = tmpl->is_atomic;
 
+    // the case table grows while a payload type intern is in flight. a cache hit that
+    // refreshed properties and left the intern-time snapshot would lay heap fields out
+    // as inline overlay
+    inst->_enum_cases = tmpl->_enum_cases;
+    inst->enum_backing = tmpl->enum_backing;
+    inst->enum_backing_refused = tmpl->enum_backing_refused;
+    inst->enum_closed_from = tmpl->enum_closed_from;
+
     inst->_properties.clear();
     inst->_property_map.clear();
     for (const auto &prop : tmpl->_properties) {
@@ -970,6 +978,22 @@ std::string AST::enum_case_construction_refusal(const ValueType &owner, const st
 std::string AST::enum_payload_property_name(size_t case_ordinal, const std::string &field_name)
 {
     return fmt::format("__c{}_{}", case_ordinal, field_name);
+}
+
+const AST::ComplexType::EnumCase *AST::ComplexType::case_owning_property(size_t property_index) const
+{
+    if (property_index == k_enum_tag_index) {
+        return nullptr;
+    }
+
+    for (const EnumCase &entry : template_or_self()->enum_cases()) {
+        if (property_index >= entry.first_payload_property
+            && property_index < entry.first_payload_property + entry.payload_field_count) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
 }
 
 AST::TypeParamDecl *AST::ComplexType::find_associated_type(const std::string &name) const

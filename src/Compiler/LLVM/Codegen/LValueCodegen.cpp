@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 
 #include "AST/StaticPropertyExprNode.h"
+#include "Compiler/LLVM/Codegen/EnumIndirect.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/SimdCodegen.h"
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
@@ -422,6 +423,18 @@ LValue LValueCodegen::property_place(
     const char *name
 )
 {
+    if (structure.property_lives_in_heap(property_index)) {
+        llvm::Value *cell = EnumIndirect::load_cell(_ctx, structure, base, property_index);
+        llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
+        llvm::Value *offset = llvm::ConstantInt::get(
+            llvm::Type::getInt64Ty(*_ctx.llvm_context),
+            structure.property_byte_offset[property_index]);
+        llvm::Value *address = _ctx.builder->CreateGEP(i8, cell, offset, name);
+
+        // the cell is exclusive to this case, so its fields do not overlay. a raw base stays raw
+        return LValue{ address, property_type, base.provenance };
+    }
+
     llvm::Value *address = gep_property(structure, base.address, property_index, name);
 
     // **inherited from the base, never assumed.** a field of a local is typed; the same field

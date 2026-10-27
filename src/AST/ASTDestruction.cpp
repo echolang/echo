@@ -86,6 +86,13 @@ bool AST::properties_need_destruction(const AST::ComplexType *ct)
     // asked of the *instantiation's* properties rather than the template's: `Box<Buffer>` needs
     // destruction where `Box<int32>` does not, and only the instantiation's layout has the substituted
     // property types. terminates on a class-typed property, which answers true without descending
+    //
+    // an indirect case owns a heap cell even when its fields are ints, and walking those fields
+    // as inline storage would recurse through a recursive enum forever
+    if (ct->has_indirect_case()) {
+        return true;
+    }
+
     for (size_t i = 0; i < ct->property_count(); i++) {
         if (AST::needs_destruction(ct->get_property_type(i))) {
             return true;
