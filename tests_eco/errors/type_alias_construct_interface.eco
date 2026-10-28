@@ -1,0 +1,8 @@
+interface Gate
+{
+    function address() : string;
+}
+
+type Portal = Gate;
+
+Portal $p = Portal();

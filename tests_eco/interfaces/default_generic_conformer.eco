@@ -1,0 +1,59 @@
+// a repository shaped like the one that asked for defaults: the interface forwards to the store its
+// conformer hands over, and a generic conformer gets the defaults instantiated per instance of itself
+class Engine<M>
+{
+    array<M> $rows = [];
+
+    function create(M $model) : M
+    {
+        $this->rows->push($model);
+        return $model;
+    }
+
+    function count() : usize { return $this->rows->count(); }
+}
+
+interface Repository<M>
+{
+    function store() : Engine<M>;
+
+    function create(M $model) : M { return $this->store()->create($model); }
+    function count() : usize { return $this->store()->count(); }
+}
+
+class Users : Repository<string>
+{
+    Engine<string> $engine = Engine<string>();
+
+    function store() : Engine<string> { return $this->engine; }
+
+    function admins() : usize
+    {
+        $this->create('root');
+        return $this->count();
+    }
+}
+
+class Bucket<E> : Repository<E>
+{
+    Engine<E> $engine;
+
+    constructor() { $this->engine = Engine<E>(); }
+
+    function store() : Engine<E> { return $this->engine; }
+}
+
+Users $u = Users();
+echo $u->create('mario');
+echo $u->admins();
+
+Bucket<int32> $b = Bucket<int32>();
+$b->create(7);
+echo $b->count();
+
+Repository<int32> $r = $b;
+$r->create(8);
+echo $r->count();
+
+Bucket<string> $names = Bucket<string>();
+echo $names->create('daniel');

@@ -70,6 +70,7 @@ public: \
 
 namespace AST
 {
+    class Collector;
     class VarDeclNode;
     enum class ValueTypePrimitive;
     class ValueType;
@@ -214,7 +215,8 @@ namespace AST
         MAKE_ISSUE_DEF1(IntegerUnderflow, IssueSeverity::Error, const std::string, _message);
 
         // semantic analysis diagnostics (recorded by the type-check pass, never thrown)
-        MAKE_ISSUE_DEF2(UnknownMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
+        // `in_default_of` names the interface when reached through a default's `$this`, else empty
+        MAKE_ISSUE_DEF3(UnknownMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name, const std::string, in_default_of, std::vector<IssueNote> notes() const override;);
         // the same shape as UnknownMember on purpose: "no such member" and "no such static" are one
         // kind of mistake on two axes, and a reader who wrote the wrong one of `->` and `::` needs the
         // two messages to look alike enough to see which they got
@@ -234,6 +236,9 @@ namespace AST
         // anything - every use site trusts the claim without re-deriving it, so this is where the claim
         // is paid for
         MAKE_ISSUE_DEF1(UnmetInterfaceRequirement, IssueSeverity::Error, const std::string, _message);
+
+        // two conformances offer a default of one name the type does not declare
+        MAKE_ISSUE_DEF1(AmbiguousDefault, IssueSeverity::Error, const std::string, _message);
 
         // overload resolution. a name that is not declared at all stays UnknownFunction - these
         // three are the cases where candidates exist but none or several of them answer the call
@@ -442,5 +447,13 @@ namespace AST
         MAKE_ISSUE_DEF1(UntokenizableManifest, IssueSeverity::Error, const std::string, _message);
 
     };
+
+    // UnknownMember, with the default-body note when `receiver` is a default's `$this`
+    void report_unknown_member(
+        Collector &collector,
+        const CodeRef &at,
+        const std::string &member_name,
+        const std::string &type_name,
+        const VarDeclNode *receiver = nullptr);
 };
 #endif

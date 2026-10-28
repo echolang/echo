@@ -1,0 +1,25 @@
+// the interfaces and their defaults live in another module. each default is instantiated for a
+// conformer declared here, and so is each slot of the conformer's table
+class Abydos : gates::Gate
+{
+    const function address() : string { return '27-07-15-32-12-30'; }
+}
+
+class Users : gates::Repository<string>
+{
+    gates::Engine<string> $engine = gates::Engine<string>();
+
+    function store() : gates::Engine<string> { return $this->engine; }
+}
+
+Abydos()->dial();
+
+gates::Gate $g = Abydos();
+$g->dial();
+
+Users $u = Users();
+echo $u->create('mario');
+
+gates::Repository<string> $r = $u;
+$r->create('teal\'c');
+echo $r->count();

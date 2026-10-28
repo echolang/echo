@@ -70,6 +70,7 @@ namespace AST
         n_foreach,
         n_namespace_decl,
         n_use_decl,
+        n_type_alias,
         n_namespace,
         n_attribute,
         n_type_decl,

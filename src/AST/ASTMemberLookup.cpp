@@ -14,6 +14,8 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 
+#include <algorithm>
+
 namespace
 {
     // an instantiation carries the layout of `Box<int32>` but none of its members: they are the
@@ -45,6 +47,53 @@ std::vector<AST::FunctionDeclNode *> AST::find_member_functions(const AST::Compl
     }
 
     return candidates;
+}
+
+std::vector<AST::FunctionDeclNode *> AST::find_receiver_functions(const AST::ComplexType *ct, const std::string &name)
+{
+    std::vector<AST::FunctionDeclNode *> candidates = find_member_functions(ct, name);
+
+    if (!candidates.empty()) {
+        return candidates;
+    }
+
+    candidates = conformance_defaults(ct, name);
+
+    // first interface wins; a second is check_default_ambiguity's error, not an ambiguous call
+    if (!candidates.empty()) {
+        const AST::ComplexType *first = candidates.front()->owner_type;
+
+        std::erase_if(candidates, [first](const AST::FunctionDeclNode *offered) {
+            return offered->owner_type != first;
+        });
+    }
+
+    return candidates;
+}
+
+std::vector<AST::FunctionDeclNode *> AST::conformance_defaults(const AST::ComplexType *ct, const std::string &name)
+{
+    std::vector<AST::FunctionDeclNode *> defaults;
+
+    if (ct == nullptr) {
+        return defaults;
+    }
+
+    // the template answers which interface; default_receiver_bindings binds its arguments at the call
+    for (const AST::ValueType &conformance : ct->conformances()) {
+        if (!conformance.is_interface()) {
+            continue;
+        }
+
+        for (AST::FunctionDeclNode *requirement : find_member_functions(conformance.get_complex_type(), name)) {
+            if (requirement->default_decl != nullptr
+                && std::ranges::find(defaults, requirement->default_decl) == defaults.end()) {
+                defaults.push_back(requirement->default_decl);
+            }
+        }
+    }
+
+    return defaults;
 }
 
 std::vector<AST::FunctionDeclNode *> AST::find_static_functions(const AST::ComplexType *ct, const std::string &name)

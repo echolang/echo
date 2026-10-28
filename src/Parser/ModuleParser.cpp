@@ -7,6 +7,7 @@
 #include "Parser/ConditionalFilter.h"
 #include "Parser/EnumMapParser.h"
 #include "Parser/ScopeParser.h"
+#include "Parser/TypeAliasParser.h"
 #include "Parser/SymbolParser.h"
 
 #include "AST/ASTConstructor.h"
@@ -141,6 +142,22 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
     for (auto &[file, tfile] : file_payloads) {
         auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_type_names);
         parse_type_names(parser_payload);
+    }
+    }
+
+    {
+    Compiler::ScopedPhase phase("type aliases");
+    bool progressed = true;
+    while (progressed) {
+        progressed = false;
+        for (auto &[file, tfile] : file_payloads) {
+            auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_declarations);
+            progressed = Parser::resolve_file_type_aliases(parser_payload) || progressed;
+        }
+    }
+
+    for (auto &[file, tfile] : file_payloads) {
+        Parser::mark_cyclic_type_aliases(*file);
     }
     }
 

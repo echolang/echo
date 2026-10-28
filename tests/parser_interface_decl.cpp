@@ -184,10 +184,17 @@ TEST_CASE("what an interface body cannot declare", "[interface]")
         REQUIRE(has_issue_containing(*bundle, "cannot declare a property"));
     }
 
-    SECTION("a method with a body") {
+    // a method with a body is a default and parses; a static has no receiver to instantiate one over
+    SECTION("a static with a body") {
         auto bundle = EchoTests::tests_make_parsed_bundle(
-            "interface I { function f() : void { echo 1; } }\n");
+            "interface I { static function f() : void { echo 1; } }\n");
         REQUIRE(has_issue_containing(*bundle, "so it cannot have a body"));
+    }
+
+    SECTION("a generic method with a body") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "interface I { function f<T>(T $x) : void { echo 1; } }\n");
+        REQUIRE(has_issue_containing(*bundle, "type parameters of its own"));
     }
 
     SECTION("a constructor") {

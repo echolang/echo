@@ -56,6 +56,7 @@ namespace AST
     class AssignNode;
     class NamespaceDeclNode;
     class UseDeclNode;
+    class TypeAliasDeclNode;
     class NamespaceNode;
     class AttributeNode;
     class TypeDeclNode;
@@ -122,6 +123,7 @@ namespace AST
         virtual void visit_assign(AssignNode &node) = 0;
         virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
         virtual void visit_use_decl(UseDeclNode &node) = 0;
+        virtual void visit_type_alias(TypeAliasDeclNode &node) = 0;
         virtual void visitNamespace(NamespaceNode &node) = 0;
         virtual void visitAttribute(AttributeNode &node) = 0;
         virtual void visit_type_decl(TypeDeclNode &node) = 0;

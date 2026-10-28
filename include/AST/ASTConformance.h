@@ -14,6 +14,7 @@ namespace AST
 {
     class FunctionDeclNode;
     class FunctionRegistry;
+    class VarDeclNode;
 
     // **two questions, deliberately two functions.** does a type *claim* an interface, and does it
     // *deliver* it. the first is what every use site reads - a type-parameter constraint, an
@@ -240,6 +241,31 @@ namespace AST
     std::vector<FunctionDeclNode *> interface_implementations(
         const ComplexType *ct,
         const ValueType &interface,
+        TypeRegistry &types
+    );
+
+    // the interface whose default has `receiver` as its `$this`, or empty
+    std::string default_interface_name(const VarDeclNode *receiver);
+
+    // the instance args a slot's body needs: the class's for a method, [conformance bindings..., ct] for a default, empty for none
+    std::vector<ValueType> implementation_instance_args(
+        const FunctionDeclNode *answer,
+        const ComplexType *ct,
+        const ValueType &interface,
+        TypeRegistry &types
+    );
+
+    // a vtable slot whose instance get_or_create_function_instance has not minted yet
+    struct UninstantiatedImplementation
+    {
+        FunctionDeclNode *tmpl = nullptr;
+        std::vector<ValueType> args;
+    };
+
+    // each slot of `ct`'s tables that still needs an instance. a non-generic class's own method is
+    // absent (empty args); an already-minted default is absent
+    std::vector<UninstantiatedImplementation> uninstantiated_implementations(
+        ComplexType *ct,
         TypeRegistry &types
     );
 

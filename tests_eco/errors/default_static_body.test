@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] default_static_body.eco:3:21
+
+  'Gate::make()' is a requirement of the interface 'Gate', so it cannot have a body - only a method with a receiver can have a default. End it with ';'.
+
+  2 | {
+  3 |     static function make() : int32 { return 1; }
+    :                     ^^^^
+  4 | }
+
+1 error, nothing was compiled.

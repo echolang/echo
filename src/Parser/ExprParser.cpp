@@ -868,7 +868,7 @@ namespace
                     symbol = Parser::find_unqualified_type(
                         payload, owner_name, *payload.context.current_namespace);
 
-                    if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+                    if (symbol == nullptr || !symbol->names_type()) {
                         // a primitive is an owner too: `usize::max()`. it is not a Symbol
                         if (!Parser::is_primitive_type_name(owner_name)) {
                             return nullptr;
@@ -891,7 +891,7 @@ namespace
 
                 symbol = payload.collector.namespaces.find_symbol(owner_name, *in);
 
-                if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+                if (symbol == nullptr || !symbol->names_type()) {
                     return nullptr;
                 }
             }
@@ -974,12 +974,31 @@ AST::ExprNode *Parser::try_parse_static_call(Parser::Payload &payload)
     // namespace exactly as it always has. the two spellings are identical, so the only thing that can
     // tell them apart is what the owner declares - and a nested type is the older meaning
     //
-    // asked of the template, a nested type inside a generic owner being refused where it is declared
+    // asked of the template, a nested type inside a generic owner being refused where it is declared.
+    // an alias is not a namespace, so restoring here would mint one; the member surface is the same
+    // path `string::view(...)` already takes
     if (owner.has_complex_type()
         && cursor.is_type(Token::Type::t_identifier)
         && owner.get_complex_type()->template_or_self()->find_member_type_decl(cursor.current().value()) != nullptr) {
-        cursor.restore(start);
-        return nullptr;
+        const auto at_nested = cursor.snapshot();
+        cursor.skip();
+        const bool constructing = Parser::skip_type_arguments(cursor)
+            && cursor.is_type(Token::Type::t_open_paren);
+        cursor.restore(at_nested);
+
+        if (constructing) {
+            const AST::Namespace *surface = AST::member_surface_namespace(
+                payload.collector.namespaces, *owner.get_complex_type()->template_or_self());
+
+            bool is_call = false;
+            auto *call = parse_funccall(payload, surface, &is_call, Parser::CallLookup {});
+
+            if (call == nullptr && !is_call) {
+                cursor.restore(start);
+            }
+
+            return call;
+        }
     }
 
     // **`Type::name` with no argument list.** an enum case is the call that builds it; anything else

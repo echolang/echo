@@ -1,5 +1,6 @@
 #include "Compiler/Lsp/LspResolve.h"
 
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTConstantExpander.h"
 #include "AST/ASTFile.h"
@@ -90,7 +91,13 @@ AST::Node *Compiler::Lsp::definition_target(AST::Node *node, AST::Bundle &bundle
     }
 
     if (ref.has_type<AST::TypeNode>()) {
-        return type_decl_of(bundle, ref.get_ptr<AST::TypeNode>()->type);
+        const AST::TypeNode *written = ref.get_ptr<AST::TypeNode>();
+
+        if (written->alias != nullptr) {
+            return const_cast<AST::TypeAliasDeclNode *>(written->alias);
+        }
+
+        return type_decl_of(bundle, written->type);
     }
 
     if (ref.has_type<AST::MemberAccessNode>()) {
@@ -173,6 +180,10 @@ const TokenReference *Compiler::Lsp::name_token_of(AST::Node *node)
 
     if (ref.has_type<AST::ConstDeclNode>()) {
         return &ref.get_ptr<AST::ConstDeclNode>()->token_name;
+    }
+
+    if (ref.has_type<AST::TypeAliasDeclNode>()) {
+        return &ref.get_ptr<AST::TypeAliasDeclNode>()->token_name;
     }
 
     if (ref.has_type<AST::ConstRefExprNode>()) {

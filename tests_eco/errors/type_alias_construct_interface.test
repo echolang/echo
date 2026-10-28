@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotConstructType  type_alias_construct_interface.eco:8:13
+
+  The type 'Gate' cannot be constructed
+
+  7 | 
+  8 | Portal $p = Portal();
+    :             ^^^^^^
+  9 | 
+
+  help: only a struct or a class has constructors. T(...) names those after T is bound - a primitive, an interface, or a type parameter that never became one of those has none
+
+1 error, nothing was compiled.

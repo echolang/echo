@@ -15,6 +15,7 @@
 #include "AST/ExprNode.h"
 
 #include "Parser/CaptureParser.h"
+#include "Parser/DefaultBodyParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/VarDeclParser.h"
@@ -1154,6 +1155,15 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
 
         if (!symbol_only) {
             payload.context.declaration_scope().add_funcdecl(*funcdecl);
+        }
+
+        return funcdecl;
+    }
+
+    // an interface requirement with a body: the body goes to its default, in both passes
+    if (Parser::starts_default_body(payload, *funcdecl)) {
+        if (!Parser::parse_default_body(payload, *funcdecl, nametoken, symbol_only)) {
+            return nullptr;
         }
 
         return funcdecl;

@@ -1,0 +1,17 @@
+expect: fail
+
+--- OUT --->
+[error] TypeRedeclaration  type_alias_collision.eco:6:6
+
+  The type 'Gate' is already declared
+
+  5 | 
+  6 | type Gate = int64;
+    :      ^^^^
+  7 | 
+
+  1 | struct Gate
+    :        ---- first declared here, and this is the one that is used
+  2 | {
+
+1 error, nothing was compiled.

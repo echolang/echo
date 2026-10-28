@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] default_generic_method.eco:3:14
+
+  'Gate::tap<U>(U)' is a requirement of the interface 'Gate', so it cannot have a body - a default cannot have type parameters of its own. End it with ';'.
+
+  2 | {
+  3 |     function tap<U>(U $x) : void { echo 1; }
+    :              ^^^
+  4 | }
+
+1 error, nothing was compiled.

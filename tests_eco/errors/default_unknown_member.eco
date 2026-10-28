@@ -1,0 +1,12 @@
+interface Gate
+{
+    const function address() : string;
+    const function log() : void { echo $this->name(); }
+}
+
+class Abydos : Gate
+{
+    const function address() : string { return '27-07-15-32-12-30'; }
+}
+
+Abydos()->log();

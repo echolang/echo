@@ -8,6 +8,7 @@
 #include "AST/ExprNode.h"
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarRefNode.h"
@@ -336,14 +337,33 @@ namespace AST
     }
 
     // a vtable slot is not a call site, so a method of View<int32> that nobody called has no
-    // instance to point a table at. interned class instantiations that can be stored as an
-    // interface get the *requirement* methods force-emitted here - the same list
-    // interface_implementation_templates names, the same get_or_create a direct call would - so
-    // OwnershipPass and PointerAdjuster walk the body in a later round. helpers that are not a
-    // slot stay lazy
+    // instance to point a table at. uninstantiated_implementations names the pairs; this mints
+    // them so OwnershipPass walks the body and interface_implementations can name the instance.
+    // helpers that are not a slot stay lazy
     bool Monomorphizer::instantiate_interface_methods()
     {
         bool progressed = false;
+
+        const auto mint_slots = [&](ComplexType *ct) {
+            for (const UninstantiatedImplementation &slot :
+                 uninstantiated_implementations(ct, _collector.type_registry)) {
+                if (get_or_create_function_instance(slot.tmpl, slot.args) != nullptr) {
+                    progressed = true;
+                }
+            }
+        };
+
+        for (auto &module_ptr : _bundle.modules) {
+            for (TypeDeclNode *node : module_ptr->nodes.of_type<TypeDeclNode>()) {
+                ComplexType &ct = node->complex_type();
+
+                if (!ct.is_class_kind() || node->is_generic() || ct.conformances().empty()) {
+                    continue;
+                }
+
+                mint_slots(&ct);
+            }
+        }
 
         for (ComplexType *ct : _collector.type_registry.instantiations()) {
             if (ct == nullptr || !ct->is_class_kind() || !ct->is_instantiated()) {
@@ -359,29 +379,7 @@ namespace AST
                 continue;
             }
 
-            const ValueType from = ValueType::make_class(ct);
-
-            for (const ValueType &iface : ct->conformances()) {
-                if (!interface_erasure_refusal(from, iface).empty()) {
-                    continue;
-                }
-
-                for (FunctionDeclNode *tmpl_method :
-                     interface_implementation_templates(ct, iface, _collector.type_registry)) {
-                    if (tmpl_method == nullptr) {
-                        continue;
-                    }
-
-                    if (tmpl_method->instance_for(ct->instantiation_args) != nullptr) {
-                        continue;
-                    }
-
-                    if (get_or_create_function_instance(tmpl_method, ct->instantiation_args)
-                        != nullptr) {
-                        progressed = true;
-                    }
-                }
-            }
+            mint_slots(ct);
         }
 
         return progressed;
@@ -615,8 +613,12 @@ namespace AST
                 return;
             }
 
-            _collector.collect_issue<Issue::UnknownMember>(
-                at, call.token_function_name.value(), receiver.get_type_desciption());
+            report_unknown_member(
+                _collector,
+                at,
+                call.token_function_name.value(),
+                receiver.get_type_desciption(),
+                place_root_of(call.arguments[0]));
             return;
         }
 

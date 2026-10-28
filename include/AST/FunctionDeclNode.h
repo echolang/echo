@@ -253,6 +253,24 @@ namespace AST
         // disagree about what the receiver is. defined out of line, ComplexType being incomplete here
         bool is_interface_requirement() const;
 
+        // a requirement with a body: the slot points at its default, the default back at the slot
+        FunctionDeclNode *default_decl = nullptr;
+        FunctionDeclNode *defaulted_requirement = nullptr;
+
+        bool is_default() const {
+            return defaulted_requirement != nullptr;
+        }
+
+        // a default's hidden `Self`, the last inherited type parameter
+        TypeParamDecl *default_self_param() const {
+            if (!is_default() || inherited_type_param_count == 0
+                || inherited_type_param_count > type_parameters.size()) {
+                return nullptr;
+            }
+
+            return type_parameters[inherited_type_param_count - 1];
+        }
+
         // the body of a `function(...) { ... }` written as an expression. it is an ordinary declaration
         // in every other respect - hoisted to the file root, mangled, emitted - but it is in no overload
         // set, no name reaches it, and its `args[0]` is the environment its captures live in

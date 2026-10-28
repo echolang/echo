@@ -145,6 +145,12 @@ namespace AST
     // type parameter
     TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner);
 
+    // a default's interface parameters, bound from the receiver's conformance (`Cargo : Stack<string>` binds `T`)
+    TypeSubstitution default_receiver_bindings(
+        const FunctionDeclNode *tmpl,
+        const ValueType &receiver,
+        TypeRegistry &registry);
+
     // instantiate from argument types plus any explicit type args. `argument_defers` marks untyped
     // literals so `pick(0, $n)` over a `usize $n` does not bind T=int32. `static_owner` seeds a
     // static / constructor; unknown otherwise. constructors read `<...>` as the type's arguments

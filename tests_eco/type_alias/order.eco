@@ -1,0 +1,15 @@
+// an alias may name another alias, a type, or a generic application declared further down
+type Address = Chevrons;
+type Chevrons = Glyphs<int32>;
+
+function first(Address $a) : int32
+{
+    return $a->items[0];
+}
+
+struct Glyphs<T>
+{
+    array<T> $items;
+}
+
+echo first(Address([27, 7, 15]));

@@ -1,0 +1,13 @@
+// a nested type is reached through the applied alias, in type position and as a constructor
+struct World
+{
+    struct Moon
+    {
+        int32 $phase;
+    }
+}
+
+type Page<T> = World;
+
+Page<int32>::Moon $m = Page<int32>::Moon(7);
+echo $m->phase;

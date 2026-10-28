@@ -16,6 +16,7 @@ namespace AST
 {
     class FunctionDeclNode;
     class TypeParamDecl;
+    class TypeAliasDeclNode;
 
     // which kind of declaration introduced a type parameter. derived from whichever owner
     // pointer is set, never stored, so the two can never disagree
@@ -29,6 +30,8 @@ namespace AST
         // t_type's, so this one is read off TypeParamDecl::is_associated rather than off which owner
         // pointer is set
         t_associated,
+
+        t_alias,
     };
 
     // **the constraint rule**, stated over a constraint list rather than over a declaration.
@@ -149,6 +152,8 @@ namespace AST
         // the declaring generic function. asserts no type owner is set
         void set_owner(const FunctionDeclNode *owner);
 
+        void set_owner(const TypeAliasDeclNode *owner);
+
         TypeParamOwnerKind owner_kind() const;
 
         ComplexType *owner_type() const {
@@ -171,6 +176,7 @@ namespace AST
         // exactly one of these is set, which is what owner_kind() reads
         ComplexType *_owner_type = nullptr;
         const FunctionDeclNode *_owner_func = nullptr;
+        const TypeAliasDeclNode *_owner_alias = nullptr;
     };
 
     // owns every type-parameter declaration in a bundle. append-only: declarations stranded by

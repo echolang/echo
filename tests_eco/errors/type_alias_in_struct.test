@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] type_alias_in_struct.eco:3:5
+
+  A type alias cannot be declared inside 'Planet' - it names a type for a whole namespace, so it belongs at file or namespace scope.
+
+  2 | {
+  3 |     type Moons = array<string>;
+    :     ^^^^
+  4 |     int32 $id;
+
+1 error, nothing was compiled.

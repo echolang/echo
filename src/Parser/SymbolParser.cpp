@@ -13,6 +13,7 @@
 #include "Parser/UseParser.h"
 #include "Parser/VisibilityParser.h"
 #include "Parser/EnumMapParser.h"
+#include "Parser/TypeAliasParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -139,6 +140,20 @@ void Parser::parse_type_names(Parser::Payload &payload)
             continue;
         }
 
+        if (starts_type_alias(cursor)) {
+            const std::optional<AST::Visibility> declared_visibility = pending.visibility;
+            pending = Pending {};
+
+            if (open_regions.empty()) {
+                declare_type_alias(payload, declared_visibility);
+            }
+            else {
+                cursor.skip();
+            }
+
+            continue;
+        }
+
         // `extern {` - remembered on pending until the `{` is pushed as a region, so a modifier
         // written ahead of the `extern` still belongs to the declarations inside. `extern struct`
         // and `extern function<...>` are the other two productions and do not take this arm
@@ -252,7 +267,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         else {
             auto *existing =
                 payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.current_namespace);
-            if (existing != nullptr && existing->node.get_ptr<AST::TypeDeclNode>() != nullptr) {
+            if (existing != nullptr && existing->node.has_type<AST::TypeDeclNode>()) {
                 continue;
             }
         }
@@ -427,6 +442,9 @@ void Parser::parse_declaration_surface(
         }
         else if (starts_enum_map(cursor)) {
             parse_file_scope_enum_map(payload, block_token, visibility);
+        }
+        else if (starts_type_alias(cursor)) {
+            skip_type_alias(payload);
         }
         else if (starts_constdecl(payload)) {
             // a compile-time constant, name *and* initializer, in this pass - the same standing a struct

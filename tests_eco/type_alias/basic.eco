@@ -1,0 +1,65 @@
+// an alias is its target: a variable, a parameter, a return, a field, a constructor, a static, the
+// leading-dot shorthand, a cast and instanceof all read the alias as the type it names
+interface Repository
+{
+    function name() : string;
+}
+
+class Query<K, M, R>
+{
+    public K $key;
+    public M $model;
+
+    static function of(K $key, M $model) : Query<K, M, R>
+    {
+        return Query<K, M, R>($key, $model);
+    }
+
+    function describe() : string
+    {
+        return "query {$this->key} on {$this->model->body}";
+    }
+}
+
+class Comment
+{
+    public string $body = 'hello';
+}
+
+class CommentRepository : Repository
+{
+    function name() : string { return 'comments'; }
+}
+
+public type CommentQuery = Query<int64, Comment, CommentRepository>;
+type Repo = Repository;
+
+struct Inbox
+{
+    CommentQuery $latest;
+}
+
+function refine(CommentQuery $q) : CommentQuery
+{
+    $q->key = $q->key + 1;
+    return $q;
+}
+
+CommentQuery $a = CommentQuery(5, Comment());
+echo refine($a)->describe();
+
+CommentQuery $b = CommentQuery::of(7, Comment());
+echo $b->describe();
+
+CommentQuery $c = .of(9, Comment());
+Inbox $inbox = Inbox($c);
+echo $inbox->latest->describe();
+
+Query<int64, Comment, CommentRepository> $plain = $c;
+echo $plain->key;
+
+Repo $r = CommentRepository();
+echo $r->name();
+echo $r instanceof Repo;
+CommentRepository $back = $r as CommentRepository;
+echo $back->name();

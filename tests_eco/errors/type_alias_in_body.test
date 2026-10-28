@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] type_alias_in_body.eco:3:5
+
+  A type alias cannot be declared inside a body - it names a type for a whole namespace, so it belongs at file or namespace scope.
+
+  2 | {
+  3 |     type Address = array<int32>;
+    :     ^^^^
+  4 | }
+
+1 error, nothing was compiled.

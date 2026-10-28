@@ -1,0 +1,48 @@
+// a generic interface's own parameters come from the conformance. `top()` names T only in its return
+// type, so nothing at the call could bind it - `Cargo : Stack<string>` does
+interface Stack<T>
+{
+    function items() : array<T>&;
+
+    function push(T $value) : void { $this->items()->push($value); }
+
+    function top() : T?
+    {
+        array<T>& $all = $this->items();
+
+        if ($all->empty()) {
+            return null;
+        }
+
+        return $all[$all->count() - 1];
+    }
+}
+
+class Cargo : Stack<string>
+{
+    public array<string> $hold = [];
+
+    function items() : array<string>& { return $this->hold; }
+}
+
+class Depot : Stack<int64>
+{
+    array<int64> $crates = [];
+
+    function items() : array<int64>& { return $this->crates; }
+}
+
+Cargo $c = Cargo();
+echo $c->top() ?? 'empty';
+$c->push('naquadah');
+$c->push('trinium');
+echo $c->top() ?? 'empty';
+
+Stack<string> $s = $c;
+$s->push('neutronium');
+echo $s->top() ?? 'empty';
+echo $c->hold->count();
+
+Depot $d = Depot();
+$d->push(5000000000);
+echo $d->top() ?? 0;

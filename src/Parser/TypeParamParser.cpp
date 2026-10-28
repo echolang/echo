@@ -4,6 +4,7 @@
 #include "AST/ASTIssue.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/TypeAliasDeclNode.h"
 
 #include <fmt/core.h>
 
@@ -246,6 +247,31 @@ AST::TypeParamScope Parser::install_type_parameters(
 AST::TypeParamScope Parser::install_type_parameters(
     Payload &payload,
     AST::ComplexType &owner,
+    const std::vector<ParsedTypeParam> &parsed
+)
+{
+    declare_type_parameters(payload, owner, parsed);
+    AST::TypeParamScope scope(payload.context, owner.type_parameters);
+    resolve_param_constraints(payload, parsed, owner.type_parameters);
+    return scope;
+}
+
+void Parser::declare_type_parameters(
+    Payload &payload,
+    AST::TypeAliasDeclNode &owner,
+    const std::vector<ParsedTypeParam> &parsed
+)
+{
+    owner.type_parameters = declare_params(payload, owner.type_parameters, parsed);
+
+    for (auto *decl : owner.type_parameters) {
+        decl->set_owner(&owner);
+    }
+}
+
+AST::TypeParamScope Parser::install_type_parameters(
+    Payload &payload,
+    AST::TypeAliasDeclNode &owner,
     const std::vector<ParsedTypeParam> &parsed
 )
 {

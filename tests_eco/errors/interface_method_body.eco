@@ -1,4 +1,4 @@
-interface Drawable
+extern interface Plugin
 {
-    function draw() : void { echo 1; }
+    function run() : void { echo 1; }
 }

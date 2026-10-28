@@ -1,0 +1,4 @@
+interface Gate
+{
+    static function make() : int32 { return 1; }
+}

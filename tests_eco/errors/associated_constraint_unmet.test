@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnmetInterfaceRequirement  associated_constraint_unmet.eco:13:7
+
+  'Gates' says it conforms to 'Repo', but 'Key' would be 'Coordinates', which does not satisfy 'contract::comparable<Coordinates>'.
+
+  12 | 
+  13 | class Gates : Repo
+     :       ^^^^^
+  14 | {
+
+1 error, nothing was compiled.

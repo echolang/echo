@@ -3,6 +3,7 @@
 #include "AST/ASTConformance.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/TypeAliasDeclNode.h"
 
 #include <cassert>
 #include <fmt/core.h>
@@ -201,6 +202,12 @@ void AST::TypeParamDecl::set_owner(const FunctionDeclNode *owner)
     _owner_func = owner;
 }
 
+void AST::TypeParamDecl::set_owner(const TypeAliasDeclNode *owner)
+{
+    assert(_owner_type == nullptr && _owner_func == nullptr);
+    _owner_alias = owner;
+}
+
 AST::TypeParamOwnerKind AST::TypeParamDecl::owner_kind() const
 {
     // ahead of the t_type arm: an associated type's owner *is* a ComplexType, so the flag is the only
@@ -214,6 +221,9 @@ AST::TypeParamOwnerKind AST::TypeParamDecl::owner_kind() const
     if (_owner_func) {
         return TypeParamOwnerKind::t_function;
     }
+    if (_owner_alias) {
+        return TypeParamOwnerKind::t_alias;
+    }
     return TypeParamOwnerKind::t_none;
 }
 
@@ -224,6 +234,9 @@ std::string AST::TypeParamDecl::owner_name() const
     }
     if (_owner_func) {
         return _owner_func->func_name();
+    }
+    if (_owner_alias) {
+        return _owner_alias->name();
     }
     return "";
 }

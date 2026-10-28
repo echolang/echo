@@ -1,0 +1,9 @@
+/*
+ * Library half of tests_eco/type_alias/cross_module. Two files whose aliases name each other out of
+ * file order, a public alias the consumer uses, and a private one it cannot.
+ */
+
+#[module: "store"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

@@ -63,6 +63,10 @@ namespace Parser
         // the declaration node is in hand
         std::string pending_doc;
 
+        // set when a type named an alias whose own target is not resolved yet. only the alias step
+        // between the first two passes can see one, and it defers the alias that asked
+        bool alias_pending = false;
+
         // reports the token the cursor is sitting on as unexpected where `expected` was wanted
         // every parser needs this and all three of the pieces it takes - the cursor for the token,
         // the context to locate it, the collector to record it - already live here

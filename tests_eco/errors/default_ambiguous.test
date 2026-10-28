@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] AmbiguousDefault  default_ambiguous.eco:12:7
+
+  'Alkesh' gets a default 'engage' from both 'Dialer' and 'Cloaking'. Declare 'engage' on 'Alkesh' to say which one it means.
+
+  11 | 
+  12 | class Alkesh : Dialer, Cloaking
+     :       ^^^^^^
+  13 | {
+
+1 error, nothing was compiled.

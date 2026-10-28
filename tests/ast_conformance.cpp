@@ -559,3 +559,257 @@ TEST_CASE("force-emitting a vtable does not instantiate methods that are not req
     REQUIRE(dumps.size() == 1);
     REQUIRE(dumps[0]->instance_for(args) == nullptr);
 }
+
+namespace
+{
+    // the helpers parse with no standard library, so everything here is an int32
+    const char *k_gate =
+        "interface Gate {\n"
+        "    const function address() : int32;\n"
+        "    const function dial() : void { echo $this->address(); }\n"
+        "}\n";
+}
+
+// a requirement with a body is two declarations: the bodyless slot and the default it points at
+TEST_CASE("a default answers a requirement the conformer does not declare", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::string(k_gate)
+        + "class Abydos : Gate {\n"
+          "    const function address() : int32 { return 27; }\n"
+          "}\n"
+          "Abydos()->dial();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *abydos = type_named(m, "Abydos");
+    auto *gate = type_named(m, "Gate");
+    REQUIRE(abydos != nullptr);
+    REQUIRE(gate != nullptr);
+
+    const auto &requirements = AST::interface_requirements(&gate->complex_type());
+    REQUIRE(requirements.size() == 2);
+
+    FunctionDeclNode *dial = requirements[1];
+    REQUIRE(dial->is_interface_requirement());
+    REQUIRE(dial->body == nullptr);
+    REQUIRE(dial->default_decl != nullptr);
+
+    FunctionDeclNode *def = dial->default_decl;
+    REQUIRE(def->is_default());
+    REQUIRE_FALSE(def->is_interface_requirement());
+    REQUIRE(def->defaulted_requirement == dial);
+    REQUIRE(def->body != nullptr);
+
+    // Self joins the inherited prefix, so the default spells no parameter of its own
+    REQUIRE(def->default_self_param() != nullptr);
+    REQUIRE(def->own_type_param_count() == 0);
+
+    REQUIRE(AST::find_member_functions(&abydos->complex_type(), "dial").empty());
+    REQUIRE(AST::find_receiver_functions(&abydos->complex_type(), "dial") == std::vector<FunctionDeclNode *>{ def });
+
+    REQUIRE_FALSE(AST::first_unmet_requirement(
+        &abydos->complex_type(),
+        gate->value_type(),
+        bundle->collector.type_registry,
+        &bundle->collector.functions).has_value());
+
+    // the slot holds the default's instance at Self = Abydos
+    auto impls = AST::interface_implementations(
+        &abydos->complex_type(), gate->value_type(), bundle->collector.type_registry);
+    REQUIRE(impls.size() == 2);
+    REQUIRE(impls[1] != nullptr);
+    REQUIRE(impls[1]->template_ref == def);
+    REQUIRE(impls[1]->is_default());
+    REQUIRE(impls[1]->instantiation_args
+        == std::vector<ValueType>{ ValueType::make_complex(&abydos->complex_type()) });
+}
+
+TEST_CASE("the conformer's own method wins over a default", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::string(k_gate)
+        + "class Chulak : Gate {\n"
+          "    const function address() : int32 { return 9; }\n"
+          "    const function dial() : void { echo 0; }\n"
+          "}\n"
+          "Chulak()->dial();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *chulak = type_named(m, "Chulak");
+    auto *gate = type_named(m, "Gate");
+    REQUIRE(chulak != nullptr);
+    REQUIRE(gate != nullptr);
+
+    auto own = AST::find_member_functions(&chulak->complex_type(), "dial");
+    REQUIRE(own.size() == 1);
+    REQUIRE(AST::find_receiver_functions(&chulak->complex_type(), "dial") == own);
+
+    auto impls = AST::interface_implementations(
+        &chulak->complex_type(), gate->value_type(), bundle->collector.type_registry);
+    REQUIRE(impls.size() == 2);
+    REQUIRE(impls[1] == own[0]);
+}
+
+TEST_CASE("what a default does not cover", "[conformance]")
+{
+    // a wrong shape is reported; the default does not take over
+    SECTION("a method of the name with the wrong shape") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(std::string(k_gate)
+            + "class Chulak : Gate {\n"
+              "    const function address() : int32 { return 9; }\n"
+              "    const function dial(int32 $n) : void { echo $n; }\n"
+              "}\n");
+        REQUIRE(has_issue_containing(*bundle, "the closest it declares is"));
+    }
+
+    SECTION("two conformances offering a default of one name") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "interface Dialer { const function engage() : void { echo 1; } }\n"
+            "interface Cloaking { const function engage() : void { echo 2; } }\n"
+            "class Alkesh : Dialer, Cloaking { }\n");
+        REQUIRE(has_issue_containing(*bundle, "gets a default 'engage' from both 'Dialer' and 'Cloaking'"));
+    }
+
+    SECTION("declaring the method settles two defaults") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "interface Dialer { const function engage() : void { echo 1; } }\n"
+            "interface Cloaking { const function engage() : void { echo 2; } }\n"
+            "class Alkesh : Dialer, Cloaking { const function engage() : void { echo 3; } }\n");
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("an extern interface's requirement") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "extern interface Plugin { function run() : void { echo 1; } }\n");
+        REQUIRE(has_issue_containing(*bundle, "so it cannot have a body"));
+    }
+}
+
+// `again()` names T only in its return type; the conformance still binds it to int32
+TEST_CASE("a default of a generic interface is instantiated at the conformance's arguments", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Source<T> {\n"
+        "    function read() : T;\n"
+        "    function again() : T { return $this->read(); }\n"
+        "}\n"
+        "class Meter : Source<int32> {\n"
+        "    function read() : int32 { return 7; }\n"
+        "}\n"
+        "Meter $m = Meter();\n"
+        "echo $m->again();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *meter = type_named(m, "Meter");
+    REQUIRE(meter != nullptr);
+    REQUIRE(meter->complex_type().conformances().size() == 1);
+
+    const ValueType source_of_int = meter->complex_type().conformances()[0];
+
+    auto agains = AST::find_receiver_functions(&meter->complex_type(), "again");
+    REQUIRE(agains.size() == 1);
+    REQUIRE(agains[0]->is_default());
+
+    const std::vector<ValueType> args {
+        prim(ValueTypePrimitive::t_int32),
+        ValueType::make_complex(&meter->complex_type()),
+    };
+
+    REQUIRE(AST::implementation_instance_args(
+        agains[0], &meter->complex_type(), source_of_int, bundle->collector.type_registry) == args);
+    REQUIRE(agains[0]->instance_for(args) != nullptr);
+}
+
+namespace
+{
+    const char *k_keyed =
+        "interface Ordered<T> {\n"
+        "    operator (const T& $a) < (const T& $b) : bool;\n"
+        "}\n"
+        "interface Index<K> {\n"
+        "    function width() : int32;\n"
+        "}\n"
+        "interface Repo {\n"
+        "    type Table : Index<Key>;\n"
+        "    type Key : Ordered<Key>;\n"
+        "    function table() : Table;\n"
+        "    function first() : Key;\n"
+        "    function next(Key $k) : Key { return $k; }\n"
+        "}\n"
+        "class Wide : Index<int64> {\n"
+        "    function width() : int32 { return 8; }\n"
+        "}\n";
+}
+
+// a constraint naming the associated type itself, or one bound by a later requirement, is checked once every
+// associated type is bound
+TEST_CASE("an associated constraint is substituted through every associated binding", "[conformance]")
+{
+    SECTION("a self-referential constraint admits a primitive, and a default uses the binding") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(std::string(k_keyed)
+            + "class Gates : Repo {\n"
+              "    function table() : Wide { return Wide(); }\n"
+              "    function first() : int64 { return 7; }\n"
+              "}\n"
+              "Gates $g = Gates();\n"
+              "echo $g->next($g->first());\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto &m = bundle->modules.find_module("test");
+        auto *gates = type_named(m, "Gates");
+        auto *repo = type_named(m, "Repo");
+        REQUIRE(gates != nullptr);
+        REQUIRE(repo != nullptr);
+
+        const ConformanceBinding binding = AST::conformance_bindings(
+            &gates->complex_type(), repo->value_type(), bundle->collector.type_registry);
+        REQUIRE(binding.failure == ConformanceBinding::Failure::t_none);
+
+        const auto &associated = AST::interface_associated_types(&repo->complex_type());
+        REQUIRE(associated.size() == 2);
+        REQUIRE(*binding.substitution.lookup(associated[1]) == prim(ValueTypePrimitive::t_int64));
+
+        auto nexts = AST::find_receiver_functions(&gates->complex_type(), "next");
+        REQUIRE(nexts.size() == 1);
+        REQUIRE(nexts[0]->is_default());
+
+        const std::vector<ValueType> args {
+            ValueType::make_complex(&type_named(m, "Wide")->complex_type()),
+            prim(ValueTypePrimitive::t_int64),
+            ValueType::make_complex(&gates->complex_type()),
+        };
+
+        REQUIRE(AST::implementation_instance_args(
+            nexts[0], &gates->complex_type(), repo->value_type(), bundle->collector.type_registry) == args);
+        REQUIRE(nexts[0]->instance_for(args) != nullptr);
+    }
+
+    SECTION("an unmet constraint is reported with the binding substituted") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(std::string(k_keyed)
+            + "struct Glyph { int32 $n; }\n"
+              "class Runes : Index<Glyph> {\n"
+              "    function width() : int32 { return 4; }\n"
+              "}\n"
+              "class Gates : Repo {\n"
+              "    function table() : Runes { return Runes(); }\n"
+              "    function first() : Glyph { return Glyph(1); }\n"
+              "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "'Key' would be 'Glyph', which does not satisfy 'Ordered<Glyph>'"));
+    }
+
+    SECTION("a constraint naming another associated type is checked against its binding") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(std::string(k_keyed)
+            + "class Gates : Repo {\n"
+              "    function table() : Wide { return Wide(); }\n"
+              "    function first() : int32 { return 7; }\n"
+              "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "'Table' would be 'Wide', which does not satisfy 'Index<int32>'"));
+    }
+}

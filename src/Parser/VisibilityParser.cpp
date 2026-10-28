@@ -4,10 +4,12 @@
 #include "Parser/OperatorDeclParser.h"
 #include "Parser/TestDeclParser.h"
 #include "Parser/TypeDeclParser.h"
+#include "Parser/TypeAliasParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/EnumMapParser.h"
 
 #include "AST/ASTIssue.h"
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/TypeDeclNode.h"
 
 #include <fmt/core.h>
@@ -103,7 +105,7 @@ Parser::VisibilityPrefix Parser::consume_declaration_visibility(
     }
     else if (!starts_funcdecl(payload.cursor) && !starts_typedecl(payload.cursor)
         && !starts_constdecl(payload) && !payload.cursor.is_type(Token::Type::t_extern)
-        && !starts_enum_map(payload.cursor)) {
+        && !starts_enum_map(payload.cursor) && !starts_type_alias(payload.cursor)) {
         refuse_visibility_prefix(
             payload,
             prefix,
@@ -153,4 +155,23 @@ void Parser::refuse_invisible_type(
         AST::visibility_refusal(layout.visibility, layout.declared_in, from, decl.type_name()),
         layout.declared_in,
         decl.name_token);
+}
+
+void Parser::refuse_invisible_type(
+    Parser::Payload &payload,
+    const AST::TypeAliasDeclNode &alias,
+    const TokenReference &at
+)
+{
+    const AST::DeclarationOrigin from = AST::origin_at(payload.context);
+
+    if (AST::visible_from(alias.visibility, alias.declared_in, from)) {
+        return;
+    }
+
+    payload.collector.collect_issue<AST::Issue::InaccessibleDeclaration>(
+        payload.context.code_ref(at),
+        AST::visibility_refusal(alias.visibility, alias.declared_in, from, alias.name()),
+        alias.declared_in,
+        alias.token_name);
 }

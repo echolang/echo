@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownMember  default_unknown_member.eco:4:47
+
+  The type 'const Abydos' has no member named 'name'
+
+  3 |     const function address() : string;
+  4 |     const function log() : void { echo $this->name(); }
+    :                                               ^^^^
+  5 | }
+
+  note: this is a default body of 'Gate', checked against each conformer it is instantiated for - a default can rely only on what 'Gate' requires
+
+1 error, nothing was compiled.

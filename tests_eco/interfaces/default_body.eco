@@ -1,0 +1,58 @@
+// a requirement written with a body is a default. a conformer that declares the method answers the
+// requirement itself; one that does not gets the default, instantiated with `$this` as the conformer
+interface Gate
+{
+    const function address() : string;
+
+    const function dial() : void
+    {
+        echo "dialling {$this->address()}";
+    }
+}
+
+// wrote one method and has two
+class Abydos : Gate
+{
+    const function address() : string { return '27-07-15-32-12-30'; }
+}
+
+// writing it yourself wins
+class Chulak : Gate
+{
+    const function address() : string { return '09-02-23-15-37-20'; }
+
+    const function dial() : void
+    {
+        echo 'jaffa, kree!';
+        echo "dialling {$this->address()}";
+    }
+}
+
+// a struct gets it too, through a direct call and a constrained generic
+struct Coordinates : Gate
+{
+    string $glyphs;
+
+    const function address() : string { return $this->glyphs; }
+}
+
+// the conformer's own body reaches the default through `$this` like any other member
+class Tollan : Gate
+{
+    const function address() : string { return '04-29-08-22-18-25'; }
+
+    function redial() : void
+    {
+        $this->dial();
+        $this->dial();
+    }
+}
+
+Abydos()->dial();
+Chulak()->dial();
+Coordinates('38-05-17-21-14-29')->dial();
+Tollan()->redial();
+
+// a const receiver reaches a const default
+const Abydos $fixed = Abydos();
+$fixed->dial();

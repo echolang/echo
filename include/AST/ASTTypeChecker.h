@@ -197,6 +197,9 @@ namespace AST
         // generic implementor is checked on its template - see the note there
         void check_conformances(TypeDeclNode &node);
 
+        // two conformances offering a default of one name the type does not declare
+        void check_default_ambiguity(TypeDeclNode &node);
+
         // reports a declaration that has no body and no marker saying where its implementation comes
         // from. **called ahead of the generic early-return** in visitFunctionDecl, since a bodyless
         // template is exactly one of the cases - see the note there

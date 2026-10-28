@@ -1,0 +1,10 @@
+// a requirement written with a body says so: a conformer may leave it out
+public interface Gate
+{
+    const function address() : string;
+
+    const function dial() : void
+    {
+        echo "dialling {$this->address()}";
+    }
+}

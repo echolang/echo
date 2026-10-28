@@ -1,0 +1,4 @@
+function dial() : void
+{
+    type Address = array<int32>;
+}

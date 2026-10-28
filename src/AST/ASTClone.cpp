@@ -127,6 +127,7 @@ Node *TypeNode::clone(CloneContext &cc) const
         : cc.make<TypeNode>(this, cc.substitute(type));
 
     c->written_spelling = written_spelling;
+    c->alias = alias;
     c->written_names.reserve(written_names.size());
     for (TypeNode *name : written_names) {
         c->written_names.push_back(cc.child(name));

@@ -1,0 +1,21 @@
+expect: fail
+
+--- OUT --->
+[error] type_alias_cycle.eco:1:6
+
+  The type alias 'Address' names itself - following its target comes back round to 'Address'.
+
+  1 | type Address = Chevrons;
+    :      ^^^^^^^
+  2 | type Chevrons = Address;
+
+[error] type_alias_cycle.eco:2:6
+
+  The type alias 'Chevrons' names itself - following its target comes back round to 'Chevrons'.
+
+  1 | type Address = Chevrons;
+  2 | type Chevrons = Address;
+    :      ^^^^^^^^
+  3 | 
+
+2 errors, nothing was compiled.

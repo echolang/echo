@@ -1,0 +1,8 @@
+modules: type_alias/lib_alias_store
+mode: build
+
+--- OUT --->
+query 5
+query 7
+2
+3

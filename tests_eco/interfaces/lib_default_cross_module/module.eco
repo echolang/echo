@@ -1,0 +1,10 @@
+/*
+ * Library half of tests_eco/interfaces/default_cross_module: the interfaces and their defaults are
+ * declared here, the conformers in the entry file, so every default instance is minted for a type
+ * this module has never heard of.
+ */
+
+#[module: "gates"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

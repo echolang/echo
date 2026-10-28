@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] type_alias_bare_generic_target.eco:6:14
+
+  'Box' is generic, so it needs its type arguments - write 'Box<...>'.
+
+  5 | 
+  6 | type Crate = Box;
+    :              ^^^
+  7 | 
+
+1 error, nothing was compiled.

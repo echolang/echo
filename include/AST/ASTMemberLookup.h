@@ -22,16 +22,17 @@ namespace AST
     class VarDeclNode;
     class VarRefNode;
 
-    // the candidate member functions a name denotes on `ct`, as an overload set - the member
-    // counterpart of FunctionRegistry::overloads, and the only place that answers "which
-    // declarations could `$obj->name(...)` be".
-    //
-    // an instantiation has no method table of its own. methods are declared on the template and
-    // instantiated per call site by the monomorphizer, so a lookup on `Box<int32>` redirects
-    // through template_ref and hands back the template's declarations - which are generic in the
-    // owner's parameters, and bind them from the receiver argument. that redirect is why
+    // what the type *declared* under `name`. an instantiation redirects through template_ref and
+    // hands back the template's declarations. `$obj->name(...)` is find_receiver_functions: this
+    // list, or the defaults the conformances offer when it is empty. that redirect is why
     // TypeRegistry::get_or_create_instantiation needs to know nothing about members
     std::vector<FunctionDeclNode *> find_member_functions(const ComplexType *ct, const std::string &name);
+
+    // what `$obj->name(...)` can reach: the declared methods, or if none, the first interface's defaults
+    std::vector<FunctionDeclNode *> find_receiver_functions(const ComplexType *ct, const std::string &name);
+
+    // every default `ct`'s conformances offer under `name`, in conformance order, each once
+    std::vector<FunctionDeclNode *> conformance_defaults(const ComplexType *ct, const std::string &name);
 
     // statics on `ct`, with the same template_ref redirect. not member_surface_namespace:
     // TypeRegistry names an instantiation `result<int32, string>`, and FunctionRegistry::overloads

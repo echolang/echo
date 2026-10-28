@@ -29,7 +29,8 @@ namespace Compiler
             t_enum,
             t_constant,
             t_namespace,
-            t_property
+            t_property,
+            t_type_alias
         };
 
         struct HoverAnswer

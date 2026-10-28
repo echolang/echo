@@ -1,0 +1,14 @@
+// aliases declared in another module, across two of its files and out of file order
+use store::CommentQuery;
+
+CommentQuery $q = CommentQuery(5, store::Comment());
+echo $q->describe();
+
+store::CommentQuery $r = store::CommentQuery::of(7, store::Comment());
+echo $r->describe();
+
+store::CommentRows $rows = [store::Comment(), store::Comment()];
+echo store::count_rows($rows);
+
+store::Rows<int32> $ints = [1, 2, 3];
+echo $ints->count();

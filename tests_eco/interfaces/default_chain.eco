@@ -1,0 +1,38 @@
+// defaults build on each other, and a call from a default to another requirement goes to the
+// conformer's version: its own when it wrote one, the default otherwise
+interface Sized
+{
+    const function count() : usize;
+
+    const function empty() : bool { return $this->count() == 0; }
+    const function any() : bool { return !$this->empty(); }
+}
+
+class Fleet : Sized
+{
+    public array<string> $ships = [];
+
+    const function count() : usize { return $this->ships->count(); }
+
+    const function empty() : bool
+    {
+        echo 'checked';
+        return $this->ships->empty();
+    }
+}
+
+class Hangar : Sized
+{
+    const function count() : usize { return 3; }
+}
+
+Fleet $f = Fleet();
+echo $f->any();
+$f->ships->push('prometheus');
+echo $f->any();
+
+echo Hangar()->empty();
+echo Hangar()->any();
+
+Sized $s = Hangar();
+echo $s->any();

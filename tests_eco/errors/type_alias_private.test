@@ -1,0 +1,18 @@
+modules: type_alias/lib_alias_store
+expect: fail
+
+--- OUT --->
+[error] InaccessibleDeclaration  type_alias_private.eco:1:8
+
+  'Secret' is private to 'b_rows.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  1 | store::Secret $s = 1;
+    :        ^^^^^^
+  2 | 
+
+  5 | 
+  6 | private type Secret = int64;
+    :              ------ declared here
+  7 | 
+
+1 error, nothing was compiled.

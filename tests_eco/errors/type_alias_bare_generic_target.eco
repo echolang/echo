@@ -1,0 +1,6 @@
+struct Box<T>
+{
+    T $value;
+}
+
+type Crate = Box;

@@ -45,6 +45,7 @@
 #include "AST/ASTEmbed.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
@@ -59,6 +60,7 @@
 
 #include <optional>
 #include <span>
+#include <unordered_set>
 #include <vector>
 
 namespace AST
@@ -962,6 +964,53 @@ void TypeChecker::check_conformances(TypeDeclNode &node)
                 unmet->wanted_signature,
                 detail));
     }
+
+    check_default_ambiguity(node);
+}
+
+void TypeChecker::check_default_ambiguity(TypeDeclNode &node)
+{
+    const AST::ComplexType &ct = node.complex_type();
+    std::unordered_set<std::string> asked;
+
+    // the same split find_receiver_functions makes: no declared member, and defaults from more than one
+    // interface
+    for (const ValueType &conformance : ct.conformances()) {
+        if (!conformance.is_interface()) {
+            continue;
+        }
+
+        for (const FunctionDeclNode *requirement : AST::interface_requirements(conformance.get_complex_type())) {
+            const std::string name = requirement->func_name();
+
+            if (requirement->default_decl == nullptr || !asked.insert(name).second
+                || !AST::find_member_functions(&ct, name).empty()) {
+                continue;
+            }
+
+            const std::vector<FunctionDeclNode *> defaults = AST::conformance_defaults(&ct, name);
+            const ComplexType *first = defaults.front()->owner_type;
+            const auto other = std::ranges::find_if(defaults, [first](const FunctionDeclNode *offered) {
+                return offered->owner_type != first;
+            });
+
+            if (other == defaults.end()) {
+                continue;
+            }
+
+            _collector.collect_issue<Issue::AmbiguousDefault>(
+                code_ref_for(node.declaration_site_token()),
+                fmt::format(
+                    "'{}' gets a default '{}' from both '{}' and '{}'. Declare '{}' on '{}' to say which one "
+                    "it means.",
+                    node.type_name(),
+                    name,
+                    first->name.value_or("?"),
+                    (*other)->owner_type->name.value_or("?"),
+                    name,
+                    node.type_name()));
+        }
+    }
 }
 
 void TypeChecker::visitMemberAccess(MemberAccessNode &node)
@@ -998,10 +1047,12 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
             // they need to hear is that the value may not be there, which the nullable arm below says.
             // reporting both would name the member as the mistake when the absence is
             else if (!base_type.is_wrapped_optional()) {
-                _collector.collect_issue<Issue::UnknownMember>(
+                report_unknown_member(
+                    _collector,
                     code_ref_for(node.get_member_name()),
                     member,
-                    complex->name.value_or("<anonymous>"));
+                    complex->name.value_or("<anonymous>"),
+                    place_root_of(&node));
             }
         }
     }
@@ -2618,7 +2669,8 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
         }
     }
 
-    if (node.has_type() && contains_type_param(node.type())) {
+    if (node.has_type() && contains_type_param(node.type())
+        && !(_current_function != nullptr && _current_function->is_interface_requirement())) {
         _collector.collect_issue<Issue::UnresolvedTypeParameter>(
             code_ref_for(node.token_varname),
             fmt::format(

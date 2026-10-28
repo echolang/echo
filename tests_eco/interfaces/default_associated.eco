@@ -1,0 +1,98 @@
+// a repository whose key and table types are the conformer's choice. both are bound by what `store()`
+// returns, both constraints name the associated types themselves, and the defaults use them
+interface Schema<M, K>
+{
+    function name() : string;
+}
+
+class Store<M, K, T>
+{
+    public map<K, M> $rows;
+    public T $table;
+
+    constructor(T $table)
+    {
+        $this->rows = map<K, M>();
+        $this->table = $table;
+    }
+
+    function put(K $key, M $model) : void { $this->rows[$key] = $model; }
+    function one(K $key) : M { return $this->rows[$key]; }
+    function count() : usize { return $this->rows->count(); }
+}
+
+interface Repo<M, R>
+{
+    type Table : Schema<M, Key>;
+    type Key : contract::comparable<Key>;
+
+    function store() : Store<M, Key, Table>;
+
+    function one(Key $key) : M { return $this->store()->one($key); }
+    function put(Key $key, M $model) : void { $this->store()->put($key, $model); }
+    function table() : string { return $this->store()->table->name(); }
+}
+
+class UserTable : Schema<string, int64>
+{
+    function name() : string { return 'users'; }
+}
+
+class TagTable : Schema<int32, string>
+{
+    function name() : string { return 'tags'; }
+}
+
+class Users : Repo<string, Users>
+{
+    Store<string, int64, UserTable> $store;
+
+    constructor() { $this->store = Store<string, int64, UserTable>(UserTable()); }
+
+    function store() : Store<string, int64, UserTable> { return $this->store; }
+}
+
+class Tags : Repo<int32, Tags>
+{
+    Store<int32, string, TagTable> $store;
+
+    constructor() { $this->store = Store<int32, string, TagTable>(TagTable()); }
+
+    function store() : Store<int32, string, TagTable> { return $this->store; }
+}
+
+class Rack<E> : Schema<E, int64>
+{
+    function name() : string { return 'rack'; }
+}
+
+class Bucket<E> : Repo<E, Bucket<E>>
+{
+    Store<E, int64, Rack<E>> $store;
+
+    constructor() { $this->store = Store<E, int64, Rack<E>>(Rack<E>()); }
+
+    function store() : Store<E, int64, Rack<E>> { return $this->store; }
+}
+
+function first_of<M, R>(R& $repo, int64 $key) : M where R : Repo<M, R>
+{
+    return $repo->one($key);
+}
+
+Users $users = Users();
+$users->put(5, 'mario');
+$users->put(7, 'samantha');
+echo $users->one(7);
+echo $users->table();
+echo first_of<string, Users>($users, 5);
+
+Tags $tags = Tags();
+$tags->put('naquadah', 42);
+echo $tags->one('naquadah');
+echo $tags->table();
+
+Bucket<float64> $bucket = Bucket<float64>();
+$bucket->put(1, 2.5);
+echo $bucket->one(1);
+echo $bucket->table();

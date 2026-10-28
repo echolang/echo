@@ -1,0 +1,6 @@
+type Page<T> = map<string, T>;
+type Ints = array<int32>;
+
+Page<int32, int32> $a;
+Ints<int32> $b;
+Page $c;

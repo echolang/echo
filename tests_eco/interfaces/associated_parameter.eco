@@ -1,0 +1,38 @@
+// an interface with no parameters of its own may still take its associated type as a parameter, in a
+// requirement and in a default
+interface Ledger
+{
+    type Key : contract::comparable<Key>;
+
+    function first() : Key;
+    function next(Key $after) : Key;
+
+    function later(Key $a, Key $b) : Key
+    {
+        if ($a < $b) {
+            return $b;
+        }
+
+        return $a;
+    }
+}
+
+class Chevrons : Ledger
+{
+    function first() : int64 { return 1; }
+    function next(int64 $after) : int64 { return $after + 1; }
+}
+
+class Glyphs : Ledger
+{
+    function first() : string { return 'abydos'; }
+    function next(string $after) : string { return "{$after}'"; }
+}
+
+Chevrons $c = Chevrons();
+echo $c->next($c->first());
+echo $c->later(7, 3);
+
+Glyphs $g = Glyphs();
+echo $g->next($g->first());
+echo $g->later('chulak', 'tollan');

@@ -1,0 +1,16 @@
+struct Coordinates
+{
+    int32 $glyph;
+}
+
+interface Repo
+{
+    type Key : contract::comparable<Key>;
+
+    function first() : Key;
+}
+
+class Gates : Repo
+{
+    function first() : Coordinates { return Coordinates(1); }
+}

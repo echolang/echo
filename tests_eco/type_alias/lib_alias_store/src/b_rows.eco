@@ -1,0 +1,12 @@
+namespace store;
+
+public type CommentRows = Rows<Comment>;
+public type Rows<T> = array<T>;
+
+private type Secret = int64;
+
+public function count_rows(CommentRows $rows) : usize
+{
+    Secret $n = 0;
+    return $rows->count() + $n;
+}

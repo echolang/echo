@@ -8,6 +8,8 @@
 #include "AST/ExprNode.h"
 #include "Parser/ParserPayload.h"
 
+#include <optional>
+
 namespace Parser
 {
     // a call written by name: `foo(...)`, `a::b::foo(...)`, `foo<int32>(...)`. The cursor sits on the name;
@@ -44,9 +46,9 @@ namespace Parser
         // there is no window in which a call is known to be one and has no token to be reported at
         std::optional<TokenReference> shorthand_dot;
 
-        // `T(...)`: the type being constructed, usually a type parameter that substitution will
-        // make concrete. unknown for every other spelling. candidates come from the registry
-        // under the type's name, and an undetermined owner is a not-yet rather than an unknown name
+        // `T(...)` or `Page<int32>(...)`: the type being constructed. unknown for every other
+        // spelling. candidates come from the registry under the type's name, and an undetermined
+        // owner is a not-yet rather than an unknown name
         AST::ValueType constructed_type = AST::ValueType::make_unknown();
     };
 

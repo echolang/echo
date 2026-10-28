@@ -9,7 +9,9 @@
 #include <AST/MemberAccessNode.h>
 #include <AST/ReturnNode.h>
 #include <AST/TemporaryBindExprNode.h>
+#include <AST/TypeAliasDeclNode.h>
 #include <AST/TypeDeclNode.h>
+#include <AST/TypeNode.h>
 #include <AST/VarDeclNode.h>
 
 #include "helpers.h"
@@ -190,6 +192,32 @@ TEST_CASE("Cloning a type declaration shares its layout", "[clone][types]")
     REQUIRE(clone == decl);
     REQUIRE(clone->value_type() == decl->value_type());
     REQUIRE(clone->value_type().get_complex_type() == decl->value_type().get_complex_type());
+}
+
+TEST_CASE("Cloning a type alias clones its target", "[clone][type_alias]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle("type Id = int32;\nId $x = 1;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+    TypeAliasDeclNode *alias = nullptr;
+    for (auto *node : module.nodes.of_type<TypeAliasDeclNode>()) {
+        if (node->name() == "Id") {
+            alias = node;
+        }
+    }
+    REQUIRE(alias != nullptr);
+    REQUIRE(alias->target != nullptr);
+
+    TypeSubstitution empty_subst;
+    CloneContext cc(module.nodes, empty_subst, bundle->collector.type_registry);
+
+    auto *clone = static_cast<TypeAliasDeclNode *>(alias->clone(cc));
+
+    REQUIRE(clone != alias);
+    REQUIRE(clone->target != alias->target);
+    REQUIRE(clone->target != nullptr);
+    REQUIRE(clone->target->type == alias->target->type);
 }
 
 TEST_CASE("A generic function body carries no second layout into its instances", "[clone][generics]")

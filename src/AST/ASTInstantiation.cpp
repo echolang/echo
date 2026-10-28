@@ -3,6 +3,7 @@
 #include "AST/ASTArgumentBind.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTConformance.h"
 #include "AST/ASTLiteralTyping.h"
 
 #include "AST/ASTTypeParam.h"
@@ -303,36 +304,61 @@ namespace AST
 
     TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner)
     {
-        TypeSubstitution bindings;
-
-        if (tmpl == nullptr || !owner.has_complex_type()) {
-            return bindings;
+        // a static and a constructor both have no receiver. the inherited prefix is the owner's
+        // own parameter list, and `T(...)` after substitution is `box<YetAnotherOne>(...)`, so T
+        // comes from the constructed type rather than from the argument
+        if (tmpl == nullptr || !owner.has_complex_type()
+            || (!tmpl->is_static_method() && !tmpl->is_constructor())) {
+            return {};
         }
 
         // the owner's *instantiation* is what says what its parameters are. an owner that is still a
         // template - `result<T, E>` inside its own body, or inside a generic that has not been
         // instantiated - carries none, and binding nothing is what keeps that a not-yet
         const std::vector<ValueType> &args = owner.get_complex_type()->instantiation_args;
-
-        // a static and a constructor both have no receiver. the inherited prefix is the owner's
-        // own parameter list, and `T(...)` after substitution is `box<YetAnotherOne>(...)`, so T
-        // comes from the constructed type rather than from the argument
-        if (!tmpl->is_static_method() && !tmpl->is_constructor()) {
-            return bindings;
-        }
-
         const size_t inherited = tmpl->inherited_type_param_count;
-
-        if (inherited == 0) {
-            return bindings;
-        }
+        TypeSubstitution bindings;
 
         for (size_t i = 0; i < inherited && i < args.size() && i < tmpl->type_parameters.size(); i++) {
-            if (is_undetermined_type(args[i])) {
-                continue;
+            if (!is_undetermined_type(args[i])) {
+                bindings.bind(tmpl->type_parameters[i], args[i]);
             }
+        }
 
-            bindings.bind(tmpl->type_parameters[i], args[i]);
+        return bindings;
+    }
+
+    TypeSubstitution default_receiver_bindings(
+        const FunctionDeclNode *tmpl,
+        const ValueType &receiver,
+        TypeRegistry &registry
+    )
+    {
+        if (tmpl == nullptr || !tmpl->is_default()) {
+            return {};
+        }
+
+        const ValueType conformer = target_type_of(receiver);
+
+        if (!conformer.has_complex_type()) {
+            return {};
+        }
+
+        // the conformance's args stop short of `Self`, which unifying the receiver binds
+        const std::vector<ValueType> conformances =
+            conformances_matching_template(conformer.get_complex_type(), tmpl->owner_type);
+
+        if (conformances.empty()) {
+            return {};
+        }
+
+        TypeSubstitution bindings;
+
+        for (const auto &[param, bound] :
+             conformance_bindings(conformer.get_complex_type(), conformances.front(), registry).substitution.bindings) {
+            if (!is_undetermined_type(bound)) {
+                bindings.bind(param, bound);
+            }
         }
 
         return bindings;
@@ -350,7 +376,10 @@ namespace AST
 
         // **the static's substitute for a receiver**, seeded before anything is inferred so that every
         // arm below reads it exactly as it reads what argument 0 bound. see static_owner_bindings
-        result.bindings = static_owner_bindings(tmpl, static_owner);
+        // a default's are seeded from the receiver's conformance the same way
+        result.bindings = tmpl->is_default() && !argument_types.empty()
+            ? default_receiver_bindings(tmpl, argument_types[0], registry)
+            : static_owner_bindings(tmpl, static_owner);
 
         // which argument's shape could not be reconciled. collected rather than returned on, so
         // that the parameters can still be judged - a template with one bad argument is usually

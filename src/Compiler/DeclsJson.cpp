@@ -1,5 +1,6 @@
 #include "Compiler/DeclsJson.h"
 
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/ASTAccess.h"
 #include "AST/ASTAttributes.h"
 #include "AST/ASTConstness.h"
@@ -564,6 +565,12 @@ Json json_function(Emit &emit, const AST::FunctionDeclNode &fn)
         { "return", json_type(fn.get_return_type(), core) },
         { "generics", json_generics(fn.type_parameters, fn.inherited_type_param_count) },
     };
+
+    // a requirement written with a body, which a conformer may leave out
+    if (fn.default_decl != nullptr) {
+        out["default"] = true;
+    }
+
     return out;
 }
 
@@ -669,6 +676,26 @@ Json json_constant(Emit &emit, const AST::ConstDeclNode &decl, const std::string
         { "doc", decl.doc_comment.empty() ? Json(nullptr) : Json(decl.doc_comment) },
         { "type", found ? source_text(tokens, keyword + 1, name) : Json(nullptr) },
         { "value", initializer_text(decl.token_name) },
+    };
+}
+
+Json json_type_alias(Emit &emit, const AST::TypeAliasDeclNode &alias)
+{
+    Json loc = json_location(emit, alias.declared_in, alias.token_name);
+    const std::string space = alias.ast_namespace != nullptr ? alias.ast_namespace->full_name() : "";
+    const AST::TypeNode *target = alias.resolved_target();
+
+    return {
+        { "kind", "type alias" },
+        { "name", alias.name() },
+        { "qualified", space.empty() ? alias.name() : space + ECO_NAMESPACE_SEPARATOR + alias.name() },
+        { "visibility", visibility_name(alias.visibility) },
+        { "file", loc["file"] },
+        { "line", loc["line"] },
+        { "column", loc["column"] },
+        { "doc", alias.doc_comment.empty() ? Json(nullptr) : Json(alias.doc_comment) },
+        { "generics", json_generics(alias.type_parameters, 0) },
+        { "target", target != nullptr ? json_type(target->type, emit.core) : Json(nullptr) },
     };
 }
 
@@ -909,6 +936,12 @@ std::string Compiler::decls_as_json(
             }
 
             declarations.push_back(json_function(emit, *fn));
+        }
+
+        for (const AST::TypeAliasDeclNode *alias : module.nodes.of_type<AST::TypeAliasDeclNode>()) {
+            if (alias != nullptr) {
+                declarations.push_back(json_type_alias(emit, *alias));
+            }
         }
 
         for (const AST::ConstDeclNode *constant : free_constants) {

@@ -18,6 +18,7 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/NamespaceDeclNode.h"
 #include "AST/UseDeclNode.h"
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/NamespaceNode.h"
 #include "AST/NullNode.h"
 #include "AST/OperatorNode.h"
@@ -79,6 +80,9 @@ const TokenReference *source_token_of(const Node &node)
 
         case NodeType::n_const_decl:
             return &static_cast<const ConstDeclNode &>(node).token_name;
+
+        case NodeType::n_type_alias:
+            return &static_cast<const TypeAliasDeclNode &>(node).token_name;
 
         case NodeType::n_assign:
             return &static_cast<const AssignNode &>(node).token_assign;

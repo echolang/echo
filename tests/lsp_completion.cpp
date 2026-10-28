@@ -467,3 +467,80 @@ TEST_CASE("completion: members of an imported function's result", "[lsp]")
     REQUIRE(has(answer, "x"));
     REQUIRE(has(answer, "len"));
 }
+
+TEST_CASE("completion: a default is offered on the conformer that did not declare it", "[lsp]")
+{
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    const std::filesystem::path path = "/tmp/lsp-complete-default.eco";
+    const std::string prelude
+        = "interface Gate\n"
+          "{\n"
+          "    const function address() : int32;\n"
+          "    const function dial() : int32 { return $this->address(); }\n"
+          "}\n"
+          "class Abydos : Gate\n"
+          "{\n"
+          "    const function address() : int32 { return 1; }\n"
+          "}\n"
+          "class Chulak : Gate\n"
+          "{\n"
+          "    const function address() : int32 { return 2; }\n"
+          "    const function dial() : int32 { return 3; }\n"
+          "}\n";
+    session.did_open(path, 1,
+        prelude
+        + "function main() : void {\n"
+          "    Abydos $a = Abydos();\n"
+          "    Chulak $c = Chulak();\n"
+          "    echo $a->address();\n"
+          "}\n");
+    session.rebuild();
+
+    const auto abydos = complete(session, path,
+        prelude
+        + "function main() : void {\n"
+          "    Abydos $a = Abydos();\n"
+          "    Chulak $c = Chulak();\n"
+          "    echo $a->|\n"
+          "}\n");
+    REQUIRE(has(abydos, "address"));
+    REQUIRE(has(abydos, "dial"));
+
+    const auto chulak = complete(session, path,
+        prelude
+        + "function main() : void {\n"
+          "    Abydos $a = Abydos();\n"
+          "    Chulak $c = Chulak();\n"
+          "    echo $c->|\n"
+          "}\n");
+    REQUIRE(has(chulak, "address"));
+    REQUIRE(has(chulak, "dial"));
+}
+
+TEST_CASE("completion: statics of an alias follow the target", "[lsp]")
+{
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    const std::filesystem::path path = "/tmp/lsp-complete-alias-static.eco";
+    session.did_open(path, 1,
+        "struct Query\n"
+        "{\n"
+        "    static function of() : Query { return Query(); }\n"
+        "}\n"
+        "type CommentQuery = Query;\n"
+        "function main() : void {\n"
+        "}\n");
+    session.rebuild();
+
+    const auto answer = complete(session, path,
+        "struct Query\n"
+        "{\n"
+        "    static function of() : Query { return Query(); }\n"
+        "}\n"
+        "type CommentQuery = Query;\n"
+        "function main() : void {\n"
+        "    CommentQuery::|\n"
+        "}\n");
+    REQUIRE(has(answer, "of"));
+}

@@ -6,11 +6,14 @@
 #include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/StaticPropertyExprNode.h>
+#include <AST/TypeAliasDeclNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/TypeNode.h>
 #include <AST/VarDeclNode.h>
 #include <AST/VarNode.h>
 #include <Compiler/Lsp/LspPositionIndex.h>
+#include <Compiler/Lsp/LspQuery.h>
+#include <Compiler/Lsp/LspResolve.h>
 
 #include "helpers.h"
 
@@ -225,4 +228,47 @@ TEST_CASE("a constant use maps to ConstRefExprNode after expansion", "[lsp]")
     const AST::NodeReference ref = AST::make_ref(
         index.at(file, 2, static_cast<uint32_t>(col + 1)));
     REQUIRE(ref.has_type<AST::ConstRefExprNode>());
+}
+
+TEST_CASE("a type alias use resolves to the alias, and the alias is a document symbol", "[lsp]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Mat4 { int32 $e; }\n"
+        "type Transform = Mat4;\n"
+        "function apply(Transform $m) : void { echo $m->e; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    Compiler::Lsp::PositionIndex index;
+    index.build(*bundle);
+
+    AST::File *file = nullptr;
+    for (auto &module_ptr : bundle->modules) {
+        for (AST::File &candidate : module_ptr->files()) {
+            file = &candidate;
+        }
+    }
+
+    REQUIRE(file != nullptr);
+
+    const std::string line = "function apply(Transform $m) : void { echo $m->e; }";
+    const size_t col = line.find("Transform");
+
+    AST::Node *at = index.at(file, 3, static_cast<uint32_t>(col + 1));
+    const AST::NodeReference ref = AST::make_ref(at);
+    REQUIRE(ref.has_type<AST::TypeNode>());
+    REQUIRE(ref.get_ptr<AST::TypeNode>()->alias != nullptr);
+
+    const AST::NodeReference target = AST::make_ref(Compiler::Lsp::definition_target(at, *bundle));
+    REQUIRE(target.has_type<AST::TypeAliasDeclNode>());
+    REQUIRE(target.get_ptr<AST::TypeAliasDeclNode>()->name() == "Transform");
+
+    bool listed = false;
+    for (const auto &symbol : Compiler::Lsp::document_symbols(*file)) {
+        if (symbol.name == "Transform") {
+            listed = symbol.kind == Compiler::Lsp::OutlineKind::t_type_alias;
+        }
+    }
+
+    REQUIRE(listed);
 }

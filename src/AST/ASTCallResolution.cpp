@@ -398,7 +398,7 @@ namespace AST
             return {};
         }
 
-        return find_member_functions(receiver_type.get_complex_type(), call.lookup_name());
+        return find_receiver_functions(receiver_type.get_complex_type(), call.lookup_name());
     }
 
     namespace

@@ -161,6 +161,7 @@ public:
     void visit_assign(AST::AssignNode &node);
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visit_use_decl(AST::UseDeclNode &node);
+    void visit_type_alias(AST::TypeAliasDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);
     void visitAttribute(AST::AttributeNode &node);
     void visit_type_decl(AST::TypeDeclNode &node);

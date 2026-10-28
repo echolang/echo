@@ -1,5 +1,6 @@
 #include "Parser/OpaqueDeclParser.h"
 
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/ASTDeclarationOrigin.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/TypeDeclParser.h"
@@ -118,6 +119,12 @@ AST::TypeDeclNode *Parser::parse_opaque_typedecl(Payload &payload, AST::Visibili
 
     if (auto *structsymbol = payload.collector.namespaces.find_symbol(
             name_token.value(), *payload.context.current_namespace)) {
+        if (structsymbol->node.has_type<AST::TypeAliasDeclNode>()) {
+            payload.collector.collect_issue<AST::Issue::TypeRedeclaration>(
+                payload.context.code_ref(name_token), name_token.value(), structsymbol->declaration_token().value());
+            return nullptr;
+        }
+
         struct_node = structsymbol->node.get_ptr<AST::TypeDeclNode>();
     }
 

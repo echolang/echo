@@ -1,4 +1,5 @@
 #include "Parser/TypeDeclParser.h"
+#include "Parser/TypeAliasParser.h"
 #include "Parser/ConstDeclParser.h"
 #include "Parser/EnumDeclParser.h"
 #include "Parser/EnumMapParser.h"
@@ -83,6 +84,10 @@ bool Parser::publish_type_symbol(Parser::Payload &payload, AST::Namespace &ns, A
     auto *existing = payload.collector.namespaces.find_symbol(node.type_name(), ns);
 
     if (existing != nullptr) {
+        if (!existing->node.has_type<AST::TypeDeclNode>()) {
+            return false;
+        }
+
         auto *existing_type = existing->node.get_ptr<AST::TypeDeclNode>();
 
         // the same declaration reached by a later pass, which is the ordinary case: passes walk
@@ -1242,6 +1247,13 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // namespaces may each hold a `Foo`
     else if (auto *structsymbol = payload.collector.namespaces.find_symbol(
                  name_token.value(), *payload.context.current_namespace)) {
+        if (structsymbol->node.has_type<AST::TypeAliasDeclNode>()) {
+            payload.collector.collect_issue<AST::Issue::TypeRedeclaration>(
+                payload.context.code_ref(name_token), name_token.value(), structsymbol->declaration_token().value());
+            cursor.skip_till_end_of_scope();
+            return nullptr;
+        }
+
         // we found a name matching symbol
         struct_node = structsymbol->node.get_ptr<AST::TypeDeclNode>();
     }
@@ -1580,6 +1592,15 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             parse_typedecl(payload);
         }
+        else if (starts_type_alias(cursor)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                fmt::format(
+                    "A type alias cannot be declared inside '{}' - it names a type for a whole namespace, so "
+                    "it belongs at file or namespace scope.",
+                    struct_node->type_name()));
+            cursor.try_skip_to_next_statement();
+        }
         // `type Iter : contract::iterator<V>;` - an interface's associated type.
         //
         // recognised contextually rather than through a `t_type` keyword token, which would break every
@@ -1618,8 +1639,8 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             //
             // an interface's method needs no arm of its own: a bodyless `function f() : void;` already
             // parses and registers through register_member_function, which is all a requirement is.
-            // only the *body* has to be refused, and that is asked of the returned node below - in the
-            // body pass, since the declaration pass returns before it ever reaches one
+            // a body on one is its default; a static's or an extern interface's body is refused below.
+            //
             // an interface's method is a **requirement**: it is the surface every implementor answers, so
             // there is nothing for a modifier to hide it from. refused ahead of parse_funcdecl so the
             // declaration is not left carrying a visibility the language does not give it
@@ -1641,16 +1662,28 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 : FuncDeclKind::t_normal;
             AST::FunctionDeclNode *member = parse_funcdecl(payload, func_kind, visibility);
 
+            // a leftover body: statics have no receiver, a method's own type parameters have no slot
             if (holds_any_requirements && member != nullptr && member->body != nullptr
                 && !member->has_synthesized_body()) {
+                std::string why;
+
+                if (holds_extern_requirements) {
+                    why = "the compiler writes each one as a call through the table a plugin hands over";
+                } else if (member->own_type_param_count() > 0) {
+                    why = "a default cannot have type parameters of its own";
+                } else {
+                    why = "only a method with a receiver can have a default";
+                }
+
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(member->declaration_site_token()),
                     fmt::format(
-                        "'{}' is a requirement of the {} '{}', so it cannot have a body - end it "
-                        "with ';' and let each implementor write one.",
+                        "'{}' is a requirement of the {} '{}', so it cannot have a body - {}. End it "
+                        "with ';'.",
                         member->signature_description(),
                         AST::type_kind_keyword(struct_node->complex_type().kind),
-                        struct_node->type_name()));
+                        struct_node->type_name(),
+                        why));
             }
         }
         // **also ahead of starts_vardecl**, and for the sharpest version of the arm above's reason: both

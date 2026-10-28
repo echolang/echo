@@ -1,0 +1,21 @@
+// the signature written once instead of at every use
+type Transform = function<int32(int32)>;
+type Reducer = function<int32(int32, int32)>;
+
+function apply(Transform $f, int32 $x) : int32
+{
+    return $f($x);
+}
+
+function fold(array<int32> $xs, Reducer $r) : int32
+{
+    int32 $acc = 0;
+    foreach ($xs as $x) {
+        $acc = $r($acc, $x);
+    }
+    return $acc;
+}
+
+Transform $twice = function(int32 $x) : int32 { return $x * 2; };
+echo apply($twice, 21);
+echo fold([1, 2, 3, 4], function(int32 $a, int32 $b) : int32 { return $a + $b; });

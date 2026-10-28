@@ -12,6 +12,8 @@
 
 namespace AST
 {
+    class TypeAliasDeclNode;
+
     class TypeNode : public Node
     {
     public:
@@ -31,6 +33,10 @@ namespace AST
         // type_token's spelling. written_names leaves use this so TypeChecker can say
         // `Unknown type 'foo::Nope'` from a node that only holds the last token
         std::string written_spelling;
+
+        // the alias a leaf was written as. its type is the alias's target, and a target that failed is
+        // the alias declaration's to report
+        const TypeAliasDeclNode *alias = nullptr;
 
         TypeNode(ValueType type, TokenReference type_token)
             : type(type), type_token(type_token)
@@ -83,7 +89,8 @@ namespace AST
     inline std::optional<UnresolvedTypeName> unresolved_type_name_refusal(const TypeNode &node)
     {
         for (const TypeNode *leaf : node.written_names) {
-            if (leaf == nullptr || !leaf->type.is_unknown() || !leaf->type_token.has_value()) {
+            if (leaf == nullptr || !leaf->type.is_unknown() || !leaf->type_token.has_value()
+                || leaf->alias != nullptr) {
                 continue;
             }
 

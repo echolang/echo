@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnmetInterfaceRequirement  default_wrong_shape.eco:8:7
+
+  'Chulak' says it conforms to 'Gate' but does not satisfy 'const dial() : void' - the closest it declares is 'const Chulak::dial(int32)'.
+
+  7 | // a method of the default's name but the wrong shape is a mistake, not something the default covers
+  8 | class Chulak : Gate
+    :       ^^^^^^
+  9 | {
+
+1 error, nothing was compiled.

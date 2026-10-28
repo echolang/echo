@@ -468,14 +468,25 @@ namespace
     {
         const AST::TypeSubstitution impl_subst = implementor_substitution(ct);
 
-        for (AST::FunctionDeclNode *candidate :
-             AST::find_member_functions(ct, wanted.requirement->func_name())) {
+        const std::vector<AST::FunctionDeclNode *> declared =
+            AST::find_member_functions(ct, wanted.requirement->func_name());
+
+        for (AST::FunctionDeclNode *candidate : declared) {
             if (candidate_answers(candidate, wanted, impl_subst, types)) {
                 return candidate;
             }
         }
 
-        return nullptr;
+        // the default answers only when nothing of the name is declared; a wrong shape stays an error
+        if (!declared.empty()) {
+            return nullptr;
+        }
+
+        const AST::FunctionDeclNode *requirement = wanted.requirement->is_instantiated()
+            ? wanted.requirement->template_ref
+            : wanted.requirement;
+
+        return requirement->default_decl;
     }
 
     // does this signature still mention an associated type nothing has bound yet?
@@ -523,6 +534,8 @@ AST::ConformanceBinding AST::conformance_bindings(
     if (ct == nullptr || associated.empty()) {
         return result;
     }
+
+    const AST::TypeSubstitution impl_subst = implementor_substitution(ct);
 
     // @TODO the explicit `type Iter = X;` form - see the chapter's holes - would seed the trial here
     // rather than replace it: the requirements below are still re-checked against the seed, so a wrong
@@ -578,7 +591,7 @@ AST::ConformanceBinding AST::conformance_bindings(
                     continue;
                 }
 
-                const AST::ValueType proposed = *trial.lookup(assoc);
+                const AST::ValueType proposed = wanted_type(*trial.lookup(assoc), impl_subst, types);
 
                 if (const AST::ValueType *already = result.substitution.lookup(assoc)) {
                     // **two members proposed different types for one name.** solve order decides which
@@ -594,30 +607,6 @@ AST::ConformanceBinding AST::conformance_bindings(
                     continue;
                 }
 
-                // the associated type's own constraint, **substituted through this conformance**:
-                // `type Iter : contract::iterator<V>` means nothing until `V` is bound, which is exactly why
-                // AST::constraint_admits exists apart from TypeParamDecl::allows
-                std::vector<AST::ValueType> constraint;
-                constraint.reserve(assoc->constraint.size());
-                for (const AST::ValueType &atom : assoc->constraint) {
-                    constraint.push_back(wanted_type(atom, result.substitution, types));
-                }
-
-                if (!AST::constraint_admits(constraint, proposed)) {
-                    result.failure = AST::ConformanceBinding::Failure::t_constraint;
-                    result.associated = assoc;
-                    result.first = proposed;
-
-                    for (const AST::ValueType &atom : constraint) {
-                        if (!result.constraint_spelling.empty()) {
-                            result.constraint_spelling += "|";
-                        }
-                        result.constraint_spelling += atom.get_type_desciption();
-                    }
-
-                    return result;
-                }
-
                 result.substitution.bind(assoc, proposed);
             }
 
@@ -625,6 +614,38 @@ AST::ConformanceBinding AST::conformance_bindings(
             // accept a few more programs; this one is order-dependent and says so, and the escape hatch
             // is that the requirements are all re-checked exactly afterwards
             break;
+        }
+    }
+
+    // the associated type's own constraint, **substituted through this conformance**:
+    // `type Iter : contract::iterator<V>` means nothing until `V` is bound, which is exactly why
+    // AST::constraint_admits exists apart from TypeParamDecl::allows
+    for (const AST::TypeParamDecl *assoc : associated) {
+        const AST::ValueType *bound = result.substitution.lookup(assoc);
+
+        if (bound == nullptr) {
+            continue;
+        }
+
+        std::vector<AST::ValueType> constraint;
+        constraint.reserve(assoc->constraint.size());
+        for (const AST::ValueType &atom : assoc->constraint) {
+            constraint.push_back(wanted_type(atom, result.substitution, types));
+        }
+
+        if (!AST::constraint_admits(constraint, *bound)) {
+            result.failure = AST::ConformanceBinding::Failure::t_constraint;
+            result.associated = assoc;
+            result.first = *bound;
+
+            for (const AST::ValueType &atom : constraint) {
+                if (!result.constraint_spelling.empty()) {
+                    result.constraint_spelling += "|";
+                }
+                result.constraint_spelling += atom.get_type_desciption();
+            }
+
+            return result;
         }
     }
 
@@ -830,19 +851,23 @@ std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
     std::vector<AST::FunctionDeclNode *> filled =
         interface_implementation_templates(ct, interface, types);
 
-    if (filled.empty() || ct == nullptr || !ct->is_instantiated()) {
+    if (filled.empty() || ct == nullptr) {
         return filled;
     }
 
-    // a vtable names a symbol. the template has none (`t_no_symbol`); the instance the
-    // monomorphizer force-emitted for this instantiation is the body. missing here is a
-    // compiler bug - instantiate_interface_methods walks this same template list
+    // a vtable needs the instance instantiate_interface_methods minted, not the template
     for (AST::FunctionDeclNode *&found : filled) {
         if (found == nullptr) {
             continue;
         }
 
-        AST::FunctionDeclNode *instance = found->instance_for(ct->instantiation_args);
+        const std::vector<AST::ValueType> args = AST::implementation_instance_args(found, ct, interface, types);
+
+        if (args.empty()) {
+            continue;
+        }
+
+        AST::FunctionDeclNode *instance = found->instance_for(args);
 
         if (instance == nullptr) {
             assert(false && "instantiate_interface_methods should have emitted this vtable instance");
@@ -853,4 +878,97 @@ std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
     }
 
     return filled;
+}
+
+std::string AST::default_interface_name(const AST::VarDeclNode *receiver)
+{
+    if (receiver == nullptr || receiver->declaring_function == nullptr) {
+        return "";
+    }
+
+    const AST::FunctionDeclNode *function = receiver->declaring_function;
+
+    if (!function->is_default() || function->args.empty() || function->args[0] != receiver
+        || function->owner_type == nullptr) {
+        return "";
+    }
+
+    return function->owner_type->name.value_or("");
+}
+
+std::vector<AST::ValueType> AST::implementation_instance_args(
+    const AST::FunctionDeclNode *answer,
+    const AST::ComplexType *ct,
+    const AST::ValueType &interface,
+    AST::TypeRegistry &types
+)
+{
+    if (answer == nullptr || ct == nullptr) {
+        return {};
+    }
+
+    if (!answer->is_default()) {
+        return ct->is_instantiated() ? ct->instantiation_args : std::vector<AST::ValueType> {};
+    }
+
+    // [interface parameters..., associated types..., Self], the default's inherited prefix
+    const AST::TypeSubstitution bound = AST::conformance_bindings(ct, interface, types).substitution;
+    const AST::TypeParamDecl *self = answer->default_self_param();
+
+    std::vector<AST::ValueType> args;
+
+    for (size_t i = 0; i < answer->inherited_type_param_count; i++) {
+        const AST::TypeParamDecl *param = answer->type_parameters[i];
+
+        if (param == self) {
+            args.push_back(AST::ValueType::make_complex(const_cast<AST::ComplexType *>(ct)));
+            continue;
+        }
+
+        const AST::ValueType *arg = bound.lookup(param);
+
+        if (arg == nullptr) {
+            return {};
+        }
+
+        args.push_back(*arg);
+    }
+
+    return args;
+}
+
+std::vector<AST::UninstantiatedImplementation> AST::uninstantiated_implementations(
+    AST::ComplexType *ct,
+    AST::TypeRegistry &types
+)
+{
+    std::vector<UninstantiatedImplementation> pending;
+
+    if (ct == nullptr) {
+        return pending;
+    }
+
+    const AST::ValueType from = AST::ValueType::make_class(ct);
+
+    for (const AST::ValueType &iface : ct->conformances()) {
+        if (!interface_erasure_refusal(from, iface).empty()) {
+            continue;
+        }
+
+        for (AST::FunctionDeclNode *tmpl_method : interface_implementation_templates(ct, iface, types)) {
+            if (tmpl_method == nullptr) {
+                continue;
+            }
+
+            std::vector<AST::ValueType> args = implementation_instance_args(tmpl_method, ct, iface, types);
+
+            if (args.empty() || tmpl_method->instance_for(args) != nullptr) {
+                continue;
+            }
+
+            pending.push_back({ tmpl_method, std::move(args) });
+        }
+    }
+
+    return pending;
 }

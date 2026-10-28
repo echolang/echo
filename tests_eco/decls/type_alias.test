@@ -1,0 +1,59 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "type alias",
+          "name": "Page",
+          "qualified": "Page",
+          "visibility": "public",
+          "file": "type_alias.eco",
+          "line": 2,
+          "column": 13,
+          "doc": "/** what a repository query reads */",
+          "generics": [
+            {
+              "name": "T",
+              "constraint": null
+            }
+          ],
+          "target": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "named",
+              "name": "T"
+            }
+          }
+        },
+        {
+          "kind": "type alias",
+          "name": "Ledger",
+          "qualified": "Ledger",
+          "visibility": "internal",
+          "file": "type_alias.eco",
+          "line": 3,
+          "column": 6,
+          "doc": null,
+          "generics": [],
+          "target": {
+            "kind": "map",
+            "key": {
+              "kind": "string"
+            },
+            "value": {
+              "kind": "prim",
+              "name": "int64"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

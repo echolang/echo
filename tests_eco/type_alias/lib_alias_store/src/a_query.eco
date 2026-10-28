@@ -1,0 +1,25 @@
+namespace store;
+
+// names an alias the next file declares
+public type CommentQuery = Query<int64, Comment, CommentRows>;
+
+public class Query<K, M, R>
+{
+    public K $key;
+    public M $model;
+
+    public static function of(K $key, M $model) : Query<K, M, R>
+    {
+        return Query<K, M, R>($key, $model);
+    }
+
+    public function describe() : string
+    {
+        return "query {$this->key}";
+    }
+}
+
+public class Comment
+{
+    public string $body = '';
+}

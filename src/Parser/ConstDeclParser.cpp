@@ -182,17 +182,17 @@ AST::ConstDeclNode *Parser::parse_constdecl(
     if (auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *target)) {
         // has_type and not get_ptr: get_ptr asserts the type rather than asking it, so as a test it is
         // always true and reads a constant as a type declaration
-        if (existing->node.has_type<AST::TypeDeclNode>()) {
-            const auto &previous_type = existing->node.get<AST::TypeDeclNode>();
-            payload.collector.collect_issue<AST::Issue::TypeRedeclaration>(
-                payload.context.code_ref(name_token), name_token.value(), previous_type.name_token.value());
-            return nullptr;
-        }
-
         if (existing->node.has_type<AST::ConstDeclNode>()) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(name_token),
                 fmt::format("The constant '{}' is already declared.", name_token.value()));
+            return nullptr;
+        }
+
+        // a type or an alias
+        if (const auto previous = existing->declaration_token()) {
+            payload.collector.collect_issue<AST::Issue::TypeRedeclaration>(
+                payload.context.code_ref(name_token), name_token.value(), previous.value());
             return nullptr;
         }
     }

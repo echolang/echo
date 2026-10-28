@@ -1,0 +1,4 @@
+interface Gate
+{
+    function tap<U>(U $x) : void { echo 1; }
+}

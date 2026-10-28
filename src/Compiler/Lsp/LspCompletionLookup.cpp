@@ -1,6 +1,7 @@
 #include "Compiler/Lsp/LspCompletionLookup.h"
 
 #include "AST/ASTBundle.h"
+#include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTFunctionRegistry.h"
@@ -12,9 +13,41 @@
 #include "AST/ASTTypeUnify.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/NamespaceDeclNode.h"
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
+
+#include <unordered_set>
+
+namespace
+{
+    AST::TypeDeclNode *type_decl_of(const AST::ValueType &type, AST::Bundle *bundle)
+    {
+        if (!type.has_complex_type() || bundle == nullptr) {
+            return nullptr;
+        }
+
+        const AST::ComplexType *owner = type.get_complex_type()->template_or_self();
+        if (owner->owner_type != nullptr && owner->name.has_value()) {
+            return owner->owner_type->find_member_type_decl(owner->name.value());
+        }
+
+        if (!owner->name.has_value() || owner->ast_namespace == nullptr) {
+            return nullptr;
+        }
+
+        const AST::Symbol *symbol = bundle->collector.namespaces.find_symbol(
+            owner->name.value(), *owner->ast_namespace);
+        if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type
+            || !symbol->node.has_type<AST::TypeDeclNode>()) {
+            return nullptr;
+        }
+
+        return symbol->node.get_ptr<AST::TypeDeclNode>();
+    }
+};
 
 const AST::ComplexType *Compiler::Lsp::complex_of(const AST::ValueType &type)
 {
@@ -28,7 +61,56 @@ const AST::ComplexType *Compiler::Lsp::complex_of(const AST::ValueType &type)
 
 std::vector<AST::FunctionDeclNode *> Compiler::Lsp::methods_of(const AST::ComplexType &type)
 {
-    return type.template_or_self()->methods();
+    std::vector<AST::FunctionDeclNode *> methods = type.template_or_self()->methods();
+
+    std::unordered_set<std::string> named;
+    named.reserve(methods.size());
+    for (const AST::FunctionDeclNode *fn : methods) {
+        named.insert(fn->func_name());
+    }
+
+    // declared members, then a default only for a name the conformer did not write. two
+    // interfaces offering the same name is check_default_ambiguity's error: skip it here
+    for (const AST::ValueType &conformance : type.conformances()) {
+        if (!conformance.is_interface()) {
+            continue;
+        }
+
+        for (AST::FunctionDeclNode *requirement : AST::interface_requirements(conformance.get_complex_type())) {
+            if (requirement->default_decl == nullptr) {
+                continue;
+            }
+
+            const std::string name = requirement->func_name();
+            if (!named.insert(name).second) {
+                continue;
+            }
+
+            const std::vector<AST::FunctionDeclNode *> defaults = AST::conformance_defaults(&type, name);
+            if (defaults.empty()) {
+                continue;
+            }
+
+            const AST::ComplexType *first = defaults.front()->owner_type;
+            bool ambiguous = false;
+            for (const AST::FunctionDeclNode *offered : defaults) {
+                if (offered->owner_type != first) {
+                    ambiguous = true;
+                    break;
+                }
+            }
+
+            if (ambiguous) {
+                continue;
+            }
+
+            for (AST::FunctionDeclNode *offered : defaults) {
+                methods.push_back(offered);
+            }
+        }
+    }
+
+    return methods;
 }
 
 Compiler::Lsp::CompletionLookup::CompletionLookup(const CompletionRequest &request) :
@@ -224,12 +306,24 @@ const AST::Namespace *Compiler::Lsp::CompletionLookup::resolve_namespace_path(
 
 AST::TypeDeclNode *Compiler::Lsp::CompletionLookup::type_of_symbol(const AST::Symbol *symbol) const
 {
-    if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type
-        || !symbol->node.has_type<AST::TypeDeclNode>()) {
+    if (symbol == nullptr) {
         return nullptr;
     }
 
-    return symbol->node.get_ptr<AST::TypeDeclNode>();
+    if (symbol->type() == AST::SymbolType::t_type && symbol->node.has_type<AST::TypeDeclNode>()) {
+        return symbol->node.get_ptr<AST::TypeDeclNode>();
+    }
+
+    if (symbol->type() == AST::SymbolType::t_alias && symbol->node.has_type<AST::TypeAliasDeclNode>()) {
+        const AST::TypeNode *target = symbol->node.get_ptr<AST::TypeAliasDeclNode>()->resolved_target();
+        if (target == nullptr) {
+            return nullptr;
+        }
+
+        return type_decl_of(target->type, _bundle);
+    }
+
+    return nullptr;
 }
 
 AST::TypeDeclNode *Compiler::Lsp::CompletionLookup::resolve_type_path(
@@ -507,7 +601,7 @@ std::optional<AST::ValueType> Compiler::Lsp::CompletionLookup::type_of_chain(
             }
         }
         else if (segment.kind == ReceiverSegment::Kind::t_method) {
-            for (AST::FunctionDeclNode *fn : AST::find_member_functions(type, segment.name)) {
+            for (AST::FunctionDeclNode *fn : AST::find_receiver_functions(type, segment.name)) {
                 current = fn->get_return_type();
                 break;
             }

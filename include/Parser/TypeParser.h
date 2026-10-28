@@ -81,6 +81,10 @@ namespace Parser
     // this to walk an optional type the same way starts_constdecl did
     bool skip_type_shape(Cursor &cursor);
 
+    // skip `<Arg, ...>` if the cursor sits on `<`. true when there was none, or it skipped;
+    // false when the tokens are not a list
+    bool skip_type_arguments(Cursor &cursor);
+
     AST::TypeNode *parse_type(Payload &payload);
 
     // silent: a name the type grammar would read as a primitive (`usize`, `int32`, …).

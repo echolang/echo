@@ -1,3 +1,5 @@
+#include "AST/TypeAliasDeclNode.h"
+#include "AST/TypeNode.h"
 #include "AST/ASTImport.h"
 
 #include "AST/ASTCollector.h"
@@ -106,7 +108,8 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
 
     Namespace *as_namespace = collector.namespaces.get(binding.path);
     Symbol *symbol = collector.namespaces.find_symbol(last, *parent);
-    const bool as_type = symbol != nullptr && symbol->type() == SymbolType::t_type;
+    const bool as_alias = symbol != nullptr && symbol->type() == SymbolType::t_alias;
+    const bool as_type = symbol != nullptr && symbol->names_type();
     const bool as_constant = symbol != nullptr && symbol->type() == SymbolType::t_constant;
     const bool as_function = collector.functions.declares(last, *parent);
     const bool as_item = as_type || as_constant || as_function;
@@ -134,7 +137,14 @@ static bool try_resolve_binding(const File &file, ImportBinding &binding, Collec
         bool type_visible = false;
         bool constant_visible = false;
 
-        if (as_type) {
+        if (as_alias) {
+            auto *alias = symbol->node.unsafe_ptr<TypeAliasDeclNode>();
+            type_visible = visible_from(alias->visibility, alias->declared_in, from);
+            refuse_invisible(
+                collector, file, binding, alias->visibility, alias->declared_in,
+                alias->name(), alias->token_name);
+        }
+        else if (as_type) {
             auto *decl = symbol->node.unsafe_ptr<TypeDeclNode>();
             const ComplexType &layout = decl->complex_type();
             type_visible = visible_from(layout.visibility, layout.declared_in, from);
@@ -254,6 +264,16 @@ Namespace *imported_namespace_start(
     // same child a fully qualified `ns::T::CONST` does. a function or constant item has no
     // surface; the parent stays the start
     Symbol *symbol = collector.namespaces.find_symbol(imp->target_name, *imp->target_namespace);
+    if (symbol != nullptr && symbol->type() == SymbolType::t_alias) {
+        const TypeNode *target = symbol->node.unsafe_ptr<TypeAliasDeclNode>()->resolved_target();
+        if (target != nullptr && target->type.has_complex_type()) {
+            if (Namespace *surface = member_surface_namespace(
+                    collector.namespaces, *target->type.get_complex_type()->template_or_self())) {
+                return surface;
+            }
+        }
+    }
+
     if (symbol != nullptr && symbol->type() == SymbolType::t_type) {
         auto *decl = symbol->node.unsafe_ptr<TypeDeclNode>();
         if (decl != nullptr) {

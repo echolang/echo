@@ -12,6 +12,7 @@
 namespace AST
 {
     class TypeDeclNode;
+    class TypeAliasDeclNode;
 };
 
 namespace Parser
@@ -113,6 +114,7 @@ namespace Parser
     // the TypeNode that lands in the tree - so refusing to hand the declaration back would trade
     // one exact diagnostic for a cascade of wrong layouts underneath it
     void refuse_invisible_type(Payload &payload, const AST::TypeDeclNode &decl, const TokenReference &at);
+    void refuse_invisible_type(Payload &payload, const AST::TypeAliasDeclNode &alias, const TokenReference &at);
 };
 
 #endif

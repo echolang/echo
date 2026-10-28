@@ -1,0 +1,50 @@
+// every way of calling reaches the same body. a direct call and a constrained generic name the
+// default's instance for the conformer; a stored interface value goes through the slot, which holds
+// that same instance for a conformer that wrote nothing, and the conformer's own method otherwise
+interface Gate
+{
+    const function address() : string;
+
+    const function dial() : void
+    {
+        echo "dialling {$this->address()}";
+    }
+}
+
+class Abydos : Gate
+{
+    const function address() : string { return '27-07-15-32-12-30'; }
+}
+
+class Chulak : Gate
+{
+    const function address() : string { return '09-02-23-15-37-20'; }
+
+    const function dial() : void
+    {
+        echo 'jaffa, kree!';
+    }
+}
+
+struct Coordinates : Gate
+{
+    string $glyphs;
+
+    const function address() : string { return $this->glyphs; }
+}
+
+function open<T: Gate>(const T& $g) : void
+{
+    $g->dial();
+}
+
+Abydos $a = Abydos();
+$a->dial();
+open($a);
+open(Chulak());
+open(Coordinates('38-05-17-21-14-29'));
+
+array<Gate> $network = [Abydos(), Chulak()];
+foreach ($network as $g) {
+    $g->dial();
+}

@@ -12,7 +12,8 @@
 
 bool AST::FunctionDeclNode::is_interface_requirement() const
 {
-    return owner_type != nullptr && owner_type->is_interface_kind();
+    // a default is owned by its interface but is a body, called directly
+    return owner_type != nullptr && owner_type->is_interface_kind() && !is_default();
 }
 
 void AST::FunctionDeclNode::replace_args(std::vector<VarDeclNode *> next)

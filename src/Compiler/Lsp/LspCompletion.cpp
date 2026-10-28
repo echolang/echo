@@ -1,5 +1,7 @@
 #include "Compiler/Lsp/LspCompletion.h"
 
+#include "AST/TypeAliasDeclNode.h"
+#include "AST/TypeNode.h"
 #include "AST/ASTAttributes.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
@@ -97,9 +99,9 @@ namespace
         return !name.empty() && name[0] == '$' ? name.substr(1) : name;
     }
 
-    CompletionItemKind kind_of_type(const AST::TypeDeclNode &type)
+    CompletionItemKind kind_of_type(AST::ComplexTypeKind kind)
     {
-        switch (type.kind()) {
+        switch (kind) {
         case AST::ComplexTypeKind::t_class:
             return CompletionItemKind::t_class;
         case AST::ComplexTypeKind::t_interface:
@@ -305,10 +307,32 @@ namespace
 
             CompletionItem item;
             item.label = type.type_name();
-            item.kind = kind_of_type(type);
+            item.kind = kind_of_type(type.kind());
             item.detail = type.value_type().get_type_desciption();
             if (type.ast_namespace != nullptr && !type.ast_namespace->is_root()) {
                 item.label_description = type.ast_namespace->display_name();
+            }
+            add(std::move(item), bucket);
+        }
+
+        void add_alias(const AST::TypeAliasDeclNode &alias, char bucket)
+        {
+            if (!visible(alias.visibility, alias.declared_in, nullptr)) {
+                return;
+            }
+
+            const AST::TypeNode *target = alias.resolved_target();
+
+            CompletionItem item;
+            item.label = alias.name();
+            item.kind = target != nullptr && target->type.has_complex_type()
+                ? kind_of_type(target->type.get_complex_type()->kind)
+                : CompletionItemKind::t_struct;
+            item.detail = target != nullptr
+                ? "type " + alias.name() + " = " + target->type.get_type_desciption()
+                : "type " + alias.name();
+            if (alias.ast_namespace != nullptr && !alias.ast_namespace->is_root()) {
+                item.label_description = alias.ast_namespace->display_name();
             }
             add(std::move(item), bucket);
         }
@@ -458,7 +482,11 @@ namespace
         void add_symbols(const AST::Namespace &ns, bool types_only, char bucket)
         {
             for (const AST::Symbol *symbol : ns.symbols()) {
-                if (AST::TypeDeclNode *type = _lookup.type_of_symbol(symbol)) {
+                if (symbol->type() == AST::SymbolType::t_alias
+                    && symbol->node.has_type<AST::TypeAliasDeclNode>()) {
+                    add_alias(*symbol->node.get_ptr<AST::TypeAliasDeclNode>(), bucket);
+                }
+                else if (AST::TypeDeclNode *type = _lookup.type_of_symbol(symbol)) {
                     add_type(*type, bucket);
                 }
                 else if (!types_only && symbol->type() == AST::SymbolType::t_constant
@@ -634,7 +662,7 @@ namespace
                             binding.target_name, *binding.target_namespace))) {
                     CompletionItem item;
                     item.label = binding.local_name;
-                    item.kind = kind_of_type(*type);
+                    item.kind = kind_of_type(type->kind());
                     item.detail = type->value_type().get_type_desciption();
                     add(std::move(item), k_bucket_own);
                     continue;

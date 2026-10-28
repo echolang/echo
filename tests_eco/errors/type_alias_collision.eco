@@ -1,0 +1,6 @@
+struct Gate
+{
+    int32 $id;
+}
+
+type Gate = int64;

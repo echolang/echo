@@ -13,6 +13,7 @@
 namespace AST
 {
     class FunctionDeclNode;
+    class TypeAliasDeclNode;
 };
 
 namespace Parser
@@ -102,6 +103,18 @@ namespace Parser
     AST::TypeParamScope install_type_parameters(
         Payload &payload,
         AST::ComplexType &owner,
+        const std::vector<ParsedTypeParam> &parsed
+    );
+
+    void declare_type_parameters(
+        Payload &payload,
+        AST::TypeAliasDeclNode &owner,
+        const std::vector<ParsedTypeParam> &parsed
+    );
+
+    AST::TypeParamScope install_type_parameters(
+        Payload &payload,
+        AST::TypeAliasDeclNode &owner,
         const std::vector<ParsedTypeParam> &parsed
     );
 };

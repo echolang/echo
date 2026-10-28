@@ -13,7 +13,9 @@
 #include "AST/ASTIssue.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/TypeNode.h"
 
 #include <algorithm>
 #include <optional>
@@ -28,6 +30,7 @@ namespace
         TokenReference token;
         AST::ValueType type;
         std::string spelling;
+        const AST::TypeAliasDeclNode *alias = nullptr;
 
         TypeNameSite(const TokenReference &token, AST::ValueType type, std::string spelling = {})
             : token(token), type(std::move(type)), spelling(std::move(spelling))
@@ -56,6 +59,18 @@ static std::optional<AST::ValueType> parse_value_type(
     std::vector<TypeNameSite> *names
 );
 static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type);
+static AST::ValueType parse_generic_application(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *template_decl,
+    const TokenReference &name_token,
+    std::vector<TypeNameSite> *names
+);
+static AST::ValueType apply_type_alias(
+    Parser::Payload &payload,
+    const AST::TypeAliasDeclNode &alias,
+    const TokenReference &name_token,
+    std::vector<TypeNameSite> *names
+);
 
 AST::Symbol *Parser::find_unqualified_type(Parser::Payload &payload, const std::string &name, const AST::Namespace &from)
 {
@@ -124,6 +139,7 @@ static bool cursor_is_integer_literal(Parser::Cursor &cursor)
 }
 
 bool Parser::skip_type_shape(Parser::Cursor &cursor);
+bool Parser::skip_type_arguments(Parser::Cursor &cursor);
 
 // skips a comma-separated list of type shapes, up to but not through whatever closes it. the grammar
 // has two such lists - a callable's parameters and a generic argument list - and they differ in
@@ -143,6 +159,34 @@ static bool skip_type_list(Parser::Cursor &cursor, IsEnd is_end)
         }
     }
 
+    return true;
+}
+
+// skip `<Arg, ...>` if the cursor sits on `<`. a generic argument is a type or a const integer,
+// the same list skip_type_shape and parse_type_arguments both walk
+bool Parser::skip_type_arguments(Parser::Cursor &cursor)
+{
+    if (!cursor.is_type(Token::Type::t_open_angle)) {
+        return true;
+    }
+
+    cursor.skip();
+
+    while (!cursor.is_generic_close()) {
+        if (cursor_is_integer_literal(cursor)) {
+            cursor.skip();
+        } else if (cursor.is_done() || !skip_type_shape(cursor)) {
+            return false;
+        }
+
+        if (cursor.is_type(Token::Type::t_comma)) {
+            cursor.skip();
+        } else if (!cursor.is_generic_close()) {
+            return false;
+        }
+    }
+
+    cursor.consume_generic_close();
     return true;
 }
 
@@ -219,26 +263,17 @@ bool Parser::skip_type_shape(Parser::Cursor &cursor)
         // so `MAX < $n` reaches here at a statement head. It declines anyway, and for a sturdier reason: the
         // list below is a list of *type shapes*, and a `$n` is not one, so the scan fails and the statement
         // is not read as a declaration
-        if (cursor.is_type(Token::Type::t_open_angle)) {
-            cursor.skip();
+        if (!skip_type_arguments(cursor)) {
+            return false;
+        }
 
-            // a generic argument is a type *or* a const integer, so `sized<4>` / `sized<0x10>`
-            // scans as a type here the same way it parses. callable parameter lists stay types-only
-            while (!cursor.is_generic_close()) {
-                if (cursor_is_integer_literal(cursor)) {
-                    cursor.skip();
-                } else if (cursor.is_done() || !skip_type_shape(cursor)) {
-                    return false;
-                }
-
-                if (cursor.is_type(Token::Type::t_comma)) {
-                    cursor.skip();
-                } else if (!cursor.is_generic_close()) {
-                    return false;
-                }
+        // `Page<int32>::Moon`: the application is the owner, then a nested type. `World::Moon` is
+        // already consumed by the `identifier ::` walk above, which cannot see a `<` in the owner
+        while (cursor.is_type_sequence(0, { Token::Type::t_namespace_sep, Token::Type::t_identifier })) {
+            cursor.skip(2);
+            if (!skip_type_arguments(cursor)) {
+                return false;
             }
-
-            cursor.consume_generic_close();
         }
     }
 
@@ -458,6 +493,16 @@ static std::optional<std::vector<AST::ValueType>> expand_type_alias(const std::s
     return out;
 }
 
+// the target a use of `alias` reads, or null - recording the deferral while the alias step has not got to it
+static const AST::TypeNode *alias_target_for(Parser::Payload &payload, const AST::TypeAliasDeclNode &alias)
+{
+    if (alias.resolution == AST::TypeAliasResolution::t_unresolved) {
+        payload.alias_pending = true;
+    }
+
+    return alias.resolved_target();
+}
+
 // resolves a single constraint atom to the set of concrete types it admits. an atom is an
 // alias, a primitive, or a user struct/class name. returns nullopt if it resolves to none
 //
@@ -484,6 +529,19 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
         return std::vector<AST::ValueType>{ decl->value_type() };
     }
 
+    if (symbol && symbol->type() == AST::SymbolType::t_alias) {
+        auto *alias = symbol->node.unsafe_ptr<AST::TypeAliasDeclNode>();
+        refuse_invisible_type(payload, *alias, payload.cursor.current());
+
+        const AST::TypeNode *target = alias_target_for(payload, *alias);
+
+        if (alias->is_generic() || target == nullptr) {
+            return std::nullopt;
+        }
+
+        return std::vector<AST::ValueType>{ target->type };
+    }
+
     return std::nullopt;
 }
 
@@ -506,8 +564,26 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
 {
     auto &cursor = payload.cursor;
 
-    if (!cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+    if (!cursor.is_type(Token::Type::t_identifier)) {
         return nullptr;
+    }
+
+    // `Owner::Nested`, or `Page<int32>::Moon` after the alias (or type) is applied. the cheap
+    // `identifier ::` shape, or `identifier <...>` that lands on `::` after skipping the args
+    if (!cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        if (!cursor.peek_is_type(1, Token::Type::t_open_angle)) {
+            return nullptr;
+        }
+
+        const auto peek = cursor.snapshot();
+        cursor.skip();
+        const bool applied_then_nested = Parser::skip_type_arguments(cursor)
+            && cursor.is_type(Token::Type::t_namespace_sep);
+        cursor.restore(peek);
+
+        if (!applied_then_nested) {
+            return nullptr;
+        }
     }
 
     // the namespace this type is written in, the same rule resolve_constraint_atom above states.
@@ -517,13 +593,9 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
     auto *symbol = find_unqualified_type(
         payload, cursor.current().value(), *payload.context.current_namespace);
 
-    if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+    if (symbol == nullptr || !symbol->names_type()) {
         return nullptr;
     }
-
-    AST::TypeDeclNode *owner = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
-
-    refuse_invisible_type(payload, *owner, cursor.current());
 
     // snapshot/restore, the idiom parse_member_call and starts_vardecl already use for exactly this
     // ambiguity: a name can be both a type and a namespace, and every failure below leaves the caller
@@ -532,11 +604,65 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
     const TokenReference owner_token = cursor.current();
     const auto start = cursor.snapshot();
 
+    AST::TypeDeclNode *owner = nullptr;
+    const AST::ComplexType *owner_ct = nullptr;
+    const AST::TypeAliasDeclNode *owner_alias = nullptr;
+    AST::ValueType owner_value;
+    std::string owner_display;
+    std::vector<TypeNameSite> applied;
+
     cursor.skip(); // the owner name
+
+    if (symbol->type() == AST::SymbolType::t_type) {
+        owner = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
+        owner_display = owner->namespaced_type_name();
+        refuse_invisible_type(payload, *owner, owner_token);
+
+        if (cursor.is_type(Token::Type::t_open_angle)) {
+            owner_value = parse_generic_application(payload, owner, owner_token, &applied);
+            if (!owner_value.has_complex_type()) {
+                cursor.restore(start);
+                return nullptr;
+            }
+
+            owner_ct = owner_value.get_complex_type()->template_or_self();
+        }
+        else {
+            owner_value = owner->value_type();
+            owner_ct = &owner->complex_type();
+        }
+    }
+    else {
+        owner_alias = symbol->node.unsafe_ptr<AST::TypeAliasDeclNode>();
+        owner_display = owner_alias->name();
+        refuse_invisible_type(payload, *owner_alias, owner_token);
+
+        // a generic alias without its arguments is not this production: `Page::Moon` leaves
+        // the tokens for the namespace walk, the same silence a missing type-name would
+        if (owner_alias->is_generic() && !cursor.is_type(Token::Type::t_open_angle)) {
+            cursor.restore(start);
+            return nullptr;
+        }
+
+        owner_value = apply_type_alias(payload, *owner_alias, owner_token, &applied);
+        if (!owner_value.has_complex_type()) {
+            cursor.restore(start);
+            return nullptr;
+        }
+
+        owner_ct = owner_value.get_complex_type()->template_or_self();
+    }
+
+    if (!cursor.is_type(Token::Type::t_namespace_sep)) {
+        cursor.restore(start);
+        return nullptr;
+    }
+
     cursor.skip(); // the `::`
 
     std::vector<TypeNameSite> pending;
-    pending.emplace_back(owner_token, owner->value_type());
+    pending.emplace_back(owner_token, owner_value);
+    pending.back().alias = owner_alias;
 
     while (true) {
         if (!cursor.is_type(Token::Type::t_identifier)) {
@@ -549,18 +675,20 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
 
         // the *local* table: an owner reached by name is a declaration, never an instantiation, so
         // there is nothing for AST::find_member_type's redirect to do here
-        AST::TypeDeclNode *nested = owner->complex_type().find_member_type_decl(name_token.value());
+        AST::TypeDeclNode *nested = owner_ct->find_member_type_decl(name_token.value());
 
         if (nested == nullptr) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(name_token),
-                fmt::format("'{}' has no nested type '{}'.", owner->namespaced_type_name(), name_token.value()));
+                fmt::format("'{}' has no nested type '{}'.", owner_display, name_token.value()));
 
             cursor.restore(start);
             return nullptr;
         }
 
         owner = nested;
+        owner_ct = &nested->complex_type();
+        owner_display = nested->namespaced_type_name();
         pending.emplace_back(name_token, nested->value_type());
         out_name.emplace(name_token); // TokenReference has no copy assignment
         cursor.skip();
@@ -568,8 +696,13 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
         // another `::` continues the chain
         if (!cursor.is_type_sequence(0, { Token::Type::t_namespace_sep, Token::Type::t_identifier })) {
             if (names != nullptr) {
+                for (const TypeNameSite &site : applied) {
+                    names->emplace_back(site.token, site.type);
+                    names->back().alias = site.alias;
+                }
                 for (const TypeNameSite &site : pending) {
                     names->emplace_back(site.token, site.type);
+                    names->back().alias = site.alias;
                 }
             }
 
@@ -823,18 +956,16 @@ static AST::ValueType parse_array_suffix(Parser::Payload &payload, AST::ValueTyp
     return type;
 }
 
-// parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
-// applied to `template_decl`, and returns the interned application ValueType. Arguments are
-// themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type
-static AST::ValueType parse_generic_application(
+// reads `<Arg, Arg, ...>` against `params`, cursor at the `<`. nullopt once reported
+static std::optional<std::vector<AST::ValueType>> parse_type_arguments(
     Parser::Payload &payload,
-    AST::TypeDeclNode *template_decl,
+    const std::vector<AST::TypeParamDecl *> &params,
+    const std::string &display,
     const TokenReference &name_token,
     std::vector<TypeNameSite> *names
 )
 {
     auto &cursor = payload.cursor;
-    AST::ComplexType *template_ct = template_decl->value_type().get_complex_type();
 
     cursor.skip(); // skip '<'
 
@@ -843,14 +974,11 @@ static AST::ValueType parse_generic_application(
     while (!cursor.is_generic_close()) {
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(name_token), Token::Type::t_close_angle, Token::Type::t_unknown);
-            return AST::ValueType::make_unknown();
+            return std::nullopt;
         }
 
         const size_t index = args.size();
-        const AST::TypeParamDecl *slot =
-            (template_ct->is_generic() && index < template_ct->type_parameters.size())
-                ? template_ct->type_parameters[index]
-                : nullptr;
+        const AST::TypeParamDecl *slot = index < params.size() ? params[index] : nullptr;
 
         if (slot != nullptr && slot->is_value_param()) {
             args.push_back(parse_const_generic_arg(payload, slot, name_token));
@@ -861,7 +989,7 @@ static AST::ValueType parse_generic_application(
                 fmt::format(
                     "Type parameter '{}' of '{}' is a type, not a value",
                     slot != nullptr ? slot->name : std::to_string(index),
-                    template_ct->name.value_or(name_token.value())));
+                    display));
             arg_sites.push_back(cursor.current());
             cursor.skip();
             args.push_back(AST::ValueType::make_unknown());
@@ -869,7 +997,7 @@ static AST::ValueType parse_generic_application(
             const TokenReference arg_at = cursor.current();
             auto arg_type = parse_value_type(payload, names);
             if (!arg_type.has_value()) {
-                return AST::ValueType::make_unknown();
+                return std::nullopt;
             }
             args.push_back(arg_type.value());
             arg_sites.push_back(arg_at);
@@ -879,7 +1007,7 @@ static AST::ValueType parse_generic_application(
             cursor.skip();
         } else if (!cursor.is_generic_close()) {
             payload.collect_unexpected_token(Token::Type::t_close_angle);
-            return AST::ValueType::make_unknown();
+            return std::nullopt;
         }
     }
 
@@ -888,7 +1016,7 @@ static AST::ValueType parse_generic_application(
     // a value argument that overflowed (or failed to parse) already reported. intern nothing
     for (const auto &arg : args) {
         if (arg.is_unknown()) {
-            return AST::ValueType::make_unknown();
+            return std::nullopt;
         }
     }
 
@@ -897,7 +1025,7 @@ static AST::ValueType parse_generic_application(
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(name_token),
                 std::move(refusal.value()));
-            return AST::ValueType::make_unknown();
+            return std::nullopt;
         }
 
         // report at the argument, so `map<string, AssetRef>` points at AssetRef. returning
@@ -906,16 +1034,27 @@ static AST::ValueType parse_generic_application(
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(arg_sites[i]),
                 std::move(refusal.value()));
-            return AST::ValueType::make_unknown();
+            return std::nullopt;
         }
     }
 
-    if (!template_ct->is_generic() || template_ct->type_parameters.size() != args.size()) {
+    return args;
+}
+
+static bool type_arguments_fit(
+    Parser::Payload &payload,
+    const std::vector<AST::TypeParamDecl *> &params,
+    const std::vector<AST::ValueType> &args,
+    const std::string &display,
+    const TokenReference &name_token
+)
+{
+    if (params.empty() || params.size() != args.size()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(name_token),
-            "Wrong number of type arguments for generic type '" + template_ct->name.value_or(name_token.value()) + "'"
+            "Wrong number of type arguments for generic type '" + display + "'"
         );
-        return AST::ValueType::make_unknown();
+        return false;
     }
 
     // enforce any type-parameter constraints on the explicit arguments (e.g. `Vec<bool>` where
@@ -924,11 +1063,11 @@ static AST::ValueType parse_generic_application(
     // the registry substitutes an atom that names one of these parameters (`T : Cmp<T>`),
     // which is still the parameter until this application binds it
     const AST::ConstraintJudgement judged = AST::first_constraint_violation(
-        template_ct->type_parameters, args, payload.collector.type_registry);
+        params, args, payload.collector.type_registry);
 
     if (judged.violation.has_value()) {
         const size_t violation = *judged.violation;
-        const auto *param = template_ct->type_parameters[violation];
+        const auto *param = params[violation];
 
         if (param->is_value_param() && args[violation].is_const_value()) {
             const AST::IntegerTokenBits written = AST::bits_of_const_value(args[violation]);
@@ -936,23 +1075,104 @@ static AST::ValueType parse_generic_application(
                 payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
                     payload.context.code_ref(name_token),
                     AST::const_generic_token_refusal(param->value_type, written));
-                return AST::ValueType::make_unknown();
+                return false;
             }
         }
 
         payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
             payload.context.code_ref(name_token),
-            "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
+            "Type parameter '" + param->name + "' of '" + display +
             "' is constrained to '" + param->constraint_spelling +
             "' but was given '" + args[violation].get_type_desciption() + "'"
         );
+        return false;
+    }
+
+    return true;
+}
+
+// parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
+// applied to `template_decl`, and returns the interned application ValueType. Arguments are
+// themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type
+static AST::ValueType parse_generic_application(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *template_decl,
+    const TokenReference &name_token,
+    std::vector<TypeNameSite> *names
+)
+{
+    AST::ComplexType *template_ct = template_decl->value_type().get_complex_type();
+    const std::string display = template_ct->name.value_or(name_token.value());
+    const std::vector<AST::TypeParamDecl *> &params = template_ct->type_parameters;
+
+    const auto args = parse_type_arguments(payload, params, display, name_token, names);
+
+    if (!args.has_value() || !type_arguments_fit(payload, params, args.value(), display, name_token)) {
         return AST::ValueType::make_unknown();
     }
 
     // the instance carries the template's kind, so make_complex answers `Box<int32>` the same way it
     // answers `Box` - no need to ask the declaration which it was
-    auto *inst = payload.collector.type_registry.get_or_create_instantiation(template_ct, args);
+    auto *inst = payload.collector.type_registry.get_or_create_instantiation(template_ct, args.value());
     return AST::ValueType::make_complex(inst);
+}
+
+// a name that is an alias stands for its target, applied through the alias's own parameters
+static AST::ValueType apply_type_alias(
+    Parser::Payload &payload,
+    const AST::TypeAliasDeclNode &alias,
+    const TokenReference &name_token,
+    std::vector<TypeNameSite> *names
+)
+{
+    auto &cursor = payload.cursor;
+
+    const AST::TypeNode *target = alias_target_for(payload, alias);
+
+    if (target == nullptr) {
+        if (cursor.is_type(Token::Type::t_open_angle)) {
+            parse_type_arguments(payload, alias.type_parameters, alias.name(), name_token, names);
+        }
+
+        return AST::ValueType::make_unknown();
+    }
+
+    if (!alias.is_generic()) {
+        if (cursor.is_type(Token::Type::t_open_angle)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(name_token),
+                fmt::format(
+                    "'{}' is a type alias with no type parameters, so it takes no type arguments - it "
+                    "names '{}' already.",
+                    alias.name(),
+                    target->type.get_type_desciption()));
+            parse_type_arguments(payload, alias.type_parameters, alias.name(), name_token, names);
+            return AST::ValueType::make_unknown();
+        }
+
+        return target->type;
+    }
+
+    if (!cursor.is_type(Token::Type::t_open_angle)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            fmt::format(
+                "'{}' is generic, so it needs its type arguments - write '{}<...>'.",
+                alias.name(), alias.name()));
+        return AST::ValueType::make_unknown();
+    }
+
+    const auto args = parse_type_arguments(payload, alias.type_parameters, alias.name(), name_token, names);
+
+    if (!args.has_value()
+        || !type_arguments_fit(payload, alias.type_parameters, args.value(), alias.name(), name_token)) {
+        return AST::ValueType::make_unknown();
+    }
+
+    return AST::substitute_type(
+        target->type,
+        AST::TypeSubstitution::positional(alias.type_parameters, args.value()),
+        payload.collector.type_registry);
 }
 
 // a *generic* type named bare is refused rather than pushed: it resolves to the template, which no
@@ -1504,6 +1724,7 @@ static std::optional<AST::ValueType> parse_value_type(
     auto token = payload.cursor.current();
     auto primitive_type = is_qualified ? AST::ValueType::make_unknown() : get_primitive_type(token.value());
     AST::TypeDeclNode *user_type_decl = nullptr;
+    const AST::TypeAliasDeclNode *alias_decl = nullptr;
     const AST::TypeParamDecl *type_param = nullptr;
 
     // if it's not a primitive type, check for type parameters first
@@ -1539,6 +1760,9 @@ static std::optional<AST::ValueType> parse_value_type(
 
                 // reported, and the type still handed back - see Parser::refuse_invisible_type
                 refuse_invisible_type(payload, *user_type_decl, token);
+            } else if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_alias) {
+                alias_decl = struct_symbol->node.unsafe_ptr<AST::TypeAliasDeclNode>();
+                refuse_invisible_type(payload, *alias_decl, token);
             } else if (!is_qualified) {
                 // a nested type lives on its owner, not in the enclosing namespace. bare `Inner`
                 // inside `Outer` is that table; `Holder { Inner $x; }` still misses
@@ -1555,6 +1779,10 @@ static std::optional<AST::ValueType> parse_value_type(
     }
 
     payload.cursor.skip();
+
+    if (alias_decl != nullptr) {
+        primitive_type = apply_type_alias(payload, *alias_decl, token, names);
+    }
 
     // the identifier's own type, before an application. written_names is "what this
     // name resolved to"; `map<string, AssetRef>` failing the argument must not make
@@ -1579,6 +1807,7 @@ static std::optional<AST::ValueType> parse_value_type(
         }
 
         names->emplace_back(token, named_type, std::move(spelling));
+        names->back().alias = alias_decl;
     }
 
     if (is_const) {
@@ -1602,6 +1831,7 @@ AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
     for (const TypeNameSite &site : names) {
         AST::TypeNode &leaf = payload.context.emplace_node<AST::TypeNode>(site.type, site.token);
         leaf.written_spelling = site.spelling;
+        leaf.alias = site.alias;
         node.written_names.push_back(&leaf);
     }
 

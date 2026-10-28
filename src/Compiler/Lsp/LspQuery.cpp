@@ -1,5 +1,6 @@
 #include "Compiler/Lsp/LspQuery.h"
 
+#include "AST/TypeAliasDeclNode.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTNode.h"
@@ -206,7 +207,9 @@ namespace
 
         if (ref.has_type<AST::TypeNode>()) {
             AST::TypeNode *written = ref.get_ptr<AST::TypeNode>();
-            answer.type_description = written->type.get_type_desciption();
+            answer.type_description = written->alias != nullptr
+                ? "type " + written->alias->name() + " = " + written->type.get_type_desciption()
+                : written->type.get_type_desciption();
             if (written->type_token.has_value()) {
                 answer.range = AST::span_of(written->type_token.value());
             }
@@ -653,6 +656,17 @@ std::vector<Compiler::Lsp::OutlineSymbol> Compiler::Lsp::document_symbols(const 
             symbol.name = decl->name();
             symbol.kind = OutlineKind::t_constant;
             symbol.range = AST::span_of(decl->token_name);
+            symbol.selection = symbol.range;
+            nest(std::move(symbol));
+            continue;
+        }
+
+        if (ref.has_type<AST::TypeAliasDeclNode>()) {
+            AST::TypeAliasDeclNode *alias = ref.get_ptr<AST::TypeAliasDeclNode>();
+            OutlineSymbol symbol;
+            symbol.name = alias->name();
+            symbol.kind = OutlineKind::t_type_alias;
+            symbol.range = AST::span_of(alias->token_name);
             symbol.selection = symbol.range;
             nest(std::move(symbol));
         }

@@ -73,6 +73,7 @@ namespace AST
         void visit_assign(AssignNode &node) override;
         void visitNamespaceDecl(NamespaceDeclNode &node) override;
         void visit_use_decl(UseDeclNode &node) override;
+        void visit_type_alias(TypeAliasDeclNode &node) override;
         void visitNamespace(NamespaceNode &node) override;
         void visitAttribute(AttributeNode &node) override;
         void visit_type_decl(TypeDeclNode &node) override;

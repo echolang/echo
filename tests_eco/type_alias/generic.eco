@@ -1,0 +1,29 @@
+// a generic alias is substituted through its own parameters, including from inside a generic body
+// whose own parameter stands in for the argument
+type Page<T> = map<string, T>;
+type Ledger = Page<int64>;
+type Pair<A, B> = map<A, array<B>>;
+
+function total<T>(Page<T> $page) : usize
+{
+    return $page->count();
+}
+
+function fresh<T>() : Page<T>
+{
+    return Page<T>();
+}
+
+Ledger $l = Page<int64>();
+$l['naquadah'] = 5;
+$l['trinium'] = 7;
+echo $l['trinium'];
+echo total($l);
+
+Page<string> $names = fresh<string>();
+$names['sg1'] = 'oneill';
+echo $names['sg1'];
+
+Pair<string, int32> $p = Pair<string, int32>();
+$p['chevrons'] = [1, 2, 3];
+echo $p['chevrons']->count();

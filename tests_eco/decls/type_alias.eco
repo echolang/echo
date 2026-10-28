@@ -1,0 +1,3 @@
+/** what a repository query reads */
+public type Page<T> = map<string, T>;
+type Ledger = Page<int64>;

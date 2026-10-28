@@ -1,4 +1,6 @@
 #include "AST/ASTIssue.h"
+#include "AST/ASTCollector.h"
+#include "AST/ASTConformance.h"
 #include "AST/VarDeclNode.h"
 
 #include <fmt/core.h>
@@ -173,6 +175,30 @@ ISSUE_MESSAGE_FNC(UnknownMember)
     return fmt::format("The type '{}' has no member named '{}'", type_name, member_name);
 }
 
+void AST::report_unknown_member(
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    const std::string &member_name,
+    const std::string &type_name,
+    const AST::VarDeclNode *receiver
+)
+{
+    collector.collect_issue<AST::Issue::UnknownMember>(
+        at, member_name, type_name, default_interface_name(receiver));
+}
+
+std::vector<AST::IssueNote> AST::Issue::UnknownMember::notes() const
+{
+    if (in_default_of.empty()) {
+        return {};
+    }
+
+    return { IssueNote { NoteKind::t_note, fmt::format(
+        "this is a default body of '{}', checked against each conformer it is instantiated for - a default "
+        "can rely only on what '{}' requires",
+        in_default_of, in_default_of) } };
+}
+
 ISSUE_MESSAGE_FNC(UnknownStaticFunction)
 {
     return fmt::format("The type '{}' has no static function named '{}'", type_name, function_name);
@@ -288,6 +314,11 @@ ISSUE_MESSAGE_FNC(UnsatisfiedTypeConstraint)
 }
 
 ISSUE_MESSAGE_FNC(UnmetInterfaceRequirement)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(AmbiguousDefault)
 {
     return _message;
 }

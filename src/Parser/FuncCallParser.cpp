@@ -14,6 +14,7 @@
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTImport.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTSymbol.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ReturnNode.h"
@@ -392,12 +393,43 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
 
     auto funcname_token = payload.cursor.current();
 
-    const AST::Namespace *imported_ns = nullptr;
-    std::string imported_name;
-    const bool may_import = requested_namespace == nullptr
+    AST::ValueType constructed = lookup.constructed_type;
+    bool consumed_type = false;
+
+    // an unqualified alias: `Page<int32>(...)`. skip_type_arguments is the silent peek so
+    // `LIMIT < $n` and a generic alias used as a comparison stay comparisons
+    const bool free_call = requested_namespace == nullptr
         && !lookup.shorthand_dot.has_value()
         && lookup.static_owner.is_unknown()
-        && lookup.constructed_type.is_unknown();
+        && constructed.is_unknown();
+
+    if (free_call) {
+        AST::Symbol *symbol = Parser::find_unqualified_type(
+            payload, funcname_token.value(), *payload.context.current_namespace);
+
+        // an alias has no constructor of its own name, so the type grammar has to apply it.
+        // a type already answers through the constructor overload set; taking that path here
+        // would steal `type_id<int32>()` from the generic function of the same name
+        if (symbol != nullptr && symbol->type() == AST::SymbolType::t_alias) {
+            const auto at_name = payload.cursor.snapshot();
+            payload.cursor.skip();
+            const bool constructing = Parser::skip_type_arguments(payload.cursor)
+                && payload.cursor.is_type(Token::Type::t_open_paren);
+            payload.cursor.restore(at_name);
+
+            if (constructing) {
+                AST::TypeNode *parsed = Parser::parse_type(payload);
+                if (parsed != nullptr) {
+                    constructed = parsed->type;
+                }
+                consumed_type = true;
+            }
+        }
+    }
+
+    const AST::Namespace *imported_ns = nullptr;
+    std::string imported_name;
+    const bool may_import = free_call && !consumed_type;
     const bool imported = may_import && AST::apply_item_import(
         AST::file_of(payload.context),
         payload.collector,
@@ -405,18 +437,29 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
         imported_ns,
         imported_name);
 
-    // skip the function name
-    payload.cursor.skip();
-
-    // optional explicit type arguments: name<int, float>(...)
-    //
-    // **speculative when the caller can reinterpret**, and that is not a nicety: a bare identifier
-    // can be a comparison operand - a compile-time constant is one - so `LIMIT < $n` arrives
-    // here with the cursor on a `<` that opens no type argument list. The only thing
-    // that settles it is whether a `(` follows the close, which is the rule parse_member_call already
-    // lives by for the same reason: `$a->count < 3`
     std::vector<AST::TypeNode *> explicit_type_args;
-    const bool type_args_read = parse_explicit_type_args(payload, funcname_token, explicit_type_args, speculative);
+    bool type_args_read = true;
+
+    if (consumed_type) {
+        // parse_type already consumed the type spelling; the cursor sits on `(`
+    }
+    else if (!constructed.is_unknown()) {
+        // T(...) or a nested type whose application the caller already folded in
+        payload.cursor.skip();
+        type_args_read = Parser::skip_type_arguments(payload.cursor);
+    }
+    else {
+        payload.cursor.skip();
+
+        // optional explicit type arguments: name<int, float>(...)
+        //
+        // **speculative when the caller can reinterpret**, and that is not a nicety: a bare identifier
+        // can be a comparison operand - a compile-time constant is one - so `LIMIT < $n` arrives
+        // here with the cursor on a `<` that opens no type argument list. The only thing
+        // that settles it is whether a `(` follows the close, which is the rule parse_member_call already
+        // lives by for the same reason: `$a->count < 3`
+        type_args_read = parse_explicit_type_args(payload, funcname_token, explicit_type_args, speculative);
+    }
 
     if (!type_args_read || !payload.cursor.is_type(Token::Type::t_open_paren)) {
         // the tokens go back exactly as they were, including the '>>' split state - which is why this
@@ -477,8 +520,8 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
             funcall.static_owner = lookup.static_owner;
         }
     }
-    else if (!lookup.constructed_type.is_unknown()) {
-        funcall.constructed_type = lookup.constructed_type;
+    else if (!constructed.is_unknown()) {
+        funcall.constructed_type = constructed;
     }
     else if (!lookup.static_owner.is_unknown()) {
         funcall.static_owner = lookup.static_owner;
@@ -505,8 +548,8 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
         // standing an undetermined receiver already has. `is_unknown()` is the "this is not that
         // kind of call" test - unknown is undetermined, and would swallow every ordinary miss
         if ((!lookup.static_owner.is_unknown() && AST::is_undetermined_type(lookup.static_owner))
-            || (!lookup.constructed_type.is_unknown()
-                && AST::is_undetermined_type(lookup.constructed_type))) {
+            || (!constructed.is_unknown()
+                && AST::is_undetermined_type(constructed))) {
             return &funcall;
         }
 
@@ -529,6 +572,14 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
                 payload.context.code_ref(funcname_token),
                 funcname_token.value(),
                 lookup.static_owner.get_type_desciption()
+            );
+            return nullptr;
+        }
+
+        if (!constructed.is_unknown()) {
+            payload.collector.collect_issue<AST::Issue::CannotConstructType>(
+                payload.context.code_ref(funcname_token),
+                constructed.get_type_desciption()
             );
             return nullptr;
         }
@@ -685,9 +736,12 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
 
         // a type that declares no such member at all is a different error from one whose overloads do
         // not answer this call, exactly as UnknownFunction is for a free call
-        payload.collector.collect_issue<AST::Issue::UnknownMember>(
+        AST::report_unknown_member(
+            payload.collector,
             payload.context.code_ref(member_token),
-            member_token.value(), receiver_type.get_type_desciption());
+            member_token.value(),
+            receiver_type.get_type_desciption(),
+            AST::place_root_of(self_arg));
         return nullptr;
 
     case AST::CallResolver::Result::t_failed:

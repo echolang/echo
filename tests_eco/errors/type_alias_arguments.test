@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] type_alias_arguments.eco:4:1
+
+  Wrong number of type arguments for generic type 'Page'
+
+  3 | 
+  4 | Page<int32, int32> $a;
+    : ^^^^
+  5 | Ints<int32> $b;
+
+[error] type_alias_arguments.eco:5:1
+
+  'Ints' is a type alias with no type parameters, so it takes no type arguments - it names 'array<int32>' already.
+
+  4 | Page<int32, int32> $a;
+  5 | Ints<int32> $b;
+    : ^^^^
+  6 | Page $c;
+
+[error] type_alias_arguments.eco:6:1
+
+  'Page' is generic, so it needs its type arguments - write 'Page<...>'.
+
+  5 | Ints<int32> $b;
+  6 | Page $c;
+    : ^^^^
+  7 | 
+
+3 errors, nothing was compiled.

@@ -33,6 +33,7 @@
 #include "Parser/TestDeclParser.h"
 #include "Parser/VisibilityParser.h"
 #include "Parser/EnumMapParser.h"
+#include "Parser/TypeAliasParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
 {
@@ -311,6 +312,9 @@ AST::ScopeNode & Parser::parse_scope(
 
         else if (starts_enum_map(cursor)) {
             parse_file_scope_enum_map(payload, block_token, visibility);
+        }
+        else if (starts_type_alias(cursor)) {
+            parse_type_alias(payload, visibility, block_token.has_value());
         }
         // a compile-time constant, which the *declaration* pass has already read in full - name, value and
         // symbol. skipped here rather than parsed again, and silently: that pass is the one owner of every

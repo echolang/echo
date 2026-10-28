@@ -1,0 +1,4 @@
+type Address = Chevrons;
+type Chevrons = Address;
+
+Address $a;

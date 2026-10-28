@@ -1,0 +1,35 @@
+namespace gates;
+
+public interface Gate
+{
+    const function address() : string;
+
+    const function dial() : void
+    {
+        echo "dialling {$this->address()}";
+    }
+}
+
+public class Engine<M>
+{
+    internal array<M> $rows = [];
+
+    public function create(M $model) : M
+    {
+        $this->rows->push($model);
+        return $model;
+    }
+
+    public function count() : usize
+    {
+        return $this->rows->count();
+    }
+}
+
+public interface Repository<M>
+{
+    function store() : Engine<M>;
+
+    function create(M $model) : M { return $this->store()->create($model); }
+    function count() : usize { return $this->store()->count(); }
+}

@@ -16,6 +16,7 @@
 
 namespace AST
 {
+    class TypeAliasDeclNode;
     struct EnumMap;
     class Module;
     class File;
@@ -73,6 +74,10 @@ namespace AST
         // in another module, so mint_file_enum_maps cannot find these by walking this module's
         // TypeDeclNodes. unique_ptr so ComplexType can hold a stable EnumMap* for lookup
         mutable std::vector<std::unique_ptr<EnumMap>> enum_maps;
+
+        // type aliases this file declares, minted in pass 1 and resolved before pass 2. **mutable** for
+        // `imports`' reason
+        mutable std::vector<TypeAliasDeclNode *> type_aliases;
 
         // the plain text content of the file
         std::optional<std::string> content;

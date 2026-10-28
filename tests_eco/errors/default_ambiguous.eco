@@ -1,0 +1,17 @@
+interface Dialer
+{
+    const function address() : string;
+    const function engage() : void { echo "dialling {$this->address()}"; }
+}
+
+interface Cloaking
+{
+    const function engage() : void { echo 'cloaked'; }
+}
+
+class Alkesh : Dialer, Cloaking
+{
+    const function address() : string { return '16-28-03-09-31-11'; }
+}
+
+Alkesh()->engage();

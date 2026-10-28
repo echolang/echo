@@ -64,6 +64,8 @@ namespace Compiler
                 return 12;
             case OutlineKind::t_property:
                 return 7;
+            case OutlineKind::t_type_alias:
+                return 26;
             }
 
             return 12;

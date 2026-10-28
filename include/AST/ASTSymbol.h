@@ -4,7 +4,9 @@
 #pragma once
 
 #include "AST/ASTNodeReference.h"
+#include "Token.h"
 
+#include <optional>
 #include <string>
 
 namespace AST
@@ -12,6 +14,7 @@ namespace AST
     class FunctionDeclNode;
     class TypeDeclNode;
     class ConstDeclNode;
+    class TypeAliasDeclNode;
 
     // what a namespace symbol slot names. a slot holds one node per name, so this is the
     // function-or-type-or-constant distinction and nothing finer: whether a type is a `struct` or a `class`
@@ -24,7 +27,8 @@ namespace AST
     {
         t_function,
         t_type,
-        t_constant
+        t_constant,
+        t_alias
     };
 
     class Symbol
@@ -40,6 +44,7 @@ namespace AST
         Symbol(FunctionDeclNode *func);
         Symbol(TypeDeclNode *type_decl);
         Symbol(ConstDeclNode *const_decl);
+        Symbol(TypeAliasDeclNode *alias);
 
         ~Symbol() {};
 
@@ -50,6 +55,14 @@ namespace AST
         std::string name() const {
             return _name;
         }
+
+        // a type or an alias of one
+        bool names_type() const {
+            return _type == SymbolType::t_type || _type == SymbolType::t_alias;
+        }
+
+        // the name token of the type, constant or alias this slot holds. nullopt for a function
+        std::optional<TokenReference> declaration_token() const;
 
     private:
 

@@ -1,0 +1,67 @@
+flags: -p decls
+
+--- OUT --->
+{
+  "modules": [
+    {
+      "name": "main",
+      "declarations": [
+        {
+          "kind": "interface",
+          "name": "Gate",
+          "qualified": "Gate",
+          "visibility": "public",
+          "file": "interface_default.eco",
+          "line": 2,
+          "column": 18,
+          "doc": null,
+          "tools": [],
+          "generics": [],
+          "conforms": [],
+          "members": [
+            {
+              "kind": "method",
+              "name": "address",
+              "qualified": "Gate::address",
+              "owner": "Gate",
+              "const": true,
+              "visibility": "public",
+              "file": "interface_default.eco",
+              "line": 4,
+              "column": 20,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "string"
+              },
+              "generics": []
+            },
+            {
+              "kind": "method",
+              "name": "dial",
+              "qualified": "Gate::dial",
+              "owner": "Gate",
+              "const": true,
+              "visibility": "public",
+              "file": "interface_default.eco",
+              "line": 6,
+              "column": 20,
+              "doc": null,
+              "tools": [],
+              "export": null,
+              "params": [],
+              "return": {
+                "kind": "prim",
+                "name": "void"
+              },
+              "generics": [],
+              "default": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

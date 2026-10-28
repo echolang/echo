@@ -1,0 +1,14 @@
+interface Gate
+{
+    const function address() : string;
+    const function dial() : void { echo "dialling {$this->address()}"; }
+}
+
+// a method of the default's name but the wrong shape is a mistake, not something the default covers
+class Chulak : Gate
+{
+    const function address() : string { return '09-02-23-15-37-20'; }
+    const function dial(int32 $chevrons) : void { echo $chevrons; }
+}
+
+Chulak()->dial(7);
