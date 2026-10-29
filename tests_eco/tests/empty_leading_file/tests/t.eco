@@ -1,0 +1,4 @@
+test answers
+{
+    assert(answer() == 42);
+}

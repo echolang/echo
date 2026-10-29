@@ -1,0 +1,7 @@
+#[module: "emptylead"]
+#[version: "0.1.0"]
+#[sources: "src/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}

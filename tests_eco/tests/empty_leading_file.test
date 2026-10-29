@@ -1,0 +1,7 @@
+mode: test
+modules: tests/empty_leading_file
+
+--- OUT --->
+ok   1/2  emptylead/t.eco::answers
+ok   2/2  main/empty_leading_file.eco::the_entry_files_own
+2 tests passed

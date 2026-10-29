@@ -599,3 +599,33 @@ TEST_CASE("a manifest that fails to resolve is reported on module.eco and outliv
     session.rebuild();
     REQUIRE(on_manifest());
 }
+
+TEST_CASE("a dependency's test scope stays shut while the root's is analysed", "[lsp]")
+{
+    // both test sources declare `Seen`. the root's tests are the project's; the dependency's
+    // belong to the dependency's own project, and opening them too was a redeclaration
+    const ProjectDir project("dependency-test-scope");
+    const std::string seen = "struct Seen\n{\n    public int64 $n;\n}\n";
+
+    project.write("lib/module.eco",
+        "#[module: \"lib\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n}\n");
+    project.write("lib/src/l.eco", "namespace lib;\n\npublic function l() : int32 { return 1; }\n");
+    const std::filesystem::path lib_test = project.write("lib/tests/seen.eco", seen);
+
+    project.write("app/module.eco",
+        "#[module: \"app\"]\n#[depends: \"../lib\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n}\n");
+    const std::filesystem::path a = project.write(
+        "app/src/a.eco", "namespace app;\n\nfunction a() : int32 { return lib::l(); }\n");
+    const std::filesystem::path app_test = project.write("app/tests/seen.eco", seen);
+
+    const Compiler::DriverOptions driver = lsp_driver();
+    Compiler::Lsp::Session session(driver);
+    session.set_workspace_root(project.root / "app");
+    session.did_open(a, 1, "namespace app;\n\nfunction a() : int32 { return lib::l(); }\n");
+    session.rebuild();
+
+    REQUIRE(session.has_snapshot());
+    REQUIRE(error_count(session) == 0);
+    REQUIRE(session.file_of(app_test) != nullptr);
+    REQUIRE(session.file_of(lib_test) == nullptr);
+}

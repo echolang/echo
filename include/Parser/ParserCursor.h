@@ -32,8 +32,14 @@ namespace Parser
 
         const TokenCollection &tokens;
 
-        Cursor(const TokenCollection &tokens, size_t start = 0, size_t end = 0) :
-            _index(start), _end(end), tokens(tokens)
+        // exclusive end. **`(0, 0)` is an empty file at the front of a shared collection**, and
+        // `_end == 0` must not mean unbounded: that sentinel made the empty file walk every later
+        // file's tokens, so `echoc run empty.eco main.eco` ran `main` twice. default end is
+        // "the rest of this collection", which `ConditionalFilter` still needs as `Cursor(tokens, i)`
+        Cursor(const TokenCollection &tokens, size_t start = 0, size_t end = (size_t)-1) :
+            _index(start),
+            _end(end == (size_t)-1 ? tokens.size() : end),
+            tokens(tokens)
         {}
         ~Cursor() {};
 
@@ -51,7 +57,7 @@ namespace Parser
         TokenSlice slice(const Snapshot &start, const Snapshot &end) const;
 
         inline size_t range_size() const {
-            return _end > 0 ? _end : tokens.size();
+            return _end;
         }
 
         inline bool is_done() const {

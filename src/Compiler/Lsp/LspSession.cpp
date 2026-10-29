@@ -250,7 +250,7 @@ void Compiler::Lsp::Session::resolve_project()
 
 Parser::ActiveTargets Compiler::Lsp::Session::workspace_targets() const
 {
-    return Compiler::workspace_analysis_targets(_manifests);
+    return Compiler::workspace_analysis_targets(_manifests, _roots);
 }
 
 std::vector<std::filesystem::path> Compiler::Lsp::Session::loose_sources_from(

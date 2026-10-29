@@ -125,16 +125,18 @@ namespace Compiler
     // resolve_programs and collect_shared_top_level_code
     bool module_declares_a_program(const Parser::ModuleManifest &manifest);
 
-    // every `#[target:]` scope this project declares, so a language server sees every file
-    // the project can compile. not one program: the server has no Program, and `--target`
-    // is compiling-only. `module_contribution_for` is still the owner of what those scopes
-    // contribute; `all_targets_active` is the graph loader's copy of the same map
+    // every `#[target:]` scope the project's roots declare, so a language server sees every
+    // file the project can compile. a dependency's scopes stay shut, as `echoc test` leaves
+    // them. not one program: the server has no Program, and `--target` is compiling-only.
+    // `module_contribution_for` is still the owner of what those scopes contribute.
+    // `all_targets_active` is per-manifest; the graph unions every module, this unions roots
     Parser::ActiveTargets workspace_analysis_targets(
-        const std::vector<Parser::ModuleManifest> &manifests
+        const std::vector<Parser::ModuleManifest> &manifests,
+        const std::vector<std::filesystem::path> &roots
     );
 
     // modules this program compiles, in resolve order. a scope-only dependency is absent otherwise.
-    // driver and language server both ask; the server opens every scope
+    // driver and language server both ask; the server opens every root scope
     std::vector<const Parser::ModuleManifest *> program_manifests(
         const std::vector<Parser::ModuleManifest> &manifests,
         const Parser::ActiveTargets &active

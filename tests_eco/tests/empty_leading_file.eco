@@ -1,0 +1,4 @@
+// the module beside this one is what the case is about: src/a.eco is empty and sorts first
+test the_entry_files_own {
+    assert(true);
+}

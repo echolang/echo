@@ -1,0 +1,114 @@
+// a class value returned by a call and compared with null inline was never released.
+// binding to a local first was fine; ?? was fine; == / != / a method / a stored bool all leaked
+
+class Thing
+{
+    public static int32 $alive = 0;
+
+    public constructor()
+    {
+        Thing::$alive = Thing::$alive + 1;
+    }
+
+    destructor()
+    {
+        Thing::$alive = Thing::$alive - 1;
+    }
+}
+
+class Holder
+{
+    public function find() : Thing?
+    {
+        return Thing();
+    }
+}
+
+function find() : Thing?
+{
+    return Thing();
+}
+
+function label() : string?
+{
+    return 'x';
+}
+
+function bound() : void
+{
+    Thing? $t = find();
+    if ($t == null) {
+        echo 'none';
+    }
+}
+
+function inlineEq() : void
+{
+    if (find() == null) {
+        echo 'none';
+    }
+}
+
+function inlineNe() : void
+{
+    if (find() != null) {
+        echo 'some';
+    }
+}
+
+function viaMethod() : void
+{
+    Holder $h = Holder();
+    if ($h->find() == null) {
+        echo 'none';
+    }
+}
+
+function stored() : void
+{
+    bool $present = find() != null;
+    echo $present;
+}
+
+function coalesced() : void
+{
+    Thing? $x = find() ?? Thing();
+}
+
+function notPresent() : void
+{
+    if (!find()) {
+        echo 'none';
+    }
+}
+
+function wrapped() : void
+{
+    if (label() == null) {
+        echo 'missing';
+    }
+}
+
+bound();
+echo Thing::$alive;
+
+inlineEq();
+echo Thing::$alive;
+
+inlineNe();
+echo Thing::$alive;
+
+viaMethod();
+echo Thing::$alive;
+
+stored();
+echo Thing::$alive;
+
+coalesced();
+echo Thing::$alive;
+
+notPresent();
+echo Thing::$alive;
+
+wrapped();
+echo mem::live_allocations();

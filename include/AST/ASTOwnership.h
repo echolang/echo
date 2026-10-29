@@ -40,6 +40,9 @@ namespace AST
     {
         ExprNode **slot = nullptr;
         NodeReference *base = nullptr;
+        // the node that raised the request. location and "its member 'tag'" read this, not the
+        // operand: a comparison operand is the call itself, a member access is the `->`
+        ExprNode *owner = nullptr;
 
         ExprNode *get() const;
         void set(ExprNode *place) const;
@@ -347,7 +350,7 @@ namespace AST
         //
         // one queue for the whole walk, and the scopes index into it by mark - which is what makes
         // forwarding free: a position that opens no scope simply does not take anything off it
-        std::vector<ExprNode *> _pending_temporaries;
+        std::vector<PendingEdge> _pending_temporaries;
 
         // **the one place a request is raised**, so the queue has a single writer and the three arms that
         // can reach into a value with no home - `$o->get()->tag`, `$o->get()->size()`, `f(41)` - all put
@@ -356,6 +359,11 @@ namespace AST
         // base needs destroying rather than addressing. a `wants` parameter here read as though this
         // owned that question too, and it never has
         void request_storage_for(ExprNode *owner);
+
+        // the same queue, for an operand the owner does not name: `find() == null` reads the call
+        // and drops it, and the binary has two such edges. `pending_edge` would assert a non-print
+        // call, so the slot is the request
+        void request_storage_at(ExprNode **slot);
 
         // **the operand edge a request means, as one answer rather than three.** reading the operand,
         // reseating it once its temporary exists, and naming it in a diagnostic are the same question,

@@ -60,6 +60,17 @@ namespace AST
 namespace
 {
 
+    // a computed owner used as a *read*: `find() == null` produces a handle the icmp does not
+    // keep, and a call forwards so nothing else binds it. a place is somebody else's. asked of
+    // the comparison/`!` operand, never of walk_value_edge itself: a match arm `=> find()` keeps
+    // the value
+    bool read_drops_a_temporary(ExprNode *expr)
+    {
+        return expr != nullptr
+            && storage_of(*expr) == StorageClass::t_materializable
+            && needs_destruction(expr->result_type());
+    }
+
     // how a diagnostic names the place a value was arriving at
     const char *describe(ValueDestination destination)
     {
@@ -1316,7 +1327,7 @@ PendingEdge OwnershipPass::pending_edge(ExprNode *owner) const
 {
     switch (owner->get_node_type()) {
         case NodeType::n_expr_addrof:
-            return {&static_cast<AddrOfExprNode *>(owner)->operand, nullptr};
+            return {&static_cast<AddrOfExprNode *>(owner)->operand, nullptr, owner};
 
         // the form that reads *through* a nullable holds its base in a named field. it is here because a
         // `weak<T>` operand was upgraded on the way in, and an upgrade **retains** - so the handle it is
@@ -1325,10 +1336,10 @@ PendingEdge OwnershipPass::pending_edge(ExprNode *owner) const
         // local, which already owns one. statement `guard` over a T? rvalue is hoisted by
         // GuardLowering into `$__guardN`. `??` registers nothing at all (see the walker's arm for why)
         case NodeType::n_expr_optional_chain:
-            return {&static_cast<OptionalChainExprNode *>(owner)->base, nullptr};
+            return {&static_cast<OptionalChainExprNode *>(owner)->base, nullptr, owner};
 
         case NodeType::n_member_access:
-            return {nullptr, &static_cast<MemberAccessNode *>(owner)->get_base_node()};
+            return {nullptr, &static_cast<MemberAccessNode *>(owner)->get_base_node(), owner};
 
         // **the one call that registers, and it registers its argument.** unlike the three above, the
         // owner is not asking for an address - it is asking for something to *own* the value it printed,
@@ -1340,7 +1351,7 @@ PendingEdge OwnershipPass::pending_edge(ExprNode *owner) const
             auto *call = static_cast<FunctionCallExprNode *>(owner);
 
             if (is_print_call(*call) && !call->arguments.empty()) {
-                return {&call->arguments[0], nullptr};
+                return {&call->arguments[0], nullptr, owner};
             }
 
             break;
@@ -1398,7 +1409,13 @@ OwnershipPass::MaterializationScope::~MaterializationScope()
 
 void OwnershipPass::request_storage_for(ExprNode *owner)
 {
-    _pending_temporaries.push_back(owner);
+    _pending_temporaries.push_back(pending_edge(owner));
+}
+
+void OwnershipPass::request_storage_at(ExprNode **slot)
+{
+    assert(slot != nullptr && *slot != nullptr);
+    _pending_temporaries.push_back(PendingEdge{slot, nullptr, *slot});
 }
 
 std::string OwnershipPass::describe_pending(ExprNode *owner) const
@@ -1473,20 +1490,19 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
     // every *other* value edge - a comparison operand, an index, a cast, a condition - reads the value
     // and drops it, and inserting a retain for those is not a safety net but a leak: nothing downstream
     // owes the matching release. that was tried, and `$b->make()->node == null` never ran the
-    // destructor at all
+    // destructor at all. the drop is `request_storage_at` on the comparison operand, which this
+    // flush then wraps around the `==` so the handle dies after the icmp, not a retain of it
     auto &bind = _current_module->nodes.emplace_back<TemporaryBindExprNode>(
-        value, location_of_expression(_pending_temporaries[mark]));
+        value, location_of_expression(_pending_temporaries[mark].owner));
 
     // recording order *is* binding order: the walk reaches an inner request first, and an inner
     // temporary holds the storage the outer one reads through, so it has to exist first
     VarDeclNode *moved_temp = nullptr;
 
     for (size_t i = mark; i < _pending_temporaries.size(); i++) {
-        ExprNode *owner = _pending_temporaries[i];
+        const PendingEdge &edge = _pending_temporaries[i];
 
-        const PendingEdge edge = pending_edge(owner);
-
-        VarDeclNode &temp = make_temporary(edge.get(), location_of_expression(owner));
+        VarDeclNode &temp = make_temporary(edge.get(), location_of_expression(edge.owner));
         bind.temporaries.push_back(&temp);
 
         if (chain.has_value() && edge.get() == chain->root) {
@@ -1532,15 +1548,15 @@ ExprNode *OwnershipPass::bind_pending_temporaries(
 void OwnershipPass::refuse_pending_temporaries(size_t mark, const char *action, const char *outcome)
 {
     for (size_t i = mark; i < _pending_temporaries.size(); i++) {
-        ExprNode *owner = _pending_temporaries[i];
+        const PendingEdge &edge = _pending_temporaries[i];
 
         _collector.collect_issue<Issue::TemporaryMember>(
-            code_ref_for(location_of_expression(owner)),
+            code_ref_for(location_of_expression(edge.owner)),
             fmt::format(
                 "'{}' has no storage of its own, so {} {} {}.",
-                pending_edge(owner).get()->result_type().get_type_desciption(),
+                edge.get()->result_type().get_type_desciption(),
                 action,
-                describe_pending(owner),
+                describe_pending(edge.owner),
                 outcome
             ),
             "Bind it to a variable first."
@@ -1573,8 +1589,8 @@ bool OwnershipPass::chain_root_is_pending(const BorrowChain &chain) const
         return false;
     }
 
-    for (ExprNode *owner : _pending_temporaries) {
-        if (pending_edge(owner).get() == chain.root) {
+    for (const PendingEdge &edge : _pending_temporaries) {
+        if (edge.get() == chain.root) {
             return true;
         }
     }
@@ -1854,6 +1870,17 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 bin->rhs = walk_value_edge(bin->rhs);
             }
 
+            // the enclosing value edge binds around the `==`, so the handle lives through the
+            // icmp and dies after it. wrapping the operand itself would `t_return` a retain of
+            // the temp and leak that copy
+            if (read_drops_a_temporary(bin->lhs)) {
+                request_storage_at(&bin->lhs);
+            }
+
+            if (read_drops_a_temporary(bin->rhs)) {
+                request_storage_at(&bin->rhs);
+            }
+
             break;
         }
 
@@ -1861,6 +1888,13 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         {
             auto *un = static_cast<UnaryExprNode *>(expr);
             un->expr = walk_value_edge(un->expr);
+
+            // `!find()` is the same presence test `$x == null` is, and the same drop
+            if (un->token_operator.type() == Token::Type::t_exclamation
+                && read_drops_a_temporary(un->expr)) {
+                request_storage_at(&un->expr);
+            }
+
             break;
         }
 

@@ -486,11 +486,18 @@ bool Compiler::manifest_is_a_root(
 }
 
 Parser::ActiveTargets Compiler::workspace_analysis_targets(
-    const std::vector<Parser::ModuleManifest> &manifests
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<std::filesystem::path> &roots
 )
 {
     Parser::ActiveTargets active;
     for (const Parser::ModuleManifest &manifest : manifests) {
+        // a dependency's target scopes belong to that project. opened here they would compile
+        // beside every other dependency's extras and collide on their helper types
+        if (!manifest_is_a_root(manifest, roots)) {
+            continue;
+        }
+
         Parser::ActiveTargets one = Parser::all_targets_active(manifest);
         for (auto &[module, names] : one) {
             active[module].insert(names.begin(), names.end());
