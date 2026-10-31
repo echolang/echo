@@ -7,6 +7,7 @@
 #include "AST/ASTOps.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTVisitor.h"
@@ -27,6 +28,7 @@
 #include "AST/TypeDeclNode.h"
 #include "AST/VarDeclNode.h"
 
+#include <optional>
 #include <vector>
 
 namespace AST
@@ -299,6 +301,25 @@ namespace
             }
 
             RecursiveVisitor::visitUnaryExpr(node);
+        }
+
+        // **an `&` of a value whose type is not yet known cannot be given a slot.** OwnershipPass
+        // skips the request while the operand is undetermined, then walks the body once, so a later
+        // round that types the operand leaves TypeChecker looking at a planted `&` with no temporary.
+        // the uncoerced-call arm below usually catches this through the operand; this one states it
+        // on the `&` so a residual cast or a settled call whose result is still unknown cannot skip it
+        void visit_addr_of_expr(AddrOfExprNode &node) override
+        {
+            if (node.operand != nullptr) {
+                const std::optional<ValueType> type = storageless_operand_type(*node.operand);
+
+                if (type.has_value() && is_undetermined_type(*type)) {
+                    pending = true;
+                    return;
+                }
+            }
+
+            RecursiveVisitor::visit_addr_of_expr(node);
         }
 
         // **a call that has not settled has not been fitted to its parameters**, and fitting is what

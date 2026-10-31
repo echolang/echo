@@ -481,15 +481,19 @@ ExprNode *CollectionLiteralExpansion::hoist(
 
     literal.expansion_decided = true;
 
+    // **the temp is always mutable.** append and keyed write take a mutable borrow; a const dest
+    // (generated ctor field, `take(const array<T>)`) takes the filled value afterwards
+    const ValueType fill_type = ValueType::make_mutable(*literal.bound_type);
+
     auto &decl = _module.nodes.emplace_back<VarDeclNode>(
         _module.make_virtual_token(
             fmt::format("$__lit{}", ++_hoist_count), Token::Type::t_varname, literal.token_bracket),
-        &_module.nodes.emplace_back<TypeNode>(*literal.bound_type));
+        &_module.nodes.emplace_back<TypeNode>(fill_type));
     decl.statement_temp = true;
 
     std::vector<NodeReference> appends;
 
-    if (!build_expansion(literal, decl, *literal.bound_type, &decl.init_expr, appends)) {
+    if (!build_expansion(literal, decl, fill_type, &decl.init_expr, appends)) {
         return nullptr;
     }
 

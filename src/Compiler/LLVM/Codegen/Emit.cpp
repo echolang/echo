@@ -142,6 +142,7 @@ bool emit_unit_objects(
         const bool can_split = can_join_relocatable(env)
             && cmp_unit->ast_module != nullptr
             && !cmp_unit->optimized
+            && !cmp_unit->merged
             && !ctx.options.debug_info;
 
         // a library is optimized whole, then only ISel fans out: split earlier and you lose inlining

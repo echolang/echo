@@ -1,0 +1,6 @@
+--- OUT --->
+5
+--- RAST --->
+CHECK: tempbind<Date>(vardecl<type<Period>>($__temp
+CHECK: call operator +(addrof<Date&>(
+CHECK: addrof<Period&>(varref<Period>(var($__temp

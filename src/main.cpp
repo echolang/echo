@@ -678,31 +678,45 @@ static bool emit_and_link_modules(
 // the inputs each freshly emitted module was built from, so the next miss can name what changed.
 //
 // best effort: a store that cannot be written is a cache that will miss next time, which is slow rather than
-// wrong. Refusing the build over it would make an unwritable directory fatal to compiling
+// wrong. Refusing the build over it would make an unwritable directory fatal to compiling.
+//
+// **one walk.** `.inputs` describes a stored object, so it stays on `emit_to`. the embed sidecar is
+// for every keyed module, including the entry: that is what the next `compute_module_keys` folds, and
+// ProgramStamp asks that before the frontend. an entry that never writes one never sees a changed
+// `std::embed` file
 static void store_module_records(
     const ModulePlan &plan,
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
-    AST::Bundle &bundle
+    AST::Bundle &bundle,
+    const Compiler::BuildLayout &layout,
+    const std::vector<const Parser::ModuleManifest *> &manifests
 )
 {
-    for (const auto &[module_name, artifact] : plan.emit_to) {
-        auto found = keys.find(module_name);
+    for (const Parser::ModuleManifest *entry : manifests) {
+        const Parser::ModuleManifest &manifest = *entry;
+        auto found = keys.find(manifest.name);
         if (found == keys.end()) {
             continue;
         }
 
-        Compiler::write_inputs_record(artifact.record, found->second);
+        auto artifact = plan.emit_to.find(manifest.name);
+        if (artifact != plan.emit_to.end()) {
+            Compiler::write_inputs_record(artifact->second.record, found->second);
+        }
 
-        AST::Module *module = bundle.modules.find_module_ptr(module_name);
-
+        AST::Module *module = bundle.modules.find_module_ptr(manifest.name);
         if (module == nullptr) {
+            continue;
+        }
+
+        if (layout.prepare_module_dir(manifest) != Compiler::BuildDirState::t_ready) {
             continue;
         }
 
         Compiler::write_embed_inputs_record(
             Compiler::module_embed_inputs_path(
-                artifact.record.parent_path(),
-                module_name,
+                layout.module_dir(manifest),
+                manifest.name,
                 found->second.embed_identity
             ),
             module->embedded_paths);
@@ -1853,8 +1867,9 @@ static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompile
     step.finish(true);
 }
 
-// C objects, codegen, optional whole-program merge, emit, link. **one path**, so `build`,
-// `run`, and a linked test runner cannot drift on `--print ir` or `-O`.
+// cache plan, C objects, codegen, optional whole-program merge, emit, link, store.
+// **one path**, so `build`, `run`, and a linked test runner cannot drift on `--print ir`,
+// `-O`, or which objects they reuse.
 //
 // nullopt is success; anything else is the exit status the subcommand owes its caller
 static std::optional<int> compile_and_link_program(
@@ -1864,11 +1879,31 @@ static std::optional<int> compile_and_link_program(
     AST::Bundle &bundle,
     LLVMCompiler &compiler,
     const std::string &output,
-    const ModulePlan &plan,
-    bool whole_program,
     const std::filesystem::path *reuse_record = nullptr
 )
 {
+    const bool whole_program = driver.whole_program;
+    const std::string &entry_module = front.entry_module();
+    const ModulePlan plan = whole_program
+        ? ModulePlan{}
+        : plan_module_artifacts(front.layout(), front.manifests(), front.cache_keys, entry_module);
+
+    report_cache_plan(
+        driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
+
+    // **a reused module gets a row and a rebuilt one does not.** Work that did not happen is the
+    // surprising half; which input changed for the ones that did is `--explain-cache`'s question, and
+    // answering it twice would put explain_miss's reasoning in two places
+    for (const Parser::ModuleManifest *manifest_ptr : front.manifests()) {
+        const Parser::ModuleManifest &manifest = *manifest_ptr;
+
+        if (plan.cached.count(manifest.name) > 0) {
+            Compiler::ProgressReporter::instance().row(
+                Compiler::ProgressPhase::t_cached, manifest.name, "reused",
+                Compiler::ProgressState::t_skipped);
+        }
+    }
+
     std::vector<Compiler::LinkRequirement> link;
 
     if (!collect_link_requirements(
@@ -1964,6 +1999,13 @@ static std::optional<int> compile_and_link_program(
             report_link_failure(diagnostics, link);
             return 1;
         }
+    }
+
+    // only now, and only for what was actually emitted: a record written before the object exists would
+    // describe a build that may still have failed
+    if (!whole_program) {
+        store_module_records(
+            plan, front.cache_keys, bundle, front.layout(), front.manifests());
     }
 
     return std::nullopt;
@@ -2111,14 +2153,6 @@ int main_run(
     if (native_run) {
         compiler.set_entry(entry_module, front.entry_file());
 
-        const bool whole_program = driver.whole_program;
-        const ModulePlan plan = whole_program
-            ? ModulePlan{}
-            : plan_module_artifacts(front.layout(), front.manifests(), front.cache_keys, entry_module);
-
-        report_cache_plan(
-            driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
-
         const std::filesystem::path runner = Compiler::CodegenTarget{}.output_path(
             front.layout().scratch_dir() / "eco_run");
 
@@ -2126,13 +2160,9 @@ int main_run(
         link_record += ".link";
 
         if (const std::optional<int> failed = compile_and_link_program(
-                driver, diagnostics, front, bundle, compiler, runner.string(), plan, whole_program,
+                driver, diagnostics, front, bundle, compiler, runner.string(),
                 front.layout().scratch_is_temporary() ? nullptr : &link_record)) {
             return failed.value();
-        }
-
-        if (!whole_program) {
-            store_module_records(plan, front.cache_keys, bundle);
         }
 
         std::vector<std::string> argv = { program_name(driver, program) };
@@ -2281,9 +2311,10 @@ static bool resolve_test_selection(
 
 // **compiles the module and runs its tests, each in a process of its own.**
 //
-// links a runner through compile_and_link_program - the same function `build` uses - and spawns
-// it once per test. Isolation is one process per test; the runner's `main` dispatches on
-// ECO_INTERNAL_RUN_TEST. a runtime that cannot survive fork-without-exec initialises in the child
+// links a runner through compile_and_link_program - the same function `build` uses, including the
+// per-module object cache - and spawns it once per test. Isolation is one process per test; the
+// runner's `main` dispatches on ECO_INTERNAL_RUN_TEST. a runtime that cannot survive
+// fork-without-exec initialises in the child
 int main_test(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
@@ -2354,20 +2385,17 @@ int main_test(
     // a linked runner through the same emit+link `build` uses, whose `main` dispatches on
     // ECO_INTERNAL_RUN_TEST. spawning it is a fresh process image, so a framework that
     // cannot survive fork-without-exec initialises in the child
-    compiler.set_entry(front.entry_module(), front.entry_file());
+    const std::string &entry_module = front.entry_module();
+
+    compiler.set_entry(entry_module, front.entry_file());
     compiler.set_test_mode(true);
     compiler.set_native_test_runner(true);
-
-    report_cache_plan(
-        driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
-        /*bypassed=*/true);
 
     const std::filesystem::path runner =
         Compiler::CodegenTarget{}.output_path(front.layout().scratch_dir() / "eco_tests");
 
     if (const std::optional<int> failed = compile_and_link_program(
-            driver, diagnostics, front, bundle, compiler, runner.string(), ModulePlan{},
-            driver.whole_program)) {
+            driver, diagnostics, front, bundle, compiler, runner.string())) {
         return failed.value();
     }
 
@@ -2413,8 +2441,6 @@ static int build_one_program(
 {
     AST::Bundle bundle;
 
-    const bool whole_program = driver.whole_program;
-
     FrontEnd front;
     if (!run_front_end(driver, diagnostics, invocation, program, bundle, front, module_keys)) {
         return 1;
@@ -2423,40 +2449,14 @@ static int build_one_program(
     const Compiler::CompilerOptions options = front.options;
     const std::string &entry_module = front.entry_module();
 
-    // an optimized or dumped build reuses nothing and stores nothing - see wants_whole_program_module
-    const ModulePlan plan = whole_program
-        ? ModulePlan{}
-        : plan_module_artifacts(front.layout(), front.manifests(), front.cache_keys, entry_module);
-
-    report_cache_plan(driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
-
-    // **a reused module gets a row and a rebuilt one does not.** Work that did not happen is the
-    // surprising half; which input changed for the ones that did is `--explain-cache`'s question, and
-    // answering it twice would put explain_miss's reasoning in two places
-    for (const Parser::ModuleManifest *manifest_ptr : front.manifests()) {
-        const Parser::ModuleManifest &manifest = *manifest_ptr;
-
-        if (plan.cached.count(manifest.name) > 0) {
-            Compiler::ProgressReporter::instance().row(
-                Compiler::ProgressPhase::t_cached, manifest.name, "reused",
-                Compiler::ProgressState::t_skipped);
-        }
-    }
-
     const std::string output = program.output.string();
 
     LLVMCompiler compiler(options);
     compiler.set_entry(entry_module, front.entry_file());
 
     if (const std::optional<int> failed = compile_and_link_program(
-            driver, diagnostics, front, bundle, compiler, output, plan, whole_program)) {
+            driver, diagnostics, front, bundle, compiler, output)) {
         return failed.value();
-    }
-
-    // only now, and only for what was actually emitted: a record written before the object exists would
-    // describe a build that may still have failed
-    if (!whole_program) {
-        store_module_records(plan, front.cache_keys, bundle);
     }
 
     // **after the link succeeded, and only then.** A failed build is one somebody is about to look at, and

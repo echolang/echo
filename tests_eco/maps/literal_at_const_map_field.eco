@@ -1,0 +1,9 @@
+// a generated constructor takes a const map field by value; the literal still fills
+struct S
+{
+    public const map<string, int32> $m;
+}
+
+S $s = S($m: ['a' => 1, 'b' => 2]);
+echo $s->m['a'];
+echo $s->m['b'];

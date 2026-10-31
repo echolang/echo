@@ -125,6 +125,7 @@ namespace AST
         );
 
         // answers the temp's name, having appended the declaration and its appends to `hoisted`.
+        // the temp is mutable even when bound_type is const: fill mutates, the dest takes the value.
         // null when the literal is not ready
         ExprNode *hoist(
             CollectionLiteralExprNode &literal,

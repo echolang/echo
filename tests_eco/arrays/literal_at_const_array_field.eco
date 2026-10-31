@@ -1,0 +1,9 @@
+// a generated constructor takes a const array field by value; the literal still fills
+struct S
+{
+    public const array<string> $names;
+}
+
+S $s = S($names: ['a', 'b']);
+echo $s->names[0];
+echo $s->names[1];

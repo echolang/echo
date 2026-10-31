@@ -1960,7 +1960,10 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         case NodeType::n_type_cast:
         {
             auto *cast = static_cast<TypeCastNode *>(expr);
-            cast->expr = walk_value_edge(cast->expr);
+            // a cast is transparent for storage: the operand's requests belong to the enclosing
+            // value edge. binding here around a residual `T&` wrap refused the slot the argument
+            // `&` had just requested, and TypeChecker reported argument_fit and this pass disagreeing
+            cast->expr = walk_expression(cast->expr);
             break;
         }
 

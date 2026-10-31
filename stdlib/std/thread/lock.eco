@@ -22,6 +22,8 @@ public class mutex<T>
 {
     private ptr<uint8> $impl;
     private T $value;
+    // const this freezes the slot, not the pointee: lock() is const and still hands out T&
+    private ptr<T> $cell;
 
     constructor(T $value)
     {
@@ -37,6 +39,7 @@ public class mutex<T>
         }
 
         $this->value = mv $value;
+        $this->cell:$ = &$this->value;
     }
 
     destructor()
@@ -45,16 +48,19 @@ public class mutex<T>
         mem::free<uint8>($this->impl);
     }
 
-    function lock() : locked<T>
+    const function lock() : locked<T>
     {
         if (c_pthread_mutex_lock($this->impl) != 0) {
             die('could not lock a mutex');
         }
 
-        return locked<T>($this->value, $this->impl);
+        // $cell is &$value from the constructor; const this freezes the pointer, not T
+        unsafe {
+            return locked<T>(&$this->cell:$[0], $this->impl);
+        }
     }
 
-    function try_lock() : locked<T>?
+    const function try_lock() : locked<T>?
     {
         int32 $rc = c_pthread_mutex_trylock($this->impl);
 
@@ -66,7 +72,9 @@ public class mutex<T>
             die('could not lock a mutex');
         }
 
-        return locked<T>($this->value, $this->impl);
+        unsafe {
+            return locked<T>(&$this->cell:$[0], $this->impl);
+        }
     }
 }
 

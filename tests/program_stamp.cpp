@@ -163,6 +163,36 @@ TEST_CASE("two programs of one module, and two outputs of one program, keep thei
     REQUIRE(skipped(project.echoc("build --explain cache --target app")));
 }
 
+TEST_CASE("changing an embedded file of the program rebuilds it", "[program_stamp][embed]")
+{
+    ScopedProject project("embed_entry");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"embedcache\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"embedcache\", entry: \"src/main.eco\" }]\n");
+    write_file(project.root() / "src/main.eco", "echo std::embed::text(\"page.txt\");\n");
+    write_file(project.root() / "src/page.txt", "one");
+
+    const std::filesystem::path app = project.root() / "ecobuild/embedcache";
+
+    REQUIRE(project.echoc("build --explain cache --target embedcache").exit_code == 0);
+    REQUIRE(ran(app).find("one") != std::string::npos);
+
+    // first compile discovers the embed and writes the sidecar; the next key then
+    // folds page.txt, so this rebuilds once
+    REQUIRE(project.echoc("build --explain cache --target embedcache").exit_code == 0);
+    REQUIRE(skipped(project.echoc("build --explain cache --target embedcache")));
+
+    write_file(project.root() / "src/page.txt", "two");
+
+    const ProcessResult after = project.echoc("build --explain cache --target embedcache");
+    INFO(after.output);
+    REQUIRE(after.exit_code == 0);
+    REQUIRE_FALSE(skipped(after));
+    REQUIRE(ran(app).find("two") != std::string::npos);
+}
+
 TEST_CASE("install after a skip still installs", "[program_stamp][install]")
 {
     ScopedProject project("install_after_skip");

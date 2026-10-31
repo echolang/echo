@@ -1,0 +1,18 @@
+// lock() is const, so a const method can write a mutex-guarded cache
+use std::thread;
+
+class Cache
+{
+    private thread::mutex<int32> $gate = thread::mutex<int32>(0);
+
+    public const function get() : int32
+    {
+        thread::locked<int32> $g = $this->gate->lock();
+        $g->value = $g->value + 1;
+        return $g->value;
+    }
+}
+
+Cache $c = Cache();
+echo $c->get();
+echo $c->get();

@@ -268,4 +268,41 @@ TEST_CASE("a large this-module copy constructor links across entry partitions", 
     REQUIRE(native.exit_code == 0);
     REQUIRE(native.output.find("scale") != std::string::npos);
 }
+
+TEST_CASE("printing IR of a partitioned entry still emits", "[cache][partition]")
+{
+    // `--print ir` merges without marking the unit optimized. splitting that blob by
+    // the entry's files puts everything else in `__shared`, and the bitcode round-trip
+    // of it used to fail (`Invalid record`)
+    ScopedProject project("print_ir_still_emits");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+
+    write_file(project.root() / "src" / "left.eco",
+        "function left() : int32\n"
+        "{\n"
+        "    return 20;\n"
+        "}\n");
+
+    write_file(project.root() / "src" / "right.eco",
+        "function right() : int32\n"
+        "{\n"
+        "    return 22;\n"
+        "}\n");
+
+    write_file(project.root() / "src" / "main.eco", "echo left() + right();\n");
+
+    const fs::path cache = project.root() / "cache";
+    const ProcessResult built = project.echoc(
+        "build -o out --print ir --build-dir " + quoted(cache));
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+    REQUIRE(built.output.find("define") != std::string::npos);
+
+    const ProcessResult ran = EchoTests::run_binary(project.root() / "out");
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("42") != std::string::npos);
+}
 #endif

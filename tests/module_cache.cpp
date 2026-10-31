@@ -998,3 +998,41 @@ TEST_CASE("an embed sidecar is per configuration, so a later compile cannot clob
     REQUIRE(after.output.find("two") != std::string::npos);
     REQUIRE(after.output.find("n.txt") != std::string::npos);
 }
+
+TEST_CASE("echoc test reuses a library object the way run does", "[cache]")
+{
+    ScopedProject project("test_reuses_library");
+
+    write_library(project.root() / "lib", "cachelib");
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco",
+        "echo cachelib::twice(21);\n"
+        "\n"
+        "test doubles\n"
+        "{\n"
+        "    assert(cachelib::twice(21) == 42);\n"
+        "}\n");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult ran = project.echoc("run" + cache, app_dir);
+    REQUIRE(ran.exit_code == 0);
+    INFO(ran.output);
+    REQUIRE(ran.output.find("42") != std::string::npos);
+    REQUIRE(ran.output.find("bypassed") == std::string::npos);
+
+    const std::string lib_before = line_starting_with(ran.output, "cachelib");
+    REQUIRE_FALSE(lib_before.empty());
+
+    const ProcessResult tested = project.echoc("test" + cache, app_dir);
+    REQUIRE(tested.exit_code == 0);
+    INFO(tested.output);
+    REQUIRE(tested.output.find("doubles") != std::string::npos);
+    REQUIRE(tested.output.find("bypassed") == std::string::npos);
+    REQUIRE(cache_key(line_starting_with(tested.output, "cachelib")) == cache_key(lib_before));
+    REQUIRE(line_starting_with(tested.output, "cachelib").find("hit") != std::string::npos);
+}

@@ -523,6 +523,7 @@ void LLVMCompiler::link_into_main()
 
     // link all modules together into the main module
     auto linker = llvm::Linker(*main_cmp_unit->llvm_module);
+    bool linked_any = false;
 
     for (auto &cmpu : _ctx.cmp_units) {
 
@@ -544,7 +545,10 @@ void LLVMCompiler::link_into_main()
             ));
         }
         cmpu->llvm_module.reset();
+        linked_any = true;
     }
+
+    main_cmp_unit->merged = linked_any;
 }
 
 void LLVMCompiler::drain_pending_definitions()

@@ -1,0 +1,8 @@
+// a by-value const array parameter is the general form of the generated-ctor field
+function take(const array<string> $names) : void
+{
+    echo $names[0];
+    echo $names[1];
+}
+
+take(['a', 'b']);

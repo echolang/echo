@@ -616,10 +616,15 @@ TEST_CASE("printing the IR merges the program but never enters the cache key", "
     REQUIRE(optimized.options.aggressive_codegen());
     REQUIRE_FALSE(dumped.options.aggressive_codegen());
 
-    // `run` is a cached build plus exec, so a plain run is not a merge. `--print ir` still is
+    // `run` and `test` are a cached build plus exec, so a plain one is not a merge. `--print ir` still is
     REQUIRE_FALSE(resolved({ "run", "a.eco" }).whole_program);
     REQUIRE_FALSE(resolved({ "run", "a.eco" }).optimize_is_whole_program());
     REQUIRE(resolved({ "run", "--print", "ir", "a.eco" }).whole_program);
+
+    REQUIRE_FALSE(resolved({ "test", "a.eco" }).whole_program);
+    REQUIRE_FALSE(resolved({ "test", "a.eco" }).optimize_is_whole_program());
+    REQUIRE(resolved({ "test", "--print", "ir", "a.eco" }).whole_program);
+    REQUIRE(resolved({ "test", "--optimize", "whole", "a.eco" }).whole_program);
 
     const DriverOptions plain = resolved({ "build", "-o", "x", "a.eco" });
 

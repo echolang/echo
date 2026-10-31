@@ -144,14 +144,13 @@ bool Compiler::resolve_driver_options(
         out.options.codegen_opt = CodegenOpt::t_baseline;
     }
 
-    // **three reasons, kept apart from the cache key's one.** The whole-program pipeline and a single IR
+    // **two reasons, kept apart from the cache key's one.** The whole-program pipeline and a single IR
     // dump can each only look at one module, so both force the merge - but a dump changes no emitted
     // byte, and letting it reach compute_module_keys would make every module's key react to a `--print`.
     //
-    // `test` still JITs, so it still merges. `run` is a cached build plus exec and follows `build`:
-    // only `--optimize whole` or `--print ir` fold the program
-    out.whole_program = out.subcommand == Subcommand::t_test
-        || out.optimize_is_whole_program()
+    // `test` links a native runner the way `run` and `build` do: only `--optimize whole` or `--print ir`
+    // fold the program
+    out.whole_program = out.optimize_is_whole_program()
         || out.prints(PrintKind::t_ir);
 
     // `--print manifest` and `--print tools` are answers, not dumps. combining one with another `-p`

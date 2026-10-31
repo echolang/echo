@@ -52,6 +52,10 @@ namespace Compiler::LLVM
         // left to do but pay for it again
         bool optimized = false;
 
+        // another unit's IR was folded in. splitting by this module's files would put everything
+        // else in `__shared`, and the bitcode round-trip of that blob fails (`Invalid record`)
+        bool merged = false;
+
         CmpUnit() {
             function_table = FunctionTable();
             structure_table = std::make_unique<StructureTable>();

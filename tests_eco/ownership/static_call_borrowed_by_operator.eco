@@ -1,0 +1,39 @@
+// calendar: `$d + Period::months(($day % 37) - 18)` inside a file-scope while. the operator
+// takes `const Period&`, so the static-call result is a borrow of a temporary. inferred `$m`
+// and a computed argument are the shape that used to ICE as argument_fit / OwnershipPass disagree
+
+struct Period
+{
+    int64 $years = 0;
+    int64 $months = 0;
+    int64 $weeks = 0;
+    int64 $days = 0;
+
+    static function months(int64 $n) : Period
+    {
+        return Period($months: $n);
+    }
+}
+
+struct Date
+{
+    int32 $day = 1;
+
+    constructor(int32 $d)
+    {
+        $this->day = $d;
+    }
+}
+
+operator (const Date& $a) + (const Period& $p) : Date
+{
+    return Date($a->day + ($p->months as int32));
+}
+
+int64 $day = 50;
+Date $d = Date(10);
+while ($day <= 50) {
+    $m = $d + Period::months(($day % 37) - 18);
+    echo $m->day;
+    $day = $day + 1;
+}

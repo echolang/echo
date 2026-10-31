@@ -178,17 +178,17 @@ public:
     void printIR(bool toFile);
     void print_unit_ir();
 
-    // **the JIT, with the seam between preparing it and calling into it left open** - what a test run
-    // needs, since it calls a definition of its own once per test instead of running a program.
+    // **the JIT, with the seam between preparing it and calling into it left open.** `run` takes this
+    // path when it cannot exec a host binary (`--explain prune`, a foreign `--target-os`)
     //
     // preparing drops everything the roots cannot reach, so the module that runs is smaller than the one
     // printIR prints. `arguments` and `environment` are the *program's*, and run_main returns what it
-    // returned - see Backend::prepare_execution and Backend::run_main, which own all of those decisions
+    // returned: Backend::prepare_execution and Backend::run_main own those decisions
     bool prepare_execution();
     int run_main(const std::vector<std::string> &arguments, const char *const *environment);
     uint64_t function_address(const std::string &mangled) const;
 
-    // the symbols the prune keeps besides the entry point - a test run's tests. Must be set before
+    // extra roots the prune keeps besides the entry point. must be set before
     // prepare_execution, which is when the prune happens
     void set_jit_roots(std::vector<std::string> roots);
 
@@ -211,9 +211,7 @@ public:
     // the never-cached entry unit is split by source file when it has more than one partition (a
     // this-module file, plus `__shared` for foreign `linkonce_odr`). each partition's object is stored
     // under a structural hash of the original IR plus the emit environment, so a rebuild whose
-    // code did not change skips ISel. `--optimize whole` marks the merged unit optimized first
-    // and does not split. `-g` does not split: DWARF metadata names every file of the unit, so a
-    // one-file edit would miss every hex
+    // code did not change skips ISel. `CmpUnit::merged`, `optimized`, and `-g` each refuse that split
     bool emit_objects(
         const std::function<std::filesystem::path(const std::string &)> &object_for,
         std::vector<std::filesystem::path> &out_objects);
