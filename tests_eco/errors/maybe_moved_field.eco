@@ -1,0 +1,21 @@
+// a nested if that maybe-moves a field must still look maybe-moved after the outer join
+
+struct Item
+{
+    int32 $n;
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+Holder $h = Holder(Item(1));
+bool $a = true;
+bool $b = false;
+if ($a) {
+    if ($b) {
+        Item $x = mv $h->item;
+    }
+}
+echo $h->item->n;

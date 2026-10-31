@@ -1,0 +1,26 @@
+// a destructor and no copy constructor still moves into a field: construction from a temporary,
+// and `$h->item = mv $next`. neither path copies, so this type is allowed both
+
+struct Item
+{
+    int32 $n;
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+{
+    Holder $h = Holder(Item(1));
+    Item $next = Item(2);
+    $h->item = mv $next;
+    echo $h->item->n;
+}
+
+echo 'done';

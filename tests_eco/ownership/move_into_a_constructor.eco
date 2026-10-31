@@ -1,0 +1,44 @@
+// a memberwise constructor is a by-value destination. a temporary and an `mv` local seat with no
+// copy; a surviving local copies once at the call, the same split `push` uses
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+{
+    Holder $from_temp = Holder(Item(1));
+    echo $from_temp->item->n;
+
+    Item $moved = Item(2);
+    Holder $from_mv = Holder(mv $moved);
+    echo $from_mv->item->n;
+
+    Item $live = Item(3);
+    Holder $from_copy = Holder($live);
+    echo $from_copy->item->n;
+    echo $live->n;
+}
+
+echo 'done';

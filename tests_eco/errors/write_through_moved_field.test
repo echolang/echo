@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UseAfterMove  write_through_moved_field.eco:15:5
+
+  '$h->item' has been moved out of.
+
+  14 | Item $x = mv $h->item;
+  15 | $h->item->n = 3;
+     :     ^^^^
+  16 | 
+
+1 error, nothing was compiled.

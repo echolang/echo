@@ -90,6 +90,26 @@ public struct buffer<T>
     }
 
     /**
+     * Exchanges this allocation with `$other`'s. Two unique owners, still two allocations; each
+     * walks away holding the block the other held.
+     *
+     * A buffer has no length, so this does not know which slots are live. The owner that calls it
+     * keeps `len` in step: `array<T>::take_from` is the one, and it only swaps when the destination
+     * is empty.
+     *
+     * `$b->swap($b)` is refused: both sides take `inout` access, and one buffer cannot be both.
+     */
+    function swap(inout buffer<T>& $other) : void
+    {
+        ptr<T> $mine = $this->data:$;
+        usize $my_cap = $this->cap;
+        $this->data:$ = $other->data:$;
+        $this->cap = $other->cap;
+        $other->data:$ = $mine;
+        $other->cap = $my_cap;
+    }
+
+    /**
      * A window over `$count` slots starting at `$from`, **unchecked**.
      *
      * The one way out of a buffer that is not a single slot, and the reason there is no accessor for

@@ -791,6 +791,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     c->body_concrete = false;
     c->live_calls_pending = true;
     c->operators_quiet = false;
+    c->receiver_consumed_paths.clear();
 
     // parameters first, so the map is populated before the body rebinds its VarNodes to them. the same
     // rule ScopeNode::clone follows for a scope's declarations - and this loop is the only thing that can

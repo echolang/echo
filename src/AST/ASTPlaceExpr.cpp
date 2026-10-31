@@ -1,6 +1,8 @@
 #include "AST/ASTPlaceExpr.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -14,6 +16,7 @@
 #include "AST/VarRefNode.h"
 
 #include <cassert>
+#include <fmt/core.h>
 #include <unordered_set>
 
 namespace AST
@@ -176,6 +179,141 @@ VarDeclNode *place_root_of(ExprNode *expr)
     auto *var_ref = static_cast<VarRefNode *>(anchor);
 
     return var_ref->is_var() ? &var_ref->get_var().decl() : nullptr;
+}
+
+VarDeclNode *member_path_of(ExprNode *expr, std::vector<std::string> &path)
+{
+    std::vector<std::string> names;
+    ExprNode *cur = expr;
+
+    while (cur != nullptr) {
+        switch (cur->get_node_type()) {
+            case NodeType::n_varref:
+                path.assign(names.rbegin(), names.rend());
+                return place_root_of(cur);
+
+            case NodeType::n_member_access:
+                names.push_back(static_cast<MemberAccessNode *>(cur)->get_member_name().value());
+                cur = member_base(cur);
+                break;
+
+            case NodeType::n_expr_addrof:
+                cur = static_cast<AddrOfExprNode *>(cur)->operand;
+                break;
+
+            case NodeType::n_expr_deref:
+                cur = static_cast<DerefExprNode *>(cur)->operand;
+                break;
+
+            case NodeType::n_expr_move:
+                cur = static_cast<MoveExprNode *>(cur)->operand;
+                break;
+
+            case NodeType::n_expr_retain:
+                cur = static_cast<RetainExprNode *>(cur)->operand;
+                break;
+
+            case NodeType::n_expr_peel:
+                cur = static_cast<PointerValueNode *>(cur)->operand;
+                break;
+
+            case NodeType::n_type_cast:
+            {
+                auto *cast = static_cast<TypeCastNode *>(cur);
+
+                if (!cast->is_implcit) {
+                    return nullptr;
+                }
+
+                cur = cast->expr;
+                break;
+            }
+
+            default:
+                return nullptr;
+        }
+    }
+
+    return nullptr;
+}
+
+std::string place_spelling(const VarDeclNode *root, const MemberPath &path)
+{
+    std::string spelling = root->name_full();
+
+    for (const auto &segment : path) {
+        spelling += "->" + segment;
+    }
+
+    return spelling;
+}
+
+std::optional<std::string> field_move_refusal(
+    const VarDeclNode *root,
+    const MemberPath &path,
+    const VarDeclNode *method_this
+)
+{
+    if (root == nullptr || path.empty() || !root->has_type()) {
+        return std::nullopt;
+    }
+
+    ValueType cursor = root->type();
+
+    if (parameter_auto_borrows(cursor)) {
+        if (root == method_this) {
+            if (cursor.pointee().is_const()) {
+                return "'mv' cannot move a field out of a const receiver";
+            }
+
+            cursor = ValueType::make_mutable(cursor.pointee());
+        }
+        else {
+            return fmt::format(
+                "'mv' can only move a whole variable - '{}' is a borrow into storage owned elsewhere",
+                root->name_full()
+            );
+        }
+    }
+
+    for (const auto &segment : path) {
+        if (cursor.is_class() || cursor.is_interface()) {
+            return fmt::format(
+                "'mv' cannot move a field out of '{}': a class handle is shared storage",
+                place_spelling(root, {})
+            );
+        }
+
+        if (!cursor.has_complex_type()) {
+            return "'mv' can only move a whole variable - moving a field or an element out of a "
+                "value is not supported yet";
+        }
+
+        const ComplexType *ct = cursor.get_complex_type();
+
+        if (find_destructor(ct) != nullptr) {
+            return fmt::format(
+                "'mv' cannot move a field out of '{}', which declares a destructor - leftover "
+                "fields are not what that destructor describes",
+                cursor.get_type_desciption()
+            );
+        }
+
+        if (ct->is_enum_kind() || ct->is_optional) {
+            return "'mv' cannot move a field out of an enum or a tagged optional";
+        }
+
+        const ComplexType::Property *prop = ct->find_property(segment);
+
+        if (prop == nullptr) {
+            return "'mv' can only move a whole variable - moving a field or an element out of a "
+                "value is not supported yet";
+        }
+
+        cursor = prop->type;
+    }
+
+    return std::nullopt;
 }
 
 ChainBaseNode *chain_base_of(ExprNode *expr)

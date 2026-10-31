@@ -1,0 +1,10 @@
+// a class handle is shared storage: moving a field out of `$obj` would leave a hole
+// other aliases of the object could still read
+
+class Bag
+{
+    string $label;
+}
+
+Bag $obj = Bag('x');
+string $s = mv $obj->label;

@@ -1,5 +1,4 @@
-// moving one field out and leaving the rest is rejected - ownership is tracked per variable, and a
-// partly-moved struct has no answer for what its destructor does
+// a user destructor cannot run over a hole: leftover fields are not what it describes
 
 struct Buffer
 {
@@ -15,6 +14,10 @@ struct Document
 {
     Buffer $body;
     usize $version;
+
+    destructor()
+    {
+    }
 }
 
 $d = Document(Buffer(mem::alloc<uint8>(1)), 1);

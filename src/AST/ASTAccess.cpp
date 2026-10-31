@@ -57,9 +57,8 @@ AST::AccessEffect AST::declared_access_effect(const AST::VarDeclNode &decl)
 
 AST::AccessEffect AST::access_effect_of(const AST::FunctionDeclNode &decl, size_t index)
 {
-    // a receiver's effect is what kind of member the function is, and nothing written on it - the
-    // same shape AST::receiver_is_const takes, and for the same reason: `$this` is args[0] like any
-    // other parameter, so a second carrier on the declaration would be a second answer
+    // a receiver's effect is what kind of member the function is. `mv $this` skips this
+    // switch so access_effect_of(VarDeclNode) answers t_take, the same as any other `mv`
     //
     // has_receiver() rather than implicit_arg_count(), because a closure's args[0] is its environment
     // and not a receiver: nothing accesses a region through it. and rather than is_member(), because a
@@ -69,7 +68,8 @@ AST::AccessEffect AST::access_effect_of(const AST::FunctionDeclNode &decl, size_
     // a **constructor** is absent from this switch on purpose, and its `t_constructor` arm would be
     // unreachable if it were here: its `$this` is a body-*local* that AST::declare_constructor_this
     // mints and marks `t_out`, so it has no receiver argument for this to answer about
-    if (index == 0 && decl.has_receiver()) {
+    if (index == 0 && decl.has_receiver()
+        && (decl.args.empty() || decl.args[0] == nullptr || !decl.args[0]->takes_ownership)) {
         switch (decl.member_kind) {
         case AST::MemberKind::t_destructor:
             // the receiver is going away and the body is what ends it

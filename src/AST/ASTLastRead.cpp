@@ -10,6 +10,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/MatchExprNode.h"
+#include "AST/MemberAccessNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
@@ -17,6 +18,8 @@
 #include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
 
+#include <algorithm>
+#include <map>
 #include <unordered_map>
 
 namespace
@@ -53,6 +56,7 @@ namespace
     struct Mention
     {
         const AST::VarDeclNode *decl = nullptr;
+        std::vector<std::string> path;
         const AST::ExprNode *node = nullptr;
         size_t statement = 0;
         bool returning = false;
@@ -63,6 +67,21 @@ namespace
         // a borrow (`label($sys)`, `$x->tag`) is a last mention that does not consume
         bool consuming = false;
         Position at;
+    };
+
+    struct PlaceKey
+    {
+        const AST::VarDeclNode *decl = nullptr;
+        std::vector<std::string> path;
+
+        bool operator<(const PlaceKey &other) const
+        {
+            if (decl != other.decl) {
+                return decl < other.decl;
+            }
+
+            return path < other.path;
+        }
     };
 
     class MentionCollector : public AST::RecursiveVisitor
@@ -133,14 +152,45 @@ namespace
 
         void visitVarRef(AST::VarRefNode &node) override
         {
+            // a member-access base is the spine to a field, not a use of the whole local
+            if (_member_base) {
+                AST::RecursiveVisitor::visitVarRef(node);
+                return;
+            }
+
             if (const AST::VarDeclNode *decl = AST::place_root_of(&node)) {
                 mentions.push_back(Mention{
-                    decl, &node, _statement, _returning, _match_group, _consuming, _position});
+                    decl, {}, &node, _statement, _returning, _match_group, _consuming, _position});
                 saw_returning |= _returning;
                 saw_statement_temp |= decl->statement_temp;
             }
 
             AST::RecursiveVisitor::visitVarRef(node);
+        }
+
+        void visitMemberAccess(AST::MemberAccessNode &node) override
+        {
+            const bool was = _member_base;
+            _member_base = true;
+            AST::RecursiveVisitor::visitMemberAccess(node);
+            _member_base = was;
+
+            if (_member_base) {
+                return;
+            }
+
+            std::vector<std::string> path;
+            AST::VarDeclNode *root = AST::member_path_of(&node, path);
+
+            if (root == nullptr || path.empty()) {
+                return;
+            }
+
+            mentions.push_back(Mention{
+                root, std::move(path), &node, _statement, _returning, _match_group, _consuming,
+                _position});
+            saw_returning |= _returning;
+            saw_statement_temp |= root->statement_temp;
         }
 
         AST::ExprNode *rewrite_place_edge(AST::ExprNode *expr) override
@@ -323,6 +373,7 @@ namespace
 
         bool _returning = false;
         bool _consuming = false;
+        bool _member_base = false;
 
         size_t _statements = 0;
         size_t _statement = 0;
@@ -359,12 +410,31 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
         bool shared_statement = false;
     };
 
-    std::unordered_map<const AST::VarDeclNode *, Candidate> last;
+    std::map<PlaceKey, Candidate> last;
 
     for (size_t i = 0; i < collector.mentions.size(); i++) {
         const Mention &mention = collector.mentions[i];
+        const PlaceKey key{mention.decl, mention.path};
+        bool overlap_shared = false;
 
-        Candidate &candidate = last[mention.decl];
+        for (auto &[other_key, other] : last) {
+            if (other_key.decl != mention.decl || other.indices.empty()) {
+                continue;
+            }
+
+            if (!AST::paths_overlap(other_key.path, mention.path)) {
+                continue;
+            }
+
+            const Mention &prev = collector.mentions[other.indices.front()];
+
+            if (prev.statement == mention.statement) {
+                other.shared_statement = true;
+                overlap_shared = true;
+            }
+        }
+
+        Candidate &candidate = last[key];
 
         if (!candidate.indices.empty()) {
             bool sibling = false;
@@ -395,17 +465,17 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
         }
 
         candidate.indices = {i};
-        candidate.shared_statement = false;
+        candidate.shared_statement = overlap_shared;
     }
 
     std::unordered_set<const AST::ExprNode *> reads;
 
-    for (const auto &[decl, candidate] : last) {
-        if (candidate.shared_statement || collector.captured.count(decl) > 0) {
+    for (const auto &[key, candidate] : last) {
+        if (candidate.shared_statement || collector.captured.count(key.decl) > 0) {
             continue;
         }
 
-        const auto declared = collector.declared.find(decl);
+        const auto declared = collector.declared.find(key.decl);
 
         if (declared == collector.declared.end()) {
             continue;
@@ -434,7 +504,7 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
             }
         }
 
-        const bool hoist_temp = decl->statement_temp;
+        const bool hoist_temp = key.decl->statement_temp;
 
         for (size_t index : candidate.indices) {
             const Mention &mention = collector.mentions[index];

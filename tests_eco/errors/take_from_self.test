@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] ConflictingAccess  take_from_self.eco:9:5
+
+  This names the same storage as another argument of the same call. '$this' takes 'inout' access, which is exclusive, so nothing else may reach that storage while the call runs - and '$other' takes 'inout' access to it too
+
+   8 | 
+   9 | $a->take_from($a);
+     :     ^^^^^^^^^
+  10 | 
+
+  help: a value cannot be both written and read by one call. copy the source first, or use an operation of 'array<int32>' that names the part of the receiver to read instead of taking a second one
+
+1 error, nothing was compiled.

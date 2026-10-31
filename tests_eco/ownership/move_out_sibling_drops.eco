@@ -1,0 +1,31 @@
+// moving one owning field still drops the sibling at the holder's brace
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $keep;
+    Item $take;
+}
+
+{
+    Holder $h = Holder(Item(1), Item(2));
+    Item $x = mv $h->take;
+    echo 'held';
+    echo $x->n;
+}
+
+echo 'done';

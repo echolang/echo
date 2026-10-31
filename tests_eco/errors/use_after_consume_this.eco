@@ -1,0 +1,20 @@
+// `$h->take()` consumes `$h`
+
+struct Item
+{
+    int32 $n;
+}
+
+struct Holder
+{
+    Item $item;
+
+    function take(mv $this) : Item
+    {
+        return $this->item;
+    }
+}
+
+Holder $h = Holder(Item(1));
+Item $x = $h->take();
+echo $h->item->n;

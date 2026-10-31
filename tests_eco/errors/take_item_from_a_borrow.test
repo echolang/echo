@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] PartialMove  take_item_from_a_borrow.eco:20:11
+
+  'mv' can only move a whole variable - '$r' is a borrow into storage owned elsewhere
+
+  19 | Holder& $r = $h;
+  20 | Item $x = $r->take_item();
+     :           ^^
+  21 | 
+
+1 error, nothing was compiled.

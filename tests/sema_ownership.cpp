@@ -504,16 +504,40 @@ TEST_CASE("the copy and move rules report what they cannot do", "[ownership]")
         REQUIRE(has_issue_containing(*bundle, "moved out of inside a loop"));
     }
 
-    SECTION("moving a field out of a value") {
+    SECTION("moving a field out of a type that declares a destructor") {
         auto bundle = EchoTests::tests_make_parsed_bundle(
             std::string(k_buffer) +
-            "struct Wrap { Buffer $inner; }\n"
+            "struct Wrap { Buffer $inner; destructor() { } }\n"
             "function f() : void {\n"
             "    $w = Wrap(Buffer(1, null));\n"
             "    $b = mv $w->inner;\n"
             "}\n");
 
-        REQUIRE(has_issue_containing(*bundle, "can only move a whole variable"));
+        REQUIRE(has_issue_containing(*bundle, "declares a destructor"));
+    }
+
+    SECTION("moving a field out of a destructor-free wrapper") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "class Handle { int32 $n; }\n"
+            "struct Wrap { Handle $inner; }\n"
+            "function f() : void {\n"
+            "    $w = Wrap(Handle(1));\n"
+            "    $h = mv $w->inner;\n"
+            "}\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("moving through a borrow") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            std::string(k_buffer) +
+            "function f() : void {\n"
+            "    $a = Buffer(1, null);\n"
+            "    Buffer& $r = $a;\n"
+            "    $b = mv $r;\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "is a borrow into storage owned elsewhere"));
     }
 
     SECTION("`mv` on something with no storage to empty") {
@@ -524,6 +548,47 @@ TEST_CASE("the copy and move rules report what they cannot do", "[ownership]")
             "}\n");
 
         REQUIRE(has_issue_containing(*bundle, "needs an expression with storage to move out of"));
+    }
+
+    SECTION("`mv` of a field of a const receiver") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Item { int32 $n; }\n"
+            "struct Holder {\n"
+            "    Item $item;\n"
+            "    const function take() : Item { return mv $this->item; }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "cannot move a field out of a const receiver"));
+    }
+
+    SECTION("nested if maybe-moves a field") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Item { int32 $n; }\n"
+            "struct Holder { Item $item; }\n"
+            "function f() : void {\n"
+            "    $h = Holder(Item(1));\n"
+            "    bool $a = true;\n"
+            "    bool $b = false;\n"
+            "    if ($a) {\n"
+            "        if ($b) { Item $x = mv $h->item; }\n"
+            "    }\n"
+            "    echo $h->item->n;\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "may have been moved"));
+    }
+
+    SECTION("writing through a moved field") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Item { int32 $n; }\n"
+            "struct Holder { Item $item; }\n"
+            "function f() : void {\n"
+            "    $h = Holder(Item(1));\n"
+            "    Item $x = mv $h->item;\n"
+            "    $h->item->n = 3;\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "'$h->item' has been moved out of"));
     }
 }
 
@@ -537,6 +602,18 @@ TEST_CASE("a value that owns nothing may still be moved, and may still be copied
         "    $a = Point(1, 2);\n"
         "    $b = $a;\n"
         "    $c = mv $b;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("`mv` of a pointer local still moves the word", "[ownership]")
+{
+    // `ptr<T>` is nullable, so `parameter_auto_borrows` leaves this a whole-variable move of the word
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f() : void {\n"
+        "    ptr<int32> $p = null;\n"
+        "    ptr<int32> $q = mv $p;\n"
         "}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());

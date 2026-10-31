@@ -1,0 +1,38 @@
+// a getter that `return $this->item` without `mv` still copies; `$h` stays whole
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+
+    function item() : Item
+    {
+        return $this->item;
+    }
+}
+
+Holder $h = Holder(Item(1));
+Item $x = $h->item();
+echo $x->n;
+echo $h->item->n;
+echo 'done';

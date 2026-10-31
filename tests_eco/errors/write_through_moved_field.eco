@@ -1,0 +1,15 @@
+// filling `$h->item` is allowed; writing through a moved prefix is not
+
+struct Item
+{
+    int32 $n;
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+Holder $h = Holder(Item(1));
+Item $x = mv $h->item;
+$h->item->n = 3;

@@ -376,6 +376,21 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     }
 
     /**
+     * Makes room for `$n` more live slots: overflow, then one reserve.
+     *
+     * `extend` and `take_from` share this so a bulk fill is one allocation. `grow_by` is the
+     * other growth, matching what `$n` appends would do.
+     */
+    private function prepare_append(usize $n) : void
+    {
+        if ($n > ~(0 as usize) - $this->len) {
+            mem::out_of_memory();
+        }
+
+        $this->reserve($this->len + $n);
+    }
+
+    /**
      * Appends every element of `$other`, leaving `$other` untouched.
      *
      * **One allocation and, for most element types, one `memcpy`.** Reserving up front is what makes it
@@ -401,11 +416,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
             return;
         }
 
-        if ($n > ~(0 as usize) - $this->len) {
-            mem::out_of_memory();
-        }
-
-        $this->reserve($this->len + $n);
+        $this->prepare_append($n);
 
         // **one branch, two correct answers**, and the copy constructor above is written through this:
         // a `T` that copies as bytes copies in bulk, and one that does not is copied an element at a
@@ -468,16 +479,12 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
 
         usize $old_len = $this->len;
 
-        if ($count > ~(0 as usize) - $old_len) {
-            mem::out_of_memory();
-        }
-
         // **one reserve, up front, and it is load-bearing rather than an optimisation.** after it the
         // buffer cannot move again for the rest of this call - which is what makes the source range
         // safe to read *while* the destination range is being filled. without it the append in the
         // element loop below could reallocate mid-way and leave the source borrow pointing at the
         // block that was just freed
-        $this->reserve($old_len + $count);
+        $this->prepare_append($count);
 
         // the same one-branch-two-answers split `extend` uses, and the same reason for each arm
         const if (mem::is_trivially_copyable<T>()) {
@@ -501,6 +508,60 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
 
                 $i = $i + 1;
             }
+        }
+    }
+
+    /**
+     * Appends every element of `$other` and leaves `$other` empty.
+     *
+     * The consuming twin of `extend`. `extend` copies and leaves the source untouched; this moves,
+     * so a `T` that cannot be copied still travels, and a nested owner is not duplicated. `$a[] =
+     * mv $x` is the one-element form; this is that, for a whole array.
+     *
+     * **`$a->take_from($a)` is refused**, same rule `extend` uses: `$this` takes `inout` by being
+     * the receiver, `$other` takes `inout` by the word on the parameter, and one array cannot be
+     * both.
+     *
+     * An empty destination steals `$other`'s buffer in one exchange. A destination that already
+     * holds elements reserves once, then moves each slot in source order.
+     */
+    function take_from(inout array<T>& $other) : void
+    {
+        usize $n = $other->len;
+
+        if ($n == 0) {
+            return;
+        }
+
+        if ($this->len == 0) {
+            // dest has no live slots, so swapping the unique buffers is the whole transfer.
+            // `$other` keeps dest's old spare (often null) and `len` of zero
+            $this->storage->swap($other->storage);
+            $this->len = $n;
+            $other->len = 0;
+            return;
+        }
+
+        const if (mem::is_trivially_copyable<T>()) {
+            // dest owns those bits after the copy, so the source must not destroy them. `len = 0`
+            // rather than `truncate`: truncate would `take` each slot and run its destructor
+            $this->extend($other);
+            $other->len = 0;
+        }
+        else {
+            $this->prepare_append($n);
+
+            usize $i = 0;
+
+            while ($i < $n) {
+                // `$this[]` is a fresh slot, `take` leaves the source slot dead. `len = 0` below
+                // is what says those slots are no longer live, so the source destructor skips them
+                $this[] = $other->storage->take($i);
+
+                $i = $i + 1;
+            }
+
+            $other->len = 0;
         }
     }
 

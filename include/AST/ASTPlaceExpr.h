@@ -9,7 +9,10 @@
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
 
+#include <algorithm>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace AST
 {
@@ -363,6 +366,39 @@ namespace AST
     // AST::place_outlives_statement is the "does this storage already live?" twin, and the two
     // share the spine walk. a new place kind that updates one and not the other fails silently
     VarDeclNode *place_root_of(ExprNode *expr);
+
+    // the local a member chain addresses, plus the property names from the root outward.
+    // `$this->a->b` answers `$this` and `["a", "b"]`. null when the place is not a plain
+    // member chain: an index has a runtime identity, a static has no frame local.
+    // peels the same AddrOf / Deref / Move / Retain / peel / implicit-cast spine
+    // place_anchor does, so a later wrap on a member-call argument still names the path
+    VarDeclNode *member_path_of(ExprNode *expr, std::vector<std::string> &path);
+
+    typedef std::vector<std::string> MemberPath;
+
+    inline bool path_is_prefix(const MemberPath &prefix, const MemberPath &path)
+    {
+        if (prefix.size() > path.size()) {
+            return false;
+        }
+
+        return std::equal(prefix.begin(), prefix.end(), path.begin());
+    }
+
+    inline bool paths_overlap(const MemberPath &a, const MemberPath &b)
+    {
+        return path_is_prefix(a, b) || path_is_prefix(b, a);
+    }
+
+    std::string place_spelling(const VarDeclNode *root, const MemberPath &path);
+
+    // empty when this path may be moved. a whole variable (empty path) is not this
+    // question. `method_this` is the enclosing method's `$this`, or null
+    std::optional<std::string> field_move_refusal(
+        const VarDeclNode *root,
+        const MemberPath &path,
+        const VarDeclNode *method_this
+    );
 
     // the `?->` marker this place sits on, if the spine ends at one. the same walk as
     // place_root_of, with ChainBase as the other leaf - so `$el?->items[0]->bump()` and

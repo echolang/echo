@@ -1,0 +1,43 @@
+// `return tag_of($h->item)` hands the field over, the same way `return tag_of($a)` hands
+// a whole local. Item's copy constructor does not run
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+    int32 $tag;
+}
+
+function tag_of(Item $x) : int32
+{
+    return $x->n;
+}
+
+function take_item() : int32
+{
+    Holder $h = Holder(Item(1), 7);
+    return tag_of($h->item);
+}
+
+echo take_item();
+echo 'done';

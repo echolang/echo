@@ -402,6 +402,24 @@ AST::ExprNode *AST::receiver_for_member_call(AST::NodeCollection &nodes, AST::Ex
 }
 
 AST::ExprNode *AST::address_member_receiver(
+    AST::NodeCollection &nodes,
+    AST::ExprNode *receiver,
+    const AST::ValueType &expected,
+    bool replay)
+{
+    if (parameter_auto_borrows(expected)) {
+        return address_member_receiver(nodes, receiver, replay);
+    }
+
+    // by-value `$this`: unwrap the planted AddrOf, do not re-address
+    if (receiver != nullptr && receiver->get_node_type() == AST::NodeType::n_expr_addrof) {
+        return static_cast<AST::AddrOfExprNode *>(receiver)->operand;
+    }
+
+    return receiver;
+}
+
+AST::ExprNode *AST::address_member_receiver(
     AST::NodeCollection &nodes, AST::ExprNode *receiver, bool replay)
 {
     if (receiver == nullptr) {

@@ -1,0 +1,85 @@
+// take_from moves every element of the source into the dest and leaves the source empty.
+// extend copies; this is the consuming twin. one-element move-in is `$a[] = mv $x`
+
+function batch() : array<int32>
+{
+    return [10, 11];
+}
+
+array<int32> $all = [1, 2];
+array<int32> $got = [3, 4, 5];
+$all->take_from($got);
+echo $all->count();
+echo $all[0];
+echo $all[1];
+echo $all[2];
+echo $all[3];
+echo $all[4];
+echo $got->count();
+
+array<int32> $empty = [];
+array<int32> $batch = [7, 8];
+$empty->take_from($batch);
+echo $empty[0];
+echo $empty[1];
+echo $batch->count();
+
+array<int32> $keep = [9];
+array<int32> $none = [];
+$keep->take_from($none);
+echo $keep->count();
+echo $keep[0];
+
+array<int32> $sum = [9];
+$sum->take_from(batch());
+echo $sum[0];
+echo $sum[1];
+echo $sum[2];
+
+struct Snap
+{
+    string $key;
+    array<string> $tags;
+}
+
+array<Snap> $acc = [Snap('a', ['x'])];
+{
+    array<Snap> $more = [Snap('b', ['y', 'z'])];
+    $acc->take_from($more);
+}
+echo $acc[0]->key;
+echo $acc[0]->tags[0];
+echo $acc[1]->key;
+echo $acc[1]->tags[0];
+echo $acc[1]->tags[1];
+
+array<Snap> $stolen = [];
+{
+    array<Snap> $pack = [Snap('c', ['p'])];
+    $stolen->take_from($pack);
+}
+echo $stolen[0]->key;
+echo $stolen[0]->tags[0];
+
+struct Item
+{
+    int32 $n;
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+echo 'start';
+array<Item> $into = array<Item>();
+$into[] = Item(1);
+{
+    array<Item> $from = array<Item>();
+    $from[] = Item(2);
+    $into->take_from($from);
+    echo 'drained';
+}
+echo $into[0]->n;
+echo $into[1]->n;
+echo 'end';

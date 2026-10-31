@@ -1,0 +1,36 @@
+// mv of a T& is a partial move: the name is a whole variable, the storage is not.
+// foreach `&$s` used to accept this and bitwise-copy nested arrays out of $got
+
+struct Snap
+{
+    string $key;
+    array<string> $tags;
+}
+
+function from_foreach_borrow() : void
+{
+    array<Snap> $got = [];
+    foreach ($got as &$s) {
+        Snap $stolen = mv $s;
+    }
+}
+
+function from_foreach_const_borrow() : void
+{
+    array<Snap> $got = [];
+    foreach ($got as const &$s) {
+        Snap $stolen = mv $s;
+    }
+}
+
+function from_borrow_local() : void
+{
+    array<Snap> $got = [Snap('', [])];
+    Snap& $r = $got[0];
+    Snap $stolen = mv $r;
+}
+
+function from_borrow_parameter(Snap& $s) : void
+{
+    Snap $stolen = mv $s;
+}

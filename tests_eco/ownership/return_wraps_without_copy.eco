@@ -1,0 +1,41 @@
+// `return Holder($item)` is `return f($x)`: the local ends at the statement, so the constructor
+// receives the value rather than a duplicate. wrapping an owner to return it is free
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+function wrap() : Holder
+{
+    Item $item = Item(5);
+    return Holder($item);
+}
+
+{
+    Holder $h = wrap();
+    echo $h->item->n;
+}
+
+echo 'done';

@@ -1,0 +1,10 @@
+// an element is not a whole variable: `mv $items[0]` would leave a hole the array destructor
+// cannot see. take / pop / take_from are the transfers that empty the slot first
+
+struct Item
+{
+    int32 $n;
+}
+
+array<Item> $items = [Item(1), Item(2)];
+Item $stolen = mv $items[0];

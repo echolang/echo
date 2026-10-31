@@ -1018,6 +1018,36 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     if (has_receiver) {
         funcdecl->member_kind = AST::MemberKind::t_method;
         push_receiver_param(payload, rebuilt, funcscope, self_type, nametoken);
+
+        // `function take(mv $this)`: `$this` is by-value T and the call `$h->take()` consumes `$h`.
+        // written as the first parameter because `$this` is otherwise planted and unspellable
+        if (cursor.is_type(Token::Type::t_mv)
+            && cursor.peek_is_type(1, Token::Type::t_varname)
+            && cursor.peek(1).value() == "$this") {
+            cursor.skip();
+            cursor.skip();
+
+            if (modifiers.is_const()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(modifiers.const_token.value()),
+                    fmt::format(
+                        "'{}' cannot be const and consume '$this' - a const method only reads the "
+                        "receiver.",
+                        nametoken.value()));
+            }
+
+            if (self_type != nullptr && self_type->type.is_pointer()) {
+                auto &value_type = payload.context.emplace_node<AST::TypeNode>(
+                    AST::ValueType::make_mutable(self_type->type.pointee()));
+                rebuilt[0]->set_type_node(&value_type);
+            }
+
+            rebuilt[0]->takes_ownership = true;
+
+            if (cursor.is_type(Token::Type::t_comma)) {
+                cursor.skip();
+            }
+        }
     }
     else if (modifiers.is_static()) {
         // the whole of what `static` does to the shape: the kind is set and no receiver is pushed, so

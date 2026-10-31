@@ -1,0 +1,40 @@
+// a field write of a surviving local is a copy: the source stays live, so the field receives a
+// duplicate. contrast ownership/move_into_a_field, which transfers and never prints `copy`
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+{
+    Holder $h = Holder(Item(1));
+    Item $keep = Item(2);
+    echo 'assign';
+    $h->item = $keep;
+    echo 'held';
+    echo $h->item->n;
+    echo $keep->n;
+}
+
+echo 'done';

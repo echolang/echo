@@ -1,0 +1,39 @@
+// `return mv $this->item` consumes that field at the call. `$h->name` stays live
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+    int32 $tag;
+
+    function take_item() : Item
+    {
+        return mv $this->item;
+    }
+}
+
+Holder $h = Holder(Item(1), 7);
+Item $x = $h->take_item();
+echo $x->n;
+echo $h->tag;
+echo 'done';

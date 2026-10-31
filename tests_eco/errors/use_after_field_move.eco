@@ -1,0 +1,16 @@
+// a moved field is unset; a sibling stays readable
+
+struct Item
+{
+    int32 $n;
+}
+
+struct Holder
+{
+    Item $item;
+    int32 $tag;
+}
+
+Holder $h = Holder(Item(1), 7);
+Item $x = mv $h->item;
+echo $h->item->n;

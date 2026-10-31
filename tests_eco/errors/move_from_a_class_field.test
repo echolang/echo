@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] PartialMove  move_from_a_class_field.eco:10:13
+
+  'mv' cannot move a field out of '$obj': a class handle is shared storage
+
+   9 | Bag $obj = Bag('x');
+  10 | string $s = mv $obj->label;
+     :             ^^
+  11 | 
+
+1 error, nothing was compiled.

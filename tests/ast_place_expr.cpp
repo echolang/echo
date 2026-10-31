@@ -309,6 +309,35 @@ TEST_CASE("storage_of of a move is addressless; place_root_of follows it", "[AST
     REQUIRE(place_root_of(&move) == place_root_of(var_ref));
 }
 
+TEST_CASE("member_path_of peels AddrOf and Move", "[AST][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Item { int32 $n; }\n"
+        "struct Holder { Item $item; }\n"
+        "Holder $h = Holder(Item(1));\n"
+        "echo $h->item->n;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *access = first_of<MemberAccessNode>(*bundle);
+    REQUIRE(access != nullptr);
+
+    std::vector<std::string> path;
+    VarDeclNode *root = member_path_of(access, path);
+    REQUIRE(root != nullptr);
+    REQUIRE(path.size() >= 1);
+
+    auto &nodes = bundle->modules.find_module("test").nodes;
+    auto &addrof = nodes.emplace_back<AddrOfExprNode>(access);
+    std::vector<std::string> via_addr;
+    REQUIRE(member_path_of(&addrof, via_addr) == root);
+    REQUIRE(via_addr == path);
+
+    auto &move = nodes.emplace_back<MoveExprNode>(access, access->get_member_name());
+    std::vector<std::string> via_move;
+    REQUIRE(member_path_of(&move, via_move) == root);
+    REQUIRE(via_move == path);
+}
+
 TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
 {
     // is_assignable_target is deliberately one wider than is_place_expression: `$p:$ = &$b`

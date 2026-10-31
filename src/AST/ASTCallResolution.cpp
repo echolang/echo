@@ -18,6 +18,7 @@
 #include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTValueType.h"
+#include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/TypeNode.h"
@@ -726,9 +727,11 @@ namespace AST
             }
 
             // parser planted AddrOf after peeling known pointers. a generic body's
-            // receiver was unknown then: address_member_receiver replays the peel
-            if (i == 0 && call.is_member_lookup()) {
-                call.arguments[i] = address_member_receiver(nodes, call.arguments[i], /*replay=*/true);
+            // receiver was unknown then: address_member_receiver replays the peel.
+            // a by-value `$this` unwraps that AddrOf and does not re-address
+            if (i == 0 && call.is_member_lookup() && call.decl->has_receiver()) {
+                call.arguments[i] = address_member_receiver(
+                    nodes, call.arguments[i], expected, /*replay=*/true);
             }
 
             wrap_argument(call.arguments[i], expected, call.token_function_name, nodes);

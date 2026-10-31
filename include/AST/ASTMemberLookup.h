@@ -188,6 +188,15 @@ namespace AST
     // seated T& from receiver_for_member_call is already the receiver and stays
     ExprNode *address_member_receiver(NodeCollection &nodes, ExprNode *receiver, bool replay = false);
 
+    // CallResolver: `expected` is args[0]. a borrow still peels-then-AddrOf; a by-value
+    // `$this` (`function take(mv $this)`) unwraps the planted AddrOf and does not re-address
+    ExprNode *address_member_receiver(
+        NodeCollection &nodes,
+        ExprNode *receiver,
+        const ValueType &expected,
+        bool replay
+    );
+
     // **the parser's wrap of `decl` as member-call argument 0.** `$el->m()` is AddrOf($el) because
     // `$el` was untyped at parse. ForeachLowering reseats it through receiver_for_member_call after
     // eliding to `const V&`; is_never_written skips it so the call, not the AddrOf, answers. a

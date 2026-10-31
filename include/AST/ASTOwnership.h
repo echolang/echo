@@ -11,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -154,6 +155,8 @@ namespace AST
         // does not exist
         struct FlowFacts
         {
+            using MemberPath = std::vector<std::string>;
+
             // declarations whose value has been moved out. a moved local is neither readable nor
             // dropped - "its destructor travelled with the value"
             std::unordered_set<const VarDeclNode *> moved;
@@ -161,6 +164,11 @@ namespace AST
             // locals moved inside a branch that did not certainly run. read a second time, so the
             // diagnostic can say "may have been moved" rather than claiming it definitely was
             std::unordered_set<const VarDeclNode *> maybe_moved;
+
+            // field paths moved out of a still-live local. `$h` in `moved` implies every path of
+            // `$h`. a path here means that path and every extension of it
+            std::unordered_map<const VarDeclNode *, std::set<MemberPath>> moved_paths;
+            std::unordered_map<const VarDeclNode *, std::set<MemberPath>> maybe_moved_paths;
 
             // the storage this body has already *initialized* - a declaration and the member names
             // below it, as one key. an initialization owes the old value no teardown because there
@@ -174,7 +182,35 @@ namespace AST
                 moved.insert(other.moved.begin(), other.moved.end());
                 maybe_moved.insert(other.maybe_moved.begin(), other.maybe_moved.end());
                 initialized.insert(other.initialized.begin(), other.initialized.end());
+
+                for (const auto &[decl, paths] : other.moved_paths) {
+                    moved_paths[decl].insert(paths.begin(), paths.end());
+                }
+
+                for (const auto &[decl, paths] : other.maybe_moved_paths) {
+                    maybe_moved_paths[decl].insert(paths.begin(), paths.end());
+                }
             }
+
+            void erase_decl(const VarDeclNode *decl)
+            {
+                moved.erase(decl);
+                maybe_moved.erase(decl);
+                moved_paths.erase(decl);
+                maybe_moved_paths.erase(decl);
+            }
+
+            bool path_moved(const VarDeclNode *root, const MemberPath &path) const;
+            bool path_maybe_moved(const VarDeclNode *root, const MemberPath &path) const;
+            void mark_moved(const VarDeclNode *root, const MemberPath &path);
+            void fill(const VarDeclNode *root, const MemberPath &path);
+
+            // *this is `before`. joining.size() >= 2. fills `conditional` with paths moved
+            // on only some arms (empty path is the whole local)
+            void merge_exclusive(
+                const std::vector<FlowFacts> &joining,
+                std::vector<std::pair<const VarDeclNode *, MemberPath>> &conditional
+            );
         };
 
         // one enclosing loop body, and what its two exits carry out of it.
@@ -206,6 +242,15 @@ namespace AST
         std::vector<LoopFrame> _loop_frames;
 
         FlowFacts _flow;
+
+        // walk_expression of a member-access base must not treat `$h` as a whole read: `$h->name`
+        // after `mv $h->item` is a sibling, and the path check sits on the access itself
+        size_t _place_base_depth = 0;
+
+        // assignment target `$h->item =` fills that exact path. a prefix (`$h->item` of
+        // `$h->item->n =`) is still a use-after-move. null when not walking a fill
+        const VarDeclNode *_fill_root = nullptr;
+        FlowFacts::MemberPath _fill_path;
 
         // **the reads at which this body hands an owner over**, from AST::handover_reads_in - answered
         // once per body, before the walk, and looked up by arrive_value at every by-value argument.
@@ -414,7 +459,10 @@ namespace AST
         // a local moved out of on one branch of an `if` but not the other. the chapter says the
         // variable is unset afterwards, which settles reading it - but not who destroys the value on
         // the branch that kept it. see the definition
-        void report_conditional_move(const VarDeclNode *decl, const std::string &remedy);
+        void report_conditional_move(
+            const VarDeclNode *decl,
+            const std::string &remedy,
+            const FlowFacts::MemberPath &path = {});
 
         // --- copy or move ---------------------------------------------------------------------
 
@@ -647,6 +695,15 @@ namespace AST
             const ComplexType *ct,
             std::vector<NodeReference> &out);
 
+        // remaining owning fields of a partly-moved local, skipping `moved` prefixes. each live
+        // field is emit_drop of that field, the same teardown assignment already plants
+        void emit_remaining_drops(
+            VarDeclNode *root,
+            std::vector<std::string> &path,
+            const ValueType &type,
+            const std::set<FlowFacts::MemberPath> &moved,
+            std::vector<NodeReference> &out);
+
         // --- synthesized declarations ------------------------------------------------------------
 
         // the skeleton every declaration this pass writes shares: a node named `name` at `site`, with
@@ -805,13 +862,17 @@ namespace AST
         FunctionDeclNode *ensure_inline_array_copy(const ValueType &type, const TokenReference &site);
 
         // **there is no copy of this value, and this is what the author is told.** two wordings, and
-        // which one applies is not a property of the type: a source that names no variable has no `mv`
-        // to suggest, because `mv $doc->body` is rejected too
+        // which one applies is not a property of the type: a source that names no variable, or a field
+        // of one, has no single `mv $x` to suggest
         //
         // split out of arrive_value's CopyKind switch so the t_none arm reads as one arm beside the
         // others rather than as fifteen lines of formatting
         void reject_uncopyable(
-            ExprNode *expr, const ValueType &wanted, const VarDeclNode *source, ValueDestination destination);
+            ExprNode *expr,
+            const ValueType &wanted,
+            const VarDeclNode *source,
+            const std::vector<std::string> &path,
+            ValueDestination destination);
 
         // a declaration synthesized this round, and the file root it belongs to. two fields because the
         // second is not the walk's own file: a deinit is built into the file that declares its type, which

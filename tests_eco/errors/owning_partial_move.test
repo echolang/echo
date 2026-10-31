@@ -1,13 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] PartialMove  owning_partial_move.eco:21:6
+[error] PartialMove  owning_partial_move.eco:24:6
 
-  'mv' can only move a whole variable - moving a field or an element out of a value is not supported yet
+  'mv' cannot move a field out of 'Document', which declares a destructor - leftover fields are not what that destructor describes
 
-  20 | $d = Document(Buffer(mem::alloc<uint8>(1)), 1);
-  21 | $b = mv $d->body;
+  23 | $d = Document(Buffer(mem::alloc<uint8>(1)), 1);
+  24 | $b = mv $d->body;
      :      ^^
-  22 | 
+  25 | 
 
 1 error, nothing was compiled.

@@ -1,0 +1,9 @@
+// take_from writes both arrays, so one array cannot be both dest and source.
+// the receiver is inout as a method; `$other` is inout by the word on the parameter
+
+array<int32> $a = [1, 2];
+array<int32> $b = [9];
+$a->take_from($b);
+echo $a->count();
+
+$a->take_from($a);

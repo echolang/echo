@@ -1,6 +1,7 @@
 #include "AST/ASTOwnership.h"
 
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCast.h"
@@ -48,11 +49,15 @@
 #include "AST/LoopControlNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
+#include <algorithm>
+#include <map>
 #include <fmt/core.h>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace AST
 {
@@ -84,26 +89,32 @@ namespace
         return "destination";
     }
 
-    // the local a `mv` names, or null when the operand is not a bare variable read. only a whole
-    // variable can be moved out of today: moving one field (`mv $doc->body`) leaves a partly-moved
-    // struct whose destructor has no defined behaviour, and moving an element (`mv $items[0]`) has a
-    // runtime index with nothing static to mark unset. both are refused rather than half-supported.
-    // a place `match` whose completing arms are that same local (`return match { => $a }`) is the
-    // same read: the phi is an address of `$a`, and t_return moves it
-    VarDeclNode *whole_variable_moved(ExprNode *operand)
+    struct OwnedPlace
+    {
+        VarDeclNode *root = nullptr;
+        std::vector<std::string> path;
+    };
+
+    // the local a `mv` names, plus the member path when the operand is `$h->item`. empty path is a
+    // whole variable. an index or a static has no root. a place `match` whose completing arms are
+    // that same local (`return match { => $a }`) is the whole-variable read
+    OwnedPlace owned_place_moved(ExprNode *operand)
     {
         operand = strip_implicit_casts(operand);
 
         if (operand == nullptr) {
-            return nullptr;
+            return {};
         }
 
-        if (operand->get_node_type() == NodeType::n_varref) {
-            return place_root_of(operand);
+        if (operand->get_node_type() == NodeType::n_varref
+            || operand->get_node_type() == NodeType::n_member_access) {
+            OwnedPlace place;
+            place.root = member_path_of(operand, place.path);
+            return place;
         }
 
         if (!value_is_an_address(*operand)) {
-            return nullptr;
+            return {};
         }
 
         auto *match = static_cast<MatchExprNode *>(operand);
@@ -122,61 +133,38 @@ namespace
             ExprNode *value = strip_implicit_casts(arm.value);
 
             if (value == nullptr || value->get_node_type() != NodeType::n_varref) {
-                return nullptr;
+                return {};
             }
 
             VarDeclNode *arm_root = place_root_of(value);
 
             if (arm_root == nullptr) {
-                return nullptr;
+                return {};
             }
 
             if (root == nullptr) {
                 root = arm_root;
             } else if (root != arm_root) {
-                return nullptr;
+                return {};
             }
         }
 
-        return root;
+        OwnedPlace place;
+        place.root = root;
+        return place;
     }
 
-    // the declaration a place ultimately addresses, plus the member names between the two in
-    // declaration order - so `$this->a->b` answers `$this` and `["a", "b"]`.
-    //
-    // null when the place is not a plain member chain. an index is the case that matters: `$items[$i]`
-    // names storage picked at runtime, so there is no static identity to compare two writes on, and
-    // guessing one would either miss a leak or invent a diagnostic
-    VarDeclNode *member_path_of(ExprNode *expr, std::vector<std::string> &path)
+    const VarDeclNode *method_this_of(const FunctionDeclNode *fn)
     {
-        if (expr == nullptr) {
+        if (fn == nullptr || !fn->has_receiver() || fn->args.empty() || fn->args[0] == nullptr) {
             return nullptr;
         }
 
-        if (expr->get_node_type() == NodeType::n_varref) {
-            return place_root_of(expr);
-        }
-
-        if (expr->get_node_type() != NodeType::n_member_access) {
+        if (fn->is_destructor() || fn->is_interface_requirement() || fn->is_default()) {
             return nullptr;
         }
 
-        auto *access = static_cast<MemberAccessNode *>(expr);
-        auto &base = access->get_base_node();
-
-        if (!base.has() || !base.is_expression_node()) {
-            return nullptr;
-        }
-
-        VarDeclNode *root = member_path_of(base.unsafe_ptr<ExprNode>(), path);
-
-        // pushed on the way *out* of the recursion, so the names come back outermost-last without a
-        // reverse. a member access nests base-first, which is the opposite of how it reads
-        if (root != nullptr) {
-            path.push_back(access->get_member_name().value());
-        }
-
-        return root;
+        return fn->args[0];
     }
 
     // an explicit `as` is a new owner of the source. `$x as I?` recast is the
@@ -216,6 +204,205 @@ namespace
         return !needs_destruction(wanted);
     }
 
+}
+
+bool OwnershipPass::FlowFacts::path_moved(const VarDeclNode *root, const MemberPath &path) const
+{
+    if (root == nullptr) {
+        return false;
+    }
+
+    if (moved.count(root) > 0) {
+        return true;
+    }
+
+    auto it = moved_paths.find(root);
+
+    if (it == moved_paths.end()) {
+        return false;
+    }
+
+    if (path.empty()) {
+        return !it->second.empty();
+    }
+
+    for (const auto &entry : it->second) {
+        if (path_is_prefix(entry, path)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool OwnershipPass::FlowFacts::path_maybe_moved(const VarDeclNode *root, const MemberPath &path) const
+{
+    if (root == nullptr) {
+        return false;
+    }
+
+    if (maybe_moved.count(root) > 0) {
+        return true;
+    }
+
+    auto it = maybe_moved_paths.find(root);
+
+    if (it == maybe_moved_paths.end()) {
+        return false;
+    }
+
+    if (path.empty()) {
+        return !it->second.empty();
+    }
+
+    for (const auto &entry : it->second) {
+        if (path_is_prefix(entry, path)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void OwnershipPass::FlowFacts::mark_moved(const VarDeclNode *root, const MemberPath &path)
+{
+    if (root == nullptr) {
+        return;
+    }
+
+    if (path.empty()) {
+        erase_decl(root);
+        moved.insert(root);
+        return;
+    }
+
+    moved_paths[root].insert(path);
+    auto maybe = maybe_moved_paths.find(root);
+
+    if (maybe != maybe_moved_paths.end()) {
+        maybe->second.erase(path);
+
+        if (maybe->second.empty()) {
+            maybe_moved_paths.erase(maybe);
+        }
+    }
+}
+
+void OwnershipPass::FlowFacts::fill(const VarDeclNode *root, const MemberPath &path)
+{
+    if (root == nullptr) {
+        return;
+    }
+
+    if (path.empty()) {
+        erase_decl(root);
+        return;
+    }
+
+    auto it = moved_paths.find(root);
+
+    if (it != moved_paths.end()) {
+        auto &paths = it->second;
+
+        for (auto p = paths.begin(); p != paths.end(); ) {
+            if (path_is_prefix(path, *p) || *p == path) {
+                p = paths.erase(p);
+            }
+            else {
+                ++p;
+            }
+        }
+
+        if (paths.empty()) {
+            moved_paths.erase(it);
+        }
+    }
+
+    auto maybe = maybe_moved_paths.find(root);
+
+    if (maybe != maybe_moved_paths.end()) {
+        auto &paths = maybe->second;
+
+        for (auto p = paths.begin(); p != paths.end(); ) {
+            if (path_is_prefix(path, *p) || *p == path) {
+                p = paths.erase(p);
+            }
+            else {
+                ++p;
+            }
+        }
+
+        if (paths.empty()) {
+            maybe_moved_paths.erase(maybe);
+        }
+    }
+}
+
+void OwnershipPass::FlowFacts::merge_exclusive(
+    const std::vector<FlowFacts> &joining,
+    std::vector<std::pair<const VarDeclNode *, MemberPath>> &conditional
+)
+{
+    for (const FlowFacts &arm : joining) {
+        initialized.insert(arm.initialized.begin(), arm.initialized.end());
+    }
+
+    maybe_moved = joining[0].maybe_moved;
+    maybe_moved_paths = joining[0].maybe_moved_paths;
+
+    for (size_t i = 1; i < joining.size(); i++) {
+        maybe_moved.insert(joining[i].maybe_moved.begin(), joining[i].maybe_moved.end());
+
+        for (const auto &[decl, paths] : joining[i].maybe_moved_paths) {
+            maybe_moved_paths[decl].insert(paths.begin(), paths.end());
+        }
+    }
+
+    std::unordered_map<const VarDeclNode *, size_t> moved_on;
+
+    for (const FlowFacts &arm : joining) {
+        for (const VarDeclNode *decl : arm.moved) {
+            moved_on[decl]++;
+        }
+    }
+
+    for (const auto &[decl, count] : moved_on) {
+        if (count == joining.size()) {
+            moved.insert(decl);
+        }
+        else {
+            maybe_moved.insert(decl);
+            conditional.emplace_back(decl, MemberPath{});
+        }
+    }
+
+    std::map<const VarDeclNode *, std::set<MemberPath>> all_paths;
+
+    for (const FlowFacts &arm : joining) {
+        for (const auto &[decl, paths] : arm.moved_paths) {
+            all_paths[decl].insert(paths.begin(), paths.end());
+        }
+    }
+
+    for (const auto &[decl, paths] : all_paths) {
+        for (const auto &path : paths) {
+            size_t count = 0;
+
+            for (const FlowFacts &arm : joining) {
+                if (arm.path_moved(decl, path)) {
+                    count++;
+                }
+            }
+
+            if (count == joining.size()) {
+                moved_paths[decl].insert(path);
+            }
+            else {
+                maybe_moved_paths[decl].insert(path);
+                conditional.emplace_back(decl, path);
+            }
+        }
+    }
 }
 
 OwnershipPass::OwnershipPass(Bundle &bundle)
@@ -317,16 +504,15 @@ bool OwnershipPass::run_round()
             // the file root is a body in every sense that matters here: codegen synthesizes `main`
             // out of it, so a local declared at file scope owns its value and is destroyed at the
             // end of the program exactly as one in a function is
-            resolve_root(root);
-
-            // declarations reached through the root's children, which is also where the
-            // monomorphizer appends the instances it creates - so an instance body created this
-            // round is resolved on the next one
+            // methods before the file root, so `$h->take_item()` at file scope sees
+            // receiver_consumed_paths already recorded
             for (auto &child : root.children) {
                 if (child.has_type<FunctionDeclNode>()) {
                     resolve_function(child.get<FunctionDeclNode>());
                 }
             }
+
+            resolve_root(root);
         });
     }
 
@@ -423,18 +609,27 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     std::vector<VarDeclNode *> owned_params;
     std::vector<VarDeclNode *> declared_params;
 
-    for (size_t i = decl.implicit_arg_count(); i < decl.args.size(); i++) {
-        VarDeclNode *arg = decl.args[i];
-
+    auto seed_param = [&](VarDeclNode *arg, bool for_handover) {
         if (arg == nullptr) {
-            continue;
+            return;
         }
 
-        declared_params.push_back(arg);
+        if (for_handover) {
+            declared_params.push_back(arg);
+        }
 
         if (arg->has_type() && needs_destruction(arg->type())) {
             owned_params.push_back(arg);
         }
+    };
+
+    if (decl.has_receiver() && !decl.args.empty() && decl.args[0] != nullptr
+        && decl.args[0]->takes_ownership) {
+        seed_param(decl.args[0], false);
+    }
+
+    for (size_t i = decl.implicit_arg_count(); i < decl.args.size(); i++) {
+        seed_param(decl.args[i], true);
     }
 
     // **the explicit parameters only**, for the reason the frame above skips the implicit ones: a
@@ -446,6 +641,25 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     walk_parameter_defaults(declared_params);
 
     walk_scope(*decl.body);
+
+    if (decl.has_receiver() && !decl.args.empty() && decl.args[0] != nullptr) {
+        VarDeclNode *self = decl.args[0];
+        decl.receiver_consumed_paths.clear();
+
+        if (_flow.moved.count(self) > 0) {
+            decl.receiver_consumed_paths.push_back({});
+        }
+        else {
+            auto it = _flow.moved_paths.find(self);
+
+            if (it != _flow.moved_paths.end()) {
+                for (const auto &path : it->second) {
+                    decl.receiver_consumed_paths.push_back(path);
+                }
+            }
+        }
+    }
+
     _frames.pop_back();
     decl.region_state = RegionState::t_owned;
 }
@@ -542,8 +756,7 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
             // gate), so a break-move of one still reaches UseAfterMove after the loop
             for (size_t i = _loop_frames.back().frame_floor; i < _frames.size(); i++) {
                 for (const VarDeclNode *local : _frames[i].locals) {
-                    carried.moved.erase(local);
-                    carried.maybe_moved.erase(local);
+                    carried.erase_decl(local);
                 }
             }
         }
@@ -591,8 +804,7 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
         // handed over inside one arm was being reported as "moved out of on only one branch", against
         // an other branch in which the variable was never declared at all
         for (const VarDeclNode *local : _frames.back().locals) {
-            _flow.moved.erase(local);
-            _flow.maybe_moved.erase(local);
+            _flow.erase_decl(local);
         }
 
         _frames.pop_back();
@@ -639,10 +851,16 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // a whole-variable target is *written*, not read, so a moved-from variable being re-seated
             // is not a use-after-move. the arm below already says so - it clears the moved state and
             // notes "the variable is live again from here on" - but the walk got there first and
-            // reported the write as a read. any other target shape (`$a->f`, `$a[$i]`) genuinely does
-            // read `$a` to find the storage, so it is walked as usual
-            if (whole_variable_moved(assign->target) == nullptr) {
+            // reported the write as a read. a field write fills that exact path; a prefix of it
+            // (`$h->item` of `$h->item->n =`) is still a use-after-move
+            const OwnedPlace fill = owned_place_moved(assign->target);
+
+            if (fill.root == nullptr || !fill.path.empty()) {
+                _fill_root = fill.root;
+                _fill_path = fill.path;
                 assign->target = walk_expression(assign->target);
+                _fill_root = nullptr;
+                _fill_path.clear();
             }
 
             target_scope.close(assign->target);
@@ -679,14 +897,16 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // t_retain, and it is already the compiler's one classifier - asked rather than respelled,
             // so the next reference-counted kind does not have to find this site
             if (!assign->is_initialization && classify_copy(target_type) == CopyKind::t_retain) {
+                std::vector<std::string> retain_path;
                 VarDeclNode *root =
-                    assign->target != nullptr ? whole_variable_moved(assign->target) : nullptr;
+                    assign->target != nullptr ? member_path_of(assign->target, retain_path) : nullptr;
 
-                // a moved-from variable owes nothing: the reference travelled with the value, and the
+                // a moved-from place owes nothing: the reference travelled with the value, and the
                 // handle still sitting in the slot is somebody else's. releasing it here would be the
-                // second release of one reference. a field or an element target (no root) always owes
-                // one - a field cannot be moved out of, so it always still holds what it was given
-                assign->releases_old = root == nullptr || _flow.moved.count(root) == 0;
+                // second release of one reference. an index target (no root) always still holds
+                // what it was given
+                assign->releases_old = root == nullptr
+                    || !_flow.path_moved(root, retain_path);
 
                 // a callable's teardown is uniform and needs no per-type deinit - see emit_drop
                 if (assign->releases_old && target_type.is_class()) {
@@ -698,8 +918,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 if (root != nullptr) {
                     // the assignment re-seats it: it holds a value again, so it is readable again and
                     // owes a release again at the end of its scope
-                    _flow.moved.erase(root);
-                    _flow.maybe_moved.erase(root);
+                    _flow.fill(root, retain_path);
                 }
                 break;
             }
@@ -751,14 +970,12 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 
                 if (root != nullptr) {
                     // whatever the place held is being replaced, so it is destroyed first - unless
-                    // it holds nothing, having been moved out of already. a field can never have
-                    // been: `mv` moves a whole variable, so a non-empty path is always still
-                    // holding what it was given
+                    // it holds nothing, having been moved out of already
                     //
                     // carried *on* the assignment rather than pushed ahead of it: gen_assign
                     // runs these after the right-hand side and before the store, which is the
                     // only window in which both the old value and the new one exist
-                    if (_flow.moved.count(root) == 0) {
+                    if (!_flow.path_moved(root, path)) {
                         auto &teardown = _current_module->nodes.emplace_back<ScopeNode>();
 
                         emit_drop(root, path, target_type, teardown.children);
@@ -768,13 +985,9 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                         }
                     }
 
-                    // the variable is live again from here on - and only when this write is the
-                    // whole of it. writing one field of a moved-out value re-seats one field, so
-                    // clearing the mark there would claim the rest of it is readable again
-                    if (path.empty()) {
-                        _flow.moved.erase(root);
-                        _flow.maybe_moved.erase(root);
-                    }
+                    // the variable is live again from here on - a whole write clears every hole,
+                    // a field write fills that path
+                    _flow.fill(root, path);
                 }
                 else if (assign->target != nullptr
                     && assign->target->get_node_type() == NodeType::n_expr_static_property) {
@@ -1061,35 +1274,11 @@ void OwnershipPass::join_exclusive(
         return;
     }
 
-    for (const FlowFacts &arm : joining) {
-        _flow.initialized.insert(arm.initialized.begin(), arm.initialized.end());
-    }
+    std::vector<std::pair<const VarDeclNode *, FlowFacts::MemberPath>> conditional;
+    _flow.merge_exclusive(joining, conditional);
 
-    // a decl stays *definitely* moved only where no reaching arm was unsure about it, which is
-    // why this is the arms' own sets rather than the snapshot: an arm that moved outright what
-    // was merely maybe-moved before the statement erased it, and that erase must survive the merge
-    _flow.maybe_moved = joining[0].maybe_moved;
-
-    for (size_t i = 1; i < joining.size(); i++) {
-        _flow.maybe_moved.insert(joining[i].maybe_moved.begin(), joining[i].maybe_moved.end());
-    }
-
-    std::unordered_map<const VarDeclNode *, size_t> moved_on;
-
-    for (const FlowFacts &arm : joining) {
-        for (const VarDeclNode *decl : arm.moved) {
-            moved_on[decl]++;
-        }
-    }
-
-    for (const auto &[decl, count] : moved_on) {
-        if (count == joining.size()) {
-            _flow.moved.insert(decl);
-        }
-        else {
-            _flow.maybe_moved.insert(decl);
-            report_conditional_move(decl, remedy);
-        }
+    for (const auto &[decl, path] : conditional) {
+        report_conditional_move(decl, remedy, path);
     }
 }
 
@@ -1138,6 +1327,7 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
         }
 
         const auto before_moved = _flow.moved;
+        const auto before_moved_paths = _flow.moved_paths;
 
         // the frame walk_scope is about to push for the body, recorded here rather than inside
         // it: walk_scope does not know whose scope it has been handed, and its `own_frame` test
@@ -1163,10 +1353,22 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
         auto back_edge = body_exit == ExitKind::t_none ? _flow.moved : before_moved;
         back_edge.insert(frame.continue_facts.moved.begin(), frame.continue_facts.moved.end());
 
+        auto back_edge_paths = body_exit == ExitKind::t_none ? _flow.moved_paths : before_moved_paths;
+
+        for (const auto &[decl, paths] : frame.continue_facts.moved_paths) {
+            back_edge_paths[decl].insert(paths.begin(), paths.end());
+        }
+
         // **and the state that reaches the code after the loop**: the back edge - the condition
         // is what the loop is left by, and it is read from the header - plus every `break`
         auto after_loop = back_edge;
         after_loop.insert(frame.break_facts.moved.begin(), frame.break_facts.moved.end());
+
+        auto after_loop_paths = back_edge_paths;
+
+        for (const auto &[decl, paths] : frame.break_facts.moved_paths) {
+            after_loop_paths[decl].insert(paths.begin(), paths.end());
+        }
 
         // judged over both, and that is the over-approximation this keeps. a `break` runs at
         // most once, so moving an outer local on that path does not repeat - but the loop can
@@ -1189,6 +1391,31 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
             );
         }
 
+        FlowFacts before_paths;
+        before_paths.moved = before_moved;
+        before_paths.moved_paths = before_moved_paths;
+
+        for (const auto &[decl, paths] : after_loop_paths) {
+            if (outer.count(decl) == 0) {
+                continue;
+            }
+
+            for (const auto &path : paths) {
+                if (before_paths.path_moved(decl, path)) {
+                    continue;
+                }
+
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(decl->token_varname), fmt::format(
+                        "'{}' is moved out of inside a loop, so the next iteration would move a "
+                        "value that is no longer there. Move it after the loop, or declare it "
+                        "inside one.",
+                        place_spelling(decl, path)
+                    )
+                );
+            }
+        }
+
         // a decl only a `break` moved is one the condition-exit path did not, so a read after
         // the loop says *may* have been moved rather than claiming it was
         for (const auto *decl : frame.break_facts.moved) {
@@ -1197,11 +1424,33 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
             }
         }
 
+        FlowFacts back_paths;
+        back_paths.moved = back_edge;
+        back_paths.moved_paths = back_edge_paths;
+
+        for (const auto &[decl, paths] : frame.break_facts.moved_paths) {
+            for (const auto &path : paths) {
+                if (!back_paths.path_moved(decl, path)) {
+                    _flow.maybe_moved_paths[decl].insert(path);
+                }
+            }
+        }
+
         _flow.moved = std::move(after_loop);
+        _flow.moved_paths = std::move(after_loop_paths);
         _flow.maybe_moved.insert(
             frame.continue_facts.maybe_moved.begin(), frame.continue_facts.maybe_moved.end());
         _flow.maybe_moved.insert(
             frame.break_facts.maybe_moved.begin(), frame.break_facts.maybe_moved.end());
+
+        for (const auto &[decl, paths] : frame.continue_facts.maybe_moved_paths) {
+            _flow.maybe_moved_paths[decl].insert(paths.begin(), paths.end());
+        }
+
+        for (const auto &[decl, paths] : frame.break_facts.maybe_moved_paths) {
+            _flow.maybe_moved_paths[decl].insert(paths.begin(), paths.end());
+        }
+
         _flow.initialized.insert(
             frame.continue_facts.initialized.begin(), frame.continue_facts.initialized.end());
         _flow.initialized.insert(
@@ -1619,7 +1868,11 @@ bool OwnershipPass::elides_guard_hoist_payload(ExprNode *expr, const VarDeclNode
     return place_root_of(chain->root) == hoist;
 }
 
-void OwnershipPass::report_conditional_move(const VarDeclNode *decl, const std::string &remedy)
+void OwnershipPass::report_conditional_move(
+    const VarDeclNode *decl,
+    const std::string &remedy,
+    const FlowFacts::MemberPath &path
+)
 {
     // the chapter's rule - "an `if` that moves on one side and not the other leaves the variable
     // unset afterwards" - settles *reading* the variable, and the merge above implements it. what it
@@ -1644,7 +1897,7 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl, const std::
         code_ref_for(decl->token_varname), fmt::format(
             "'{}' owns a resource and is moved out of on only one branch, so nothing would destroy it "
             "on the other. {}",
-            decl->name_full(),
+            place_spelling(decl, path),
             remedy
         )
     );
@@ -1715,12 +1968,23 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // runtime
             VarDeclNode *decl = place_root_of(expr);
 
-            if (decl != nullptr && _flow.moved.count(decl) > 0) {
+            if (decl == nullptr) {
+                break;
+            }
+
+            const bool wholly = _flow.moved.count(decl) > 0;
+            const bool partial_whole =
+                _place_base_depth == 0
+                && (_flow.path_moved(decl, {}) || _flow.path_maybe_moved(decl, {}));
+
+            if (wholly || partial_whole) {
+                const bool maybe = _flow.path_maybe_moved(decl, {});
+
                 _collector.collect_issue<Issue::UseAfterMove>(
                     code_ref_for(location_of_expression(expr)), fmt::format(
                         "'{}' {} moved out of.",
                         decl->name_full(),
-                        _flow.maybe_moved.count(decl) > 0 ? "may have been" : "has been"
+                        maybe ? "may have been" : "has been"
                     )
                 );
             }
@@ -1775,6 +2039,33 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 }
 
                 call->arguments[i] = resolve_value_arrival(call->arguments[i], wanted, param, ValueDestination::t_argument);
+            }
+
+            if (call->decl != nullptr
+                && !call->decl->receiver_consumed_paths.empty()
+                && !call->arguments.empty()
+                && !(call->decl->has_receiver() && !call->decl->args.empty()
+                    && call->decl->args[0] != nullptr && call->decl->args[0]->takes_ownership)) {
+                std::vector<std::string> base_path;
+                VarDeclNode *root = member_path_of(call->arguments[0], base_path);
+
+                for (const auto &extra : call->decl->receiver_consumed_paths) {
+                    std::vector<std::string> path = base_path;
+                    path.insert(path.end(), extra.begin(), extra.end());
+
+                    if (root == nullptr) {
+                        continue;
+                    }
+
+                    if (const auto refusal = field_move_refusal(root, path, nullptr)) {
+                        _collector.collect_issue<Issue::PartialMove>(
+                            code_ref_for(location_of_expression(call->arguments[0])),
+                            *refusal);
+                        continue;
+                    }
+
+                    _flow.mark_moved(root, path);
+                }
             }
 
             if (assert_condition) {
@@ -2229,7 +2520,9 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             if (base.has() && base.is_expression_node()) {
                 // **reseated**, the way AST::OperatorRewriter's arm is and AST::PointerAdjuster's is
                 // not: a base can be replaced here, and the reference has to follow it
+                ++_place_base_depth;
                 ExprNode *walked = walk_expression(base.unsafe_ptr<ExprNode>());
+                --_place_base_depth;
                 base = NodeReference(walked->get_node_type(), walked);
 
                 // **a base with no storage of its own needs some** - `$o->mid()->tag`, where the value
@@ -2240,6 +2533,35 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 // exactly as it was written
                 if (member_base_needs_storage(*walked)) {
                     request_storage_for(access);
+                }
+            }
+
+            std::vector<std::string> path;
+            VarDeclNode *root = member_path_of(expr, path);
+
+            const bool filling = _fill_root == root && _fill_path == path;
+
+            if (!filling && root != nullptr && !path.empty()
+                && _flow.moved.count(root) == 0
+                && (_flow.path_moved(root, path) || _flow.path_maybe_moved(root, path))) {
+                bool inner_already = false;
+
+                if (path.size() > 1) {
+                    std::vector<std::string> prefix(path.begin(), path.end() - 1);
+                    inner_already = _flow.path_moved(root, prefix)
+                        || _flow.path_maybe_moved(root, prefix);
+                }
+
+                if (!inner_already) {
+                    const bool maybe = !_flow.path_moved(root, path);
+
+                    _collector.collect_issue<Issue::UseAfterMove>(
+                        code_ref_for(location_of_expression(expr)), fmt::format(
+                            "'{}' {} moved out of.",
+                            place_spelling(root, path),
+                            maybe ? "may have been" : "has been"
+                        )
+                    );
                 }
             }
 
@@ -2375,20 +2697,40 @@ ExprNode *OwnershipPass::arrive_value(
     if (explicit_move) {
         auto *move = static_cast<MoveExprNode *>(expr);
 
-        VarDeclNode *source = whole_variable_moved(move->operand);
+        const OwnedPlace place = owned_place_moved(move->operand);
 
-        if (source == nullptr) {
+        if (place.root == nullptr) {
             _collector.collect_issue<Issue::PartialMove>(
                 code_ref_for(move->token_move),
                 "'mv' can only move a whole variable - moving a field or an element out of a value "
                 "is not supported yet");
         }
+        else if (place.path.empty()
+            && place.root->has_type()
+            && parameter_auto_borrows(place.root->type())) {
+            // a foreach `&$s` is a whole varref of an element, not an owner. unwrapping `mv`
+            // here bitwise-copies nested arrays while `$got` still holds them
+            _collector.collect_issue<Issue::PartialMove>(
+                code_ref_for(move->token_move),
+                fmt::format(
+                    "'mv' can only move a whole variable - '{}' is a borrow into storage owned elsewhere",
+                    place.root->name_full()
+                )
+            );
+        }
+        else if (const auto refusal = field_move_refusal(
+            place.root, place.path, method_this_of(_current_function)
+        )) {
+            _collector.collect_issue<Issue::PartialMove>(
+                code_ref_for(move->token_move),
+                *refusal
+            );
+        }
         else {
             // the read happens before the move: `$b = mv $a` on an already-moved `$a` is a
             // use-after-move, not a second transfer
             move->operand = walk_expression(move->operand);
-            _flow.moved.insert(source);
-            _flow.maybe_moved.erase(source);
+            _flow.mark_moved(place.root, place.path);
         }
 
         // the marker's whole job is done. from here the tree is the plain place expression, and
@@ -2406,9 +2748,10 @@ ExprNode *OwnershipPass::arrive_value(
     // here already wrapped in the implicit cast AST::CallResolver inserted, and this gate is asked of
     // the cast. so `consume($rows->at(0))` is not refused - it is *copied*, by the ordinary arrival
     // one level down, which is sound if less strict than the place case beside it
-    if (param != nullptr && param->takes_ownership && is_place_expression(*expr)) {
+    if (param != nullptr && param->takes_ownership && is_place_expression(*expr)
+        && param->name_full() != "$this") {
         // reported at the *argument*, not at the parameter: the annotation is the declaration's, but
-        // the `mv` that has to be written is the caller's
+        // the `mv` that has to be written is the caller's. `$this` has no slot for `mv` at `$h->take()`
         _collector.collect_issue<Issue::MoveRequired>(
             code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' takes ownership of this argument - write 'mv' in front of it, or the value would "
@@ -2461,6 +2804,26 @@ ExprNode *OwnershipPass::arrive_value(
         return expr;
     }
 
+    // `$h->take()`: no syntactic `mv` on the receiver, and a t_bytes holder still consumes `$h`
+    if (destination == ValueDestination::t_argument
+        && param != nullptr
+        && param->takes_ownership
+        && param->name_full() == "$this") {
+        const OwnedPlace place = owned_place_moved(expr);
+        const bool whole = place.root != nullptr && place.path.empty()
+            && place.root->has_type() && !place.root->type().is_pointer();
+
+        if (!whole) {
+            _collector.collect_issue<Issue::PartialMove>(
+                code_ref_for(location_of_expression(expr)),
+                "'mv $this' can only consume a whole owned local");
+            return expr;
+        }
+
+        _flow.mark_moved(place.root, {});
+        return expr;
+    }
+
     // **a value arriving at a `T?` is copied as a `T`.** through AST::arrival_destination_of, which is
     // the peel AST::TypeChecker and AST::argument_fit already make and this was the reader that did not.
     // so the copy was classified against the pair, which folds its two properties and answers
@@ -2490,7 +2853,8 @@ ExprNode *OwnershipPass::arrive_value(
         return expr;
     }
 
-    VarDeclNode *source = whole_variable_moved(expr);
+    const OwnedPlace place = owned_place_moved(expr);
+    VarDeclNode *source = place.root;
 
     // implicit moves: a returned local, an initialization, and an argument handover_reads_in proved
     // (`return f($x)` ends `$x` the same way `return $x` does). without the first, `$a = Buffer(...)`
@@ -2516,9 +2880,20 @@ ExprNode *OwnershipPass::arrive_value(
     const bool source_owns_its_value =
         source != nullptr && source->has_type() && !source->type().is_pointer();
 
-    if (moves_implicitly && source_owns_its_value) {
-        _flow.moved.insert(source);
-        _flow.maybe_moved.erase(source);
+    const bool field_ok = place.path.empty()
+        || !field_move_refusal(source, place.path, method_this_of(_current_function)).has_value();
+
+    // a method `$this` outlives the call: `return $this->item` copies. a dying local's field
+    // at t_return is the same transfer as `return $local`
+    const bool implicit_field =
+        !place.path.empty()
+        && field_ok
+        && (destination == ValueDestination::t_return || hands_over_to_callee);
+
+    const bool implicit_whole = place.path.empty() && source_owns_its_value;
+
+    if (moves_implicitly && (implicit_whole || implicit_field) && source_owns_its_value) {
+        _flow.mark_moved(source, place.path);
         return expr;
     }
 
@@ -2587,7 +2962,7 @@ ExprNode *OwnershipPass::arrive_value(
         // nobody has said what a copy of this would mean. an arm of its own now, rather than whatever was
         // left over once a copy-constructor lookup on the way past came back null
         case CopyKind::t_none:
-            reject_uncopyable(expr, wanted, source, destination);
+            reject_uncopyable(expr, wanted, source, place.path, destination);
             return expr;
 
         // a `T[N]` whose element is not a byte copy. no ComplexType, so no constructor to hang
@@ -2618,13 +2993,14 @@ void OwnershipPass::reject_uncopyable(
     ExprNode *expr,
     const ValueType &wanted,
     const VarDeclNode *source,
+    const std::vector<std::string> &path,
     ValueDestination destination
 )
 {
     // **the one way out that is not about this type at all**, so it is spelled once ahead of the two arms
     // that offer it: whether the whole value can be moved instead is a property of `source` and of nothing
-    // else
-    const std::string transfer = source != nullptr
+    // else. a non-empty path is a field: `mv $a->storage` is the transfer, or the whole `$a`
+    const std::string transfer = (source != nullptr && path.empty())
         ? fmt::format("Write 'mv {}' to transfer it", source->name_full())
         : std::string("Move the whole value rather than a part of it");
 
@@ -2728,6 +3104,13 @@ void OwnershipPass::collect_frame_drops(const Frame &frame, std::vector<NodeRefe
         }
 
         std::vector<std::string> path;
+        auto paths = _flow.moved_paths.find(*local);
+
+        if (paths != _flow.moved_paths.end() && !paths->second.empty()) {
+            emit_remaining_drops(*local, path, (*local)->type(), paths->second, out);
+            continue;
+        }
+
         emit_drop(*local, path, (*local)->type(), out);
     }
 }
@@ -3203,6 +3586,49 @@ void OwnershipPass::emit_property_drops(
 
         path.push_back(prop.name);
         emit_drop(root, path, prop.type, out);
+        path.pop_back();
+    }
+}
+
+void OwnershipPass::emit_remaining_drops(
+    VarDeclNode *root,
+    std::vector<std::string> &path,
+    const ValueType &type,
+    const std::set<FlowFacts::MemberPath> &moved,
+    std::vector<NodeReference> &out
+)
+{
+    const bool fully_moved = std::any_of(moved.begin(), moved.end(), [&](const auto &entry) {
+        return AST::path_is_prefix(entry, path);
+    });
+
+    if (fully_moved) {
+        return;
+    }
+
+    const bool deeper_hole = std::any_of(moved.begin(), moved.end(), [&](const auto &entry) {
+        return AST::path_is_prefix(path, entry) && entry.size() > path.size();
+    });
+
+    if (!deeper_hole) {
+        if (needs_destruction(type)) {
+            emit_drop(root, path, type, out);
+        }
+
+        return;
+    }
+
+    if (!type.has_complex_type()) {
+        return;
+    }
+
+    const ComplexType *ct = type.get_complex_type();
+
+    for (size_t i = ct->property_count(); i > 0; i--) {
+        const ComplexType::Property &prop = ct->get_property(i - 1);
+
+        path.push_back(prop.name);
+        emit_remaining_drops(root, path, prop.type, moved, out);
         path.pop_back();
     }
 }

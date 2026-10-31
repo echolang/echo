@@ -351,6 +351,15 @@ namespace
                 }
             }
 
+            FunctionDeclNode *consume = node.decl;
+
+            if (consume != nullptr && consume->has_receiver() && consume->body != nullptr
+                && !consume->is_generic()
+                && consume->region_state != RegionState::t_owned) {
+                pending = true;
+                return;
+            }
+
             RecursiveVisitor::visitFunctionCallExpr(node);
         }
 

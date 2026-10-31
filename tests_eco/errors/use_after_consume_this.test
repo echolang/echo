@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UseAfterMove  use_after_consume_this.eco:20:6
+
+  '$h' has been moved out of.
+
+  19 | Item $x = $h->take();
+  20 | echo $h->item->n;
+     :      ^^
+  21 | 
+
+1 error, nothing was compiled.

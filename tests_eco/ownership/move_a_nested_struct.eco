@@ -1,0 +1,37 @@
+// moving the outer struct moves the inner one with it. Inner's copy constructor is the witness:
+// `$b = mv $a` must not print `copy`
+
+struct Inner
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Inner& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Outer
+{
+    Inner $inner;
+}
+
+{
+    Outer $a = Outer(Inner(7));
+    echo 'move';
+    Outer $b = mv $a;
+    echo $b->inner->n;
+}
+
+echo 'done';

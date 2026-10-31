@@ -1,0 +1,20 @@
+// a consuming method still needs an owned receiver; `$r` is a borrow
+
+struct Item
+{
+    int32 $n;
+}
+
+struct Holder
+{
+    Item $item;
+
+    function take_item() : Item
+    {
+        return mv $this->item;
+    }
+}
+
+Holder $h = Holder(Item(1));
+Holder& $r = $h;
+Item $x = $r->take_item();

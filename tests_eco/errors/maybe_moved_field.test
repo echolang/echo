@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UseAfterMove  maybe_moved_field.eco:21:10
+
+  '$h->item' may have been moved out of.
+
+  20 | }
+  21 | echo $h->item->n;
+     :          ^^^^
+  22 | 
+
+1 error, nothing was compiled.

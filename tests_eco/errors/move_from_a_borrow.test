@@ -1,0 +1,40 @@
+expect: fail
+
+--- OUT --->
+[error] PartialMove  move_from_a_borrow.eco:35:20
+
+  'mv' can only move a whole variable - '$s' is a borrow into storage owned elsewhere
+
+  34 | {
+  35 |     Snap $stolen = mv $s;
+     :                    ^^
+  36 | }
+
+[error] PartialMove  move_from_a_borrow.eco:30:20
+
+  'mv' can only move a whole variable - '$r' is a borrow into storage owned elsewhere
+
+  29 |     Snap& $r = $got[0];
+  30 |     Snap $stolen = mv $r;
+     :                    ^^
+  31 | }
+
+[error] PartialMove  move_from_a_borrow.eco:14:24
+
+  'mv' can only move a whole variable - '$s' is a borrow into storage owned elsewhere
+
+  13 |     foreach ($got as &$s) {
+  14 |         Snap $stolen = mv $s;
+     :                        ^^
+  15 |     }
+
+[error] PartialMove  move_from_a_borrow.eco:22:24
+
+  'mv' can only move a whole variable - '$s' is a borrow into storage owned elsewhere
+
+  21 |     foreach ($got as const &$s) {
+  22 |         Snap $stolen = mv $s;
+     :                        ^^
+  23 |     }
+
+4 errors, nothing was compiled.

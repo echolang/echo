@@ -1,0 +1,34 @@
+// writing the moved path fills the hole; the holder is whole again and Item's copy
+// constructor does not run on either transfer
+
+struct Item
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    constructor(const Item& $other)
+    {
+        echo 'copy';
+        $this->n = $other->n;
+    }
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+struct Holder
+{
+    Item $item;
+}
+
+Holder $h = Holder(Item(1));
+Item $x = mv $h->item;
+$h->item = mv $x;
+echo $h->item->n;
+echo 'done';

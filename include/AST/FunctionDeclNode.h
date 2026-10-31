@@ -414,6 +414,10 @@ namespace AST
         // skips. a clone resets it with region_state
         bool body_concrete = false;
 
+        // `$this` paths this method moved and did not fill. empty after t_owned is a getter.
+        // a clone resets it with region_state. BodyPending waits on t_owned for a method body
+        std::vector<std::vector<std::string>> receiver_consumed_paths;
+
         // bind/settle still walk a t_owned body: ownership mints drop calls then marks t_owned, and
         // the next round instantiates them. once a live_calls walk of a t_owned body finds no
         // generic-decl and no non-terminal call, later rounds skip it. a clone resets this
