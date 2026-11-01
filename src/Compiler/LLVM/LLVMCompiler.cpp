@@ -773,7 +773,7 @@ void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node)
 // replace is still there
 void LLVMCompiler::visit_move_expr(AST::MoveExprNode &node)
 {
-    throw _ctx.error("'mv' survived the ownership pass");
+    throw _ctx.error("'mv' survived the ownership pass " + _ctx.function_context());
 }
 void LLVMCompiler::visit_const_ref(AST::ConstRefExprNode &node)
 {

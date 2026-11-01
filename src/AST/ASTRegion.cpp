@@ -356,8 +356,20 @@ namespace
             if (consume != nullptr && consume->has_receiver() && consume->body != nullptr
                 && !consume->is_generic()
                 && consume->region_state != RegionState::t_owned) {
-                pending = true;
-                return;
+                // **the same cycle seat as borrow_callee_still_arriving.** a method that is only
+                // waiting on this body (or on a cycle through it) cannot be asked to be `t_owned`
+                // first: both stay pending and the `mv` in this body is never walked. visiting
+                // with InFlight answers the callee's own unfinished nodes, and a cycle is not one
+                if (!already_visiting(consume->body)) {
+                    InFlight hold(visiting, consume->body);
+                    consume->body->accept(*this);
+
+                    if (pending) {
+                        return;
+                    }
+
+                    consume->body_concrete = true;
+                }
             }
 
             RecursiveVisitor::visitFunctionCallExpr(node);
