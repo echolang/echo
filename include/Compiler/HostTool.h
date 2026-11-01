@@ -67,6 +67,13 @@ namespace Compiler
     // not been bundled
     std::filesystem::path windows_sysroot();
 
+    // musl prefix for `--target-libc musl`. empty when none is on this machine,
+    // or when MUSL_SYSROOT is set and is not a sysroot. otherwise MUSL_SYSROOT,
+    // then next to echoc, then FHS lib/echo/sysroot. a sysroot is libc.a, include/,
+    // musl crt objects, and libclang_rt.builtins.a. not cached: MUSL_SYSROOT is
+    // read on each ask. the refusal sentence lives in append_musl_target_args
+    std::filesystem::path musl_sysroot();
+
     // the macOS SDK `ld` and Homebrew clang both need to find libSystem. empty
     // off Darwin, and empty when neither $SDKROOT nor `xcrun --show-sdk-path`
     // answered. asked once: xcrun is a fifth of what going straight to `ld`
@@ -138,10 +145,28 @@ namespace Compiler
         std::string &out_error
     );
 
+    // `-target` / `--sysroot` / `-static` for a musl row. false with a sentence
+    // when no musl sysroot is on this machine, or when MUSL_SYSROOT is set and
+    // is not a sysroot
+    bool append_musl_target_args(
+        std::vector<std::string> &argv,
+        const CodegenTarget &target,
+        std::string &out_error
+    );
+
+    // last on the line, after user objects: `link_words`, `-lc` and compiler-rt
+    // builtins as one group, then musl `crtn.o`. no-op without a sysroot.
+    // `append_codegen_link_args` already planted crt1/crti. builtins are required
+    // of a sysroot, so the tail always names them when it emits
+    void append_musl_link_tail(
+        std::vector<std::string> &argv,
+        const std::vector<std::string> &link_words
+    );
+
     // `-target` / `--sysroot` / `-isysroot` / Windows CRT includes for this row.
-    // the dispatcher is the row's OS: WASI, Darwin/iOS, Windows, else nothing.
+    // the dispatcher is the row: WASI, musl, Darwin/iOS, Windows, else nothing.
     // CBuild and link_program both call this so they cannot disagree about
-    // the triple. false with a sentence when a WASI sysroot is not on this machine
+    // the triple. false with a sentence when a WASI or musl sysroot is missing
     bool append_codegen_target_args(
         std::vector<std::string> &argv,
         const CodegenTarget &target,

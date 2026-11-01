@@ -87,6 +87,10 @@ namespace Compiler::LLVM
         // emitted when the seed is fixed, so a plugin can copy a zero
         void gen_seed_hash();
 
+        // `syscall(getrandom)` into `$slot`, `/dev/urandom` if that number is missing. insert point
+        // is the join when this returns
+        void gen_linux_seed_bytes(llvm::Value *slot);
+
         // the two arms of unbuffer_stdio, one per StdioUnbuffering that does something
         void unbuffer_ucrt(llvm::Type *i32, llvm::Type *ptr);
         void unbuffer_wasi_libc(llvm::Type *i32, llvm::Type *ptr);

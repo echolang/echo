@@ -141,11 +141,12 @@ internal extern {
 }
 #[end]
 
-// Linux reads file info through `statx` rather than `stat`: `struct stat` is a different layout on
-// x86_64 and arm64, and glibc before 2.33 exports no `stat` symbol at all - it was an inline over
-// `__xstat`. `struct statx` is the kernel's, one layout on every arch, 256 bytes. The tail is
-// declared because the kernel writes it. Named `stat_buf` like the other families' so the code
-// that only passes one around is written once
+// Linux reads file info through the `statx` syscall rather than `stat`: `struct stat` is a
+// different layout on x86_64 and arm64, and glibc before 2.33 exports no `stat` symbol at all.
+// `struct statx` is the kernel's, one layout on every arch, 256 bytes. The tail is declared
+// because the kernel writes it. Named `stat_buf` like the other families' so the code that only
+// passes one around is written once. The call itself is `linux_statx` in linux_sys.eco, a raw
+// syscall, so the binary does not need a libc wrapper.
 #[if: family == linux]
 internal struct stat_buf
 {
@@ -185,13 +186,6 @@ internal struct stat_buf
     constructor()
     {
     }
-}
-
-internal extern {
-    function statx as c_statx(
-        int32 $dirfd, ptr<const uint8> $path, int32 $flags, uint32 $mask, ptr<stat_buf> $out) : int32;
-    function copy_file_range as c_copy_file_range(
-        int32 $in, ptr<int64> $in_off, int32 $out, ptr<int64> $out_off, usize $len, uint32 $flags) : isize;
 }
 
 internal const int32 AT_FDCWD = -100;

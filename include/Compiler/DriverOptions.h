@@ -81,6 +81,9 @@ namespace Compiler
         // wasi is the same door: facts are wasm32 on every subcommand
         bool ios_device = false;
 
+        // `build` only. empty is this machine's libc. `musl` is a static linux command
+        std::string target_libc;
+
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order
         std::filesystem::path build_dir;
 

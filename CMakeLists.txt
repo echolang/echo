@@ -120,6 +120,9 @@ set(ECO_STDLIB_DEFINITION "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
 
 target_compile_definitions(${APPNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 target_compile_definitions(${LIBNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
+# Catch2 drives the fork path of eco_spawn.c directly. user programs compile that
+# file without this, so they do not grow a test-only symbol
+target_compile_definitions(${LIBNAME} PRIVATE ECO_SPAWN_TESTING)
 
 # the clang that compiled this binary. `echoc build` / `echoc test` must not
 # pick a GNU-ABI clang that happens to sit first on PATH (llvm-mingw cannot
@@ -338,17 +341,33 @@ echo_embed_runtime(
         k_alloc_runtime_c eco_cache.c
 )
 
+set(ECO_SPAWN_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/runtime/process")
+set(ECO_SPAWN_EMBEDDED "${CMAKE_BINARY_DIR}/generated/spawn_runtime_embedded.h")
+echo_embed_runtime(
+    OUTPUT "${ECO_SPAWN_EMBEDDED}"
+    GUARD SPAWN_RUNTIME_EMBEDDED_H
+    DELIM echo_spawn
+    DIR "${ECO_SPAWN_RUNTIME_DIR}"
+    FILES
+        k_spawn_runtime_header eco_spawn.h
+        k_spawn_runtime_c eco_spawn.c
+)
+
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CMAKE_SOURCE_DIR}/stdlib/build)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
+target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
+target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 target_sources(${LIBNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
 target_sources(${APPNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
+target_sources(${LIBNAME} PRIVATE "${ECO_SPAWN_RUNTIME_DIR}/eco_spawn.c")
+target_sources(${APPNAME} PRIVATE "${ECO_SPAWN_RUNTIME_DIR}/eco_spawn.c")
 
 # vendor
 add_subdirectory(vendor)
@@ -375,6 +394,7 @@ target_link_libraries(tests PRIVATE Catch2::Catch2)
 target_link_libraries(tests PRIVATE ${LIBNAME})
 target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
 target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
+target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
 target_include_directories(tests PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # the same LLVM components the compiler links, because the tests link the whole compiler library and any
@@ -414,7 +434,8 @@ target_compile_definitions(tests PRIVATE
     "ECHO_TESTS_ECHOC_BINARY=\"$<TARGET_FILE:${APPNAME}>\""
     "ECHO_TESTS_E2E_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\""
     "ECHO_TESTS_TMP_DIR=\"${CMAKE_BINARY_DIR}/e2e_tmp\""
-    ${ECO_STDLIB_DEFINITION})
+    ${ECO_STDLIB_DEFINITION}
+    ECO_SPAWN_TESTING)
 
 # ctest integration
 enable_testing()

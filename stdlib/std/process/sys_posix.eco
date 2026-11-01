@@ -1,10 +1,12 @@
 /**
  * Spawning, waiting and killing on Darwin and Linux.
  *
- * **`posix_spawn` and nothing else.** Between a `fork` and the `exec` that follows it, only
- * async-signal-safe work is allowed: no allocation, no lock, no drop. Nothing in the language can
- * hold an Echo body to that. `posix_spawn` keeps that window inside libc and reports a failed `exec`
- * as its return value. Everything a fork would have done in the child is a file action instead.
+ * **`posix_spawn` on Darwin, a C helper for every Linux spawn.** Between a
+ * `fork` and the `exec` that follows it, only async-signal-safe work is allowed: no allocation, no
+ * lock, no drop. Nothing in the language can hold an Echo body to that. Darwin's `posix_spawn`
+ * keeps that window inside libc. Linux has no portable chdir file action, so every spawn calls
+ * `__eco_spawn_with_chdir` (posix_spawn + `addchdir_np` when the libc has it, fork otherwise).
+ * A null cwd skips the chdir.
  *
  * The child starts with SIGPIPE back at its default. A command ignores it so a closed pipe is an error
  * it can handle, and an ignored signal stays ignored across `exec`. Without the reset, `yes | head`
@@ -27,6 +29,7 @@ private struct spawn_scratch
     ptr<ptr<const uint8>> $argv;
     ptr<ptr<const uint8>> $envp;
 
+#[if: family == darwin]
     // the file-actions and attribute objects, in place: unique, so they never move once `_init` filled
     // them. their layout is libc's (a pointer on Darwin, a few hundred bytes on glibc; its attr is 336),
     // so each is a block comfortably larger than either, that `_init` fills and `_destroy` empties
@@ -34,6 +37,7 @@ private struct spawn_scratch
     uint8[512] $attr_bytes;
     bool $actions_live;
     bool $attr_live;
+#[end]
 
     // the child's ends of the pipes, closed here once the child holds its own copies
     array<int32> $theirs;
@@ -42,19 +46,30 @@ private struct spawn_scratch
     int32[3] $mine;
     bool $handed_over;
 
+#[if: family == linux]
+    // -1 inherit, -2 /dev/null, -3 the child's stdout, else dup2 this fd onto 0/1/2. the C helper reads it
+    int32[3] $child_fd;
+#[end]
+
     constructor()
     {
         $this->argv:$ = null;
         $this->envp:$ = null;
+#[if: family == darwin]
         $this->actions_live = false;
         $this->attr_live = false;
+#[end]
         $this->theirs = array<int32>();
         $this->mine = [-1, -1, -1];
         $this->handed_over = false;
+#[if: family == linux]
+        $this->child_fd = [SPAWN_INHERIT, SPAWN_INHERIT, SPAWN_INHERIT];
+#[end]
     }
 
     destructor()
     {
+#[if: family == darwin]
         if ($this->actions_live) {
             c_actions_destroy($this->actions());
         }
@@ -62,6 +77,7 @@ private struct spawn_scratch
         if ($this->attr_live) {
             c_attr_destroy($this->attr());
         }
+#[end]
 
         mem::free<ptr<const uint8>>($this->argv);
         mem::free<ptr<const uint8>>($this->envp);
@@ -83,6 +99,7 @@ private struct spawn_scratch
         }
     }
 
+#[if: family == darwin]
     function actions() : ptr<uint8>
     {
         return &$this->action_bytes[0];
@@ -92,6 +109,7 @@ private struct spawn_scratch
     {
         return &$this->attr_bytes[0];
     }
+#[end]
 }
 
 // a NULL-terminated block of pointers into `$strings`, which must outlive it and be terminated
@@ -145,66 +163,44 @@ private function open_pipe() : result<fd_pair, ioerror>
     return .ok(fd_pair($fds[0], $fds[1]));
 }
 
-// the file actions that put one stream in place, in order: stdin, then stdout, then stderr, so `.merge`
-// sees the stdout already moved. like every spawn call below, an action answers an errno as its result
-private function arrange(spawn_scratch& $s, int32 $target, stdio $how) : status<ioerror>
+// the child's end of a new pipe, parent end in `$s->mine`. both paths seat stdio through this
+private function seat_pipe(spawn_scratch& $s, int32 $target) : result<int32, ioerror>
 {
-    int32 $rc = 0;
-
-    match ($how) {
-        .inherit => {
-#[if: family == darwin]
-            // `POSIX_SPAWN_CLOEXEC_DEFAULT` closes every descriptor the actions do not name, the three
-            // standard ones included
-            $rc = c_actions_inherit($s->actions(), $target);
-#[end]
-        },
-        .piped => {
-            fd_pair $p = guard open_pipe() else ($e) {
-                return .error($e);
-            }
-
-            // the child reads its stdin and writes the other two
-            int32 $theirs = $p->write;
-            int32 $mine = $p->read;
-
-            if ($target == 0) {
-                $theirs = $p->read;
-                $mine = $p->write;
-            }
-
-            $s->theirs[] = $theirs;
-            $s->mine[$target as usize] = $mine;
-            $rc = c_actions_dup2($s->actions(), $theirs, $target);
-        },
-        .discard => {
-            string $null_device = '/dev/null';
-            int32 $flags = std::io::O_WRONLY;
-
-            if ($target == 0) {
-                $flags = std::io::O_RDONLY;
-            }
-
-            $rc = c_actions_open($s->actions(), $target, $null_device->cstr(), $flags, 0);
-        },
-        .merge => {
-            $rc = c_actions_dup2($s->actions(), 1, 2);
-        },
-        .file($f) => {
-            $rc = c_actions_dup2($s->actions(), $f->fd(), $target);
-        },
-        .pipe($r) => {
-            $rc = c_actions_dup2($s->actions(), $r->end()->fd, $target);
-        },
+    fd_pair $p = guard open_pipe() else ($e) {
+        return .error($e);
     }
 
-    if ($rc != 0) {
-        return .error(ioerror($rc));
+    int32 $theirs = $p->write;
+    int32 $mine = $p->read;
+
+    if ($target == 0) {
+        $theirs = $p->read;
+        $mine = $p->write;
     }
 
-    return .ok;
+    $s->theirs[] = $theirs;
+    $s->mine[$target as usize] = $mine;
+
+    return .ok($theirs);
 }
 
+private function child_source(spawn_scratch& $s, int32 $fd) : result<int32, ioerror>
+{
+    if ($fd < 0 || $fd > 2) {
+        return .ok($fd);
+    }
+
+    int32 $lifted = c_fcntl($fd, F_DUPFD_CLOEXEC, [3]);
+    if ($lifted < 0) {
+        return .error(std::io::last_error());
+    }
+
+    $s->theirs[] = $lifted;
+
+    return .ok($lifted);
+}
+
+#[if: family == darwin]
 private function spawn_status(int32 $rc) : status<ioerror>
 {
     if ($rc != 0) {
@@ -213,14 +209,62 @@ private function spawn_status(int32 $rc) : status<ioerror>
 
     return .ok;
 }
+#[end]
 
-private function arrange_cwd(spawn_scratch& $s, const prepared& $p) : status<ioerror>
+// one encoding both paths write: -1 inherit, -2 /dev/null, -3 the child's stdout, else dup2 this fd
+private function stdio_source(spawn_scratch& $s, int32 $target, stdio $how) : result<int32, ioerror>
 {
-    string $cwd = guard $p->cwd else {
-        return .ok;
+    match ($how) {
+        .inherit => {
+            return .ok(SPAWN_INHERIT);
+        },
+        .piped => {
+            return seat_pipe($s, $target);
+        },
+        .discard => {
+            return .ok(SPAWN_DEVNULL);
+        },
+        .merge => {
+            return .ok(SPAWN_STDOUT);
+        },
+        .file($f) => {
+            return child_source($s, $f->fd());
+        },
+        .pipe($r) => {
+            return child_source($s, $r->end()->fd);
+        },
     }
+}
 
-    int32 $rc = c_actions_chdir($s->actions(), $cwd->cstr());
+#[if: family == darwin]
+// posix_spawn file actions, in order: stdin, then stdout, then stderr, so `.merge` sees stdout already
+// moved. an action answers an errno as its result
+private function arrange_posix(spawn_scratch& $s, int32 $target, stdio $how) : status<ioerror>
+{
+    int32 $src = guard stdio_source($s, $target, $how) else ($e) {
+        return .error($e);
+    };
+
+    int32 $rc = 0;
+
+    if ($src == SPAWN_INHERIT) {
+        // `POSIX_SPAWN_CLOEXEC_DEFAULT` closes every descriptor the actions do not name, the three
+        // standard ones included
+        $rc = c_actions_inherit($s->actions(), $target);
+    } else if ($src == SPAWN_DEVNULL) {
+        string $null_device = '/dev/null';
+        int32 $flags = std::io::O_WRONLY;
+
+        if ($target == 0) {
+            $flags = std::io::O_RDONLY;
+        }
+
+        $rc = c_actions_open($s->actions(), $target, $null_device->cstr(), $flags, 0);
+    } else if ($src == SPAWN_STDOUT) {
+        $rc = c_actions_dup2($s->actions(), 1, $target);
+    } else {
+        $rc = c_actions_dup2($s->actions(), $src, $target);
+    }
 
     if ($rc != 0) {
         return .error(ioerror($rc));
@@ -229,13 +273,60 @@ private function arrange_cwd(spawn_scratch& $s, const prepared& $p) : status<ioe
     return .ok;
 }
 
-internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $err) : result<child, ioerror>
+private function arrange_cwd_posix(spawn_scratch& $s, const prepared& $p) : status<ioerror>
 {
-    spawn_scratch $s = spawn_scratch();
+    string $cwd = guard $p->cwd else {
+        return .ok;
+    };
 
-    $s->argv:$ = c_block($p->argv);
-    $s->envp:$ = c_block($p->envp);
+    int32 $rc = c_actions_chdir($s->actions(), $cwd->cstr());
+    if ($rc != 0) {
+        return .error(ioerror($rc));
+    }
 
+    return .ok;
+}
+#[end]
+
+#[if: family == linux]
+private function arrange_fork(spawn_scratch& $s, int32 $target, stdio $how) : status<ioerror>
+{
+    int32 $src = guard stdio_source($s, $target, $how) else ($e) {
+        return .error($e);
+    };
+
+    $s->child_fd[$target as usize] = $src;
+    return .ok;
+}
+#[end]
+
+private function finish_spawn(spawn_scratch& $s, int32 $pid) : child
+{
+    std::io::pipe_writer? $stdin = null;
+    std::io::pipe_reader? $stdout = null;
+    std::io::pipe_reader? $stderr = null;
+
+    if ($s->mine[0] >= 0) {
+        $stdin = std::io::pipe_writer(std::io::raw_end($s->mine[0]));
+    }
+
+    if ($s->mine[1] >= 0) {
+        $stdout = std::io::pipe_reader(std::io::raw_end($s->mine[1]));
+    }
+
+    if ($s->mine[2] >= 0) {
+        $stderr = std::io::pipe_reader(std::io::raw_end($s->mine[2]));
+    }
+
+    $s->handed_over = true;
+
+    return child($pid, ptr<uint8>(null), $stdin, $stdout, $stderr);
+}
+
+#[if: family == darwin]
+private function spawn_posix(
+    spawn_scratch& $s, const prepared& $p, stdio $in, stdio $out, stdio $err) : result<child, ioerror>
+{
     int32 $init = c_actions_init($s->actions());
     if ($init != 0) {
         return .error(ioerror($init));
@@ -248,19 +339,19 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
     }
     $s->attr_live = true;
 
-    guard arrange($s, 0, $in) else ($e) {
+    guard arrange_posix($s, 0, $in) else ($e) {
         return .error($e);
     }
 
-    guard arrange($s, 1, $out) else ($e) {
+    guard arrange_posix($s, 1, $out) else ($e) {
         return .error($e);
     }
 
-    guard arrange($s, 2, $err) else ($e) {
+    guard arrange_posix($s, 2, $err) else ($e) {
         return .error($e);
     }
 
-    guard arrange_cwd($s, $p) else ($e) {
+    guard arrange_cwd_posix($s, $p) else ($e) {
         return .error($e);
     }
 
@@ -292,30 +383,68 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
 
     int32 $pid = 0;
     int32 $rc = c_posix_spawn(&$pid, $p->path->cstr(), $s->actions(), $s->attr(), $s->argv, $s->envp);
-
     if ($rc != 0) {
         return .error(ioerror($rc));
     }
 
-    std::io::pipe_writer? $stdin = null;
-    std::io::pipe_reader? $stdout = null;
-    std::io::pipe_reader? $stderr = null;
+    return .ok(finish_spawn($s, $pid));
+}
+#[end]
 
-    if ($s->mine[0] >= 0) {
-        $stdin = std::io::pipe_writer(std::io::raw_end($s->mine[0]));
+#[if: family == linux]
+private function spawn_linux_exec(
+    spawn_scratch& $s, const prepared& $p, ptr<const uint8> $chdir) : result<child, ioerror>
+{
+    int32 $pid = 0;
+    int32 $rc = c_spawn_with_chdir(
+        &$pid, $p->path->cstr(), $s->argv, $s->envp, $chdir, &$s->child_fd[0]);
+    if ($rc != 0) {
+        return .error(ioerror($rc));
     }
 
-    if ($s->mine[1] >= 0) {
-        $stdout = std::io::pipe_reader(std::io::raw_end($s->mine[1]));
+    return .ok(finish_spawn($s, $pid));
+}
+
+private function spawn_linux(
+    spawn_scratch& $s,
+    const prepared& $p,
+    stdio $in,
+    stdio $out,
+    stdio $err
+) : result<child, ioerror>
+{
+    guard arrange_fork($s, 0, $in) else ($e) {
+        return .error($e);
     }
 
-    if ($s->mine[2] >= 0) {
-        $stderr = std::io::pipe_reader(std::io::raw_end($s->mine[2]));
+    guard arrange_fork($s, 1, $out) else ($e) {
+        return .error($e);
     }
 
-    $s->handed_over = true;
+    guard arrange_fork($s, 2, $err) else ($e) {
+        return .error($e);
+    }
 
-    return .ok(child($pid, ptr<uint8>(null), $stdin, $stdout, $stderr));
+    string $cwd = guard $p->cwd else {
+        return spawn_linux_exec($s, $p, ptr<const uint8>(null));
+    };
+
+    return spawn_linux_exec($s, $p, $cwd->cstr());
+}
+#[end]
+
+internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $err) : result<child, ioerror>
+{
+    spawn_scratch $s = spawn_scratch();
+
+    $s->argv:$ = c_block($p->argv);
+    $s->envp:$ = c_block($p->envp);
+
+#[if: family == linux]
+    return spawn_linux($s, $p, $in, $out, $err);
+#[else]
+    return spawn_posix($s, $p, $in, $out, $err);
+#[end]
 }
 
 internal function sys_wait(int32 $pid, ptr<uint8> $process, bool $block) : result<exit_status?, ioerror>

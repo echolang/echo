@@ -28,6 +28,121 @@ TEST_CASE("ios-device without --target-os ios is refused", "[target]")
     REQUIRE_FALSE(target.is_cross());
 }
 
+TEST_CASE("a musl triple uses musl libc", "[target]")
+{
+    const Compiler::CodegenTarget target =
+        Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-musl");
+    REQUIRE(target.uses_musl());
+    REQUIRE(target.os() == Compiler::TargetOs::t_linux);
+    REQUIRE(target.is_cross());
+}
+
+TEST_CASE("musl libc is a linux-host build", "[target]")
+{
+    Compiler::TargetFacts facts;
+    Compiler::CodegenTarget target;
+    std::string error;
+
+    REQUIRE(Compiler::TargetFacts::resolve("linux", "", {}, facts, error));
+#if defined(__linux__)
+    REQUIRE(Compiler::resolve_codegen_target(facts, false, target, error, "musl"));
+    REQUIRE(target.uses_musl());
+    REQUIRE(target.triple().find("linux-musl") != std::string::npos);
+#else
+    REQUIRE_FALSE(Compiler::resolve_codegen_target(facts, false, target, error, "musl"));
+    REQUIRE(error.find("Linux host") != std::string::npos);
+#endif
+}
+
+TEST_CASE("musl libc is refused for wasi", "[target]")
+{
+    Compiler::TargetFacts facts;
+    Compiler::CodegenTarget target;
+    std::string error;
+
+    REQUIRE(Compiler::TargetFacts::resolve("wasi", "", {}, facts, error));
+    REQUIRE_FALSE(Compiler::resolve_codegen_target(facts, false, target, error, "musl"));
+    REQUIRE(error.find("linux") != std::string::npos);
+}
+
+TEST_CASE("host libc stays the host triple", "[target]")
+{
+    Compiler::TargetFacts facts;
+    Compiler::CodegenTarget target;
+    std::string error;
+
+    REQUIRE(Compiler::TargetFacts::resolve("", "", {}, facts, error));
+    REQUIRE(Compiler::resolve_codegen_target(facts, false, target, error, "host"));
+    REQUIRE_FALSE(target.uses_musl());
+    REQUIRE_FALSE(target.is_cross());
+}
+
+TEST_CASE("the empty-triple host row is never the musl sysroot row", "[target]")
+{
+    const Compiler::CodegenTarget host;
+    REQUIRE_FALSE(host.uses_musl());
+    REQUIRE(host.triple().empty());
+}
+
+TEST_CASE("entropy_source is a row capability", "[target]")
+{
+    const Compiler::CodegenTarget gnu =
+        Compiler::CodegenTarget::for_triple("x86_64-unknown-linux-gnu");
+    REQUIRE(gnu.entropy_source() == Compiler::EntropySource::t_getrandom_or_urandom);
+    REQUIRE(gnu.linux_seed_syscalls().has_value());
+    REQUIRE(gnu.linux_seed_syscalls()->getrandom == 318);
+    REQUIRE(gnu.linux_seed_syscalls()->openat == 257);
+    REQUIRE(gnu.linux_seed_syscalls()->read == 0);
+    REQUIRE(gnu.linux_seed_syscalls()->close == 3);
+
+    const Compiler::CodegenTarget arm =
+        Compiler::CodegenTarget::for_triple("aarch64-unknown-linux-gnu");
+    REQUIRE(arm.linux_seed_syscalls().has_value());
+    REQUIRE(arm.linux_seed_syscalls()->getrandom == 278);
+    REQUIRE(arm.linux_seed_syscalls()->openat == 56);
+    REQUIRE(arm.linux_seed_syscalls()->read == 63);
+    REQUIRE(arm.linux_seed_syscalls()->close == 57);
+
+    const Compiler::CodegenTarget other =
+        Compiler::CodegenTarget::for_triple("x86_64-unknown-freebsd");
+    REQUIRE(other.entropy_source() == Compiler::EntropySource::t_getentropy);
+    REQUIRE_FALSE(other.linux_seed_syscalls().has_value());
+
+    const Compiler::CodegenTarget riscv =
+        Compiler::CodegenTarget::for_triple("riscv64-unknown-linux-gnu");
+    REQUIRE(riscv.os() == Compiler::TargetOs::t_linux);
+    REQUIRE(riscv.entropy_source() == Compiler::EntropySource::t_getentropy);
+    REQUIRE_FALSE(riscv.linux_seed_syscalls().has_value());
+
+    REQUIRE(Compiler::CodegenTarget::wasi().entropy_source() == Compiler::EntropySource::t_getentropy);
+    REQUIRE_FALSE(Compiler::CodegenTarget::wasi().linux_seed_syscalls().has_value());
+
+    const Compiler::CodegenTarget host;
+#if defined(__linux__)
+    REQUIRE(host.entropy_source() == Compiler::EntropySource::t_getrandom_or_urandom);
+    REQUIRE(host.linux_seed_syscalls().has_value());
+#else
+    REQUIRE_FALSE(host.linux_seed_syscalls().has_value());
+#endif
+}
+
+TEST_CASE("musl libc is this machine's arch", "[target]")
+{
+#if !defined(__linux__)
+    SKIP("linux hosts resolve musl");
+#else
+    Compiler::TargetFacts facts;
+    Compiler::CodegenTarget target;
+    std::string error;
+    const std::string other =
+        (Compiler::TargetFacts::host().architecture == "arm64") ? "x86_64" : "arm64";
+
+    REQUIRE(Compiler::TargetFacts::resolve("linux", other, {}, facts, error));
+    REQUIRE_FALSE(Compiler::resolve_codegen_target(facts, false, target, error, "musl"));
+    REQUIRE(error.find("arch") != std::string::npos);
+#endif
+}
+
 TEST_CASE("linux target-os stays the host triple even on build", "[target]")
 {
     Compiler::TargetFacts facts;

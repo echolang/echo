@@ -26,6 +26,13 @@ namespace Compiler
         t_library,
     };
 
+    // which libc a linux command is linked against. host is this machine and the default
+    enum class TargetLibc
+    {
+        t_host,
+        t_musl,
+    };
+
     // the OS a row emits for. read off the triple when the row is built
     enum class TargetOs
     {
@@ -79,10 +86,21 @@ namespace Compiler
     {
         // `arc4random_buf`, which has no failure path at all
         t_arc4random,
-        // `getentropy`, glibc 2.25+, musl, Android 28+, and wasi-libc over `random_get`
+        // `getentropy`. wasi-libc over `random_get`, and every row that is not darwin/linux/windows
         t_getentropy,
+        // `syscall(getrandom)` then `/dev/urandom`. linux only; numbers live on the row
+        t_getrandom_or_urandom,
         // UCRT `rand_s`, four bytes a call
         t_rand_s,
+    };
+
+    // linux `syscall` numbers for the hash-seed draw. absent off linux
+    struct LinuxSeedSyscalls
+    {
+        uint64_t getrandom;
+        uint64_t openat;
+        uint64_t read;
+        uint64_t close;
     };
 
     // how a native lib looks up a symbol in the host image. `dlopen(NULL)` from a ctor can deadlock
@@ -109,6 +127,7 @@ namespace Compiler
         static CodegenTarget for_triple(std::string triple);
         static CodegenTarget ios_simulator(const std::string &arch);
         static CodegenTarget ios_device();
+        static CodegenTarget linux_musl(const std::string &arch);
         CodegenTarget for_program(ExecModel model) const;
 
         // the LLVM triple objects are emitted for. empty means the host
@@ -150,6 +169,14 @@ namespace Compiler
 
         bool is_wasi() const {
             return _os == TargetOs::t_wasi;
+        }
+
+        TargetLibc libc() const {
+            return _libc;
+        }
+
+        bool uses_musl() const {
+            return _libc == TargetLibc::t_musl;
         }
 
         bool is_windows() const {
@@ -199,6 +226,7 @@ namespace Compiler
         SigpipePolicy sigpipe_policy() const;
         ErrnoSource errno_source() const;
         EntropySource entropy_source() const;
+        std::optional<LinuxSeedSyscalls> linux_seed_syscalls() const { return _linux_seed; }
         HostSymbolLookup host_symbol_lookup() const;
 
         // `RTLD_DEFAULT` as an integer `dlsym` takes. unused on `t_get_proc_address`
@@ -234,6 +262,8 @@ namespace Compiler
         std::string _apple_sdk;
         ExecModel _exec_model = ExecModel::t_command;
         TargetOs _os = TargetOs::t_other;
+        TargetLibc _libc = TargetLibc::t_host;
+        std::optional<LinuxSeedSyscalls> _linux_seed;
         bool _wasm_arch = false;
         unsigned _pointer_bytes = 8;
     };
@@ -257,11 +287,13 @@ namespace Compiler
     // arch implications (wasi is wasm32, ios-device is arm64) live on TargetFacts::resolve.
     // `build` and analysis paths (lsp, emit-only OS) fill a row; `run` / `test` keep the
     // host row so `--target-os ios` stays a facts-only look at another platform's branch
+    // `target_libc` is the `--target-libc` word, empty meaning host
     bool resolve_codegen_target(
         const TargetFacts &facts,
         bool ios_device,
         CodegenTarget &out_target,
-        std::string &out_error);
+        std::string &out_error,
+        const std::string &target_libc = {});
 };
 
 #endif

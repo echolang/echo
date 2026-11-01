@@ -40,6 +40,7 @@ namespace Compiler
         t_strtoull,
         t_arc4random_buf,
         t_getentropy,
+        t_syscall,
         t_rand_s,
         t_get_module_handle_a,
         t_get_proc_address,

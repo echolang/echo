@@ -1,0 +1,68 @@
+// dir() with the fork helper's stdio: discard, merge, and an explicit piped capture
+
+#[unique]
+private struct temp_dir
+{
+    string $path;
+
+    constructor(string $path)
+    {
+        $this->path = $path;
+    }
+
+    destructor()
+    {
+        result<bool, std::io::ioerror> $b = std::io::rmdir($this->path);
+    }
+}
+
+if (std::env::argc() > 1) {
+    string $role = str::from(std::env::arg(1)->cstr());
+
+    if ($role == 'both') {
+        std::io::print('to stdout\n');
+        std::io::eprint('to stderr\n');
+        return 0;
+    }
+
+    if ($role == 'hello') {
+        std::io::print('hello\n');
+        return 0;
+    }
+
+    die('unknown role');
+}
+
+int32 $pid = std::env::pid();
+temp_dir $hold = temp_dir(std::env::join(std::env::tmp(), "eco_process_cwd_stdio_{$pid}"));
+bool $made = guard std::io::mkdir($hold->path) else ($e) {
+    die("mkdir: {$e}");
+};
+
+string $self = std::env::exe();
+
+std::process::command $quiet = std::process::command($self, ['hello']);
+$quiet->dir($hold->path);
+$quiet->stdout(.discard);
+$quiet->stderr(.discard);
+std::process::exit_status $q = guard $quiet->status() else ($e) {
+    die("discard: {$e}");
+};
+echo "discarded: {$q}";
+
+std::process::command $piped = std::process::command($self, ['hello']);
+$piped->dir($hold->path);
+$piped->stdout(.piped);
+std::process::output $p = guard $piped->output() else ($e) {
+    die("piped: {$e}");
+};
+std::io::print($p->stdout);
+
+std::process::command $merged = std::process::command($self, ['both']);
+$merged->dir($hold->path);
+$merged->stderr(.merge);
+std::process::output $m = guard $merged->output() else ($e) {
+    die("merge: {$e}");
+};
+std::io::print($m->stdout);
+echo "merged stderr empty: {$m->stderr->empty()}";

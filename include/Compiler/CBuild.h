@@ -133,7 +133,8 @@ namespace Compiler
     );
 
     // sysroots and SDK this row reads, folded into `digest`. one fold for a C object's key and a
-    // program stamp, so they cannot disagree about the SDK
+    // program stamp, so they cannot disagree about the SDK. musl is hashed when the row uses it
+    // (path and `echo-musl-version`, so a new libc at the same path still misses)
     uint64_t fold_toolchain_sysroots(const CompilerOptions &options, uint64_t digest);
 
     // `content_digest` of this spec, compiling nothing. a stamp folds it so an edited header rebuilds.

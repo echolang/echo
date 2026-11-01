@@ -11,6 +11,7 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 
 #include <cassert>
+#include <optional>
 
 namespace Compiler::LLVM
 {
@@ -206,6 +207,11 @@ void ProcessCodegen::gen_seed_hash()
                 break;
             }
 
+            case Compiler::EntropySource::t_getrandom_or_urandom: {
+                gen_linux_seed_bytes(slot);
+                break;
+            }
+
             case Compiler::EntropySource::t_rand_s: {
                 llvm::FunctionCallee fill = _ctx.libc_callee(Compiler::RuntimeSymbol::t_rand_s, i32, { ptr });
                 _ctx.builder->CreateCall(fill, { slot });
@@ -221,6 +227,73 @@ void ProcessCodegen::gen_seed_hash()
     }
 
     _ctx.builder->CreateCall(seed, {});
+}
+
+void ProcessCodegen::gen_linux_seed_bytes(llvm::Value *slot)
+{
+    llvm::LLVMContext &ctx = *_ctx.llvm_context;
+    llvm::Type *i64 = llvm::Type::getInt64Ty(ctx);
+
+    const std::optional<Compiler::LinuxSeedSyscalls> nrs = _ctx.options.codegen.linux_seed_syscalls();
+    assert(nrs.has_value() && "getrandom entropy is linux");
+    const Compiler::LinuxSeedSyscalls &n = *nrs;
+
+    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
+    auto *urandom = llvm::BasicBlock::Create(ctx, "seed.urandom", fn);
+    auto *do_read = llvm::BasicBlock::Create(ctx, "seed.urand_read", fn);
+    auto *filled = llvm::BasicBlock::Create(ctx, "seed.filled", fn);
+
+    llvm::FunctionCallee sys = _ctx.libc_callee(
+        Compiler::RuntimeSymbol::t_syscall, i64, { i64 }, true);
+    llvm::Value *rc = _ctx.builder->CreateCall(
+        sys,
+        {
+            llvm::ConstantInt::get(i64, n.getrandom),
+            slot,
+            llvm::ConstantInt::get(i64, 8),
+            llvm::ConstantInt::get(i64, 0),
+        },
+        "seed.getrandom");
+    _ctx.builder->CreateCondBr(
+        _ctx.builder->CreateICmpEQ(rc, llvm::ConstantInt::get(i64, 8)), filled, urandom);
+
+    _ctx.builder->SetInsertPoint(urandom);
+    llvm::Constant *path = _ctx.builder->CreateGlobalStringPtr("/dev/urandom", ".eco.urandom");
+    // O_CLOEXEC is 0x80000 on both linux arches; a lib ctor can run in a host that forks
+    constexpr uint64_t k_o_cloexec = 0x80000;
+    llvm::Value *fd = _ctx.builder->CreateCall(
+        sys,
+        {
+            llvm::ConstantInt::get(i64, n.openat),
+            llvm::ConstantInt::getSigned(i64, -100),
+            path,
+            llvm::ConstantInt::get(i64, k_o_cloexec),
+            llvm::ConstantInt::get(i64, 0),
+        },
+        "seed.urand_fd");
+    _ctx.builder->CreateCondBr(
+        _ctx.builder->CreateICmpSGE(fd, llvm::ConstantInt::get(i64, 0)), do_read, filled);
+
+    _ctx.builder->SetInsertPoint(do_read);
+    llvm::Value *got = _ctx.builder->CreateCall(
+        sys,
+        {
+            llvm::ConstantInt::get(i64, n.read),
+            fd,
+            slot,
+            llvm::ConstantInt::get(i64, 8),
+        },
+        "seed.urand_n");
+    _ctx.builder->CreateCall(sys, { llvm::ConstantInt::get(i64, n.close), fd });
+    auto *short_read = llvm::BasicBlock::Create(ctx, "seed.urand_short", fn);
+    _ctx.builder->CreateCondBr(
+        _ctx.builder->CreateICmpEQ(got, llvm::ConstantInt::get(i64, 8)), filled, short_read);
+
+    _ctx.builder->SetInsertPoint(short_read);
+    _ctx.builder->CreateStore(llvm::ConstantInt::get(i64, 0), slot);
+    _ctx.builder->CreateBr(filled);
+
+    _ctx.builder->SetInsertPoint(filled);
 }
 
 void ProcessCodegen::gen_capture(llvm::Function *entry)

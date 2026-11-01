@@ -64,6 +64,7 @@ const char *Compiler::runtime_symbol_name(RuntimeSymbol symbol)
         case RuntimeSymbol::t_strtoull: return "strtoull";
         case RuntimeSymbol::t_arc4random_buf: return "arc4random_buf";
         case RuntimeSymbol::t_getentropy: return "getentropy";
+        case RuntimeSymbol::t_syscall: return "syscall";
         case RuntimeSymbol::t_rand_s: return "rand_s";
         case RuntimeSymbol::t_get_module_handle_a: return "GetModuleHandleA";
         case RuntimeSymbol::t_get_proc_address: return "GetProcAddress";

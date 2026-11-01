@@ -28,8 +28,6 @@ internal extern {
     function posix_spawn_file_actions_adddup2 as c_actions_dup2(ptr<uint8> $actions, int32 $fd, int32 $to) : int32;
     function posix_spawn_file_actions_addopen as c_actions_open(
         ptr<uint8> $actions, int32 $fd, ptr<const uint8> $path, int32 $flags, uint32 $mode) : int32;
-    function posix_spawn_file_actions_addchdir_np as c_actions_chdir(
-        ptr<uint8> $actions, ptr<const uint8> $path) : int32;
 
     function posix_spawnattr_init as c_attr_init(ptr<uint8> $attr) : int32;
     function posix_spawnattr_destroy as c_attr_destroy(ptr<uint8> $attr) : int32;
@@ -60,7 +58,28 @@ internal extern {
 internal extern {
     // keeps a descriptor open across `POSIX_SPAWN_CLOEXEC_DEFAULT`: how an inherited stdio stream survives it
     function posix_spawn_file_actions_addinherit_np as c_actions_inherit(ptr<uint8> $actions, int32 $fd) : int32;
+    function posix_spawn_file_actions_addchdir_np as c_actions_chdir(
+        ptr<uint8> $actions, ptr<const uint8> $path) : int32;
 }
+#[end]
+
+#[if: family == linux]
+internal extern {
+    function __eco_spawn_with_chdir as c_spawn_with_chdir(
+        ptr<int32> $pid,
+        ptr<const uint8> $path,
+        ptr<ptr<const uint8>> $argv,
+        ptr<ptr<const uint8>> $envp,
+        ptr<const uint8> $chdir,
+        ptr<int32> $child_fd
+    ) : int32;
+}
+#[end]
+
+#[if: family != windows]
+internal const int32 SPAWN_INHERIT = -1;
+internal const int32 SPAWN_DEVNULL = -2;
+internal const int32 SPAWN_STDOUT = -3;
 #[end]
 
 // one `struct pollfd`: the same 8 bytes on Darwin and Linux
@@ -93,9 +112,11 @@ internal const int16 POSIX_SPAWN_SETSIGMASK = 8;
 // race-free here, where there is no `pipe2`
 internal const int16 POSIX_SPAWN_CLOEXEC_DEFAULT = 16384;
 internal const int32 O_NONBLOCK = 4;
+internal const int32 F_DUPFD_CLOEXEC = 67;
 #[elif: family == linux]
 internal const int16 POSIX_SPAWN_CLOEXEC_DEFAULT = 0;
 internal const int32 O_NONBLOCK = 2048;
+internal const int32 F_DUPFD_CLOEXEC = 1030;
 #[end]
 
 #[if: os == windows]

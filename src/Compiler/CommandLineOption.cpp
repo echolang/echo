@@ -631,6 +631,31 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_target_libc, "target-libc", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_target,
+            // this machine's arch: a static command, not another OS. install copies it
+            accepts::build | accepts::install, 0, ExclusionGroup::t_none,
+            "<name>", "",
+            "which libc a linux command links",
+            "Which libc a linux command is linked against:\n"
+            "  echoc build --target-libc musl -o app main.eco\n"
+            "  echoc install --target-libc musl\n"
+            "'host' is this machine and the default. 'musl' is a static command that runs on Linux 3.2 "
+            "and newer. It needs a musl sysroot: a released Linux echoc ships one, or set MUSL_SYSROOT "
+            "to a prefix that holds lib/libc.a.\n"
+            "'build' and 'install' take it. Off Linux, or with a non-linux '--target-os', it is refused. "
+            "A lib target is refused too: a musl image is a static command.",
+            {
+                { "host", accepts::build | accepts::install, 0,
+                    "this machine's libc",
+                    "The default. Links against the libc on this machine." },
+                { "musl", accepts::build | accepts::install, 0,
+                    "static, runs on old linux kernels",
+                    "A fully static command. Needs a musl sysroot next to echoc or MUSL_SYSROOT. "
+                    "'install' copies it into the install directory." },
+            }, nullptr
+        },
+        {
             Opt::t_define, "define", nullptr, '\0',
             OptionArity::t_repeated_value, OptionCategory::t_target,
             accepts::project, 0, ExclusionGroup::t_none,

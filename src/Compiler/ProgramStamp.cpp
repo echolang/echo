@@ -11,6 +11,7 @@
 #include "Compiler/ParsePipeline.h"
 #include "Compiler/ProfileRuntime.h"
 #include "Compiler/AllocRuntime.h"
+#include "Compiler/SpawnRuntime.h"
 
 #include <fmt/core.h>
 
@@ -135,6 +136,10 @@ bool compute_program_echo_key(
     digest = fold_flag(plan.options.using_alloc_cache(), "alloccache", "nocache", digest);
     if (plan.options.using_alloc_cache()) {
         digest = fold_field(Compiler::alloc_runtime_stamp(), digest);
+    }
+
+    if (plan.options.codegen.os() == Compiler::TargetOs::t_linux && !plan.options.codegen.is_wasm()) {
+        digest = fold_field(Compiler::spawn_runtime_stamp(), digest);
     }
 
     if (plan.options.profiling()) {

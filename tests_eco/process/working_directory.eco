@@ -1,0 +1,47 @@
+// dir() is the child's working directory: a marker sitting only there is what it opens
+
+#[unique]
+private struct temp_dir
+{
+    string $path;
+
+    constructor(string $path)
+    {
+        $this->path = $path;
+    }
+
+    destructor()
+    {
+        string $marker = std::env::join($this->path->view(), 'marker');
+        result<bool, std::io::ioerror> $a = std::io::remove($marker);
+        result<bool, std::io::ioerror> $b = std::io::rmdir($this->path);
+    }
+}
+
+if (std::env::argc() > 1) {
+    string $got = guard std::io::readfile('marker') else ($e) {
+        die("cwd: {$e}");
+    };
+    std::io::print($got);
+    return 0;
+}
+
+int32 $pid = std::env::pid();
+temp_dir $hold = temp_dir(std::env::join(std::env::tmp(), "eco_process_cwd_{$pid}"));
+bool $made = guard std::io::mkdir($hold->path) else ($e) {
+    die("mkdir: {$e}");
+};
+
+string $marker = std::env::join($hold->path->view(), 'marker');
+usize $n = guard std::io::writefile($marker, 'here\n') else ($e) {
+    die("marker: {$e}");
+};
+
+string $self = std::env::exe();
+std::process::command $c = std::process::command($self, ['in']);
+$c->dir($hold->path);
+std::process::output $o = guard $c->output() else ($e) {
+    die("dir: {$e}");
+};
+
+std::io::print($o->stdout);

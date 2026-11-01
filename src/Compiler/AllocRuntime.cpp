@@ -7,6 +7,10 @@
 
 #include "eco_cache.h"
 
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/DynamicLibrary.h>
+
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -26,9 +30,14 @@ std::string Compiler::alloc_runtime_stamp()
 
 void Compiler::touch_alloc_runtime()
 {
-    (void)&__eco_cache_alloc;
-    (void)&__eco_cache_realloc;
-    (void)&__eco_cache_free;
+    const auto pin = [](const char *name, auto *fn) {
+        llvm::sys::DynamicLibrary::AddSymbol(
+            name, reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(fn)));
+    };
+
+    pin("__eco_cache_alloc", __eco_cache_alloc);
+    pin("__eco_cache_realloc", __eco_cache_realloc);
+    pin("__eco_cache_free", __eco_cache_free);
 }
 
 Compiler::LinkRequirement Compiler::alloc_runtime_link(const std::filesystem::path &object)

@@ -83,6 +83,7 @@ namespace Compiler
         t_target_os,
         t_target_arch,
         t_ios_device,
+        t_target_libc,
         t_define,
         t_target_cpu,
         t_target_features,

@@ -5,3 +5,9 @@ stdlib: off
 --- IR --->
 CHECK: __eco_hash_seed
 CHECK: __eco_seed_hash
+CHECK-NOT: @getentropy
+CHECK-LINUX: seed.getrandom
+CHECK-NOT-DARWIN: seed.getrandom
+CHECK-NOT-WINDOWS: seed.getrandom
+CHECK-NOT-DARWIN: /dev/urandom
+CHECK-NOT-WINDOWS: /dev/urandom

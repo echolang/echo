@@ -546,6 +546,15 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({ "lsp", "--ios-device" }) == "'lsp' does not take '--ios-device'.");
     REQUIRE(refusal({ "build", "--ios-device", "-o", "out", "a.eco" }) == "<accepted>");
     REQUIRE(resolved({ "build", "--ios-device", "-o", "out", "a.eco" }).ios_device);
+
+    REQUIRE(refusal({ "run", "--target-libc", "musl", "a.eco" }) == "'run' does not take '--target-libc'.");
+    REQUIRE(refusal({ "test", "--target-libc", "musl", "a.eco" }) == "'test' does not take '--target-libc'.");
+    REQUIRE(refusal({ "lsp", "--target-libc", "musl" }) == "'lsp' does not take '--target-libc'.");
+    REQUIRE(refusal({ "install", "--target-libc", "musl" }) == "<accepted>");
+    REQUIRE(resolved({ "install", "--target-libc", "musl" }).target_libc == "musl");
+    REQUIRE(contains(refusal({ "build", "--target-libc", "glibc", "-o", "out", "a.eco" }), "Unknown '--target-libc'"));
+    REQUIRE(refusal({ "build", "--target-libc", "musl", "-o", "out", "a.eco" }) == "<accepted>");
+    REQUIRE(resolved({ "build", "--target-libc", "musl", "-o", "out", "a.eco" }).target_libc == "musl");
 }
 
 // **a flag a subcommand accepts and silently ignores is worse than one it rejects, and a *value* is no

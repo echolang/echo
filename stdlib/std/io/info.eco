@@ -2,7 +2,8 @@
  * What a path is, and the verbs that need to know: `info`, `linkinfo`, `chmod`, `realpath`, `copy`.
  *
  * One `fileinfo` shape on every platform. Darwin and wasi read it out of `stat`, Linux out of
- * `statx`, Windows out of a handle's `BY_HANDLE_FILE_INFORMATION` - libc.eco holds each layout.
+ * the kernel's `statx` buffer (or `stat` if that call is missing), Windows out of a handle's
+ * `BY_HANDLE_FILE_INFORMATION` - libc.eco holds each layout.
  * What a platform cannot say is said once, on the field: a creation time is `null` where there is
  * none, and Windows permissions are the read-only bit and nothing more.
  */

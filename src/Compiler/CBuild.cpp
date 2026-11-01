@@ -20,6 +20,7 @@
 
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -405,6 +406,16 @@ uint64_t Compiler::fold_toolchain_sysroots(const CompilerOptions &options, uint6
     if (options.codegen.is_wasi()) {
         digest = fnv1a64(wasi_sysroot().string(), digest);
         digest = fnv1a64(wasi_resource_dir().string(), digest);
+    }
+
+    if (options.codegen.uses_musl()) {
+        const std::filesystem::path root = musl_sysroot();
+        digest = fnv1a64(root.string(), digest);
+        if (!root.empty()) {
+            if (const std::optional<std::string> ver = read_whole_file(root / "echo-musl-version")) {
+                digest = fnv1a64(*ver, digest);
+            }
+        }
     }
 
     return digest;

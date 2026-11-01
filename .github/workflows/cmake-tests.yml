@@ -325,6 +325,7 @@ jobs:
           sudo apt update
           sudo apt install -y cmake \
             ninja-build \
+            make \
             libc++-dev \
             libc++abi-dev \
             zlib1g-dev \
@@ -449,6 +450,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p stage epm-stage
+          ./tools/linux/bundle_musl.sh stage/sysroot
           cp build-release/echoc stage/
           cp "$RUNNER_TEMP/epm" stage/
           cp "$RUNNER_TEMP/epm" epm-stage/
@@ -456,6 +458,20 @@ jobs:
           cp LICENSE epm-stage/
           tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
           tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
+
+      - name: Smoke a musl command
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          printf 'echo 1.5;\n' > smoke-musl.eco
+          "${{github.workspace}}/stage/echoc" build --target-libc musl -o smoke-musl smoke-musl.eco
+          if ldd ./smoke-musl >ldd.out 2>&1; then
+            echo "musl command is dynamic:" >&2
+            cat ldd.out >&2
+            exit 1
+          fi
+          grep -q 'not a dynamic executable' ldd.out
+          test "$(./smoke-musl)" = "1.500000"
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
@@ -494,6 +510,7 @@ jobs:
           sudo apt update
           sudo apt install -y cmake \
             ninja-build \
+            make \
             libc++-dev \
             libc++abi-dev \
             zlib1g-dev \
@@ -610,6 +627,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p stage epm-stage
+          ./tools/linux/bundle_musl.sh stage/sysroot
           cp build-release/echoc stage/
           cp "$RUNNER_TEMP/epm" stage/
           cp "$RUNNER_TEMP/epm" epm-stage/
@@ -617,6 +635,20 @@ jobs:
           cp LICENSE epm-stage/
           tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
           tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
+
+      - name: Smoke a musl command
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          printf 'echo 1.5;\n' > smoke-musl.eco
+          "${{github.workspace}}/stage/echoc" build --target-libc musl -o smoke-musl smoke-musl.eco
+          if ldd ./smoke-musl >ldd.out 2>&1; then
+            echo "musl command is dynamic:" >&2
+            cat ldd.out >&2
+            exit 1
+          fi
+          grep -q 'not a dynamic executable' ldd.out
+          test "$(./smoke-musl)" = "1.500000"
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4

@@ -10,6 +10,7 @@
 
 #include <fmt/core.h>
 
+#include <cassert>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -70,6 +71,21 @@ CodegenTarget::CodegenTarget(std::string triple, std::string apple_sdk)
     _os = os_of(parsed);
     _wasm_arch = parsed.isWasm();
     _pointer_bytes = parsed.isArch32Bit() ? 4 : 8;
+    // empty triple is the host row, including a musl host. t_musl is the
+    // `--target-libc musl` static sysroot, named by linux_musl() or a musl triple
+    _libc = TargetLibc::t_host;
+    if (!_triple.empty() && parsed.isOSLinux() && parsed.getEnvironment() == llvm::Triple::Musl) {
+        _libc = TargetLibc::t_musl;
+    }
+
+    if (_os == TargetOs::t_linux) {
+        if (parsed.getArch() == llvm::Triple::x86_64) {
+            _linux_seed = LinuxSeedSyscalls{ 318, 257, 0, 3 };
+        }
+        else if (parsed.isAArch64()) {
+            _linux_seed = LinuxSeedSyscalls{ 278, 56, 63, 57 };
+        }
+    }
 }
 
 CodegenTarget CodegenTarget::wasi()
@@ -90,6 +106,17 @@ CodegenTarget CodegenTarget::ios_simulator(const std::string &arch)
 CodegenTarget CodegenTarget::ios_device()
 {
     return CodegenTarget(std::string(k_ios_device_arch) + "-apple-ios" + k_ios_min_version, "iphoneos");
+}
+
+CodegenTarget CodegenTarget::linux_musl(const std::string &arch)
+{
+    const std::string echo_arch = arch.empty() ? TargetFacts::host().architecture : arch;
+    if (echo_arch == "arm64") {
+        return for_triple("aarch64-unknown-linux-musl");
+    }
+
+    assert(echo_arch == "x86_64" && "linux_musl is x86_64 or arm64");
+    return for_triple("x86_64-unknown-linux-musl");
 }
 
 CodegenTarget CodegenTarget::for_program(ExecModel model) const
@@ -207,7 +234,8 @@ EntropySource CodegenTarget::entropy_source() const
         case TargetOs::t_darwin: return EntropySource::t_arc4random;
         case TargetOs::t_ios: return EntropySource::t_arc4random;
         case TargetOs::t_windows: return EntropySource::t_rand_s;
-        case TargetOs::t_linux: return EntropySource::t_getentropy;
+        case TargetOs::t_linux:
+            return _linux_seed ? EntropySource::t_getrandom_or_urandom : EntropySource::t_getentropy;
         case TargetOs::t_wasi: return EntropySource::t_getentropy;
         case TargetOs::t_other: return EntropySource::t_getentropy;
     }
@@ -341,11 +369,54 @@ bool resolve_codegen_target(
     const TargetFacts &facts,
     bool ios_device,
     CodegenTarget &out_target,
-    std::string &out_error)
+    std::string &out_error,
+    const std::string &target_libc)
 {
     out_target = CodegenTarget();
 
     const bool host_is_darwin = TargetFacts::host().operating_system == "darwin";
+    const bool want_musl = (target_libc == "musl");
+
+    if (!target_libc.empty() && target_libc != "host" && !want_musl) {
+        out_error = fmt::format("unknown --target-libc '{}', expected one of: host, musl", target_libc);
+        return false;
+    }
+
+    if (want_musl) {
+        if (facts.operating_system != "linux") {
+            out_error = "--target-libc musl needs linux";
+            return false;
+        }
+
+        if (TargetFacts::host().operating_system != "linux") {
+            out_error = "--target-libc musl links a static linux command, which needs a Linux host";
+            return false;
+        }
+
+        if (facts.architecture == "wasm32") {
+            out_error = "--target-libc musl is a native linux command; wasm32 is not";
+            return false;
+        }
+
+        if (!facts.architecture.empty()
+            && facts.architecture != TargetFacts::host().architecture) {
+            out_error = fmt::format(
+                "--target-libc musl is this machine's arch; --target-arch '{}' is a cross",
+                facts.architecture);
+            return false;
+        }
+
+        const std::string musl_arch =
+            facts.architecture.empty() ? TargetFacts::host().architecture : facts.architecture;
+        if (musl_arch != "x86_64" && musl_arch != "arm64") {
+            out_error = fmt::format(
+                "--target-libc musl supports x86_64 and arm64; '{}' is not", musl_arch);
+            return false;
+        }
+
+        out_target = CodegenTarget::linux_musl(musl_arch);
+        return true;
+    }
 
     if (ios_device) {
         if (facts.operating_system != "ios") {

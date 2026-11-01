@@ -16,8 +16,8 @@ namespace Compiler
     // program stamp so an edited cache rebuilds
     std::string alloc_runtime_stamp();
 
-    // keep eco_cache.o in the static archive so MCJIT can resolve it. the JIT
-    // path calls this; the stamp does not
+    // keep eco_cache.o in the archive, and name it for MCJIT: ELF echoc does
+    // not export the symbol, so SearchForAddressOfSymbol would miss it
     void touch_alloc_runtime();
 
     // compile the cache into objects via build_c_sources. empty `out_objects` on failure

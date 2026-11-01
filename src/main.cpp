@@ -34,6 +34,7 @@
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProfileDriver.h"
 #include "Compiler/AllocRuntime.h"
+#include "Compiler/SpawnRuntime.h"
 #include "Compiler/ProgramStamp.h"
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/PublicTools.h"
@@ -1232,6 +1233,13 @@ static bool resolve_programs(
                 diagnostics.render_untyped("Lib Needs Host", *refusal);
                 return false;
             }
+
+            if (row.uses_musl()) {
+                diagnostics.render_untyped(
+                    "Musl Is A Command",
+                    "a musl image is a static command, and a lib target is a loadable library");
+                return false;
+            }
         }
 
         const std::filesystem::path named = driver.output.empty()
@@ -1320,7 +1328,8 @@ static bool resolve_invocation(
                 out.target_facts,
                 driver.ios_device,
                 out.codegen,
-                error)) {
+                error,
+                driver.target_libc)) {
             diagnostics.render_untyped("Invalid Target", error);
             return false;
         }
@@ -1980,6 +1989,16 @@ static std::optional<int> compile_and_link_program(
                 link,
                 runtime_error)) {
             diagnostics.render_untyped("Allocation Cache Failed", runtime_error);
+            return 1;
+        }
+
+        if (!Compiler::spawn_link_runtime(
+                front.options,
+                front.layout().scratch_dir() / "spawn",
+                front.layout().scratch_dir(),
+                link,
+                runtime_error)) {
+            diagnostics.render_untyped("Spawn Helper Failed", runtime_error);
             return 1;
         }
     }

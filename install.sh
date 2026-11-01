@@ -13,6 +13,7 @@ set -euo pipefail
 
 REPO="echolang/echo"
 INSTALL_DIR="${ECHO_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR%/}"
 
 # spelled out rather than derived: uname says Darwin where the release asset says macos, and these
 # four are the platforms the release workflow builds (windows is install.ps1)
@@ -100,6 +101,45 @@ fi
 
 # sudo only when it is needed, and it reads its password from the tty - so this still works under
 # `curl | bash`, where stdin is the script
+#
+# INSTALL_DIR is the bin directory. echoc looks for musl in, in order: next to the
+# binary, one directory up, then <prefix>/lib/echo/sysroot. a tree in bin/ is rude,
+# so a dest named `.../bin` plants the FHS path; a flat prefix keeps it next to echoc
+copy_sysroot() {
+    local src="$1"
+    local dest="$2"
+    local parent
+    parent="$(dirname "${dest}")"
+
+    if [ -e "${dest}" ] && [ ! -f "${dest}/echo-musl-version" ] && [ -n "$(ls -A "${dest}" 2>/dev/null)" ]; then
+        echo "not replacing ${dest}: it was not installed by echo. --target-libc musl stays unavailable" >&2
+        return 0
+    fi
+
+    echo "installing musl sysroot to ${dest}"
+    if mkdir -p "${parent}" 2>/dev/null && [ -w "${parent}" ]; then
+        rm -rf "${dest}"
+        mkdir -p "${dest}"
+        cp -a "${src}/." "${dest}/"
+    else
+        echo "${parent} is not writable, installing with sudo ..."
+        sudo rm -rf "${dest}"
+        sudo mkdir -p "${dest}"
+        sudo cp -a "${src}/." "${dest}/"
+    fi
+}
+
+install_sysroot() {
+    if [ ! -d "${tmp}/sysroot" ]; then
+        return 0
+    fi
+
+    case "${INSTALL_DIR}" in
+        */bin) copy_sysroot "${tmp}/sysroot" "$(dirname "${INSTALL_DIR}")/lib/echo/sysroot" ;;
+        *)     copy_sysroot "${tmp}/sysroot" "${INSTALL_DIR}/sysroot" ;;
+    esac
+}
+
 if [ -w "${INSTALL_DIR}" ]; then
     install -m 755 "${tmp}/echoc" "${INSTALL_DIR}/echoc"
     install -m 755 "${tmp}/epm" "${INSTALL_DIR}/epm"
@@ -109,6 +149,8 @@ else
     sudo install -m 755 "${tmp}/echoc" "${INSTALL_DIR}/echoc"
     sudo install -m 755 "${tmp}/epm" "${INSTALL_DIR}/epm"
 fi
+
+install_sysroot
 
 echo "installed echoc $("${INSTALL_DIR}/echoc" --version) to ${INSTALL_DIR}/echoc"
 echo "installed epm $("${INSTALL_DIR}/epm" --version) to ${INSTALL_DIR}/epm"

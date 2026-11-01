@@ -1,0 +1,5 @@
+mode: run
+
+--- OUT --->
+true: exit 0
+dir: exit 0

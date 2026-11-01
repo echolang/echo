@@ -2,7 +2,6 @@ flags: --target-os linux
 
 --- OUT --->
 --- IR --->
-CHECK: declare i32 @posix_spawnattr_setsigdefault(
-CHECK: declare i32 @posix_spawn(
-CHECK: declare i32 @posix_spawn_file_actions_adddup2(
+CHECK: declare i32 @__eco_spawn_with_chdir(
 CHECK: declare i32 @pipe2(
+CHECK-NOT: declare i32 @posix_spawn(

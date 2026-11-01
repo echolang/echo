@@ -1,0 +1,224 @@
+/**
+ * Linux kernel calls that may be missing: raw `syscall()`, an ENOSYS cache, a fallback the
+ * caller names. Libc wrappers for these would bind a versioned symbol the binary then needs
+ * at load, even on a kernel that has had the call for years.
+ */
+
+namespace std::io;
+
+#[if: family == linux]
+internal extern {
+    function syscall as c_syscall(int64 $n, variadic_args $args) : int64;
+}
+#[end]
+
+#[if: family == linux && arch == x86_64]
+internal const int64 SYS_FSTAT = 5;
+internal const int64 SYS_SENDFILE = 40;
+internal const int64 SYS_NEWFSTATAT = 262;
+internal const int64 SYS_COPY_FILE_RANGE = 326;
+internal const int64 SYS_STATX = 332;
+#[elif: family == linux && arch == arm64]
+internal const int64 SYS_NEWFSTATAT = 79;
+internal const int64 SYS_FSTAT = 80;
+internal const int64 SYS_SENDFILE = 71;
+internal const int64 SYS_COPY_FILE_RANGE = 285;
+internal const int64 SYS_STATX = 291;
+#[end]
+
+#[if: family == linux && arch == x86_64]
+// kernel `struct stat` on x86_64, 144 bytes. glibc's is a different layout and, before 2.33,
+// has no `stat` symbol at all
+internal struct kernel_stat
+{
+    uint64 $dev = 0;
+    uint64 $ino = 0;
+    uint64 $nlink = 0;
+    uint32 $mode = 0;
+    uint32 $uid = 0;
+    uint32 $gid = 0;
+    uint32 $pad0 = 0;
+    uint64 $rdev = 0;
+    int64 $size = 0;
+    int64 $blksize = 0;
+    int64 $blocks = 0;
+    uint64 $atime_sec = 0;
+    uint64 $atime_nsec = 0;
+    uint64 $mtime_sec = 0;
+    uint64 $mtime_nsec = 0;
+    uint64 $ctime_sec = 0;
+    uint64 $ctime_nsec = 0;
+    int64 $unused0 = 0;
+    int64 $unused1 = 0;
+    int64 $unused2 = 0;
+
+    constructor()
+    {
+    }
+}
+#[elif: family == linux && arch == arm64]
+// kernel `struct stat` on arm64, 128 bytes (`asm-generic/stat.h`)
+internal struct kernel_stat
+{
+    uint64 $dev = 0;
+    uint64 $ino = 0;
+    uint32 $mode = 0;
+    uint32 $nlink = 0;
+    uint32 $uid = 0;
+    uint32 $gid = 0;
+    uint64 $rdev = 0;
+    uint64 $pad2 = 0;
+    int64 $size = 0;
+    int32 $blksize = 0;
+    int32 $pad3 = 0;
+    int64 $blocks = 0;
+    int64 $atime_sec = 0;
+    uint64 $atime_nsec = 0;
+    int64 $mtime_sec = 0;
+    uint64 $mtime_nsec = 0;
+    int64 $ctime_sec = 0;
+    uint64 $ctime_nsec = 0;
+    uint32 $unused0 = 0;
+    uint32 $unused1 = 0;
+
+    constructor()
+    {
+    }
+}
+#[end]
+
+#[if: family == linux]
+private struct linux_have
+{
+    int32 $pad;
+
+    static atomic<int32> $statx = atomic<int32>(0);
+    static atomic<int32> $copy_file_range = atomic<int32>(0);
+    static atomic<int32> $sendfile = atomic<int32>(0);
+}
+
+private function linux_set_enosys() : void
+{
+    ptr<int32> $slot = c_errno_location();
+    $slot = ENOSYS;
+}
+
+// true when this kernel has no such call; errno is already ENOSYS
+private function linux_saw_enosys(atomic<int32>& $have, int64 $rc) : bool
+{
+    if ($rc >= 0) {
+        return false;
+    }
+
+    if (last_error()->code != ENOSYS) {
+        return false;
+    }
+
+    $have->store(-1);
+    return true;
+}
+
+// statx only: old Docker/libseccomp answered unknown syscalls with EPERM, not ENOSYS.
+// callers key the fallback on ENOSYS, so this path rewrites errno to that
+private function linux_saw_statx_unavailable(atomic<int32>& $have, int64 $rc) : bool
+{
+    if ($rc >= 0) {
+        return false;
+    }
+
+    int32 $code = last_error()->code;
+    if ($code != ENOSYS && $code != EPERM) {
+        return false;
+    }
+
+    $have->store(-1);
+    linux_set_enosys();
+    return true;
+}
+
+private function linux_skip(const atomic<int32>& $have) : bool
+{
+    return $have->load() < 0;
+}
+
+internal function linux_statx(
+    int32 $dirfd, ptr<const uint8> $path, int32 $flags, uint32 $mask, ptr<stat_buf> $out) : int32
+{
+    if (linux_skip(linux_have::$statx)) {
+        linux_set_enosys();
+        return -1;
+    }
+
+    int64 $rc = c_syscall(
+        SYS_STATX, [$dirfd as int64, $path, $flags as int64, $mask as int64, $out]);
+
+    if (linux_saw_statx_unavailable(linux_have::$statx, $rc)) {
+        return -1;
+    }
+
+    if ($rc < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+internal function linux_newfstatat(
+    int32 $dirfd, ptr<const uint8> $path, ptr<kernel_stat> $out, int32 $flags) : int32
+{
+    int64 $rc = c_syscall(SYS_NEWFSTATAT, [$dirfd as int64, $path, $out, $flags as int64]);
+
+    if ($rc < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+internal function linux_fstat(int32 $fd, ptr<kernel_stat> $out) : int32
+{
+    int64 $rc = c_syscall(SYS_FSTAT, [$fd as int64, $out]);
+
+    if ($rc < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+internal function linux_copy_file_range(
+    int32 $in, ptr<int64> $in_off, int32 $out, ptr<int64> $out_off, usize $len, uint32 $flags) : isize
+{
+    if (linux_skip(linux_have::$copy_file_range)) {
+        linux_set_enosys();
+        return -1;
+    }
+
+    int64 $rc = c_syscall(
+        SYS_COPY_FILE_RANGE,
+        [$in as int64, $in_off, $out as int64, $out_off, $len as int64, $flags as int64]);
+
+    if (linux_saw_enosys(linux_have::$copy_file_range, $rc)) {
+        return -1;
+    }
+
+    return $rc as isize;
+}
+
+internal function linux_sendfile(int32 $out, int32 $in, usize $len) : isize
+{
+    if (linux_skip(linux_have::$sendfile)) {
+        linux_set_enosys();
+        return -1;
+    }
+
+    int64 $rc = c_syscall(
+        SYS_SENDFILE, [$out as int64, $in as int64, ptr<int64>(null), $len as int64]);
+
+    if (linux_saw_enosys(linux_have::$sendfile, $rc)) {
+        return -1;
+    }
+
+    return $rc as isize;
+}
+#[end]

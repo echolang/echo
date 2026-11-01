@@ -6,6 +6,7 @@
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/AllocRuntime.h"
+#include "Compiler/SpawnRuntime.h"
 #include "Compiler/ArtifactFile.h"
 #include "Compiler/ArtifactSeal.h"
 #include "Compiler/CodegenTarget.h"
@@ -14,10 +15,6 @@
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
-
-#if defined(_WIN32)
-#include "eco_cache.h"
-#endif
 
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Config/llvm-config.h>
@@ -144,6 +141,8 @@ bool Backend::prepare_execution()
         Compiler::touch_alloc_runtime();
     }
 
+    Compiler::touch_spawn_runtime();
+
     auto main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {
         throw Compiler::InternalCompilerException("No main module found to run", nullptr);
@@ -209,11 +208,6 @@ bool Backend::prepare_execution()
     pin("malloc", malloc);
     pin("free", free);
     pin("realloc", realloc);
-    if (_ctx.options.using_alloc_cache()) {
-        pin("__eco_cache_alloc", __eco_cache_alloc);
-        pin("__eco_cache_realloc", __eco_cache_realloc);
-        pin("__eco_cache_free", __eco_cache_free);
-    }
     pin("getenv", getenv);
     pin("strtoull", strtoull);
     pin("rand_s", rand_s);
@@ -829,13 +823,17 @@ bool Backend::link_program(
 
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
-    for (const std::string &word : link_words) {
-        // UCRT already has libm; clang turning `-lm` into m.lib is a
-        // missing-library error. a wasi row still wants `-lm` (wasi-libc)
-        if (_ctx.options.codegen.is_windows() && word == "-lm") {
-            continue;
+    if (_ctx.options.codegen.uses_musl()) {
+        Compiler::append_musl_link_tail(fallback, link_words);
+    } else {
+        for (const std::string &word : link_words) {
+            // UCRT already has libm; clang turning `-lm` into m.lib is a
+            // missing-library error. a wasi row still wants `-lm` (wasi-libc)
+            if (_ctx.options.codegen.is_windows() && word == "-lm") {
+                continue;
+            }
+            fallback.push_back(word);
         }
-        fallback.push_back(word);
     }
 
     // Linux has no host_linker_command, so this is the command a `run` records. asked of this argv,

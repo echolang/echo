@@ -1,0 +1,54 @@
+// JIT spawn: echoc run on Linux must resolve __eco_spawn_with_chdir. cannot use
+// this binary as the child (exe() is echoc). /bin/sh is the stand-in
+
+#[if: os != windows]
+#[unique]
+private struct temp_dir
+{
+    string $path;
+
+    constructor(string $path)
+    {
+        $this->path = $path;
+    }
+
+    destructor()
+    {
+        string $marker = std::env::join($this->path->view(), 'marker');
+        result<bool, std::io::ioerror> $a = std::io::remove($marker);
+        result<bool, std::io::ioerror> $b = std::io::rmdir($this->path);
+    }
+}
+#[end]
+
+#[if: os == windows]
+echo "true: exit 0";
+echo "dir: exit 0";
+#[else]
+
+std::process::command $ok = std::process::command('true');
+std::process::exit_status $s = guard $ok->status() else ($e) {
+    die("true: {$e}");
+};
+echo "true: {$s}";
+
+int32 $pid = std::env::pid();
+temp_dir $hold = temp_dir(std::env::join(std::env::tmp(), "eco_run_spawn_{$pid}"));
+bool $made = guard std::io::mkdir($hold->path) else ($e) {
+    die("mkdir: {$e}");
+};
+
+string $marker = std::env::join($hold->path->view(), 'marker');
+usize $n = guard std::io::writefile($marker, 'here\n') else ($e) {
+    die("marker: {$e}");
+};
+
+std::process::command $c = std::process::command('/bin/sh', ['-c', 'test -f marker']);
+$c->dir($hold->path);
+std::process::exit_status $got = guard $c->status() else ($e) {
+    die("dir: {$e}");
+};
+
+echo "dir: {$got}";
+
+#[end]

@@ -231,6 +231,10 @@ bool Compiler::append_codegen_target_args(
         return append_wasi_target_args(argv, target, out_error);
     }
 
+    if (target.uses_musl()) {
+        return append_musl_target_args(argv, target, out_error);
+    }
+
     if (target.is_darwin()) {
         return append_apple_target_args(argv, target, out_error);
     }
@@ -266,6 +270,16 @@ bool Compiler::append_codegen_link_args(
     // compile must not see it: CBuild reuses append_codegen_target_args
     if (target.is_wasi() && target.is_library()) {
         argv.push_back("-mexec-model=reactor");
+    }
+
+    // musl's clang driver still asks gcc for crtbeginT.o. -nostdlib drops that;
+    // crt1/crti go here (before user objects). `-lc` and builtins are the tail,
+    // after objects and link words
+    if (target.uses_musl()) {
+        argv.push_back("-nostdlib");
+        const std::filesystem::path lib = musl_sysroot() / "lib";
+        argv.push_back((lib / "crt1.o").string());
+        argv.push_back((lib / "crti.o").string());
     }
 
     // native library: clang -shared, the same driver CBuild trusts for a loadable

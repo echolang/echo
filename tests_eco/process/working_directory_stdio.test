@@ -1,0 +1,8 @@
+mode: build
+
+--- OUT --->
+discarded: exit 0
+hello
+to stdout
+to stderr
+merged stderr empty: true
