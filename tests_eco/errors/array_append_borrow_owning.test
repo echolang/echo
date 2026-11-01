@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: &$a[] needs elements that are just bytes - writing through T& would destroy leftover storage
+  at array.eco:977

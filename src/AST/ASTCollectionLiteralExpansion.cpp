@@ -1,5 +1,6 @@
 #include "AST/ASTCollectionLiteralExpansion.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
@@ -13,6 +14,7 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/AssignNode.h"
 #include "AST/ConstantDataExprNode.h"
 #include "AST/ExprNode.h"
@@ -230,9 +232,27 @@ void CollectionLiteralExpansion::emit_index_assign(
     VarDeclNode &into,
     std::vector<ExprNode *> indices,
     ExprNode *value,
+    const ValueType &wanted,
+    bool report_mismatch,
     std::vector<NodeReference> &appends
 )
 {
+    // t_append / t_index / t_inline name one element type. a keyed dest can have several
+    // `[]=` overloads, so fill.value is one of them and a mismatch here would refuse a
+    // value another overload accepts. a void element is TypeChecker's "produces no value"
+    if (report_mismatch && value != nullptr && !is_undetermined_type(wanted)
+        && !expression_produces_no_value(*value)) {
+        const ValueType from = value->result_type();
+        if (!is_undetermined_type(from) && argument_fit(from, value, wanted) == ArgumentFit::t_none) {
+            _collector.collect_issue<Issue::InvalidTypeConversion>(
+                code_ref_for(location_of_expression(value)),
+                fmt::format(
+                    "cannot assign '{}' to '{}'",
+                    from.get_type_desciption(), wanted.get_type_desciption()));
+            return;
+        }
+    }
+
     auto &var_ref = local_place(_module, into);
 
     auto &slot_expr = _module.nodes.emplace_back<IndexExprNode>(
@@ -336,7 +356,14 @@ bool CollectionLiteralExpansion::build_expansion(
                 indices.push_back(&index);
             }
 
-            emit_index_assign(*array, into, std::move(indices), array->elements[i], appends);
+            emit_index_assign(
+                *array,
+                into,
+                std::move(indices),
+                array->elements[i],
+                fill.element,
+                fill.kind != CollectionFill::Kind::t_keyed,
+                appends);
         }
 
         return true;
@@ -369,7 +396,7 @@ bool CollectionLiteralExpansion::build_expansion(
     appends.reserve(map->entries.size());
 
     for (MapLiteralExprNode::Entry &entry : map->entries) {
-        emit_index_assign(*map, into, {entry.key}, entry.value, appends);
+        emit_index_assign(*map, into, {entry.key}, entry.value, fill.value, false, appends);
     }
 
     return true;

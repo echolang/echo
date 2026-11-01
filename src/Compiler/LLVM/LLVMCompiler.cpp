@@ -581,7 +581,7 @@ void LLVMCompiler::drain_pending_definitions()
             for (const AST::FunctionDeclNode *decl : owed) {
                 // gen_function_decl sets current_file from the declaration itself, so a body's own source
                 // position does not depend on this walk - which it must not, since two units emit the
-                // same bytes. See CodegenContext::function_file_map
+                // same bytes. See CodegenContext::file_of
                 _stmt.gen_function_decl(const_cast<AST::FunctionDeclNode &>(*decl));
             }
         }

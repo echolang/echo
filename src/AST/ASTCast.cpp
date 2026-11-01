@@ -81,10 +81,12 @@ namespace AST
             ? ValueType::make_non_nullable(to)
             : to;
 
-        if (recast_dest.is_interface() && (from.is_interface() || from.is_class())) {
-            const std::string why = from.is_interface()
+        // from_value, so `const Layer& as Dense` is the recast `Layer as Dense` is.
+        // a `ptr<Layer>` stays a pointer: value_result_type peels T& and leaves ptr<T>
+        if (recast_dest.is_interface() && (from_value.is_interface() || from_value.is_class())) {
+            const std::string why = from_value.is_interface()
                 ? interface_storage_refusal(recast_dest)
-                : interface_erasure_refusal(from, recast_dest);
+                : interface_erasure_refusal(from_value, recast_dest);
 
             if (!why.empty()) {
                 return CastLookup::refused(why);
@@ -93,7 +95,7 @@ namespace AST
             // a class that conforms is a widening: the vtable is known here. `$x as I?` of
             // that is an optional wrap of the widening. a class that does not still recasts,
             // so `bind<T : A>` can write `$x as B` and instantiate for a T that is not B
-            if (from.is_class() && conforms_to(from, recast_dest)) {
+            if (from_value.is_class() && conforms_to(from_value, recast_dest)) {
                 return CastLookup::ok(
                     to.is_wrapped_optional() ? CastKind::t_optional_wrap : CastKind::t_interface);
             }
@@ -101,7 +103,7 @@ namespace AST
             return CastLookup::ok(CastKind::t_interface_recast);
         }
 
-        if (from.is_interface() && recast_dest.is_class()) {
+        if (from_value.is_interface() && recast_dest.is_class()) {
             return CastLookup::ok(CastKind::t_interface_recast);
         }
 

@@ -243,3 +243,19 @@ TEST_CASE("cast_plan_for recasts a stored interface, and widens a class that con
     REQUIRE(cast_plan_for(typed(m, only, &lit), b_opt).plan.kind == CastKind::t_interface_recast);
     REQUIRE(cast_plan_for(typed(m, a, &lit), b_opt).plan.kind == CastKind::t_interface_recast);
 }
+
+TEST_CASE("a const interface borrow recasts to a class", "[cast]")
+{
+    // libann/metal: foreach copy-elision seats `const Layer&`; the recast peels that
+    // borrow the same way a primitive `const uint32& as uint16` does
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface A { function a() : int32; }\n"
+        "class Both : A {\n"
+        "    function a() : int32 { return 1; }\n"
+        "}\n"
+        "function take(const A& $x) : int32 {\n"
+        "    Both $b = $x as Both;\n"
+        "    return $b->a();\n"
+        "}\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}

@@ -35,7 +35,7 @@ namespace Compiler::LLVM
     struct UnitPartition
     {
         // the source file's basename, or `__shared` for foreign `linkonce_odr` and
-        // anything `function_file_map` does not place. diagnostics only; the object
+        // anything `file_of` does not place. diagnostics only; the object
         // name is `hex`
         std::string label;
         std::string hex;
@@ -52,7 +52,7 @@ namespace Compiler::LLVM
     // dump, whose metadata numbering moved across identical rebuilds
     //
     // a this-module function lands in that file's partition. `linkonce_odr` that
-    // `function_file_map` places in another module - generic instantiations,
+    // `file_of` places in another module - generic instantiations,
     // synthesized deinits - land in `__shared`, and a small `#[inline]` helper is
     // cloned into each partition that calls it. a call into a
     // large ODR body is an external from the file object and a definition in

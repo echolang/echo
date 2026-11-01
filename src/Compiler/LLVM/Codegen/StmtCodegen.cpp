@@ -43,6 +43,7 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
@@ -156,12 +157,15 @@ llvm::Value *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
         return nullptr;
     }
 
-    // idempotent, and deliberately not by presence alone: var_map is keyed by declaration and never
-    // cleared between functions, so a hit that was emitted into *another* llvm::Function is not this
-    // scope's slot - reusing it would build a body reading an alloca that does not dominate its uses
+    // idempotent inside one body. gen_function_decl clears var_map, so a hit is this function's
+    // slot. a leftover from another body is valid IR that loads an alloca it does not dominate
     auto found = _ctx.var_map.find(&node);
-    if (found != _ctx.var_map.end()
-        && slot_function(found->second) == _ctx.builder->GetInsertBlock()->getParent()) {
+    if (found != _ctx.var_map.end()) {
+        if (slot_function(found->second) != _ctx.builder->GetInsertBlock()->getParent()) {
+            assert(false && "var_map hit an alloca from another function");
+            std::abort();
+        }
+
         return found->second;
     }
 
@@ -264,7 +268,7 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     // and the file *this declaration* was written in, rather than whichever one the walk happens to be
     // standing in. The body can bake the file name into a constant - an `assert` message carries
     // `<file>:<line>` - so leaving it ambient makes the emitted bytes depend on the walk, which is not
-    // allowed for a definition two units may both emit. See CodegenContext::function_file_map
+    // allowed for a definition two units may both emit. See CodegenContext::file_of
     AST::File *prev_file = _ctx.current_file;
     _ctx.current_file = _ctx.file_of(&node);
 
@@ -290,6 +294,10 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         _ctx.current_file = prev_file;
         return;
     }
+
+    // keyed by declaration for the whole compile until this. an ODR-shared body emitted into a
+    // second unit would otherwise find the first unit's allocas
+    _ctx.var_map.clear();
 
     // a generated definition claims its symbol weakly, because more than one unit may legitimately hold
     // the same one - see AST::FunctionEmission::t_odr_shared. The flip happens here rather than at

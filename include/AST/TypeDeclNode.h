@@ -37,6 +37,7 @@ namespace AST
         {
             _complex_type = ComplexType(name_token.value());
             _complex_type.kind = kind;
+            _complex_type.declaration = this;
         };
 
         ~TypeDeclNode() {};

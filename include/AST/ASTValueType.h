@@ -1088,6 +1088,10 @@ namespace AST
 
         DeclarationOrigin declared_in;
 
+        // the declaration node that embeds this layout. null on an instantiation (read
+        // through template_or_self) and on a compiler-minted anonymous layout
+        TypeDeclNode *declaration = nullptr;
+
         bool is_class_kind() const {
             return kind == ComplexTypeKind::t_class;
         }

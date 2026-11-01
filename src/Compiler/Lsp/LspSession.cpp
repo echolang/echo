@@ -2,6 +2,7 @@
 
 #include "AST/ASTValueType.h"
 #include "Compiler/CodegenTarget.h"
+#include "Compiler/LLVM/Codegen/TypeLayout.h"
 #include "Compiler/SettledPath.h"
 
 #include <chrono>
@@ -328,6 +329,7 @@ Compiler::Lsp::Session::RebuildProduct Compiler::Lsp::Session::produce_snapshot(
     auto next = std::make_unique<Snapshot>();
     next->bundle = std::make_unique<AST::Bundle>();
     AST::PointerSizeScope pointer_size(inputs.options.codegen.pointer_size());
+    Compiler::LLVM::LayoutQueryScope layout(inputs.options);
     Parser::ModuleParser parser(inputs.facts, {});
 
     // the driver's answer over every scope the workspace opens, so a module only a hook's tool needs is

@@ -273,6 +273,33 @@ TEST_CASE("a burst of frees still allocates", "[alloc]")
     __eco_cache_flush();
 }
 
+TEST_CASE("frees across pages in scrambled order still allocate", "[alloc]")
+{
+    // 16-byte class holds ~1016 slots per page. 4000 live slots span several
+    // pages; even-then-odd free is the map-teardown order that used to walk
+    // every page per free
+    __eco_cache_flush();
+
+    std::vector<void *> live;
+    live.reserve(4000);
+    for (int i = 0; i < 4000; i++) {
+        void *p = __eco_cache_alloc(16);
+        REQUIRE(p != nullptr);
+        live.push_back(p);
+    }
+    for (size_t i = 1; i < live.size(); i += 2) {
+        __eco_cache_free(live[i]);
+    }
+    for (size_t i = 0; i < live.size(); i += 2) {
+        __eco_cache_free(live[i]);
+    }
+
+    void *again = __eco_cache_alloc(16);
+    REQUIRE(again != nullptr);
+    __eco_cache_free(again);
+    __eco_cache_flush();
+}
+
 TEST_CASE("many live pages still allocate and free", "[alloc]")
 {
     __eco_cache_flush();

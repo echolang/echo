@@ -81,12 +81,17 @@ namespace AST
     // and body_is_pending share this so the continuation cannot resolve against `chainbase<const T?&>`
     ValueType chain_base_type_of(const ExprNode &base);
 
-    // true when a non-nullable `from` arriving at a tagged `to` must be wrapped. argument_fit,
-    // TypeChecker, CallResolver and coerce_value all ask. an already-nullable argument is the pair
+    // true when `from` arriving at a tagged `to` must be wrapped. a non-nullable value, and a
+    // flag-nullable class (`Hatak?` into `Vessel?`). argument_fit, TypeChecker, CallResolver
+    // and coerce_value all ask
     bool arrival_wraps_optional(const ValueType &from, const ValueType &to);
 
     // the payload wherever arrival_wraps_optional is true, else `to`. OwnershipPass copies against this
     ValueType arrival_destination_of(const ValueType &from, const ValueType &to);
+
+    // peels a flag-nullable class when wrapping into a tagged dest, else `from`. argument_fit,
+    // TypeChecker and coerce_value all ask, so `Hatak?` at `Vessel?` is `Hatak` at `Vessel`
+    ValueType arrival_source_of(const ValueType &from, const ValueType &to);
 
     // **what `echo` prints when handed a `T?`** - the payload, and only when the payload is a primitive.
     //

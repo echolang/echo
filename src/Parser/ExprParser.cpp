@@ -1832,8 +1832,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         // the name resolves, but to storage in a frame this one cannot reach. inside a closure that is a
         // *capture*: the value is copied into the closure's environment at the creation site, and the body
         // reads the copy. anywhere else - a plain nested `function`, which has no environment - it is an
-        // error, because lowering it would load from an alloca belonging to a different llvm::Function and
-        // CodegenContext::var_map would hand over a perfectly valid one
+        // error, because lowering it would load from an alloca belonging to a different llvm::Function
         AST::ExprNode *captured_read = nullptr;
 
         if (found.crossed_function_boundary()) {

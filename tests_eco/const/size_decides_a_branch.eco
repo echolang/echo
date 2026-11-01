@@ -1,0 +1,18 @@
+// mem::size / mem::align fold, so a const if can pick an arm. the struct's stride is
+// the target's alloc size, including tail padding - 5 would mean someone counted fields by hand
+
+struct Padded
+{
+    int32 $a;
+    int8 $b;
+}
+
+const if (mem::size<int32>() > 2) {
+    echo 1;
+}
+
+const if (mem::size<Padded>() > 5) {
+    echo mem::size<Padded>();
+}
+
+echo mem::align<int32>();

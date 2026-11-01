@@ -4,8 +4,16 @@
 #include <AST/TypeDeclNode.h>
 #include <AST/ASTValueType.h>
 #include <Compiler/ParsePipeline.h>
+#include <Compiler/LLVM/Codegen/TypeLayout.h>
 
 #include "helpers.h"
+
+#include <optional>
+
+namespace
+{
+    std::optional<Compiler::LLVM::LayoutQueryScope> t_test_layout;
+}
 
 EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
 {
@@ -54,6 +62,11 @@ void EchoTests::run_test_semantic_passes(AST::Bundle &bundle, Compiler::Compiler
     Compiler::run_semantic_pipeline(bundle, options);
 }
 
+void EchoTests::tests_drop_layout_query()
+{
+    t_test_layout.reset();
+}
+
 std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string content)
 {
     return tests_make_parsed_bundle(std::move(content), tests_compiler_options());
@@ -87,6 +100,8 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
     }
 
     AST::PointerSizeScope pointer_size(options.codegen.pointer_size());
+    t_test_layout.reset();
+    t_test_layout.emplace(options);
     auto module_parser = Parser::ModuleParser(options.facts);
     module_parser.parse_input(input);
 
@@ -123,11 +138,14 @@ namespace
             .collector = bundle->collector
         };
 
+        auto options = EchoTests::tests_compiler_options();
+        t_test_layout.reset();
+        t_test_layout.emplace(options);
         auto module_parser = Parser::ModuleParser(
             Compiler::TargetFacts::host(), std::move(test_modules));
         module_parser.parse_input(input);
 
-        EchoTests::run_test_semantic_passes(*bundle, EchoTests::tests_compiler_options());
+        EchoTests::run_test_semantic_passes(*bundle, options);
 
         return bundle;
     }

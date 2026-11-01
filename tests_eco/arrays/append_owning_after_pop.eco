@@ -1,0 +1,23 @@
+// `$a[] = $v` after pop still seats one owner. the old append-borrow path would destroy the
+// popped element's leftover bytes on the next write
+
+class Box
+{
+    int32 $n;
+
+    destructor()
+    {
+        echo $this->n;
+    }
+}
+
+array<Box> $a = [];
+$a[] = Box(1);
+$a[] = Box(2);
+Box $out = $a->pop();
+echo $out->n;
+$a[] = Box(3);
+echo $a->count();
+echo $a[0]->n;
+echo $a[1]->n;
+echo mem::live_allocations();

@@ -14,12 +14,20 @@
 
 bool AST::conforms_to(const AST::ComplexType *ct, const AST::ValueType &interface)
 {
-    if (ct == nullptr || !interface.is_interface()) {
+    if (ct == nullptr) {
+        return false;
+    }
+
+    // stored conformances are the bare interface. `Vessel?` is a tagged dest, not a
+    // different conformance
+    const ValueType asked = ValueType::make_non_nullable(interface);
+
+    if (!asked.is_interface()) {
         return false;
     }
 
     const auto &declared = ct->conformances();
-    return std::find(declared.begin(), declared.end(), interface) != declared.end();
+    return std::find(declared.begin(), declared.end(), asked) != declared.end();
 }
 
 const std::vector<AST::FunctionDeclNode *> &AST::interface_requirements(const AST::ComplexType *interface)

@@ -14,12 +14,8 @@ namespace AST
     // **the module and file a declaration was written in**, recorded where it is knowable - while the
     // declaration is being parsed - rather than derived from a tree walk afterwards.
     //
-    // this is the primary record and not a fourth cache. Three maps in the compiler answer a question of
-    // this family today, each built by its own sweep over an arena or over the file roots
-    // (Monomorphizer::_decl_module, OwnershipPass::_type_module, CodegenContext::function_file_map), and
-    // every one of them is a *derivation* of what the parser already had in its hand and threw away. They
-    // are still there; retiring them onto this field is the direction, and the reason to state it
-    // here is that a fourth sweep added later would have nothing to be the fourth answer to.
+    // this is the primary record and not a fourth cache. CodegenContext::file_of and site_of
+    // read it. a fourth sweep added later would have nothing to be the fourth answer to.
     //
     // a **generic instantiation inherits its template's origin**, which falls out of
     // FunctionDeclNode::clone taking a shallow copy first - and it is the answer wanted rather than a

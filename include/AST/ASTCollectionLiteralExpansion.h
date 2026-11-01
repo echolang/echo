@@ -112,6 +112,8 @@ namespace AST
             VarDeclNode &into,
             std::vector<ExprNode *> indices,
             ExprNode *value,
+            const ValueType &wanted,
+            bool report_mismatch,
             std::vector<NodeReference> &appends
         );
 

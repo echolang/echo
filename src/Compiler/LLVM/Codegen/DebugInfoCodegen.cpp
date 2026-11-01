@@ -224,10 +224,10 @@ void DebugInfoCodegen::begin_function(const AST::FunctionDeclNode &node, llvm::F
     // **the declaration's own file, never the ambient one.** A t_odr_shared body is emitted into every
     // unit that references it, so N units mint N subprograms for one symbol and they have to agree.
     //
-    // the *token* first and CodegenContext::function_file_map second, which is the opposite of an
+    // the *token* first and CodegenContext::file_of second, which is the opposite of an
     // optimization: file_of falls back to the ambient `current_file` on a miss, and a miss is silent -
-    // so a body reached through a gap in that map got the file of whichever unit was being lowered, and
-    // the two objects disagreed. A token names one collection, and one module owns it, in every unit
+    // so a body reached through a gap in DeclarationOrigin got the file of whichever unit was being
+    // lowered, and the two objects disagreed. A token names one collection, and one module owns it, in every unit
     const TokenReference *token = AST::source_token_of(node);
 
     AST::File *file = token != nullptr ? token->file() : nullptr;
@@ -546,7 +546,7 @@ llvm::DIType *DebugInfoCodegen::struct_type_of(const AST::ValueType &type, CmpUn
 
     // **the file the type was declared in, never the unit's own.** A type description is emitted into
     // every unit that mentions it, so anything read from the ambient unit here makes two descriptions
-    // of one type - which is what CodegenContext::type_site_map exists to prevent
+    // of one type - which is what CodegenContext::site_of exists to prevent
     const auto site = _ctx.site_of(complex);
     llvm::DIFile *decl_file = site.has_value() ? file_for(*unit, site->file) : nullptr;
     const unsigned decl_line = site.has_value() ? site->line : 0;

@@ -417,6 +417,12 @@ public function from(uint32 $v) : string { uint64 $wide = $v; return unsigned_to
 public function from(uint64 $v) : string { return unsigned_to_string($v, spec(0, 0, 0, -1)); }
 
 #[inline]
+public function from(isize $v) : string { int64 $wide = $v as int64; return signed_to_string($wide, spec(0, 0, 0, -1)); }
+
+#[inline]
+public function from(usize $v) : string { uint64 $wide = $v as uint64; return unsigned_to_string($wide, spec(0, 0, 0, -1)); }
+
+#[inline]
 public function from(int8 $v, const string& $spec) : string { int64 $wide = $v; return signed_to_string($wide, spec_of($spec)); }
 #[inline]
 public function from(int16 $v, const string& $spec) : string { int64 $wide = $v; return signed_to_string($wide, spec_of($spec)); }
@@ -433,6 +439,12 @@ public function from(uint16 $v, const string& $spec) : string { uint64 $wide = $
 public function from(uint32 $v, const string& $spec) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec_of($spec)); }
 #[inline]
 public function from(uint64 $v, const string& $spec) : string { return unsigned_to_string($v, spec_of($spec)); }
+
+#[inline]
+public function from(isize $v, const string& $spec) : string { int64 $wide = $v as int64; return signed_to_string($wide, spec_of($spec)); }
+
+#[inline]
+public function from(usize $v, const string& $spec) : string { uint64 $wide = $v as uint64; return unsigned_to_string($wide, spec_of($spec)); }
 
 /**
  * A float, at `FLT_DIG` significant digits.

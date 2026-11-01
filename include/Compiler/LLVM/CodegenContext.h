@@ -12,6 +12,9 @@
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/TbaaTree.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/FunctionDeclNode.h"
+#include "AST/ASTValueType.h"
+#include "AST/TypeDeclNode.h"
 
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -195,52 +198,52 @@ namespace Compiler::LLVM
         CmpUnit *current_cmp_unit = nullptr;
         AST::File *current_file = nullptr;
 
-        // the file each function declaration was written in, so a body's own source position does not
-        // depend on which walk reached it.
-        //
-        // a body's *content* no longer reads this: the abort path asks the call's own token.
-        // the map remains for the declaration-site question A40 will retire onto
-        // DeclarationOrigin - an ODR-shared body's DISubprogram file must not depend on which walk
-        // reached it.
-        //
-        // a lookup miss is legitimate and falls back to the ambient file: a declaration reached other
-        // than through a file root has no better answer available
-        std::unordered_map<const AST::FunctionDeclNode *, AST::File *> function_file_map;
-
+        // the file a function was written in. DeclarationOrigin, so an ODR-shared body's
+        // DISubprogram does not depend on which walk reached it. a miss falls back to the
+        // ambient file: a minted declaration that never stamped origin
         AST::File *file_of(const AST::FunctionDeclNode *decl) const {
-            auto found = function_file_map.find(decl);
-            return found != function_file_map.end() ? found->second : current_file;
+            if (decl != nullptr && decl->declared_in.file != nullptr) {
+                return const_cast<AST::File *>(decl->declared_in.file);
+            }
+
+            return current_file;
         }
 
         // a token names its own file (`TokenReference::file`) and whether this compiler minted it
         // (`TokenReference::is_minted`). there is no bundle-wide scan and no ambient fallback for
         // either question
 
-        // **and where each declared type was written**, for the map above's reason rather than as a
-        // convenience: a type's description is emitted into every unit that mentions it, so anything in
-        // it taken from the ambient unit makes two descriptions of one type. That is not hypothetical -
-        // a struct's DIType named the first file of whichever module was being lowered, so `map<K,V>`
-        // was declared in `arr.eco` in one object and in the user's file in the next, and
-        // verify_odr_consistency refused the build.
-        //
-        // an instantiation has no declaration node of its own, so a caller reads through
-        // ComplexType::template_or_self() exactly as the function map's third sweep does
+        // **where each declared type was written.** a type's description is emitted into every
+        // unit that mentions it, so the file and line come off the TypeDeclNode, not the
+        // ambient unit. an instantiation has no declaration node of its own: template_or_self
         struct TypeSite
         {
             AST::File *file = nullptr;
             uint32_t line = 0;
         };
 
-        std::unordered_map<const AST::ComplexType *, TypeSite> type_site_map;
-
         std::optional<TypeSite> site_of(const AST::ComplexType *type) const {
             if (type == nullptr) {
                 return std::nullopt;
             }
 
-            auto found = type_site_map.find(type->template_or_self());
+            const AST::ComplexType *home = type->template_or_self();
+            AST::TypeDeclNode *decl = home->declaration;
+            if (decl == nullptr || !decl->name_token.has_value()) {
+                return std::nullopt;
+            }
 
-            return found != type_site_map.end() ? std::optional<TypeSite>(found->second) : std::nullopt;
+            const TokenReference &token = decl->name_token.value();
+            AST::File *file = token.file();
+            if (file == nullptr) {
+                file = const_cast<AST::File *>(home->declared_in.file);
+            }
+
+            if (file == nullptr) {
+                return std::nullopt;
+            }
+
+            return TypeSite{ file, token.line() };
         }
 
         // the function declaration currently being generated, set/restored around each function
@@ -256,6 +259,9 @@ namespace Compiler::LLVM
         llvm::Type *sret_type = nullptr;
 
         std::stack<CodegenValue> value_stack;
+
+        // slots of the function body currently being emitted. StmtCodegen::gen_function_decl
+        // clears it, so a hit is this function's alloca and not another body's
         std::unordered_map<AST::VarDeclNode *, llvm::Value *> var_map;
 
         // **the place each `?->` currently being lowered seated its unwrapped base at**, keyed on the

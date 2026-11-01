@@ -239,6 +239,24 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     }
 
     /**
+     * Grows by one, raises `len`, answers the new slot's index.
+     *
+     * `$a[] =` and `&$a[]` share this so they seat the same index.
+     */
+    #[inline]
+    internal function bump() : usize
+    {
+        usize $len = $this->len;
+        if ($len >= $this->storage->capacity()) {
+            $this->grow_by(1);
+        }
+
+        $this->len = $len + 1;
+
+        return $len;
+    }
+
+    /**
      * Makes room for exactly `$count` elements - no doubling, no floor.
      *
      * For the array you will fill once and keep: `reserve()` may hand back more than you asked for, and
@@ -572,11 +590,18 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * cover. `&$a[]` is the same thing written as a place, and reads better at most call sites.
      *
      * The slot starts out **uninitialized** while `count()` has already grown, so filling it is
-     * part of the contract rather than an option.
+     * part of the contract rather than an option. **Only for a `T` that is bytes**: writing
+     * through `T&` is a reassignment, and after a `pop()` that would destroy leftover storage.
+     * `$a[] = $v` is the owning fill.
      */
     function slot() : T&
     {
-        return &$this[];
+        const if (mem::is_trivially_copyable<T>()) {
+            return &$this[];
+        }
+        else {
+            die('slot() needs elements that are just bytes - writing through T& would destroy leftover storage');
+        }
     }
 
     /**
@@ -918,28 +943,37 @@ operator<T> (const array<T>& $a)[usize $index] : const T&
 }
 
 /**
- * The append contract: `$a[] = $value` grows by one and hands back the new slot.
+ * The append contract: `$a[] = $value` grows by one and seats with `put` / `mem::init`.
  *
  * One operand where the element form has two, which is the whole of how the two are told apart -
  * they share one overload set and one name, and arity is what `AST::match_function` compares first.
  *
- * The slot it returns is **uninitialized**, and the assignment writing into it is an
- * *initialization*: there is no old value there, so none is torn down. That is the compiler's rule
- * (`AssignNode::is_initialization`), not this function's, but it is the reason this function is
- * allowed to hand back a slot it has not filled.
- *
  * **`#[inline]`**, and growth only when the slot is missing: `grow_by`'s while inlined into
  * every append kept a cap phi of "fitted or grown", so a reserved fill never proved realloc
  * dead. The missing-room arm still calls `grow_by(1)`, which owns overflow and doubling.
+ *
+ * `&$a[]` below is the uninitialized-slot form, gated to a T that is just bytes.
+ */
+#[inline]
+operator<T> (array<T>& $a)[] = (T $value) : void
+{
+    $a->storage->put($a->bump(), mv $value);
+}
+
+/**
+ * The append borrow: `&$a[]` grows by one and hands back the new slot.
+ *
+ * **Only for a `T` that is bytes.** The slot is uninitialized; writing through `T&` is a
+ * reassignment. `$a[] = $v` is the owning fill, through `[]=` above. The losing `const if`
+ * arm is a `die` at this line: `is_trivially_copyable` is not a `where` constraint.
  */
 #[inline]
 operator<T> (array<T>& $a)[] : T&
 {
-    usize $len = $a->len;
-    if ($len >= $a->storage->capacity()) {
-        $a->grow_by(1);
+    const if (mem::is_trivially_copyable<T>()) {
+        return $a->storage->at($a->bump());
     }
-
-    $a->len = $len + 1;
-    return $a->storage->at($len);
+    else {
+        die('&$a[] needs elements that are just bytes - writing through T& would destroy leftover storage');
+    }
 }

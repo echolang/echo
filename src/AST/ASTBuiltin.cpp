@@ -123,7 +123,6 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_slot_count:
             return AST::BuiltinFoldability::t_ast_fact;
 
-        // and the two that read a DataLayout. they still fold, at codegen, where there is one
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
             return AST::BuiltinFoldability::t_needs_layout;

@@ -2,9 +2,11 @@
 
 #include "AST/ASTAbi.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTCompleteness.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTExternInterface.h"
 #include "AST/ASTDestruction.h"
+#include "AST/ASTLayoutQuery.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ConstExprNode.h"
 #include "AST/ConstIfNode.h"
@@ -441,15 +443,20 @@ namespace
 
         const AST::BuiltinKind kind = AST::builtin_kind_for(call.decl->builtin.value());
 
+        const auto layout_refusal = [&]() {
+            return ConstFoldResult::refused(fmt::format(
+                "'{}' is answered from the target's layout, which the compiler only knows once it is "
+                "emitting code - so it cannot decide a 'const' expression.",
+                call.decl->builtin.value()));
+        };
+
         switch (AST::builtin_foldability(kind)) {
             case AST::BuiltinFoldability::t_ast_fact:
                 break;
 
             case AST::BuiltinFoldability::t_needs_layout:
-                return ConstFoldResult::refused(fmt::format(
-                    "'{}' is answered from the target's layout, which the compiler only knows once it is "
-                    "emitting code - so it cannot decide a 'const' expression.",
-                    call.decl->builtin.value()));
+                // size_of / align_of: the kind switch asks AST::layout_alloc_size
+                break;
 
             case AST::BuiltinFoldability::t_not_a_query:
                 return ConstFoldResult::refused(fmt::format(
@@ -507,6 +514,25 @@ namespace
                     )
                 );
 
+            case AST::BuiltinKind::t_size_of:
+            case AST::BuiltinKind::t_align_of: {
+                const std::optional<uint64_t> answer = kind == AST::BuiltinKind::t_size_of
+                    ? AST::layout_alloc_size(subject)
+                    : AST::layout_abi_align(subject);
+
+                if (!answer.has_value()) {
+                    if (AST::type_completeness(subject) != AST::TypeCompleteness::t_complete) {
+                        return ConstFoldResult::pending();
+                    }
+
+                    return layout_refusal();
+                }
+
+                return ConstFoldResult::folded(
+                    AST::ValueType(AST::ValueTypePrimitive::t_usize),
+                    *answer);
+            }
+
             case AST::BuiltinKind::t_abi_fingerprint:
             case AST::BuiltinKind::t_abi_slot_count: {
                 const AST::ComplexType *ct = subject.get_complex_type();
@@ -527,7 +553,6 @@ namespace
             }
 
             default:
-                // unreachable: builtin_foldability answered t_ast_fact
                 return ConstFoldResult::refused(fmt::format(
                     "'{}' is not a fact about a type.", call.decl->builtin.value()));
         }

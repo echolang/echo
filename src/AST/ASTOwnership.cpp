@@ -3645,6 +3645,11 @@ FunctionDeclNode &OwnershipPass::begin_synthesized_decl(const std::string &name,
     // than at each of the two callers, because "this pass built it" is exactly what this function means
     decl.is_implicitly_generated = true;
 
+    // the type's home, swapped in by TypeHomeScope before this runs. file_of reads this rather
+    // than walking a map of every declaration
+    decl.declared_in.module = _current_module;
+    decl.declared_in.file = _current_file;
+
     decl.body = &_current_module->nodes.emplace_back<ScopeNode>();
 
     return decl;
@@ -3861,8 +3866,8 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
         const BodyMutationScope mutating(*this, decl);
 
         // the owner is set so AST::enclosing_type_of answers for this body, which is what lets a
-        // `private` static be seated by its own type's initializer - and what keeps
-        // CodegenContext::function_file_map's `site_of(owner_type)` fallback able to place it
+        // `private` static be seated by its own type's initializer. declared_in was stamped
+        // above, so file_of places this body in the type's file
         decl.owner_type = ct;
         decl.return_type = &_current_module->nodes.emplace_back<TypeNode>(ValueType::make_void());
 

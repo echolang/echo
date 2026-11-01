@@ -266,18 +266,17 @@ namespace AST
     // **can this builtin be answered before codegen, and if not, why not?**
     //
     // three answers rather than a bool, because the two ways "no" happens are two different sentences
-    // to whoever wrote the call. a layout query *could* be foldable one day and is not today; a
-    // `dprint` never will be, and telling someone to wait for the first is useless advice about the
-    // second
+    // to whoever wrote the call. a layout query folds when a LayoutQueryScope is live and refuses
+    // when it is not; a `dprint` never will be, and telling someone to wait for the first is useless
+    // advice about the second
     enum class BuiltinFoldability
     {
         // AST::classify_copy and AST::needs_destruction, verbatim - the tree and nothing else, so
         // AST::const_fold can answer them from a ValueType alone
         t_ast_fact,
 
-        // size_of / align_of. an llvm::DataLayout and a TypeRegistry, which exist only at codegen -
-        // and asking the AST for a struct's stride is asking it for an ABI it does not model. what is
-        // missing is a target layout at AST level, not an arm here
+        // size_of / align_of. AST::const_fold asks AST::layout_alloc_size when a
+        // LayoutQueryScope is live, and refuses with the layout sentence when it is not
         t_needs_layout,
 
         // not a query at all: it allocates, prints, stops the program, or moves a value out of a place

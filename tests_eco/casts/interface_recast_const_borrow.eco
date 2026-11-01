@@ -1,0 +1,30 @@
+// libann/metal layout(): foreach copy-elision seats `$layer` as `const Layer&`,
+// then `$layer as Dense` is an interface recast. peel the borrow and it is
+// the same recast as `Layer as Dense`
+
+interface Layer
+{
+    function kind() : string;
+}
+
+class Dense : Layer
+{
+    function kind() : string
+    {
+        return 'dense';
+    }
+}
+
+function take(const Layer& $layer) : string
+{
+    Dense $d = $layer as Dense;
+    return $d->kind();
+}
+
+array<Layer> $raw = [];
+$raw[] = Dense();
+foreach ($raw as $layer) {
+    echo take($layer);
+    Dense $d = $layer as Dense;
+    echo $d->kind();
+}

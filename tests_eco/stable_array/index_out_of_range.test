@@ -3,6 +3,6 @@ expect: fail
 --- OUT --->
 1
 assertion failed: stable_array index out of range
-  at stable_array.eco:578
+  at stable_array.eco:597
 --- IR --->
 CHECK: at stable_array.eco:

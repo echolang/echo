@@ -1,0 +1,9 @@
+// libtcp frames_net: `"a frame of {$n} bytes"` over a foreach usize.
+// ForeachLowering elides an unread by-value usize to `const usize&` before
+// InterpolationLowering mints `str::from`. `from(usize)` answers that borrow
+// by reading through; a value usize still promotes to uint64 as before
+
+array<usize> $sizes = [3 as usize, 5 as usize];
+foreach ($sizes as $n) {
+    echo "n={$n}";
+}

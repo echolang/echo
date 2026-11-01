@@ -45,6 +45,7 @@
 #include "Compiler/TestRunner.h"
 #include "Compiler/TestSelection.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
+#include "Compiler/LLVM/Codegen/TypeLayout.h"
 
 #include <fmt/core.h>
 #include <iostream>
@@ -780,6 +781,7 @@ struct FrontEnd
     // so parse, typecheck, and codegen (integer literals) agree. restoring on destroy
     // is what keeps an in-process wasm32 compile from poisoning later tests
     std::optional<AST::PointerSizeScope> pointer_size;
+    std::optional<Compiler::LLVM::LayoutQueryScope> layout_query;
 
     // empty unless something downstream reads one - see needs_cache_keys
     std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
@@ -1521,6 +1523,7 @@ static bool run_front_end(
     out.options = program_options(driver, invocation, program);
 
     out.pointer_size.emplace(out.options.codegen.pointer_size());
+    out.layout_query.emplace(out.options);
 
     // **after the facts and not before**, which is why the parser is built here rather than handed in: it
     // takes them at construction, so there is no window in which one exists that has not been told what

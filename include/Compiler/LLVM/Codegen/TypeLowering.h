@@ -62,7 +62,7 @@ namespace Compiler::LLVM
         // them has to remember to ask about. References to its symbols still resolve, because a caller
         // declares what it needs into its *own* unit.
         //
-        // `function_file_map` is deliberately still built over every module in the bundle, cached or not: an
+        // DeclarationOrigin is read over every module in the bundle, cached or not: an
         // ODR-shared body from a cached module's template can be emitted into a fresh unit, and it has to
         // carry the source position it was written at
         void create_cmp_units(

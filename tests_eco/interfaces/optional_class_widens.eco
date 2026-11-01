@@ -1,0 +1,44 @@
+// a flag-nullable class widens to a tagged optional interface. Hatak? is still t_class;
+// Vessel? is { __has, Vessel }. the wrap keeps absence: a null handle is a null Vessel?
+
+interface Vessel
+{
+    function bays() : int32;
+}
+
+class Hatak : Vessel
+{
+    int32 $glider_bays;
+
+    destructor()
+    {
+        echo 'gone';
+    }
+
+    function bays() : int32
+    {
+        return $this->glider_bays;
+    }
+}
+
+function fly(Vessel? $v) : int32
+{
+    return $v?->bays() ?? 0;
+}
+
+echo fly(Hatak(4));
+
+Hatak $h = Hatak(5);
+Hatak? $maybe = $h;
+echo fly($maybe);
+
+Vessel? $w = $maybe;
+echo $w?->bays() ?? 0;
+
+Hatak? $empty = null;
+echo fly($empty);
+
+$maybe = null;
+$w = null;
+echo mem::refs($h);
+echo mem::live_allocations();

@@ -126,12 +126,30 @@ AST::ValueType AST::chain_base_type_of(const AST::ExprNode &base)
 
 bool AST::arrival_wraps_optional(const AST::ValueType &from, const AST::ValueType &to)
 {
-    return to.is_wrapped_optional() && !from.is_nullable();
+    if (!to.is_wrapped_optional() || from.is_wrapped_optional()) {
+        return false;
+    }
+
+    // a non-nullable value into a tagged dest: `Drawable? $d = Circle(4)`
+    if (!from.is_nullable()) {
+        return true;
+    }
+
+    // a flag-nullable class into a tagged dest: `Hatak?` is still `t_class`,
+    // `Vessel?` is `{ __has, Vessel }`. the wrap is the same, the has-bit comes from the handle
+    return from.is_class();
 }
 
 AST::ValueType AST::arrival_destination_of(const AST::ValueType &from, const AST::ValueType &to)
 {
     return arrival_wraps_optional(from, to) ? to.optional_payload() : to;
+}
+
+AST::ValueType AST::arrival_source_of(const AST::ValueType &from, const AST::ValueType &to)
+{
+    return arrival_wraps_optional(from, to) && from.is_nullable()
+        ? ValueType::make_non_nullable(from)
+        : from;
 }
 
 AST::ValueType AST::echo_printed_type_of(const AST::ValueType &type)

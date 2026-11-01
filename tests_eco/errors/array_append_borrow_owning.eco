@@ -1,0 +1,5 @@
+// `&$a[]` is slot() written as a place. same gate: an owning T cannot be filled through
+// an uninitialized T&
+
+array<string> $words = [];
+string& $s = &$words[];

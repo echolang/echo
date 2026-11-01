@@ -69,7 +69,16 @@ typedef struct Cache {
     Page *hint;
     Page *current[k_class_count];
     Page *pages[k_class_count];
+    Page **page_hash;
+    uint32_t page_hash_cap;
+    uint32_t page_hash_len;
 } Cache;
+
+static Page *const k_page_tomb = (Page *)(uintptr_t)1;
+
+enum {
+    k_page_hash_min = 32
+};
 
 typedef struct Large {
     uint32_t magic;
@@ -424,6 +433,119 @@ static int is_large_block(void *p, Large **out)
     return 1;
 }
 
+static uint32_t hash_page(Page *page, uint32_t cap)
+{
+    uintptr_t x = ((uintptr_t)page >> 14) * (uintptr_t)0x9E3779B97F4A7C15ull;
+
+    return (uint32_t)x & (cap - 1);
+}
+
+static Page **page_hash_probe(Cache *t, Page *page, Page ***tomb)
+{
+    uint32_t slot;
+    uint32_t n;
+
+    *tomb = NULL;
+    if (t->page_hash_cap == 0) {
+        return NULL;
+    }
+    slot = hash_page(page, t->page_hash_cap);
+    for (n = 0; n < t->page_hash_cap; n++) {
+        Page **cell = &t->page_hash[slot];
+
+        if (*cell == page) {
+            return cell;
+        }
+        if (*cell == NULL) {
+            return *tomb != NULL ? *tomb : cell;
+        }
+        if (*cell == k_page_tomb && *tomb == NULL) {
+            *tomb = cell;
+        }
+        slot = (slot + 1) & (t->page_hash_cap - 1);
+    }
+    return *tomb;
+}
+
+static int page_hash_grow(Cache *t, uint32_t cap)
+{
+    Page **fresh = (Page **)calloc(cap, sizeof(Page *));
+    uint32_t i;
+
+    if (fresh == NULL) {
+        return 0;
+    }
+    for (i = 0; i < t->page_hash_cap; i++) {
+        Page *page = t->page_hash[i];
+        uint32_t slot;
+
+        if (page == NULL || page == k_page_tomb) {
+            continue;
+        }
+        slot = hash_page(page, cap);
+        while (fresh[slot] != NULL) {
+            slot = (slot + 1) & (cap - 1);
+        }
+        fresh[slot] = page;
+    }
+    free(t->page_hash);
+    t->page_hash = fresh;
+    t->page_hash_cap = cap;
+    return 1;
+}
+
+static void page_hash_add(Cache *t, Page *page)
+{
+    Page **tomb;
+    Page **cell;
+
+    if (t->page_hash_cap == 0 && !page_hash_grow(t, k_page_hash_min)) {
+        return;
+    }
+    if (t->page_hash_len * 4 >= t->page_hash_cap * 3
+        && !page_hash_grow(t, t->page_hash_cap * 2)) {
+        return;
+    }
+    cell = page_hash_probe(t, page, &tomb);
+    if (cell == NULL) {
+        return;
+    }
+    if (*cell != page) {
+        t->page_hash_len++;
+    }
+    *cell = page;
+}
+
+static void page_hash_del(Cache *t, Page *page)
+{
+    Page **tomb;
+    Page **cell = page_hash_probe(t, page, &tomb);
+
+    if (cell == NULL || *cell != page) {
+        return;
+    }
+    *cell = k_page_tomb;
+    if (t->page_hash_len > 0) {
+        t->page_hash_len--;
+    }
+}
+
+static int page_hash_has(Cache *t, Page *page)
+{
+    Page **tomb;
+    Page **cell = page_hash_probe(t, page, &tomb);
+
+    return cell != NULL && *cell == page;
+}
+
+static void page_hash_reset(Cache *t)
+{
+    if (t->page_hash != NULL) {
+        memset(t->page_hash, 0, (size_t)t->page_hash_cap * sizeof(Page *));
+    }
+    t->page_hash_len = 0;
+}
+
 static void unlink_page(Cache *t, Page *page)
 {
     unsigned klass = page->klass;
@@ -441,6 +563,7 @@ static void unlink_page(Cache *t, Page *page)
     if (t->current[klass] == page) {
         t->current[klass] = NULL;
     }
+    page_hash_del(t, page);
 }
 
 static void link_page(Cache *t, Page *page)
@@ -453,6 +576,7 @@ static void link_page(Cache *t, Page *page)
         page->next->prev = page;
     }
     t->pages[klass] = page;
+    page_hash_add(t, page);
 }
 
 static void drain_foreign(Page *page)
@@ -644,7 +768,6 @@ static ECO_ALWAYS_INLINE Page *tls_page_of(Cache *t, void *p)
 {
     Page *page = page_of(p);
     unsigned k;
-    Page *it;
 
     if (t->hint == page) {
         return page;
@@ -655,13 +778,9 @@ static ECO_ALWAYS_INLINE Page *tls_page_of(Cache *t, void *p)
             return page;
         }
     }
-    for (k = 0; k < k_class_count; k++) {
-        for (it = t->pages[k]; it != NULL; it = it->next) {
-            if (it == page) {
-                t->hint = page;
-                return page;
-            }
-        }
+    if (page_hash_has(t, page)) {
+        t->hint = page;
+        return page;
     }
     return NULL;
 }
@@ -915,6 +1034,7 @@ void __eco_cache_flush(void)
 
     lock_cache();
     t->hint = NULL;
+    page_hash_reset(t);
     for (klass = 0; klass < k_class_count; klass++) {
         Page *page = t->pages[klass];
         t->pages[klass] = NULL;

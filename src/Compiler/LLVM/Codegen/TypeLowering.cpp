@@ -22,7 +22,7 @@
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTMangler.h"
 #include "AST/ASTNullability.h"
-#include "AST/ASTSourceToken.h"
+#include "AST/ASTTypeParam.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
@@ -139,130 +139,6 @@ void TypeLowering::create_cmp_units(
         _ctx.debug_info->create_unit(*cmp_unit);
 
         _ctx.cmp_unit_map[module->name] = cmp_unit.get();
-    }
-
-    // where every declaration was written, recorded once now that the file roots are final - every pass
-    // that appends one has run. See CodegenContext::function_file_map for why a body needs this rather
-    // than the ambient current_file
-    _ctx.function_file_map.clear();
-
-    // **all three ways a function is declared, or the map answers for none of them.** a free function is a
-    // file-root child; a method is a child of a type declaration that is; and an instantiation is neither -
-    // the monomorphizer appends it to the module, so it has no file of its own and takes its template's.
-    //
-    // recording only the first left the other two on the ambient fallback, and an instantiation is exactly
-    // the case the map exists for: it is `t_odr_shared`, so its `assert` message is baked into a definition
-    // two units may both emit. It read right for as long as the generic type happened to be declared in the
-    // stdlib file the walk reached first, which is luck rather than a rule, and adding one file ahead of it
-    // alphabetically was enough to make every `array<T>` bounds message name the wrong source file
-
-    // where each declared type was written. Two readers, and neither could derive it: the third sweep
-    // below reaches declarations that have no file root above them and no template to read through and
-    // carry only an owner, and DebugInfoCodegen needs a type's description to be the same in every unit
-    // that mentions it. Built here because a ComplexType has no back-pointer to its TypeDeclNode
-    _ctx.type_site_map.clear();
-
-    // file-root children first: a named map plants in the file that wrote it, and that
-    // file must win over the owner's TypeDecl, which a dependency module walks first
-    for (auto &module : bundle.modules) {
-        for (auto &file : module->files()) {
-            if (file.root == nullptr) {
-                continue;
-            }
-
-            for (auto &child : file.root->children) {
-                if (child.has_type<AST::FunctionDeclNode>()) {
-                    _ctx.function_file_map.try_emplace(
-                        child.get_ptr<AST::FunctionDeclNode>(), &file);
-                }
-                else if (child.has_type<AST::TypeDeclNode>()) {
-                    AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
-                    const TokenReference *at = AST::source_token_of(*type_decl);
-
-                    _ctx.type_site_map[&type_decl->complex_type()] = CodegenContext::TypeSite{
-                        &file, at != nullptr ? at->line() : 0 };
-                }
-            }
-        }
-    }
-
-    for (auto &module : bundle.modules) {
-        for (auto &file : module->files()) {
-            if (file.root == nullptr) {
-                continue;
-            }
-
-            for (auto &child : file.root->children) {
-                if (!child.has_type<AST::TypeDeclNode>()) {
-                    continue;
-                }
-
-                AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
-                for (AST::FunctionDeclNode *method : type_decl->methods()) {
-                    _ctx.function_file_map.try_emplace(method, &file);
-                }
-                for (AST::FunctionDeclNode *method : type_decl->complex_type().static_methods()) {
-                    _ctx.function_file_map.try_emplace(method, &file);
-                }
-            }
-        }
-    }
-
-    // the instantiations, in a second sweep: a template must already be in the map before an instance can
-    // read through it, and a template is not guaranteed to be walked before the module holding its instances
-    for (auto &module : bundle.modules) {
-        for (AST::FunctionDeclNode *decl : module->nodes.of_type<AST::FunctionDeclNode>()) {
-            if (decl->template_ref == nullptr) {
-                continue;
-            }
-
-            auto found = _ctx.function_file_map.find(decl->template_ref);
-
-            if (found != _ctx.function_file_map.end()) {
-                _ctx.function_file_map.try_emplace(decl, found->second);
-            }
-        }
-    }
-
-    // **and the declarations no walk above reaches at all.** Two shapes, both t_odr_shared, so a miss
-    // here is not a cosmetically wrong file name in an abort message - it is two units emitting
-    // different bytes for one symbol, which verify_odr_consistency now throws on:
-    //
-    //   - a **closure**, which is nested inside an expression rather than being a file-root child. It
-    //     was written in a file though, and its `declaration_token` is the real `function` keyword, so
-    //     the token answers directly.
-    //   - a **synthesized deinit, copy constructor or field-wise constructor**, appended to the module
-    //     by AST::OwnershipPass or the struct parser with no template_ref and only a virtual name
-    //     token. Nothing about it was written anywhere, so the honest answer is the file its *owner*
-    //     was declared in - which is also where a person reading a backtrace expects to land.
-    //
-    // asking the token first and the owner second is the order that matters: a hand-written method has
-    // both and the token is the more specific of the two
-    for (auto &module : bundle.modules) {
-        for (AST::FunctionDeclNode *decl : module->nodes.of_type<AST::FunctionDeclNode>()) {
-            if (_ctx.function_file_map.find(decl) != _ctx.function_file_map.end()) {
-                continue;
-            }
-
-            // a token belongs to exactly one module's collection, and a clone appended to another
-            // module still carries its template's - so this asks the bundle rather than this module
-            if (const TokenReference *token = AST::source_token_of(*decl)) {
-                if (AST::File *written_in = token->file()) {
-                    _ctx.function_file_map[decl] = written_in;
-                    continue;
-                }
-            }
-
-            if (decl->owner_type == nullptr) {
-                continue;
-            }
-
-            // through template_or_self, or an instantiation's synthesized deinit finds no declaration
-            // node at all - only the template it was derived from ever had one
-            if (auto owner_site = _ctx.site_of(decl->owner_type)) {
-                _ctx.function_file_map[decl] = owner_site->file;
-            }
-        }
     }
 
     // ensure none of the modules are null
@@ -1743,83 +1619,17 @@ llvm::FunctionType *TypeLowering::get_llvm_function_type(
 
 llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
 {
-    llvm::Type *base_type = nullptr;
-
-    // **`T?` first, and only when `T` has no null value of its own.** over a pointer, a class or a weak
-    // the flag changes nothing about the machine type - a null address already means absent - so those
-    // fall through to their own arms below and `Foo?` costs exactly what `Foo` costs. over anything else
-    // there is no spare representation to donate, so the value is tagged
-    //
-    // asked through ValueType::is_wrapped_optional() rather than spelled out here, because coerce_value
-    // and the null comparison branch on the same question and three answers would be three shapes
+    // **`T?` first**, so the interned `{ i1, T }` keeps its `eco.optional.` name. llvm_type_of
+    // would intern the same ComplexType through create_llvm_struct_for_instance and lose that
     if (type.is_wrapped_optional()) {
         return optional_llvm_type(type, cmp_unit);
     }
 
-    // every pointer level is the same opaque `ptr` under LLVM's opaque pointer model, so the
-    // pointee is never lowered. that also sidesteps lowering a pointer to a struct that has
-    // not been declared in this compilation unit yet
-    if (type.is_pointer()) {
-        return llvm::PointerType::get(*_ctx.llvm_context, 0);
-    }
+    auto intern = [&](const AST::ComplexType *complex) -> llvm::Type * {
+        if (complex == nullptr) {
+            return nullptr;
+        }
 
-    // a class-typed *value* is the handle - one machine address into the heap block, never the block
-    // itself. so this answers before the struct arm, and deliberately does not lower the layout: that
-    // is get_or_create_class_layout's job, asked for by the few places that need it. lowering it here
-    // instead would mean every `ptr<Foo>` and every borrow parameter dragged the whole layout in
-    if (type.is_class()) {
-        return llvm::PointerType::get(*_ctx.llvm_context, 0);
-    }
-
-    // and a weak handle is the very same address - the block it names, differently typed. the whole of
-    // what makes it weak is which count it moved and that reading it needs an upgrade, both of which are
-    // settled long before lowering, so there is nothing left for the machine type to carry
-    if (type.is_weak()) {
-        return llvm::PointerType::get(*_ctx.llvm_context, 0);
-    }
-
-    // a callable is a *fat* pointer, `{ ptr fn, ptr env }`. two words rather than one because a
-    // non-capturing callable - which includes every plain function used as a value - must not have to
-    // allocate an environment just to be callable; its env slot is simply null. and the env has to be
-    // there at all because a capturing closure's storage cannot live in the function pointer
-    //
-    // structural, so this type is built rather than looked up: two spellings of one signature are one
-    // Echo type and must be one llvm::Type, which an anonymous StructType gives for free
-    if (type.is_callable()) {
-        return callable_llvm_type();
-    }
-
-    // a C function pointer is one opaque word - C's shape, no environment. a kind rather than a
-    // flag on the callable so this cannot silently share the two-word lowering above
-    if (type.is_c_function()) {
-        return llvm::PointerType::get(*_ctx.llvm_context, 0);
-    }
-
-    // an interface *value* is a fat pointer too, `{ ptr object, ptr vtable }`, and for the callable's
-    // reason: the object alone cannot answer which method to call without a scan at every call site,
-    // so the vtable is resolved once at the **widening**, where the concrete class is still known
-    //
-    // field 0 holds the class handle, which is what makes a receiver free: a class method's `$this` is
-    // `Circle&` - the address of a slot holding a handle - and `&iface.object` is exactly that shape
-    if (type.is_interface()) {
-        return iface_llvm_type();
-    }
-
-    if (type.is_primitive()) {
-        base_type = get_llvm_type(type.get_primitive_type());
-    }
-    // an enum shares the arm because the *AST* shape is still ordinary properties, `__tag` first.
-    // the LLVM type may overlay the payload slots - StructureLayout owns that - but the
-    // structure table and these two entry points stay the one way a layout is found
-    else if (type.is_opaque()) {
-        // TypeChecker refused a by-value incomplete type. inventing an empty struct here is the
-        // lie this kind exists to prevent
-        throw _ctx.error(fmt::format(
-            "incomplete type '{}' reached lowering as a value - this is a compiler defect",
-            type.get_type_desciption()));
-    }
-    else if (type.is_struct() || type.is_enum()) {
-        auto *complex = type.get_complex_type();
         auto struct_id = cmp_unit.structure_table->get_structure_id(complex);
 
         // lower the layout into this unit on demand. build_struct_maps only registers the structs
@@ -1834,7 +1644,7 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         //
         // both are keyed on the ComplexType: intern_struct_type gives one llvm::StructType per
         // ComplexType in the context, and the unit table only holds the row and the offset table
-        if (!struct_id && complex) {
+        if (!struct_id) {
             create_llvm_struct_for_instance(complex, cmp_unit);
             struct_id = cmp_unit.structure_table->get_structure_id(complex);
         }
@@ -1842,23 +1652,33 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         if (!struct_id) {
             throw _ctx.error(fmt::format(
                 "Struct '{}' is not declared in compilation unit '{}' ({})",
-                complex ? complex->name.value_or("<anonymous>") : "<null>",
+                complex->name.value_or("<anonymous>"),
                 cmp_unit.ast_module ? cmp_unit.ast_module->name : "<unknown>",
                 _ctx.function_context()));
         }
 
-        base_type = cmp_unit.structure_table->get_structure(struct_id).llvm_struct;
+        return cmp_unit.structure_table->get_structure(struct_id).llvm_struct;
+    };
+
+    if (llvm::Type *ty = llvm_type_of(type, *_ctx.llvm_context, _ctx.layout(), intern)) {
+        return ty;
     }
-    else if (type.is_type_param()) {
-        // a resolved instance never carries a type parameter; reaching here is a compiler bug
-        // (a template escaped monomorphization) rather than a user error. name the parameter and
-        // where it was declared, so the report points at the generic that failed to instantiate
-        // instead of leaving the reader to guess which type carried it
+
+    if (type.is_opaque()) {
+        throw _ctx.error(fmt::format(
+            "incomplete type '{}' reached lowering as a value - this is a compiler defect",
+            type.get_type_desciption()));
+    }
+
+    if (type.is_type_param()) {
         const AST::TypeParamDecl *param = type.get_type_param();
 
         std::string declared_at;
         if (param->name_token.has_value()) {
-            declared_at = fmt::format(" declared at {}:{}", param->name_token.value().line(), param->name_token.value().char_offset());
+            declared_at = fmt::format(
+                " declared at {}:{}",
+                param->name_token.value().line(),
+                param->name_token.value().char_offset());
         }
 
         throw _ctx.error(fmt::format(
@@ -1866,77 +1686,44 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
             "instantiated with concrete types before compilation",
             param->describe(), declared_at, _ctx.function_context()));
     }
-    else if (type.is_inline_array()) {
-        const std::optional<uint64_t> length = type.bound_array_length();
-        if (!length.has_value()) {
-            throw _ctx.error(fmt::format(
-                "Cannot lower inline array '{}' with an unbound length {}",
-                type.get_type_desciption(), _ctx.function_context()));
-        }
 
-        llvm::Type *element = get_llvm_type(type.array_element(), cmp_unit);
-        base_type = llvm::ArrayType::get(element, *length);
+    if (type.is_inline_array()) {
+        throw _ctx.error(fmt::format(
+            "Cannot lower inline array '{}' with an unbound length {}",
+            type.get_type_desciption(), _ctx.function_context()));
     }
-    else if (type.is_simd()) {
-        const std::optional<uint64_t> length = type.bound_simd_length();
-        if (!length.has_value()) {
-            throw _ctx.error(fmt::format(
-                "Cannot lower vector '{}' with an unbound length {}",
-                type.get_type_desciption(), _ctx.function_context()));
-        }
 
-        llvm::Type *element = get_llvm_type(type.simd_element(), cmp_unit);
-        base_type = llvm::FixedVectorType::get(element, static_cast<unsigned>(*length));
+    if (type.is_simd()) {
+        throw _ctx.error(fmt::format(
+            "Cannot lower vector '{}' with an unbound length {}",
+            type.get_type_desciption(), _ctx.function_context()));
     }
-    else if (type.is_const_value()) {
+
+    if (type.is_const_value()) {
         throw _ctx.error(fmt::format(
             "Cannot lower a const generic value '{}' as a machine type {}",
             type.get_type_desciption(), _ctx.function_context()));
     }
-    else {
-        throw _ctx.error(fmt::format(
-            "Unsupported type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
-    }
 
-    return base_type;
+    throw _ctx.error(fmt::format(
+        "Unsupported type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
 }
 
 llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
 {
-    switch (type) {
-        case AST::ValueTypePrimitive::t_void:
-            return llvm::Type::getVoidTy(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_float32:
-            return llvm::Type::getFloatTy(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_float64:
-            return llvm::Type::getDoubleTy(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_int8:
-            return llvm::Type::getInt8Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_int16:
-            return llvm::Type::getInt16Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_int32:
-            return llvm::Type::getInt32Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_int64:
-            return llvm::Type::getInt64Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_uint8:
-            return llvm::Type::getInt8Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_uint16:
-            return llvm::Type::getInt16Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_uint32:
-            return llvm::Type::getInt32Ty(*_ctx.llvm_context);
-        case AST::ValueTypePrimitive::t_uint64:
-            return llvm::Type::getInt64Ty(*_ctx.llvm_context);
-        // pointer-width integers. the DataLayout the TargetMachine published
-        case AST::ValueTypePrimitive::t_usize:
-        case AST::ValueTypePrimitive::t_isize:
-            return _ctx.size_int_ty();
-        case AST::ValueTypePrimitive::t_bool:
-            return llvm::Type::getInt1Ty(*_ctx.llvm_context);
-        default:
-            throw _ctx.error(fmt::format(
-                "Unsupported primitive type '{}' {}",
-                AST::get_primitive_name(type), _ctx.function_context()));
+    llvm::Type *ty = llvm_type_of(
+        AST::ValueType(type),
+        *_ctx.llvm_context,
+        _ctx.layout(),
+        [](const AST::ComplexType *) -> llvm::Type * { return nullptr; });
+
+    if (ty == nullptr) {
+        throw _ctx.error(fmt::format(
+            "Unsupported primitive type '{}' {}",
+            AST::get_primitive_name(type), _ctx.function_context()));
     }
+
+    return ty;
 }
 
 llvm::Value *TypeLowering::coerce_ssa(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const CmpUnit &cmp_unit)
@@ -2092,16 +1879,22 @@ CodegenValue TypeLowering::coerce_value(
                 to.get_type_desciption(), _ctx.function_context()));
         }
 
-        const AST::ValueType target_payload = AST::ValueType::make_non_nullable(to);
-        CodegenValue payload = coerce_value(value, from, target_payload, cmp_unit);
+        const AST::ValueType source_payload = AST::arrival_source_of(from, to);
+        const AST::ValueType target_payload = AST::arrival_destination_of(from, to);
+        CodegenValue payload = coerce_value(value, source_payload, target_payload, cmp_unit);
         llvm::StructType *opt_ty = optional_llvm_type(to, cmp_unit);
+
+        // a flag-nullable class keeps its absence: `Hatak?` into `Vessel?` is present
+        // iff the handle is. a non-nullable source is always there
+        llvm::Value *has = from.is_nullable()
+            ? gen_has_value(value, from)
+            : llvm::ConstantInt::getTrue(*_ctx.llvm_context);
 
         if (payload.is_aggregate() || aggregate_lives_in_memory(opt_ty, _ctx.layout())) {
             llvm::Value *slot = _ctx.entry_alloca(opt_ty, "opt.wrap");
             llvm::Value *has_ptr = _ctx.builder->CreateStructGEP(
                 opt_ty, slot, AST::k_optional_has_index, "opt.has.ptr");
-            _ctx.builder->CreateStore(
-                llvm::ConstantInt::getTrue(*_ctx.llvm_context), has_ptr);
+            _ctx.builder->CreateStore(has, has_ptr);
             llvm::Value *val_ptr = _ctx.builder->CreateStructGEP(
                 opt_ty, slot, AST::k_optional_value_index, "opt.val.ptr");
             _ctx.lvalues->gen_store(LValue{ val_ptr, target_payload }, payload);
@@ -2117,10 +1910,7 @@ CodegenValue TypeLowering::coerce_value(
         llvm::Value *ssa_payload = _ctx.materialize(payload, "opt.payload");
         llvm::Value *wrapped = llvm::UndefValue::get(opt_ty);
         wrapped = _ctx.builder->CreateInsertValue(
-            wrapped,
-            llvm::ConstantInt::getTrue(*_ctx.llvm_context),
-            { AST::k_optional_has_index },
-            "opt.has");
+            wrapped, has, { AST::k_optional_has_index }, "opt.has");
 
         return CodegenValue::scalar(_ctx.builder->CreateInsertValue(
             wrapped, ssa_payload, { AST::k_optional_value_index }, "opt.val"));

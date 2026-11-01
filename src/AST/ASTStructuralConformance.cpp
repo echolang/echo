@@ -177,13 +177,15 @@ namespace
 
 bool AST::conforms_to(const AST::ValueType &type, const AST::ValueType &interface)
 {
-    if (!interface.is_interface()) {
+    const ValueType asked = ValueType::make_non_nullable(interface);
+
+    if (!asked.is_interface()) {
         return false;
     }
 
     if (type.has_complex_type()) {
-        return AST::conforms_to(type.get_complex_type(), interface);
+        return AST::conforms_to(type.get_complex_type(), asked);
     }
 
-    return structurally_conforms(type, interface);
+    return structurally_conforms(type, asked);
 }

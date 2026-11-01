@@ -425,12 +425,11 @@ namespace AST
         // `g(string)` beats `g(string?)` for `'a'` without a rank that would also make wrap-of-promotion
         // beat a plain promotion
         //
-        // an argument that is *already* nullable is left to the arms below, where the equality above has
-        // already accepted the one shape that fits - which is AST::arrival_wraps_optional's second half,
-        // and asked through it because the cast AST::CallResolver mints and the `insertvalue` pair
-        // TypeLowering::coerce_value emits are the same decision made twice more
+        // a flag-nullable class into a tagged dest peels the source too: `Hatak?` at `Vessel?` is
+        // `Hatak` at `Vessel`, not `Hatak?` at `Vessel` - that second pair would also rank a
+        // non-null interface parameter, which discards absence
         if (arrival_wraps_optional(from, to)) {
-            return argument_fit(from, expr, to.optional_payload());
+            return argument_fit(arrival_source_of(from, to), expr, arrival_destination_of(from, to));
         }
 
         // before the borrow rule, so an argument that already fits a borrow parameter is not
@@ -509,7 +508,8 @@ namespace AST
         // **a class only.** a struct's conformance is a compile-time contract - it has no runtime type
         // for a dispatch to read - so a struct argument answers t_none here and the type checker
         // reports it against the destination, which is where the reason belongs
-        if (to.is_interface() && from.is_class() && conforms_to(from, to)) {
+        if (to.is_interface() && from.is_class() && conforms_to(from, to)
+            && (!from.is_nullable() || to.is_nullable())) {
             return ArgumentFit::t_interface_widening;
         }
 

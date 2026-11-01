@@ -252,10 +252,18 @@ public struct stable_array<T> : contract::iterable<T>, contract::const_iterable<
      *
      * The slot starts out uninitialized while `count()` has already grown. `&$a[]` is the same
      * thing written as a place. That place stays valid across later appends.
+     *
+     * **Only for a `T` that is bytes.** Writing through `T&` is a reassignment. `$a[] = $v`
+     * is the owning fill.
      */
     function slot() : T&
     {
-        return &$this[];
+        const if (mem::is_trivially_copyable<T>()) {
+            return &$this[];
+        }
+        else {
+            die('slot() needs elements that are just bytes - writing through T& would destroy leftover storage');
+        }
     }
 
     /**
@@ -375,12 +383,23 @@ public struct stable_array<T> : contract::iterable<T>, contract::const_iterable<
     /**
      * Grows by one, raises `len`, hands back the new slot. The append operator is this call.
      */
+    #[inline]
     internal function bump() : T&
     {
         $this->grow_by(1);
         $this->len = $this->len + 1;
 
         return $this->seat($this->len - 1);
+    }
+
+    #[inline]
+    internal function bump_put(T $value) : void
+    {
+        $this->grow_by(1);
+        usize $index = $this->len;
+        $this->len = $index + 1;
+        stable_loc $at = $this->locate($index);
+        $this->blocks[$at->block]->put($at->offset, mv $value);
     }
 
     /**
@@ -583,10 +602,20 @@ operator<T> (const stable_array<T>& $a)[usize $index] : const T&
 /**
  * The append contract: `$a[] = $value` grows by one and hands back the new slot.
  *
- * The slot is uninitialized, and the assignment writing into it is an initialization. The
- * address remains valid across later appends.
+ * `$a[] = $v` seats with `put` / `mem::init`. `&$a[]` is the uninitialized-slot form,
+ * gated to a T that is just bytes. The address remains valid across later appends.
  */
+operator<T> (stable_array<T>& $a)[] = (T $value) : void
+{
+    $a->bump_put(mv $value);
+}
+
 operator<T> (stable_array<T>& $a)[] : T&
 {
-    return $a->bump();
+    const if (mem::is_trivially_copyable<T>()) {
+        return $a->bump();
+    }
+    else {
+        die('&$a[] needs elements that are just bytes - writing through T& would destroy leftover storage');
+    }
 }

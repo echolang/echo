@@ -258,7 +258,7 @@ TEST_CASE("reading an enclosing function's local is reported, not lowered", "[le
 {
     // the scope chain is deliberately left intact - it is the environment a closure will capture from
     // - so the read resolves. lowering it would load from an alloca belonging to a different
-    // llvm::Function, because CodegenContext::var_map is keyed on the declaration and never cleared
+    // llvm::Function; var_map is per body, so the honest failure is "no allocation in scope"
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function outer() : int32 {\n"
         "    int32 $n = 5;\n"

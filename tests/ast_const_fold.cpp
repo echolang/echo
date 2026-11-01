@@ -440,14 +440,28 @@ TEST_CASE("a builtin asked about an unbound T is pending, never a refusal", "[co
     REQUIRE(fold_last_condition(*bundle).result == ConstFoldResult::Result::t_pending);
 }
 
-TEST_CASE("a layout query is refused, and says why", "[const_fold]")
+TEST_CASE("a layout query folds once the target layout is installed", "[const_fold]")
 {
-    // size_of and align_of read an llvm::DataLayout, which exists only at codegen. a refusal rather than
-    // a pending, because no fixpoint round is ever going to answer it
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "#[echoc::builtin: size_of]\n"
         "function so<T>() : usize;\n"
         "usize $subject = so<int32>();\n");
+
+    const ConstFoldResult folded = fold_subject(*bundle);
+
+    REQUIRE(folded.is_folded());
+    REQUIRE(folded.type.is_primitive_of_type(AST::ValueTypePrimitive::t_usize));
+    REQUIRE(folded.bits == 4);
+}
+
+TEST_CASE("a layout query is refused when no target layout is installed", "[const_fold]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "#[echoc::builtin: size_of]\n"
+        "function so<T>() : usize;\n"
+        "usize $subject = so<int32>();\n");
+
+    EchoTests::tests_drop_layout_query();
 
     const ConstFoldResult folded = fold_subject(*bundle);
 

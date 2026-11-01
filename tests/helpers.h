@@ -53,6 +53,10 @@ namespace EchoTests
     // Compiler::run_semantic_pipeline, kept under this name so the ~40 call sites do not change
     void run_test_semantic_passes(AST::Bundle &bundle, Compiler::CompilerOptions options);
 
+    // drops the process-wide LayoutQueryScope tests_make_parsed_bundle installed, so a
+    // subsequent const_fold of size_of / align_of is the no-layout refusal
+    void tests_drop_layout_query();
+
     std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(std::string content);
 
     // the same, under options the caller chose. exists for the one diagnostic that depends on a flag:

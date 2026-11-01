@@ -1,0 +1,8 @@
+expect: fail
+
+# die is baked into the method, so the location names array.eco. update the number if
+# the die moves; the claim is that an owning element is refused rather than filled through T&
+
+--- OUT --->
+fatal error: slot() needs elements that are just bytes - writing through T& would destroy leftover storage
+  at array.eco:603

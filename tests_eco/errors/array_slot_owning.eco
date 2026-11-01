@@ -1,0 +1,5 @@
+// slot() of an owning T would hand back T& onto uninitialized (or popped) bytes.
+// writing through that T& runs a destructor over leftover storage
+
+array<string> $words = [];
+string& $s = $words->slot();

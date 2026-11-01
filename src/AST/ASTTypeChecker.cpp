@@ -2537,7 +2537,7 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
             return;
         }
 
-        if (arg_assignable_to(from, &value, destination)) {
+        if (arg_assignable_to(arrival_source_of(from, to), &value, destination)) {
             return;
         }
     }

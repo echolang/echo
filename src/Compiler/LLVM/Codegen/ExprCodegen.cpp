@@ -1331,8 +1331,6 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
             decl->builtin.value(), decl->instantiation_args.size(), _ctx.function_context()));
     }
 
-    const AST::ValueType &subject = decl->instantiation_args[0];
-
     // the result is whatever the declaration promised - usize for the two sizes, bool for the
     // predicates - so the constant lands with the type the caller already expects, and an i1 needs no
     // arm of its own here
@@ -1346,24 +1344,17 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the stride between
         // array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]` mean, and using the store
         // size would under-allocate for any padded struct
-        case AST::BuiltinKind::t_size_of:
-            value = _ctx.layout().getTypeAllocSize(_ctx.types->get_llvm_type(subject, *_ctx.current_cmp_unit));
-            break;
-
-        case AST::BuiltinKind::t_align_of:
-            value = _ctx.layout().getABITypeAlign(
-                _ctx.types->get_llvm_type(subject, *_ctx.current_cmp_unit)).value();
-            break;
-
-        // **the taxonomy answering for itself, through its one owner.** these two read no layout at all -
-        // they are AST facts - and they used to be folded here *as well as* in AST::const_fold, which a
-        // `const if` needs one pass earlier. two spellings of one fact, held in step by nothing, is the
+        // **the taxonomy answering for itself, through its one owner.** size/align now fold
+        // the same way the ownership predicates do: AST::const_fold, which a `const if` needs
+        // one pass earlier. two spellings of one fact, held in step by nothing, is the
         // recurring bug in this codebase, so this arm asks rather than answering.
         //
-        // the arity guard above stays and is still the load-bearing part: it is what guarantees `subject`
-        // is concrete. the two callers' answers to "is `T` bound yet" are deliberately different - a
+        // the arity guard above stays and is still the load-bearing part: it is what guarantees the
+        // type argument is concrete. the two callers' answers to "is `T` bound yet" are deliberately different - a
         // fixpoint round gets `t_pending`, because it has more rounds, and this throws, because an
         // un-instantiated template reaching codegen is a compiler bug rather than a source error
+        case AST::BuiltinKind::t_size_of:
+        case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_is_integer:
         case AST::BuiltinKind::t_needs_destruction:

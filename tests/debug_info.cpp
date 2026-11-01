@@ -53,7 +53,7 @@ TEST_CASE("a -g build of a program using generics, classes and closures verifies
 {
     // every shape whose debug info is built somewhere other than the obvious place: a class is a pointer
     // to a heap box whose payload fields are hoisted to their box offsets, a generic instantiation takes
-    // its template's file through function_file_map, a closure is a declaration nested in an expression
+    // its template's file through DeclarationOrigin, a closure is a declaration nested in an expression
     // that no file-root walk reaches, and a `foreach` mints a cursor no source file spells
     ScopedProject project("verifies");
 
