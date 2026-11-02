@@ -1,0 +1,7 @@
+function take(construct int32& $v) : int32
+{
+    return $v;
+}
+
+int32 $n = 1;
+echo take($n);

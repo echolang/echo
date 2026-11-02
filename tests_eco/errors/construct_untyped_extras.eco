@@ -1,0 +1,6 @@
+function make<T>(construct T $value) : T
+{
+    return $value;
+}
+
+echo make(2, 3);

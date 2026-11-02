@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  construct_overloaded_miss.eco:24:11
+
+  No constructor of 'Dual' accepts these arguments. Candidates are:
+    Dual(int32, string)
+    Dual(string, int32)
+
+  23 | 
+  24 | Dual $d = make<Dual>(1, 2);
+     :           ^^^^
+  25 | echo $d->n;
+
+1 error, nothing was compiled.

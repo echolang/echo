@@ -138,6 +138,19 @@ bool Parser::starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &eff
     return true;
 }
 
+bool Parser::starts_construct_param(Parser::Cursor &cursor)
+{
+    if (!cursor.is_type(Token::Type::t_identifier)) {
+        return false;
+    }
+
+    if (cursor.peek_is_type(1, Token::Type::t_varname)) {
+        return false;
+    }
+
+    return cursor.current().value() == "construct";
+}
+
 bool Parser::parse_parameter_list(
     Parser::Payload &payload,
     std::vector<AST::VarDeclNode *> &args,
@@ -183,6 +196,13 @@ bool Parser::parse_parameter_list(
             cursor.skip();
         }
 
+        // `construct M $value` - after the label so `once: construct T $v` is the labelled gather.
+        // same contextual rule as an access effect
+        const bool constructs_in_place = starts_construct_param(cursor);
+        if (constructs_in_place) {
+            cursor.skip();
+        }
+
         auto *param = parse_varexpr(payload, &into);
 
         if (param != nullptr) {
@@ -199,6 +219,7 @@ bool Parser::parse_parameter_list(
 
             param->takes_ownership = takes_ownership;
             param->access_effect = access_effect;
+            param->constructs_in_place = constructs_in_place;
 
             // `read T&` is `const T&` to every later pass: `const function` already works this
             // way for `$this`, and that is the one owner of "may this place be written". the

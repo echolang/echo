@@ -496,6 +496,9 @@ Json json_params(const AST::FunctionDeclNode &fn, const AST::CoreTypes &core)
             { "mode", mode[0] == '\0' ? Json(nullptr) : Json(mode) },
             { "move", arg->takes_ownership },
         });
+        if (arg->constructs_in_place) {
+            out.back()["construct"] = true;
+        }
     }
 
     return out;

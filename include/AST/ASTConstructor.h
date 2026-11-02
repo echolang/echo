@@ -170,6 +170,11 @@ namespace AST
     // semantic pipeline settles `Foo(...)`
     void finalize_module_construction(Module &module, Collector &collector);
 
+    // **is this implicit constructor's arity still going to shrink?** init derives fields after
+    // pass 2, so the memberwise list is still wide until finalize_module_construction. CallResolver
+    // waits on this call's candidates; construct-wrap waits on the *target's* constructors
+    bool constructor_arity_pending(const FunctionDeclNode &ctor, const Module *module);
+
     // a private instance property with no initializer. the implicit ctor cannot take it as a
     // public argument and cannot leave it unassigned. null when every private field is initialized
     // or there are none

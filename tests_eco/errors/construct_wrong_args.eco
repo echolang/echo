@@ -1,0 +1,12 @@
+struct RouteMeta
+{
+    public string $path;
+}
+
+function meta<M>(construct M $value) : M
+{
+    return $value;
+}
+
+RouteMeta $m = meta<RouteMeta>(1, 2);
+echo $m->path;

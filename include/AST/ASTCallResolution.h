@@ -101,7 +101,8 @@ namespace AST
             FunctionCallExprNode &call,
             const std::vector<FunctionDeclNode *> &candidates,
             const CodeRef &at,
-            bool report);
+            bool report,
+            NodeCollection &nodes);
     };
 
     // true when any argument still names a type parameter, so finalize stays silent: the call

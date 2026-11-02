@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] construct_not_last.eco:1:10
+
+  'construct' can only sit on the last parameter: remaining call-site arguments build this one.
+
+  1 | function pair(construct int32 $a, int32 $b) : int32
+    :          ^^^^
+  2 | {
+
+1 error, nothing was compiled.

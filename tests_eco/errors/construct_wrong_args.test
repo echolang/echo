@@ -1,0 +1,14 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  construct_wrong_args.eco:11:16
+
+  No constructor of 'RouteMeta' accepts these arguments. Candidates are:
+    RouteMeta(string)
+
+  10 | 
+  11 | RouteMeta $m = meta<RouteMeta>(1, 2);
+     :                ^^^^
+  12 | echo $m->path;
+
+1 error, nothing was compiled.

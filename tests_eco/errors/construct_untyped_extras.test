@@ -1,0 +1,14 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  construct_untyped_extras.eco:6:6
+
+  No overload of 'make' accepts these arguments. Candidates are:
+    make<T>(construct T)
+
+  5 | 
+  6 | echo make(2, 3);
+    :      ^^^^
+  7 | 
+
+1 error, nothing was compiled.

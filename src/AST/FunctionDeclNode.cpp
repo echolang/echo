@@ -83,6 +83,10 @@ std::vector<std::string> AST::FunctionDeclNode::written_parameter_spellings() co
             spelling += ": ";
         }
 
+        if (args[i]->constructs_in_place) {
+            spelling += "construct ";
+        }
+
         // `read` rewrites the pointee to const at parse; the keyword already said that, so
         // printing `read const T&` is one fact twice
         AST::ValueType shown = args[i]->type();

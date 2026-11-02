@@ -1,0 +1,155 @@
+// construct M $value fills the parameter by constructing M from the written arguments
+
+struct Pair
+{
+    int32 $a;
+    int32 $b;
+}
+
+function make<T>(construct T $value) : T
+{
+    return $value;
+}
+
+$p = make<Pair>(2, 3);
+echo $p->a;
+echo $p->b;
+
+echo make<int32>(5);
+
+class Handle
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+echo make<Handle>(7)->n;
+
+struct Packed<T>
+{
+    T $v;
+}
+
+echo make<Packed<int32>>(9)->v;
+box<int32> $boxed = make<box<int32>>(5);
+echo $boxed->get();
+
+#[unique]
+struct Cell
+{
+    int32 $n;
+}
+
+function take_cell(construct Cell $c) : int32
+{
+    return $c->n;
+}
+
+echo take_cell(3);
+Cell $c = Cell(4);
+echo take_cell(mv $c);
+
+struct RouteMeta
+{
+    public string $path;
+}
+
+function plant(construct RouteMeta $m) : string
+{
+    return $m->path;
+}
+
+echo plant('/hello');
+
+enum Method
+{
+    case get;
+    case post;
+}
+
+struct Route
+{
+    public Method $method;
+    public string $path;
+}
+
+function meta<M>(construct M $value) : M
+{
+    return $value;
+}
+
+Route $named = meta<Route>($method: .get, $path: '/users');
+echo $named->path;
+
+Route $pos = meta<Route>(.post, '/bye');
+echo $pos->path;
+
+Route $built = Route(.get, '/x');
+Route $copy = meta<Route>($built);
+echo $copy->path;
+
+function bind<T>(once: construct T $value) : T
+{
+    return $value;
+}
+
+Pair $q = bind<Pair>(once: 8, 9);
+echo $q->a;
+echo $q->b;
+
+function put<M>(string $key, construct M $value) : string
+{
+    return $key;
+}
+
+echo put<Pair>('home', 1, 2);
+echo put<Pair>($key: 'home', $a: 1, $b: 2);
+
+// prefix then construct: $x is the int, remaining args build T
+function tag<T>(int32 $x, construct T $value) : int32
+{
+    return $x * 100 + $value->a * 10 + $value->b;
+}
+
+echo tag<Pair>(4, 1, 2);
+echo tag<Pair>($x: 4, $a: 1, $b: 2);
+echo tag<Pair>(4, $a: 8, $b: 9);
+
+struct Box
+{
+    function meta<M>(construct M $value) : M
+    {
+        return $value;
+    }
+
+    function meta<M>() : int32
+    {
+        return 1;
+    }
+}
+
+Box $b = Box();
+echo $b->meta<RouteMeta>();
+echo $b->meta<RouteMeta>('/z')->path;
+
+// wrap into a type whose init derives a field: pass-2 arity is still wide
+struct SumPair
+{
+    int32 $a;
+    int32 $b;
+    int32 $sum;
+
+    init
+    {
+        $this->sum = $this->a + $this->b;
+    }
+}
+
+SumPair $sp = make<SumPair>(1, 2);
+echo $sp->a;
+echo $sp->b;
+echo $sp->sum;

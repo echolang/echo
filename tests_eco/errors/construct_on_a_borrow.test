@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] construct_on_a_borrow.eco:1:10
+
+  'construct' needs a by-value parameter, not a borrow or a pointer.
+
+  1 | function take(construct int32& $v) : int32
+    :          ^^^^
+  2 | {
+
+1 error, nothing was compiled.

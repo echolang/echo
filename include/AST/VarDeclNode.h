@@ -119,6 +119,12 @@ namespace AST
         // in the mangled name - where the `$name` does not, except as an optional named-arg filter
         std::optional<TokenReference> label_token;
 
+        // written `construct M $value`: the arguments at the call construct `M`, and this parameter
+        // receives the value. here rather than on the ValueType for takes_ownership's reason: the
+        // ABI is still `M`, so `meta(construct M)` and `meta(M)` collide as DuplicateFunctionSignature.
+        // a label on this parameter opens the gather (`once: construct T`) rather than filling one slot
+        bool constructs_in_place = false;
+
         // the attributes written ahead of this property. empty on a local: only a type body
         // drains onto a VarDeclNode
         AttributeList attributes;

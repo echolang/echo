@@ -174,6 +174,11 @@ namespace Parser
     // giving it a second reader would be two answers to which token said `take`
     bool starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &effect);
 
+    // **does `construct` start here?** same contextual rule as an access effect: an identifier
+    // followed by `$name` is the type `construct`, and `construct M $value` is the parameter mode.
+    // not a keyword - `construct` as a function or type name stays legal
+    bool starts_construct_param(Parser::Cursor &cursor);
+
     // reads a parameter list up to and *including* its closing token, appending each parameter to
     // `args` and declaring it in `into`. the cursor must already be past the opening one
     //

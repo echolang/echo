@@ -1,0 +1,25 @@
+struct Dual
+{
+    int32 $n;
+    string $s;
+
+    constructor(int32 $n, string $s)
+    {
+        $this->n = $n;
+        $this->s = $s;
+    }
+
+    constructor(string $s, int32 $n)
+    {
+        $this->n = $n;
+        $this->s = $s;
+    }
+}
+
+function make<T>(construct T $value) : T
+{
+    return $value;
+}
+
+Dual $d = make<Dual>(1, 2);
+echo $d->n;

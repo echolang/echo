@@ -3,6 +3,7 @@
 #include "AST/ASTClone.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTConstruction.h"
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTFile.h"
@@ -547,6 +548,19 @@ void AST::finalize_type_construction(
             declaration_scope.add_funcdecl(*synth);
         }
     }
+}
+
+bool AST::constructor_arity_pending(const AST::FunctionDeclNode &ctor, const AST::Module *module)
+{
+    if (module == nullptr || module->construction_finalized) {
+        return false;
+    }
+
+    if (!ctor.is_implicitly_generated || !ctor.is_constructor()) {
+        return false;
+    }
+
+    return AST::find_init(AST::enclosing_type_of(ctor)) != nullptr;
 }
 
 void AST::finalize_module_construction(AST::Module &module, AST::Collector &collector)

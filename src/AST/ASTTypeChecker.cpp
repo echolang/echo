@@ -13,6 +13,7 @@
 #include "AST/ASTSimd.h"
 #include "AST/ASTCompleteness.h"
 #include "AST/ASTVariadic.h"
+#include "AST/ASTConstructForward.h"
 
 
 #include "AST/ASTConstFold.h"
@@ -262,6 +263,7 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     // there
     check_has_implementation(node);
     check_variadic_args_position(node);
+    check_construct_position(node);
 
     if (node.name_token.has_value()) {
         check_c_function_type(node.get_return_type(), node.name_token.value());
@@ -667,6 +669,18 @@ void TypeChecker::check_variadic_args_position(FunctionDeclNode &node)
     // of an ordinary Echo function - and each of those is a different parser. asking here means the
     // four sentences are written together and cannot drift
     auto refusal = variadic_args_refusal(node, _collector.core_types);
+
+    if (!refusal.has_value() || !node.name_token.has_value()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.name_token.value()), std::move(refusal.value()));
+}
+
+void TypeChecker::check_construct_position(FunctionDeclNode &node)
+{
+    auto refusal = construct_refusal(node);
 
     if (!refusal.has_value() || !node.name_token.has_value()) {
         return;

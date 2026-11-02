@@ -213,6 +213,10 @@ namespace AST
         // see AST::variadic_args_refusal for why it is one question rather than four
         void check_variadic_args_position(FunctionDeclNode &node);
 
+        // where `construct` may sit, asked of the declaration as a whole -
+        // see AST::construct_refusal
+        void check_construct_position(FunctionDeclNode &node);
+
         // every `extern function<R(P...)>` that appears on a declaration, through the one
         // walk in AST::c_function_type_refusal
         void check_c_function_type(const ValueType &type, const TokenReference &at);

@@ -1,5 +1,6 @@
 #include "AST/ASTCallResolution.h"
 
+#include "AST/ASTConstructForward.h"
 #include "AST/ASTVariadic.h"
 
 #include "AST/ASTArgumentBind.h"
@@ -10,11 +11,13 @@
 #include "AST/ASTCast.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTConstructor.h"
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
+#include "Token.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTValueType.h"
@@ -28,6 +31,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <ranges>
 
 namespace AST
@@ -344,17 +348,7 @@ namespace AST
         // is a real empty set. a struct or class looks up the same overload set a written `Foo(...)`
         // already uses: constructors are namespace functions named after the type
         if (!call.constructed_type.is_unknown()) {
-            if (is_undetermined_type(call.constructed_type) || !call.constructed_type.has_complex_type()) {
-                return {};
-            }
-
-            const ComplexType *owner = call.constructed_type.get_complex_type()->template_or_self();
-
-            if (!owner->name.has_value() || owner->ast_namespace == nullptr) {
-                return {};
-            }
-
-            return _collector.functions.overloads(*owner->name, *owner->ast_namespace);
+            return constructors_of(call.constructed_type, _collector.functions);
         }
 
         // a **static** call: the type names the overload set. a closed search - falling through
@@ -429,27 +423,18 @@ namespace AST
         FunctionCallExprNode &call,
         const std::vector<FunctionDeclNode *> &candidates,
         const CodeRef &at,
-        bool report
+        bool report,
+        NodeCollection &nodes
     )
     {
         const std::string &name = call.token_function_name.value();
 
         // pass 2 registers the memberwise constructor with a signature whose arity may still
-        // shrink once `init` has been parsed. only types that declared `init` (the slot is filled
-        // in pass 2, before any body) need this wait - every other implicit constructor's arity
-        // is already final, and leaving those pending until after parse types `$a = Foo(...)`
-        // as void for a round, which PointerAdjuster and CastResolution then mis-read
-        if (at.module != nullptr && !at.module->construction_finalized) {
-            for (auto *candidate : candidates) {
-                if (candidate == nullptr
-                    || !candidate->is_implicitly_generated
-                    || !candidate->is_constructor()) {
-                    continue;
-                }
-
-                if (find_init(enclosing_type_of(*candidate)) != nullptr) {
-                    return Result::t_pending;
-                }
+        // shrink once `init` has been parsed. AST::constructor_arity_pending is the same wait
+        // construct-wrap uses on the *target's* constructors
+        for (auto *candidate : candidates) {
+            if (candidate != nullptr && constructor_arity_pending(*candidate, at.module)) {
+                return Result::t_pending;
             }
         }
 
@@ -457,12 +442,43 @@ namespace AST
         {
             FunctionDeclNode *decl = nullptr;
             ArgumentBinding binding;
+            ConstructWrap wrap;
         };
 
         std::vector<BoundCandidate> bound;
         bound.reserve(candidates.size());
 
+        bool saw_pending_construct = false;
+        ValueType failed_construct_type = ValueType::make_unknown();
+        std::vector<FunctionDeclNode *> failed_construct_ctors;
+
         for (auto *candidate : candidates) {
+            ConstructWrap plan = consider_construct_wrap(
+                *candidate,
+                call,
+                _collector.type_registry,
+                _collector.functions,
+                at.module);
+
+            if (plan.kind == ConstructWrap::Kind::t_pending) {
+                saw_pending_construct = true;
+                continue;
+            }
+
+            if (plan.kind == ConstructWrap::Kind::t_unconstructable) {
+                failed_construct_type = plan.target;
+                failed_construct_ctors = std::move(plan.constructors);
+                continue;
+            }
+
+            if (plan.kind == ConstructWrap::Kind::t_wrap) {
+                bound.push_back(BoundCandidate {
+                    .decl = candidate,
+                    .wrap = std::move(plan),
+                });
+                continue;
+            }
+
             ArgumentBinding binding = bind_arguments(
                 *candidate, call.arguments, call.argument_names);
 
@@ -470,10 +486,25 @@ namespace AST
                 continue;
             }
 
-            bound.push_back(BoundCandidate { candidate, std::move(binding) });
+            bound.push_back(BoundCandidate {
+                .decl = candidate,
+                .binding = std::move(binding),
+            });
         }
 
         if (bound.empty()) {
+            if (saw_pending_construct) {
+                return Result::t_pending;
+            }
+
+            if (!failed_construct_type.is_unknown()) {
+                _collector.collect_issue<Issue::NoMatchingOverload>(at, fmt::format(
+                    "No constructor of '{}' accepts these arguments. Candidates are:{}",
+                    failed_construct_type.get_type_desciption(),
+                    describe_candidates(failed_construct_ctors)));
+                return Result::t_failed;
+            }
+
             // bind failures are final, like t_no_viable: a name that matches nothing, a missing
             // label, an unfilled required parameter. they are not waiting on a later type.
             // construction calls are not resolved at parse, so this is never asked against a
@@ -496,7 +527,15 @@ namespace AST
         for (BoundCandidate &entry : bound) {
             auto *candidate = entry.decl;
             auto parameter_types = candidate->parameter_types();
-            const BoundSlots slots = bound_slots(entry.binding);
+            const ArgumentBinding &binding = entry.wrap.kind == ConstructWrap::Kind::t_wrap
+                ? entry.wrap.binding : entry.binding;
+            BoundSlots slots = bound_slots(binding);
+            if (entry.wrap.kind == ConstructWrap::Kind::t_wrap
+                && entry.wrap.remaining_start < slots.types.size()) {
+                slots.types[entry.wrap.remaining_start] = entry.wrap.target;
+                slots.exprs[entry.wrap.remaining_start] = nullptr;
+                slots.defers[entry.wrap.remaining_start] = false;
+            }
 
             if (filter_instantiation && candidate->is_generic()) {
                 // score a template against the parameters it would actually be instantiated with,
@@ -553,6 +592,14 @@ namespace AST
         switch (match.outcome) {
         case FunctionMatch::Outcome::t_resolved:
             call.decl = match.decl;
+            for (BoundCandidate &entry : bound) {
+                if (entry.decl != match.decl || entry.wrap.kind != ConstructWrap::Kind::t_wrap) {
+                    continue;
+                }
+
+                apply_construct_wrap(call, entry.wrap, nodes);
+                break;
+            }
             call.settlement = CallSettlement::t_uncoerced;
             return Result::t_settled;
 
@@ -673,6 +720,14 @@ namespace AST
                         spelling, describe_operands(argument_types)));
                     return Result::t_failed;
                 }
+            }
+
+            if (!call.constructed_type.is_unknown()) {
+                _collector.collect_issue<Issue::NoMatchingOverload>(at, fmt::format(
+                    "No constructor of '{}' accepts these arguments. Candidates are:{}",
+                    call.constructed_type.get_type_desciption(),
+                    describe_candidates(match.tied.empty() ? candidates : match.tied)));
+                return Result::t_failed;
             }
 
             _collector.collect_issue<Issue::NoMatchingOverload>(at, fmt::format(
@@ -805,7 +860,7 @@ namespace AST
                 return Result::t_unknown_name;
             }
 
-            const auto chosen = choose_declaration(call, candidates, at, report);
+            const auto chosen = choose_declaration(call, candidates, at, report, nodes);
 
             if (chosen == Result::t_failed) {
                 call.settlement = CallSettlement::t_failed;
