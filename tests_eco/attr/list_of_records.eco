@@ -1,0 +1,25 @@
+public struct Item
+{
+    public int32 $n;
+}
+
+public struct Row
+{
+    public slice<Item> $items;
+    public function<int32()> $call;
+}
+
+#[http::get: [{ n: 1 }, { n: 2 }]]
+public function a() : int32
+{
+    return 4;
+}
+
+int32 $sum = 0;
+foreach (attr::of<Row>("http::get") as const &$row) {
+    foreach ($row->items as const &$item) {
+        $sum = $sum + $item->n;
+    }
+    $sum = $sum + $row->call();
+}
+echo $sum;

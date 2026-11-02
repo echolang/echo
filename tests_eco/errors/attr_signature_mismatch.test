@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_signature_mismatch.eco:7:17
+
+  this function is 'function<int32(int32)>', and the collected field wants 'function<int32()>'
+
+  6 | #[http::get]
+  7 | public function listUsers(int32 $n) : int32
+    :                 ^^^^^^^^^
+  8 | {
+
+1 error, nothing was compiled.

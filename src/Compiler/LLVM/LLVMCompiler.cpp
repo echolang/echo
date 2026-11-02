@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/LLVMCompiler.h"
 
+#include "Compiler/LLVM/Codegen/AttrCollectCodegen.h"
 #include "Compiler/LLVM/Codegen/Emit.h"
 #include "Compiler/LLVM/OdrComparison.h"
 #include "Compiler/PhaseTimings.h"
@@ -319,6 +320,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // which declared type is `string`, published before anything is lowered: gen_literal_string builds a
     // constant of it, so it has to be answerable from the first expression onward
     _ctx.core_types_ptr = &bundle.collector.core_types;
+    _ctx.attr_plans = &bundle.collector.attr_plans;
 
     _ctx.program_hashes = std::any_of(
         bundle.modules.begin(),
@@ -448,6 +450,11 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         throw Compiler::InternalCompilerException(fmt::format(
             "no entry module '{}' in the bundle", _ctx.entry_module_name), nullptr);
     }
+
+    // after bodies so adapters can name the collected functions, before the drain so an
+    // ODR callee the table references still gets a body in this unit
+    _ctx.current_cmp_unit = main_cmp_unit;
+    Compiler::LLVM::emit_attr_tables(_ctx);
 
     // a reactor has no entry: crt1-reactor.o provides `_initialize`, and the
     // surface is the module's exports. skip the call rather than wrapping the

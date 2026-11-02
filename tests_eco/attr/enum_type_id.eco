@@ -1,0 +1,16 @@
+public struct Tagged
+{
+    public type_id $id;
+}
+
+#[http::component]
+public enum Color
+{
+    case red;
+    case blue;
+}
+
+echo attr::of<Tagged>("http::component")->count();
+foreach (attr::of<Tagged>("http::component") as const &$row) {
+    echo $row->id == type_id<Color>();
+}

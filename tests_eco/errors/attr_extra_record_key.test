@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_extra_record_key.eco:7:3
+
+  'Route' has no field named 'extra' to fill from this attribute
+
+  6 | 
+  7 | #[http::get: { path: "/a", extra: 1 }]
+    :   ^^^^^^^^^
+  8 | public function a() : int32
+
+1 error, nothing was compiled.

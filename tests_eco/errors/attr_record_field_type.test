@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_record_field_type.eco:7:3
+
+  'http::get' fills 'path' with a number, and 'path' is 'string'
+
+  6 | 
+  7 | #[http::get: { path: 1 }]
+    :   ^^^^^^^^^
+  8 | public function a() : int32
+
+1 error, nothing was compiled.

@@ -309,6 +309,7 @@ namespace AST
         // every other call
         void check_abort_message(FunctionCallExprNode &node);
         void check_embed_argument(FunctionCallExprNode &node);
+        void check_attr_of_call(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_unsafe_builtin(FunctionCallExprNode &node);
         void check_abi_slot_symbol(FunctionCallExprNode &node);

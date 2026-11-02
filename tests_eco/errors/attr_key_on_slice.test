@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_key_on_slice.eco:13:12
+
+  'methods' is 'slice<string>', not a scalar payload field to key on
+
+  12 | 
+  13 | echo attr::of<Route>("http::get", "methods")->count();
+     :            ^^
+  14 | 
+
+1 error, nothing was compiled.

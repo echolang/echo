@@ -73,6 +73,7 @@ namespace
             { "abi_bind_unchecked", AST::BuiltinKind::t_abi_bind_unchecked },
             { "embed_text", AST::BuiltinKind::t_embed_text },
             { "embed_bytes", AST::BuiltinKind::t_embed_bytes },
+            { "attr_of", AST::BuiltinKind::t_attr_of },
         };
         return table;
     }
@@ -182,6 +183,7 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_bind_unchecked:
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
+        case AST::BuiltinKind::t_attr_of:
             return AST::BuiltinFoldability::t_not_a_query;
     }
 
@@ -254,6 +256,7 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_bind_unchecked:
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
+        case AST::BuiltinKind::t_attr_of:
             return false;
     }
 
@@ -328,6 +331,7 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_bind_unchecked:
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
+        case AST::BuiltinKind::t_attr_of:
             return false;
     }
 
@@ -410,6 +414,7 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_bind_unchecked:
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
+        case AST::BuiltinKind::t_attr_of:
             return std::nullopt;
     }
 
@@ -481,6 +486,7 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_abi_bind_unchecked:
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
+        case AST::BuiltinKind::t_attr_of:
             return false;
     }
 

@@ -1,0 +1,12 @@
+public struct Tagged
+{
+    public type_id $id;
+}
+
+#[http::component]
+public struct Box<T>
+{
+    public T $v;
+}
+
+echo attr::of<Tagged>("http::component")->count();

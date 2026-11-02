@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_duplicate_empty_key.eco:13:3
+
+  '' is used twice as the 'path' of 'http::get'
+
+  12 | 
+  13 | #[http::get: ""]
+     :   ^^^^^^^^^
+  14 | public function alsoUsers() : int32
+
+1 error, nothing was compiled.

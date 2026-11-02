@@ -1,0 +1,24 @@
+public struct Route
+{
+    public string $path;
+    public function<int32()> $call;
+}
+
+#[http::get: "/users"]
+public function listUsers() : int32
+{
+    return 1;
+}
+
+#[http::get: "/users/{id}"]
+public function showUser() : int32
+{
+    return 2;
+}
+
+int32 $sum = 0;
+foreach (attr::of<Route>("http::get") as const &$row) {
+    $sum = $sum + $row->call();
+}
+echo $sum;
+echo attr::of<Route>("http::get")->count();

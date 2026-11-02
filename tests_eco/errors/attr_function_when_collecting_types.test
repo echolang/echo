@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_function_when_collecting_types.eco:7:17
+
+  this attribute collects types, not functions
+
+  6 | #[http::component]
+  7 | public function a() : int32
+    :                 ^
+  8 | {
+
+1 error, nothing was compiled.

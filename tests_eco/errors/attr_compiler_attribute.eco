@@ -1,0 +1,6 @@
+public struct Row
+{
+    public function<int32()> $call;
+}
+
+echo attr::of<Row>("echoc::builtin")->count();

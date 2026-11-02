@@ -43,6 +43,7 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTEmbed.h"
+#include "AST/ASTAttrCollect.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTMemberLookup.h"
@@ -249,6 +250,8 @@ void TypeChecker::run()
         AST::check_class_locals(*module_ptr, _collector);
         AST::check_enum_maps(_collector, *module_ptr);
     }
+
+    AST::check_attr_collects(_collector, _bundle);
 }
 
 void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
@@ -1734,6 +1737,19 @@ void TypeChecker::check_embed_argument(FunctionCallExprNode &node)
     }
 }
 
+void TypeChecker::check_attr_of_call(FunctionCallExprNode &node)
+{
+    AttrPlan *plan = attr_plan_for(node, _collector);
+    if (plan == nullptr) {
+        return;
+    }
+
+    if (plan->status == AttrPlanStatus::t_refused) {
+        const TokenReference &at = plan->at.has_value() ? plan->at.value() : node.token_function_name;
+        _collector.collect_issue<Issue::CannotCollectAttribute>(code_ref_for(at), plan->refusal);
+    }
+}
+
 // a `const` value may only be handed to a method that promised to read it. the promise is the
 // receiver's own type - `const Foo&` at args[0] - so the *fit* already refuses this, and what is
 // left is which of the two diagnostics the reader gets: the conversion's, which names a pointee they
@@ -1935,6 +1951,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 
         check_abort_message(node);
         check_embed_argument(node);
+        check_attr_of_call(node);
         check_ref_count_argument(node);
         check_raw_storage_argument(node);
         check_atomic_operand(node);

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_no_target.eco:6:12
+
+  attr::of<T> needs one target field: a function<...>, an extern function<...>, or a type_id
+
+  5 | 
+  6 | echo attr::of<Route>("http::get")->count();
+    :            ^^
+  7 | 
+
+1 error, nothing was compiled.

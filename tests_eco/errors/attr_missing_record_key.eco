@@ -1,0 +1,14 @@
+public struct Route
+{
+    public string $path;
+    public int32 $n;
+    public function<int32()> $call;
+}
+
+#[http::get: { path: "/a" }]
+public function a() : int32
+{
+    return 1;
+}
+
+echo attr::of<Route>("http::get")->count();

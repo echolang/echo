@@ -1,0 +1,18 @@
+public struct Inner
+{
+    public function<int32()> $go;
+}
+
+public struct Route
+{
+    public Inner $inner;
+    public function<int32()> $call;
+}
+
+#[http::get: { inner: { } }]
+public function a() : int32
+{
+    return 1;
+}
+
+echo attr::of<Route>("http::get")->count();

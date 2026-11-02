@@ -1,0 +1,13 @@
+public struct Route
+{
+    public map<string, string> $headers;
+    public function<int32()> $call;
+}
+
+#[http::get: { headers: { auth: "bearer" } }]
+public function a() : int32
+{
+    return 1;
+}
+
+echo attr::of<Route>("http::get")->count();

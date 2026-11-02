@@ -1,0 +1,13 @@
+public struct Route
+{
+    public slice<string> $methods;
+    public function<int32()> $call;
+}
+
+#[http::get: ["GET"]]
+public function a() : int32
+{
+    return 1;
+}
+
+echo attr::of<Route>("http::get", "methods")->count();

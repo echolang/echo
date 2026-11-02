@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_two_targets.eco:7:12
+
+  attr::of<T> needs exactly one target field, and this struct has more than one
+
+  6 | 
+  7 | echo attr::of<Route>("http::get")->count();
+    :            ^^
+  8 | 
+
+1 error, nothing was compiled.

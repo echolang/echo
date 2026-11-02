@@ -1,0 +1,8 @@
+public struct Route
+{
+    public string $path;
+    public function<int32()> $call;
+}
+
+string $k = "path";
+echo attr::of<Route>("http::get", $k)->count();

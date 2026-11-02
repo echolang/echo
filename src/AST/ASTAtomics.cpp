@@ -70,6 +70,7 @@ namespace AST
             case BuiltinKind::t_abi_bind_unchecked:
             case BuiltinKind::t_embed_text:
             case BuiltinKind::t_embed_bytes:
+            case BuiltinKind::t_attr_of:
                 return false;
         }
 

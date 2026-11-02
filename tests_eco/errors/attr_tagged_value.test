@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_tagged_value.eco:7:3
+
+  a collected attribute cannot be tagged
+
+  6 | 
+  7 | #[http::get: get "/a"]
+    :   ^^^^^^^^^
+  8 | public function a() : int32
+
+1 error, nothing was compiled.

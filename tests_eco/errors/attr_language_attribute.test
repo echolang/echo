@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_language_attribute.eco:6:12
+
+  'inline' is not a tool attribute; attr::of collects names like 'http::get'
+
+  5 | 
+  6 | echo attr::of<Row>("inline")->count();
+    :            ^^
+  7 | 
+
+1 error, nothing was compiled.

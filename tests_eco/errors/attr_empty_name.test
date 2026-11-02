@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_empty_name.eco:6:12
+
+  attr::of needs an attribute name, not an empty string
+
+  5 | 
+  6 | echo attr::of<Route>("")->count();
+    :            ^^
+  7 | 
+
+1 error, nothing was compiled.

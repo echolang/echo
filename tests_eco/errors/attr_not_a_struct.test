@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_not_a_struct.eco:6:12
+
+  attr::of<T> needs T to be a struct
+
+  5 | 
+  6 | echo attr::of<int32>("http::get")->count();
+    :            ^^
+  7 | 
+
+1 error, nothing was compiled.

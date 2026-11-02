@@ -1,0 +1,16 @@
+public struct Route
+{
+    public function<int32()> $call;
+}
+
+#[http::get]
+private function hidden() : int32
+{
+    return 7;
+}
+
+int32 $sum = 0;
+foreach (attr::of<Route>("http::get") as const &$row) {
+    $sum = $sum + $row->call();
+}
+echo $sum;

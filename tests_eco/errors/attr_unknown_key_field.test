@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_unknown_key_field.eco:7:12
+
+  'Route' has no field named 'missing' to use as a unique key
+
+  6 | 
+  7 | echo attr::of<Route>("http::get", "missing")->count();
+    :            ^^
+  8 | 
+
+1 error, nothing was compiled.

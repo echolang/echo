@@ -1,0 +1,20 @@
+public struct Box
+{
+    public int32 $n;
+
+    #[http::get]
+    public constructor()
+    {
+        $this->n = 7;
+    }
+}
+
+public struct Route
+{
+    public function<Box()> $call;
+}
+
+foreach (attr::of<Route>("http::get") as const &$row) {
+    Box $b = $row->call();
+    echo $b->n;
+}

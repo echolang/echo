@@ -1,0 +1,12 @@
+public struct Tagged
+{
+    public type_id $id;
+}
+
+#[http::component]
+public function a() : int32
+{
+    return 1;
+}
+
+echo attr::of<Tagged>("http::component")->count();

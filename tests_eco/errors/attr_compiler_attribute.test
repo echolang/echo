@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_compiler_attribute.eco:6:12
+
+  'echoc::builtin' is not a tool attribute; attr::of collects names like 'http::get'
+
+  5 | 
+  6 | echo attr::of<Row>("echoc::builtin")->count();
+    :            ^^
+  7 | 
+
+1 error, nothing was compiled.

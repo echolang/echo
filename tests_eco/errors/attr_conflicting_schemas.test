@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_conflicting_schemas.eco:18:12
+
+  attr::of collects 'http::get' as 'Other', and another call collects it as 'Route'
+
+  17 | echo attr::of<Route>("http::get")->count();
+  18 | echo attr::of<Other>("http::get")->count();
+     :            ^^
+  19 | 
+
+1 error, nothing was compiled.

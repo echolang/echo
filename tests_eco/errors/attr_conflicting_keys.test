@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_conflicting_keys.eco:15:12
+
+  attr::of collects 'http::get' keyed on 'path', and another call keys it on 'id'
+
+  14 | echo attr::of<Route>("http::get", "path")->count();
+  15 | echo attr::of<Route>("http::get", "id")->count();
+     :            ^^
+  16 | 
+
+1 error, nothing was compiled.

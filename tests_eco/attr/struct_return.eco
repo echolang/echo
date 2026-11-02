@@ -1,0 +1,22 @@
+public struct Point
+{
+    public int32 $x;
+    public int32 $y;
+}
+
+public struct Row
+{
+    public function<Point()> $call;
+}
+
+#[http::get]
+public function origin() : Point
+{
+    return Point(3, 4);
+}
+
+foreach (attr::of<Row>("http::get") as const &$row) {
+    Point $p = $row->call();
+    echo $p->x;
+    echo $p->y;
+}

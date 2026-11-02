@@ -1,0 +1,15 @@
+public struct Route
+{
+    public function<int32()> $call;
+}
+
+public struct Box
+{
+    #[http::get]
+    public function hidden() : int32
+    {
+        return 1;
+    }
+}
+
+echo attr::of<Route>("http::get")->count();

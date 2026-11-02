@@ -526,6 +526,10 @@ llvm::Function *TypeLowering::ensure_function_adapt(
         *_ctx.current_cmp_unit,
         shape);
 
+    const ReturnAbi abi = c_abi
+        ? ReturnAbi{}
+        : return_abi_of(decl, *_ctx.current_cmp_unit);
+
     llvm::Function *adapt = llvm::Function::Create(
         adapt_ty,
         c_abi ? llvm::GlobalValue::InternalLinkage : llvm::GlobalValue::LinkOnceODRLinkage,
@@ -533,6 +537,13 @@ llvm::Function *TypeLowering::ensure_function_adapt(
         _ctx.current_module());
 
     apply_c_integer_ext(*adapt, signature, shape);
+
+    // **sret on the adapter itself.** the indirect call site already marks the call; without
+    // the same attribute on this definition AArch64 still reads the hidden pointer as x0
+    // (the environment, which is null)
+    if (abi.is_indirect() && adapt->arg_size() > 0) {
+        adapt->addParamAttrs(0, indirect_return_attributes(*_ctx.llvm_context, abi, _ctx.layout()));
+    }
 
     llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
     _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
@@ -542,7 +553,6 @@ llvm::Function *TypeLowering::ensure_function_adapt(
     unsigned i = 0;
 
     if (!c_abi) {
-        const ReturnAbi abi = return_abi_of(decl, *_ctx.current_cmp_unit);
         if (abi.is_indirect()) {
             forwarded.push_back(adapt->getArg(i++));
         }
@@ -570,6 +580,15 @@ llvm::Function *TypeLowering::ensure_function_adapt(
     llvm::CallInst *call = _ctx.builder->CreateCall(target, forwarded);
     if (c_abi) {
         call->setTailCall(true);
+    }
+
+    // **sret on the call**, same as emit_call: a missing attribute on AArch64 puts the
+    // hidden pointer in the wrong register, and a callable that returns an aggregate
+    // writes through null
+    if (abi.is_indirect()) {
+        call->setAttributes(call->getAttributes().addParamAttributes(
+            *_ctx.llvm_context, 0,
+            indirect_return_attributes(*_ctx.llvm_context, abi, _ctx.layout())));
     }
 
     if (adapt->getReturnType()->isVoidTy()) {

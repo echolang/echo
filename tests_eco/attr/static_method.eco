@@ -1,0 +1,17 @@
+public struct Box
+{
+    #[http::get]
+    public static function hidden() : int32
+    {
+        return 9;
+    }
+}
+
+public struct Route
+{
+    public function<int32()> $call;
+}
+
+foreach (attr::of<Route>("http::get") as const &$row) {
+    echo $row->call();
+}

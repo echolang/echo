@@ -1,0 +1,24 @@
+public struct Route
+{
+    public string $path;
+    public int32 $n;
+    public function<int32()> $call;
+}
+
+#[http::get: { path: "/a", n: 10 }]
+public function a() : int32
+{
+    return 1;
+}
+
+#[http::get: { path: "/b", n: 20 }]
+public function b() : int32
+{
+    return 2;
+}
+
+int32 $sum = 0;
+foreach (attr::of<Route>("http::get") as const &$row) {
+    $sum = $sum + $row->n + $row->call();
+}
+echo $sum;

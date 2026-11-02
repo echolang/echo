@@ -1,0 +1,24 @@
+public struct Get
+{
+    public function<int32()> $call;
+}
+
+public struct Post
+{
+    public function<int32()> $call;
+}
+
+#[http::get]
+public function g() : int32
+{
+    return 1;
+}
+
+#[http::post]
+public function p() : int32
+{
+    return 2;
+}
+
+echo attr::of<Get>("http::get")->count();
+echo attr::of<Post>("http::post")->count();

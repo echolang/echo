@@ -1,0 +1,14 @@
+public struct Row
+{
+    public function<string()> $call;
+}
+
+#[http::get]
+public function greet() : string
+{
+    return "hi";
+}
+
+foreach (attr::of<Row>("http::get") as const &$row) {
+    echo $row->call();
+}

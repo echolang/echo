@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_missing_record_key.eco:8:3
+
+  'n' is missing from this 'http::get' attribute
+
+  7 | 
+  8 | #[http::get: { path: "/a" }]
+    :   ^^^^^^^^^
+  9 | public function a() : int32
+
+1 error, nothing was compiled.

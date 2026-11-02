@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_list_into_array.eco:13:12
+
+  attr::of<T> cannot fill 'methods' of type 'array<string>'
+
+  12 | 
+  13 | echo attr::of<Route>("http::get")->count();
+     :            ^^
+  14 | 
+
+1 error, nothing was compiled.

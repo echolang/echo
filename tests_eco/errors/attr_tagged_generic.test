@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_tagged_generic.eco:7:17
+
+  a generic function has no single instance to collect
+
+  6 | #[http::get]
+  7 | public function handle<T>(T $v) : int32
+    :                 ^^^^^^
+  8 | {
+
+1 error, nothing was compiled.

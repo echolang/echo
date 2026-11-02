@@ -1,0 +1,14 @@
+public struct Route
+{
+    public extern function<int32()> $call;
+}
+
+#[http::get]
+public function one() : int32
+{
+    return 4;
+}
+
+foreach (attr::of<Route>("http::get") as const &$row) {
+    echo $row->call();
+}

@@ -1,0 +1,26 @@
+public struct Opts
+{
+    public bool $auth;
+}
+
+public struct Route
+{
+    public string $path;
+    public slice<string> $methods;
+    public Opts $opts;
+    public function<int32()> $call;
+}
+
+#[http::get: { path: "/users", methods: ["GET", "HEAD"], opts: { auth: true } }]
+public function listUsers() : int32
+{
+    return 7;
+}
+
+foreach (attr::of<Route>("http::get") as const &$row) {
+    echo $row->path;
+    echo $row->methods->count();
+    echo $row->methods[0];
+    echo $row->opts->auth;
+    echo $row->call();
+}

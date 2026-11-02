@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] ConstViolation  attr_table_write.eco:14:16
+
+  Const violation: cannot write through 'const string&' - its pointee is const
+
+  13 | slice<const Route> $rows = attr::of<Route>("http::get");
+  14 | $rows[0]->path = "/x";
+     :                ^
+  15 | 
+
+1 error, nothing was compiled.

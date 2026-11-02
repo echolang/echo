@@ -1,0 +1,16 @@
+public struct Row
+{
+    public slice<int32> $ns;
+    public function<int32()> $call;
+}
+
+#[http::get: []]
+public function a() : int32
+{
+    return 1;
+}
+
+foreach (attr::of<Row>("http::get") as const &$row) {
+    echo $row->ns->count();
+    echo $row->call();
+}

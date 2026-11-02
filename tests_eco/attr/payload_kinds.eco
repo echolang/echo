@@ -1,0 +1,20 @@
+public struct Route
+{
+    public int32 $n;
+    public bool $ok;
+    public float64 $w;
+    public function<int32()> $call;
+}
+
+#[http::get: { n: 3, ok: true, w: 1.5 }]
+public function a() : int32
+{
+    return 10;
+}
+
+foreach (attr::of<Route>("http::get") as const &$row) {
+    echo $row->n;
+    echo $row->ok;
+    echo $row->w;
+    echo $row->call();
+}

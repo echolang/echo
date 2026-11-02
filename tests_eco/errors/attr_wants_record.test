@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_wants_record.eco:8:3
+
+  'http::get' wants a record { ... } when 'Route' has more than one payload field
+
+  7 | 
+  8 | #[http::get: "/a"]
+    :   ^^^^^^^^^
+  9 | public function a() : int32
+
+1 error, nothing was compiled.

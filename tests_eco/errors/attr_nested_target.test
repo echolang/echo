@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_nested_target.eco:18:12
+
+  a nested payload struct cannot hold a collected target, and 'Inner' does
+
+  17 | 
+  18 | echo attr::of<Route>("http::get")->count();
+     :            ^^
+  19 | 
+
+1 error, nothing was compiled.

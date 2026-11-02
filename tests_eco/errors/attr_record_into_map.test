@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_record_into_map.eco:13:12
+
+  attr::of<T> cannot fill 'headers' of type 'map<string,string>'
+
+  12 | 
+  13 | echo attr::of<Route>("http::get")->count();
+     :            ^^
+  14 | 
+
+1 error, nothing was compiled.

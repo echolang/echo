@@ -1,0 +1,14 @@
+public struct Route
+{
+    public string $path;
+    public function<int32()> $call;
+}
+
+#[http::get: "/a"]
+public function a() : int32
+{
+    return 1;
+}
+
+slice<const Route> $rows = attr::of<Route>("http::get");
+$rows[0]->path = "/x";

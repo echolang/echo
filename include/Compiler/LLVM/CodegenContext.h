@@ -47,6 +47,7 @@ namespace AST
     class VarDeclNode;
     class FunctionDeclNode;
     class ChainBaseNode;
+    class AttrPlanTable;
 };
 
 namespace Compiler::LLVM
@@ -85,6 +86,11 @@ namespace Compiler::LLVM
         // by compile_bundle rather than reached for, so codegen never holds the whole collector - the
         // only thing it needs from it is which declared type is `string`
         const AST::CoreTypes *core_types_ptr = nullptr;
+
+        // interned attr::of tables, published beside core_types so the builtin call and
+        // emit_attr_tables agree on one plan. AttrPlanTable is forward-declared; the AST owner
+        // is the complete type
+        const AST::AttrPlanTable *attr_plans = nullptr;
 
         // **can anything in this program hash a key**: a `#[echoc::builtin: hash_seed]` is in the bundle.
         // without it the startup draw is a getenv and an entropy call nothing would ever read

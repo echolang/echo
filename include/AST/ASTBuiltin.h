@@ -261,6 +261,10 @@ namespace AST
         // land in the binary as a `string` or a `string::view`. AST::embed_plan_for is the owner
         t_embed_text,
         t_embed_bytes,
+
+        // `attr::of<T>`. the matching declarations are collected at compile time; codegen
+        // returns a slice over a constant table. AST::attr_plan_for is the owner
+        t_attr_of,
     };
 
     // **can this builtin be answered before codegen, and if not, why not?**

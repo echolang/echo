@@ -13,6 +13,7 @@
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTNode.h"
+#include "AST/ASTAttrCollect.h"
 
 #include "Token.h"
 
@@ -47,6 +48,9 @@ namespace AST
         // what every parser already has at hand through Payload::collector, and because the binding must
         // outlive the module that declared it: a literal in *any* file resolves against it
         CoreTypes core_types = CoreTypes();
+
+        // interned by AST::attr_plan_for, keyed on attribute name plus the schema type
+        AttrPlanTable attr_plans;
 
         // create a registry for the native scalar cast types
 

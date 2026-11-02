@@ -1,0 +1,19 @@
+public struct Route
+{
+    public string $path;
+    public function<int32()> $call;
+}
+
+#[http::get: "/users"]
+public function listUsers() : int32
+{
+    return 1;
+}
+
+#[http::get: "/users"]
+public function alsoUsers() : int32
+{
+    return 2;
+}
+
+echo attr::of<Route>("http::get", "path")->count();

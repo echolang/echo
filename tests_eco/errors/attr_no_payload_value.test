@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_no_payload_value.eco:6:3
+
+  'http::get' has a value, and 'Route' has no payload field to fill
+
+  5 | 
+  6 | #[http::get: "/x"]
+    :   ^^^^^^^^^
+  7 | public function a() : int32
+
+1 error, nothing was compiled.

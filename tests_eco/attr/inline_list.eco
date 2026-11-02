@@ -1,0 +1,17 @@
+public struct Row
+{
+    public int32[2] $pair;
+    public function<int32()> $call;
+}
+
+#[http::get: [8, 9]]
+public function a() : int32
+{
+    return 1;
+}
+
+foreach (attr::of<Row>("http::get") as const &$row) {
+    echo $row->pair[0];
+    echo $row->pair[1];
+    echo $row->call();
+}

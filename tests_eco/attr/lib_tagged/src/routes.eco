@@ -1,0 +1,7 @@
+namespace tagged;
+
+#[http::get]
+public function one() : int32
+{
+    return 1;
+}

@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 
 #include "AST/ASTEmbed.h"
+#include "Compiler/LLVM/Codegen/AttrCollectCodegen.h"
 #include "AST/ConstantDataExprNode.h"
 #include "AST/MatchExprNode.h"
 
@@ -1152,6 +1153,10 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_embed_bytes:
             gen_embed_builtin(node, kind);
             return;
+
+        case AST::BuiltinKind::t_attr_of:
+            Compiler::LLVM::gen_attr_of_builtin(_ctx, node);
+            return;
     }
 }
 
@@ -1425,6 +1430,7 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_abi_bind_unchecked:
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
+        case AST::BuiltinKind::t_attr_of:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }

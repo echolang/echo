@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_tagged_method.eco:9:21
+
+  a method has a receiver this callable field does not take
+
+   8 |     #[http::get]
+   9 |     public function hidden() : int32
+     :                     ^^^^^^
+  10 |     {
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_duplicate_int_key.eco:13:3
+
+  '1' is used twice as the 'n' of 'http::get'
+
+  12 | 
+  13 | #[http::get: 1]
+     :   ^^^^^^^^^
+  14 | public function b() : int32
+
+1 error, nothing was compiled.

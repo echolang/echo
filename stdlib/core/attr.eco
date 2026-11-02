@@ -1,0 +1,23 @@
+/**
+ * Compile-time discovery of tagged declarations.
+ *
+ * `#[http::get: "/users"]` is a tool attribute: echoc carries it and otherwise ignores it.
+ * `attr::of<T>` is the language-level consumer. It walks the program for that name, checks each
+ * hit against `T`, and answers a `slice<const T>` over a constant table. The set is closed when
+ * the program is compiled. Adding a tagged function and not rebuilding cannot change it.
+ *
+ * Tagging is how a declaration publishes itself into the table, including a `private` one.
+ * `T` is the schema. Exactly one field is the target: a `function<...>`, an `extern function<...>`,
+ * or a `type_id`. Every other field is filled from the attribute value.
+ */
+
+namespace attr;
+
+/**
+ * Every declaration tagged `$name`, as rows of `T`.
+ *
+ * `$name` is a string literal (`"http::get"`). `$key` is empty, or a field of `T` whose values
+ * must be unique across the table.
+ */
+#[echoc::builtin: attr_of]
+public function of<T>(string $name, string $key = '') : slice<const T>;

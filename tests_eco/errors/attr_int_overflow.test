@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_int_overflow.eco:7:3
+
+  300 does not fit in 'n' of 'uint8'
+
+  6 | 
+  7 | #[http::get: 300]
+    :   ^^^^^^^^^
+  8 | public function a() : int32
+
+1 error, nothing was compiled.

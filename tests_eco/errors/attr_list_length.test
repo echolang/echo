@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_list_length.eco:7:3
+
+  this list has 3 elements, and 'pair' is 'int32[2]'
+
+  6 | 
+  7 | #[http::get: [1, 2, 3]]
+    :   ^^^^^^^^^
+  8 | public function a() : int32
+
+1 error, nothing was compiled.

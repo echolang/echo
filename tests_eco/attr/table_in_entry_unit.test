@@ -1,0 +1,13 @@
+modules: attr/lib_tagged
+mode: build
+flags: --optimize none
+
+--- OUT --->
+1
+--- UNIT_IR --->
+# table defined in the entry unit; the tagged function is a declare here, so the
+# dependency's object is a function of its own source
+CHECK: [unit main]
+CHECK: @__eco_attr_
+CHECK: constant
+CHECK: declare dso_local i32 @_tagged_oneZ

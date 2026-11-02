@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_generic_type.eco:7:15
+
+  a generic type has no single identity to collect
+
+  6 | #[http::component]
+  7 | public struct Box<T>
+    :               ^^^
+  8 | {
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_key_must_fold.eco:8:12
+
+  attr::of needs a string literal as its key field name
+
+  7 | string $k = "path";
+  8 | echo attr::of<Route>("http::get", $k)->count();
+    :            ^^
+  9 | 
+
+1 error, nothing was compiled.

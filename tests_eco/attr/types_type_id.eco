@@ -1,0 +1,27 @@
+public struct Tagged
+{
+    public type_id $id;
+}
+
+#[http::component]
+public struct Alpha
+{
+    public int32 $n;
+}
+
+#[http::component]
+public class Beta
+{
+    public int32 $n;
+}
+
+int32 $n = 0;
+foreach (attr::of<Tagged>("http::component") as const &$row) {
+    if ($row->id == type_id<Alpha>()) {
+        $n = $n + 1;
+    }
+    if ($row->id == type_id<Beta>()) {
+        $n = $n + 10;
+    }
+}
+echo $n;

@@ -1,0 +1,7 @@
+flags: --optimize none
+
+--- OUT --->
+1
+--- IR --->
+CHECK: @__eco_attr_
+CHECK: constant

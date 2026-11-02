@@ -1,0 +1,17 @@
+public struct Route
+{
+    public function<int32()> $call;
+}
+
+#[http::get]
+public function one() : int32
+{
+    return 1;
+}
+
+function wrap<T>() : usize
+{
+    return attr::of<T>("http::get")->count();
+}
+
+echo wrap<Route>();

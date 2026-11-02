@@ -96,6 +96,11 @@ ISSUE_MESSAGE_FNC(CannotEmbed)
     return _message;
 }
 
+ISSUE_MESSAGE_FNC(CannotCollectAttribute)
+{
+    return _message;
+}
+
 ISSUE_MESSAGE_FNC(UnknownFunction)
 {
     return fmt::format("The function '{}' could not be found", function_name);

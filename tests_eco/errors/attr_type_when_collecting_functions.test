@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_type_when_collecting_functions.eco:7:15
+
+  this attribute collects functions, not types
+
+  6 | #[http::get]
+  7 | public struct Alpha
+    :               ^^^^^
+  8 | {
+
+1 error, nothing was compiled.

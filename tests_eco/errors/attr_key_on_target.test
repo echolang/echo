@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCollectAttribute  attr_key_on_target.eco:12:12
+
+  'call' is the collected target of 'Route', not a payload field to key on
+
+  11 | 
+  12 | echo attr::of<Route>("http::get", "call")->count();
+     :            ^^
+  13 | 
+
+1 error, nothing was compiled.
