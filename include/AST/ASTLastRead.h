@@ -17,7 +17,7 @@ namespace AST
     // set only when all of these hold
     //
     //   - it sits in a `return`, or it is a collection-literal hoist (`statement_temp`)
-    //     whose last mention is this read (the temp dies with the statement)
+    //     whose last mention is a by-value read (a borrow of `$__lit` still needs the temp)
     //   - last mention in source order
     //   - only mention in its statement (`return $out->fold($out)` stays a copy)
     //   - no loop / rejoining branch that does not also enclose the declaration

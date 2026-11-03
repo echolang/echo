@@ -513,7 +513,10 @@ std::unordered_set<const AST::ExprNode *> AST::handover_reads_in(
                 continue;
             }
 
-            if (hoist_temp || mention.returning) {
+            // a `$__litN` at a borrow (`str::join([...], $sep)`) is still live for the call;
+            // only a by-value last mention hands it over. returning is the other gate, same as
+            // a named local: `return [1, 2]` moves the hoist
+            if (mention.returning || (hoist_temp && mention.consuming)) {
                 reads.insert(mention.node);
             }
         }

@@ -28,6 +28,10 @@ namespace AST
         bool is_generic = false;
         std::vector<ValueType> argument_types;
         std::vector<ExprNode *> arguments;
+        // parallel to argument_types. a slot bound_slots already knows cannot fit (a collection
+        // dest that cannot fill). empty means none. match_function drops the candidate before
+        // argument_fit, which would wait on the still-unknown type
+        std::vector<bool> rejected;
     };
 
     struct FunctionMatch

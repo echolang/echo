@@ -1,0 +1,22 @@
+// fill is dest shape. a settled entry that cannot sit in it drops that candidate, so
+// `['a']` at `array<int32>` loses to `array<string>` instead of winning on by-value exact
+
+function take(const array<int32>& $a) : string { return 'int'; }
+function take(const array<string>& $a) : string { return 'str'; }
+
+echo take(['a']);
+
+function grab(array<int32> $a) : string { return 'int'; }
+function grab(const array<string>& $a) : string { return 'str'; }
+
+echo grab(['a']);
+
+function nest(const array<array<int32>>& $a) : string { return 'int'; }
+function nest(const array<array<string>>& $a) : string { return 'str'; }
+
+echo nest([['a']]);
+
+function keyed(map<int32, int32> $m) : string { return 'int'; }
+function keyed(const map<string, int32>& $m) : string { return 'str'; }
+
+echo keyed(['a' => 1]);

@@ -155,7 +155,7 @@ namespace AST
         // does not exist
         struct FlowFacts
         {
-            using MemberPath = std::vector<std::string>;
+            typedef std::vector<std::string> MemberPath;
 
             // declarations whose value has been moved out. a moved local is neither readable nor
             // dropped - "its destructor travelled with the value"

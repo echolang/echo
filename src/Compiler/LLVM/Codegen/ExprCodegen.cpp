@@ -1525,8 +1525,7 @@ void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::B
     // and a block address. **nullable**, because that is the whole of what these three promise: `alloc`
     // hands back null when the allocator could not, `free` accepts null, and `realloc` takes and returns
     // it - which is why the raw allocator is spelled `ptr<uint8>` in the stdlib and not `uint8&`
-    const AST::ValueType block_type = AST::ValueType::make_pointer(
-        AST::ValueType(AST::ValueTypePrimitive::t_uint8), /*nullable=*/true);
+    const AST::ValueType block_type = AST::ValueType::make_pointer(AST::ValueType(AST::ValueTypePrimitive::t_uint8), /*nullable=*/true);
 
     std::vector<llvm::Value *> args;
 

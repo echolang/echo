@@ -76,10 +76,10 @@ llvm::Function *AbortCodegen::get_or_create_abort_thunk()
         { opaque_ptr, size_ty, opaque_ptr, size_ty, opaque_ptr, size_ty, i32, opaque_ptr, size_ty },
         false);
 
+    // linkonce_odr for the same reason the release thunks are: every unit that can stop emits
+    // its own definition, and the linker folds them
     llvm::Function *thunk = llvm::Function::Create(
         type,
-        // linkonce_odr for the same reason the release thunks are: every unit that can stop emits
-        // its own definition, and the linker folds them
         llvm::GlobalValue::LinkOnceODRLinkage,
         name,
         _ctx.current_module());

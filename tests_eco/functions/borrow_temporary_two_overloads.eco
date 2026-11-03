@@ -1,0 +1,11 @@
+// two same-arity overloads leave an array-literal argument untyped until ranking can see it.
+// finalize then plants AddrOf on the string, and ownership has to walk after that coerce
+struct bits
+{
+    public int32 $n;
+}
+
+function take(const bits& $p, const string& $s) : string { return $s; }
+function take(const array<string>& $a, const string& $s) : string { return $s; }
+
+echo take(['a'], 'x');

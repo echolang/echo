@@ -13,6 +13,7 @@
 
 namespace AST
 {
+    class Collector;
     class FunctionCallExprNode;
 
     // how a template answers a call. declaration order is best to worst
@@ -164,11 +165,12 @@ namespace AST
 
     // the same question asked of a call node: argument types are read off the arguments, type
     // arguments off `explicit_type_args`. for a caller that has not already got the argument types
-    // in hand - AST::CallResolver has, since the matcher needs them too
+    // in hand - AST::CallResolver has, since the matcher needs them too. `collector` is what
+    // bound_slots asks for collection fill, the same object ranking uses
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const FunctionCallExprNode &call,
-        TypeRegistry &registry);
+        Collector &collector);
 
     // how a call's types are read, in one place: an argument slot or type node left null by a failed
     // parse counts as unknown rather than as absent, so the vectors stay positional and every reader

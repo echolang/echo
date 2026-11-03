@@ -766,11 +766,11 @@ static AST::CallResolver::Result resolve_funccall(Parser::Payload &payload, AST:
     // finalizing sweep at the end of the fixpoint reports whatever never resolved
     AST::CallResolver resolver(payload.collector);
 
+    // the deferrable diagnostic belongs to the fixpoint, which reports it once when it is out of
+    // rounds. reporting it here would reject a program that is perfectly well typed
     return resolver.settle(
         funcall,
         payload.context.module.nodes,
         payload.context.code_ref(funcall.token_function_name),
-        // the deferrable diagnostic belongs to the fixpoint, which reports it once when it is out of
-        // rounds. reporting it here would reject a program that is perfectly well typed
         false);
 }

@@ -575,7 +575,10 @@ AST::ConformanceBinding AST::conformance_bindings(
             // decay on, `iterate() : Iter` would happily bind `Iter` through a pointer level the
             // implementor does not actually return
             bool unified = AST::unify_type(
-                wanted.return_type, candidate->get_return_type(), trial, /*allow_decay=*/false);
+                wanted.return_type,
+                candidate->get_return_type(),
+                trial,
+                /*allow_decay=*/false);
 
             for (size_t i = 0; unified && i < wanted.parameters.size(); i++) {
                 unified = AST::unify_type(

@@ -171,6 +171,19 @@ namespace AST
         return storage_of(expr) == StorageClass::t_place;
     }
 
+    // ranking's place: a real place, or a collection literal expansion will hoist as `$__lit`.
+    // storage_of stays addressless for the node; the hoist is the slot. argument_fit peels `mv`
+    // then asks this so `const T&` scores `t_borrow` for `[...]` the same way it does for the name
+    inline bool ranks_as_place(const ExprNode &expr)
+    {
+        const NodeType kind = expr.get_node_type();
+        if (kind == NodeType::n_expr_array_literal || kind == NodeType::n_expr_map_literal) {
+            return true;
+        }
+
+        return is_place_expression(expr);
+    }
+
     // every place, plus a call returning a non-nullable borrow (`$a->at(0)`). a `ptr<T>` a call
     // returned is not one: the program has to say `:$` / `guard`. four mirrors of this: PointerAdjuster's
     // deref, value_result_type, argument_fit t_read_through, OwnershipPass's copy

@@ -530,12 +530,15 @@ namespace AST
             auto parameter_types = candidate->parameter_types();
             const ArgumentBinding &binding = entry.wrap.kind == ConstructWrap::Kind::t_wrap
                 ? entry.wrap.binding : entry.binding;
-            BoundSlots slots = bound_slots(binding);
+            BoundSlots slots = bound_slots(*candidate, binding, _collector);
             if (entry.wrap.kind == ConstructWrap::Kind::t_wrap
                 && entry.wrap.remaining_start < slots.types.size()) {
                 slots.types[entry.wrap.remaining_start] = entry.wrap.target;
                 slots.exprs[entry.wrap.remaining_start] = nullptr;
                 slots.defers[entry.wrap.remaining_start] = false;
+                if (entry.wrap.remaining_start < slots.rejected.size()) {
+                    slots.rejected[entry.wrap.remaining_start] = false;
+                }
             }
 
             if (filter_instantiation && candidate->is_generic()) {
@@ -585,6 +588,7 @@ namespace AST
                 .is_generic = candidate->is_generic(),
                 .argument_types = slots.types,
                 .arguments = slots.exprs,
+                .rejected = slots.rejected,
             });
         }
 
@@ -786,8 +790,7 @@ namespace AST
             // receiver was unknown then: address_member_receiver replays the peel.
             // a by-value `$this` unwraps that AddrOf and does not re-address
             if (i == 0 && call.is_member_lookup() && call.decl->has_receiver()) {
-                call.arguments[i] = address_member_receiver(
-                    nodes, call.arguments[i], expected, /*replay=*/true);
+                call.arguments[i] = address_member_receiver(nodes, call.arguments[i], expected, /*replay=*/true);
             }
 
             wrap_argument(call.arguments[i], expected, call.token_function_name, nodes);

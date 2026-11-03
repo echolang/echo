@@ -138,16 +138,16 @@ TEST_CASE("a member followed by '<' is still a comparison", "[methods]")
     // argument list because a bare identifier is never a comparison operand - values carry a `$` -
     // but a *member* is a perfectly good operand, so the list is parsed speculatively and rolled
     // back unless a `(` follows it
+    // the right side is a *variable* rather than the literal this case used to write: a `bool`
+    // destination retypes a literal operand, so `bool $b = $p->x < 3;` compares an int32 against a
+    // bool - which has no lowering and is now reported as one. that is a bug about literal typing
+    // and not about the `<` this case is here for, so it is kept out of the way
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
         "    int32 $x;\n"
         "    function sum() : int32 { return $this->x; }\n"
         "}\n"
         "$p = Point(1);\n"
-        // the right side is a *variable* rather than the literal this case used to write: a `bool`
-        // destination retypes a literal operand, so `bool $b = $p->x < 3;` compares an int32 against a
-        // bool - which has no lowering and is now reported as one. that is a bug about literal typing
-        // and not about the `<` this case is here for, so it is kept out of the way
         "int32 $limit = 3;\n"
         "bool $b = $p->x < $limit;\n");
 

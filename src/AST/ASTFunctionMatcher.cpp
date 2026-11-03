@@ -131,8 +131,14 @@ AST::FunctionMatch AST::match_function(const std::vector<AST::FunctionCandidate>
 
         const std::vector<ValueType> &arg_types = candidate->argument_types;
         const std::vector<ExprNode *> &arg_exprs = candidate->arguments;
+        const std::vector<bool> &rejected = candidate->rejected;
 
         for (size_t i = 0; i < arg_types.size(); i++) {
+            if (i < rejected.size() && rejected[i]) {
+                fits = false;
+                break;
+            }
+
             auto *expr = i < arg_exprs.size() ? arg_exprs[i] : nullptr;
             const auto fit = argument_fit(arg_types[i], expr, candidate->parameter_types[i]);
 

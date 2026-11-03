@@ -1,12 +1,17 @@
 #include "AST/ASTArgumentBind.h"
 
+#include "AST/ASTArgumentFit.h"
+#include "AST/ASTArrayLiteral.h"
 #include "AST/ASTClone.h"
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTLiteralTyping.h"
+#include "AST/ASTMapLiteral.h"
 #include "AST/ASTSourceToken.h"
+#include "AST/ASTVariadic.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
 
@@ -44,6 +49,84 @@ namespace
         }
 
         return spelling;
+    }
+
+    bool ranking_rejects_fill(
+        const AST::CollectionFill &fill,
+        AST::Collector &collector,
+        AST::CollectionLiteralExprNode &literal
+    );
+
+    // a settled entry that cannot sit in `wanted`. untyped literals and pending types stay possible
+    bool ranking_rejects_entry(
+        AST::ExprNode *entry,
+        const AST::ValueType &wanted,
+        AST::Collector &collector
+    )
+    {
+        entry = AST::peel_move(entry);
+        if (entry == nullptr || AST::is_untyped_literal(entry)) {
+            return false;
+        }
+
+        AST::CollectionLiteralExprNode *inner = AST::collection_literal_of(entry);
+        if (inner != nullptr && !inner->expansion_decided) {
+            if (AST::contains_type_param(wanted) || AST::is_undetermined_type(wanted)) {
+                return false;
+            }
+
+            const AST::CollectionFill inner_fill =
+                AST::collection_fill_of(wanted, collector, *inner);
+            if (inner_fill.kind == AST::CollectionFill::Kind::t_none) {
+                return AST::type_is_determined_for_fit(AST::implicit_conversion_target(wanted));
+            }
+
+            return ranking_rejects_fill(inner_fill, collector, *inner);
+        }
+
+        const AST::ValueType from = entry->result_type();
+        if (!AST::type_is_determined_for_fit(from) || !AST::type_is_determined_for_fit(wanted)) {
+            return false;
+        }
+
+        return AST::argument_fit(from, entry, wanted) == AST::ArgumentFit::t_none;
+    }
+
+    bool ranking_rejects_fill(
+        const AST::CollectionFill &fill,
+        AST::Collector &collector,
+        AST::CollectionLiteralExprNode &literal
+    )
+    {
+        if (AST::ArrayLiteralExprNode *array = AST::array_literal_of(&literal)) {
+            if (fill.kind != AST::CollectionFill::Kind::t_inline
+                && fill.kind != AST::CollectionFill::Kind::t_append
+                && fill.kind != AST::CollectionFill::Kind::t_index) {
+                return false;
+            }
+
+            for (AST::ExprNode *element : array->elements) {
+                if (ranking_rejects_entry(element, fill.element, collector)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        AST::MapLiteralExprNode *map = AST::map_literal_of(&literal);
+        if (map == nullptr || fill.kind != AST::CollectionFill::Kind::t_keyed) {
+            return false;
+        }
+
+        for (const AST::MapLiteralExprNode::Entry &entry : map->entries) {
+            if (ranking_rejects_entry(entry.key, fill.key, collector)
+                || ranking_rejects_entry(entry.value, fill.value, collector)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
@@ -252,17 +335,70 @@ void AST::apply_argument_binding(
     call.argument_names.clear();
 }
 
-AST::BoundSlots AST::bound_slots(const AST::ArgumentBinding &binding)
+AST::BoundSlots AST::bound_slots(
+    const AST::FunctionDeclNode &decl,
+    const AST::ArgumentBinding &binding,
+    AST::Collector &collector
+)
 {
     BoundSlots result;
     result.types.reserve(binding.filled.size());
     result.exprs.reserve(binding.filled.size());
     result.defers.reserve(binding.filled.size());
+    result.rejected.reserve(binding.filled.size());
 
-    for (const BoundArgument &slot : binding.filled) {
-        result.types.push_back(slot.value != nullptr ? slot.value->result_type() : ValueType::make_unknown());
+    for (size_t i = 0; i < binding.filled.size(); i++) {
+        const BoundArgument &slot = binding.filled[i];
+        const VarDeclNode *param = i < decl.args.size() ? decl.args[i] : nullptr;
+
+        ValueType type = ValueType::make_unknown();
+        bool rejected = false;
+
+        if (slot.from_default && param != nullptr && param->has_type()
+            && !contains_type_param(param->type())) {
+            // a generic template's default is often still untyped; the parameter is concrete
+            // (`map<string, string>`). a parameter that still names `T` must not score here:
+            // `Engine<string>()` would stay pending on `array<M>`
+            type = param->type();
+        }
+        else if (!slot.from_default && param != nullptr && param->has_type()) {
+            CollectionLiteralExprNode *literal = collection_literal_of(slot.value);
+
+            if (literal != nullptr && !literal->expansion_decided) {
+                // a pack stays unknown: ranking waits on the elements, not the list
+                if (!is_variadic_args(param->type(), collector.core_types)) {
+                    const ValueType dest = implicit_conversion_target(param->type());
+
+                    if (!contains_type_param(dest)) {
+                        const CollectionFill fill =
+                            collection_fill_of(param->type(), collector, *literal);
+                        if (fill.kind != CollectionFill::Kind::t_none) {
+                            if (ranking_rejects_fill(fill, collector, *literal)) {
+                                rejected = true;
+                            } else {
+                                // ranking-only: the hoist will be a place of this type. do not write
+                                // bound_type here, or two candidates would fight over one literal
+                                type = dest;
+                            }
+                        }
+                        else if (type_is_determined_for_fit(dest)) {
+                            rejected = true;
+                        }
+                    }
+                }
+            }
+            else if (slot.value != nullptr) {
+                type = slot.value->result_type();
+            }
+        }
+        else if (slot.value != nullptr) {
+            type = slot.value->result_type();
+        }
+
+        result.types.push_back(type);
         result.exprs.push_back(slot.value);
         result.defers.push_back(is_untyped_literal(slot.value));
+        result.rejected.push_back(rejected);
     }
 
     return result;

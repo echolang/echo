@@ -2133,12 +2133,12 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
 
                 // an indirect call has no implicit parameter, so the position a reader counts to is the
                 // index
+                // no declaration: an indirect call is through a callable value, which is never an
+                // operator and has no name of its own beyond the one the call site wrote
                 check_call_argument(
                     node.arguments[i],
                     signature.parameter_types[i],
                     i + 1,
-                    // no declaration: an indirect call is through a callable value, which is never an
-                    // operator and has no name of its own beyond the one the call site wrote
                     nullptr,
                     callee_name,
                     node.token);

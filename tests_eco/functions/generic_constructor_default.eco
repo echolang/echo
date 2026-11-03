@@ -1,0 +1,42 @@
+// a constructor-call default on a generic used to make the omitted-argument call AmbiguousCall
+// listing that one candidate. `= []` dest-types immediately and already worked
+
+class WithCtor
+{
+    public static function a<T>(name: const string& $name, map: map<string, string> $renames = map<string, string>()) : void
+    {
+        echo $name;
+        echo $renames->count();
+    }
+}
+
+WithCtor::a<int32>(name: 'n');
+
+class WithEmpty
+{
+    public static function a<T>(name: const string& $name, map: map<string, string> $renames = []) : void
+    {
+        echo $name;
+    }
+}
+
+WithEmpty::a<int32>(name: 'e');
+
+class Plain
+{
+    public static function a(name: const string& $name, map: map<string, string> $renames = map<string, string>()) : void
+    {
+        echo $name;
+    }
+}
+
+Plain::a(name: 'p');
+
+// a default that still names T must stay the expression's type. scoring `array<M>` here
+// would make match rule 2 see a type-parameter argument and never stamp this lone candidate
+function with_rows<M>(array<M> $xs = []) : usize
+{
+    return $xs->count();
+}
+
+echo with_rows<string>();

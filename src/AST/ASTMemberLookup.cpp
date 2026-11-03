@@ -405,7 +405,8 @@ AST::ExprNode *AST::address_member_receiver(
     AST::NodeCollection &nodes,
     AST::ExprNode *receiver,
     const AST::ValueType &expected,
-    bool replay)
+    bool replay
+)
 {
     if (parameter_auto_borrows(expected)) {
         return address_member_receiver(nodes, receiver, replay);
@@ -420,7 +421,10 @@ AST::ExprNode *AST::address_member_receiver(
 }
 
 AST::ExprNode *AST::address_member_receiver(
-    AST::NodeCollection &nodes, AST::ExprNode *receiver, bool replay)
+    AST::NodeCollection &nodes,
+    AST::ExprNode *receiver,
+    bool replay
+)
 {
     if (receiver == nullptr) {
         return receiver;

@@ -153,3 +153,68 @@ SumPair $sp = make<SumPair>(1, 2);
 echo $sp->a;
 echo $sp->b;
 echo $sp->sum;
+
+class Endpoint<A>
+{
+    public string $path;
+
+    public constructor(const string& $path)
+    {
+        $this->path = $path;
+    }
+}
+
+class Holder
+{
+    public function seat<T>(construct T $value) : string
+    {
+        return $value->path;
+    }
+}
+
+class Show {}
+
+echo Holder()->seat<Endpoint<Show>>(Endpoint<Show>('/x'));
+echo Holder()->seat<Endpoint<Show>>('/y');
+Endpoint<Show> $at = Endpoint<Show>('/z');
+echo Holder()->seat<Endpoint<Show>>($at);
+
+struct MethodHolder
+{
+    public Method $method;
+}
+
+function seat_method(construct MethodHolder $h) : string
+{
+    return match ($h->method) {
+        Method::get => 'get',
+        Method::post => 'post',
+    };
+}
+
+echo seat_method(.get);
+
+struct Bag
+{
+    public array<int32> $items;
+}
+
+function hold(construct Bag $b) : int32
+{
+    return $b->items->count();
+}
+
+echo hold([1, 2, 3]);
+
+$inferred = make<Pair>(6, 7);
+echo make<Pair>($inferred)->a;
+echo make<Pair>($inferred)->b;
+
+struct Parcel
+{
+    public Pair $pair;
+}
+
+Parcel $parcel = Parcel(Pair(10, 11));
+echo make<Pair>($parcel->pair)->a;
+echo make<Pair>($parcel->pair)->b;

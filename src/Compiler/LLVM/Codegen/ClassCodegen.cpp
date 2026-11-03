@@ -1063,10 +1063,10 @@ llvm::Function *ClassCodegen::declare_release_thunk(const std::string &name, con
     llvm::Type *void_type = llvm::Type::getVoidTy(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
 
+    // linkonce_odr for the same reason the typeinfo global is: every unit that releases this block
+    // emits its own definition, and the linker folds them
     llvm::Function *thunk = llvm::Function::Create(
         llvm::FunctionType::get(void_type, { opaque_ptr }, false),
-        // linkonce_odr for the same reason the typeinfo global is: every unit that releases this block
-        // emits its own definition, and the linker folds them
         llvm::GlobalValue::LinkOnceODRLinkage,
         name,
         _ctx.current_module());

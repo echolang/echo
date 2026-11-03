@@ -247,11 +247,11 @@ namespace
 
 TEST_CASE("a second struct of the same name is reported", "[structdecl]")
 {
+    // where the *first* declaration is is a secondary label now, not a clause in the sentence - the
+    // renderer quotes that line in a frame of its own. See AST::Issue::TypeRedeclaration::labels
     EchoTests::assert_code_emits_issue(
         "struct Foo { int32 $x; }\n"
         "struct Foo { int32 $y; }\n",
-        // where the *first* declaration is is a secondary label now, not a clause in the sentence - the
-        // renderer quotes that line in a frame of its own. See AST::Issue::TypeRedeclaration::labels
         "The type 'Foo' is already declared");
 }
 

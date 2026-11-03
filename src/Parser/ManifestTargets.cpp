@@ -73,7 +73,8 @@ void Parser::read_manifest_targets(
     const AST::AttributeValue &written,
     AST::AttributeReader &reader,
     uint32_t line,
-    std::vector<Parser::WrittenTarget> &out_targets)
+    std::vector<Parser::WrittenTarget> &out_targets
+)
 {
     for (const AST::AttributeValue *entry : AST::AttributeReader::each(written)) {
         Parser::TargetKind kind = Parser::TargetKind::t_executable;

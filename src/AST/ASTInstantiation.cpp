@@ -3,6 +3,7 @@
 #include "AST/ASTArgumentBind.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTCollector.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTLiteralTyping.h"
 
@@ -746,7 +747,8 @@ namespace AST
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const FunctionCallExprNode &call,
-        TypeRegistry &registry)
+        Collector &collector
+    )
     {
         // a static names its owner; a constructor names the type it builds. they are mutually
         // exclusive on the node, and either is the seed static_owner_bindings reads
@@ -761,12 +763,12 @@ namespace AST
             return rejected(InstantiationBlame::t_argument_count);
         }
 
-        const BoundSlots slots = bound_slots(binding);
+        const BoundSlots slots = bound_slots(*tmpl, binding, collector);
 
         return can_instantiate(
             tmpl,
             slots.types,
-            registry,
+            collector.type_registry,
             explicit_type_args_of(call),
             owner,
             slots.defers);

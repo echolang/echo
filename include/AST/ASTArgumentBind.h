@@ -48,16 +48,28 @@ namespace AST
         size_t missing_param = 0;
     };
 
-    // the filled slots of a successful binding, in parameter order, as the three lists ranking
-    // and instantiation both need. one owner so CallResolver and can_instantiate cannot drift
+    // the filled slots of a successful binding, in parameter order, as ranking and instantiation
+    // both need. one owner so CallResolver and can_instantiate cannot drift
     struct BoundSlots
     {
         std::vector<ValueType> types;
         std::vector<ExprNode *> exprs;
         std::vector<bool> defers;
+        // a collection dest that cannot fill this literal, or whose settled entries cannot sit
+        // in that fill. match_function drops the candidate before argument_fit, which would wait
+        // on the still-unknown type
+        std::vector<bool> rejected;
     };
 
-    BoundSlots bound_slots(const ArgumentBinding &binding);
+    // ranking type of each filled slot. a `from_default` hole scores as the parameter type when
+    // that type names no type parameter. an unexpanded collection whose dest can fill it scores
+    // as that dest's value type (no `bound_type` write). a dest that cannot fill, or whose settled
+    // entries cannot sit in the fill, is `rejected`. a pack at `variadic_args` stays unknown so
+    // ranking waits on the elements
+    BoundSlots bound_slots(
+        const FunctionDeclNode &decl,
+        const ArgumentBinding &binding,
+        Collector &collector);
 
     // match this argument list against `decl`'s parameters. implicit args (`$this`, a closure
     // environment) occupy the leading slots of `arguments` and are copied through; names start

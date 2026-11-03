@@ -2049,7 +2049,11 @@ static std::optional<int> prepare_jit(
     // the JIT is handed one module, so every unit is merged and there are no per-module objects to store or
     // load - the plan is reported as bypassed rather than not reported at all
     report_cache_plan(
-        driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
+        driver,
+        front.manifests(),
+        front.cache_keys,
+        ModulePlan{},
+        front.entry_module(),
         /*bypassed=*/true);
 
     // **before codegen**, because a C source that does not compile is a build that is going to fail either
@@ -2705,7 +2709,11 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
             driver.modules,
             /*with_stdlib=*/true,
             /*allow_project_discovery=*/true,
-            diagnostics, facts, driver.package_dir, manifests, roots,
+            diagnostics,
+            facts,
+            driver.package_dir,
+            manifests,
+            roots,
             Parser::ManifestRead::t_dependencies)) {
         return 1;
     }

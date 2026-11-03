@@ -252,11 +252,11 @@ void DebugInfoCodegen::begin_function(const AST::FunctionDeclNode &node, llvm::F
         flags |= llvm::DISubprogram::SPFlagOptimized;
     }
 
+    // the symbol this body is being emitted under, read off the function rather than mangled a
+    // second time - gen_function_decl already did that walk to find this very llvm::Function
     _subprogram = unit->builder->createFunction(
         di_file,
         debugger_name(node.func_name()),
-        // the symbol this body is being emitted under, read off the function rather than mangled a
-        // second time - gen_function_decl already did that walk to find this very llvm::Function
         func->getName(),
         di_file,
         line,
@@ -461,11 +461,22 @@ void DebugInfoCodegen::declare_local(
 
     llvm::DILocalVariable *variable = arg_no.has_value()
         ? unit->builder->createParameterVariable(
-            current_scope(), debugger_name(decl.name()), arg_no.value(), file, line, type,
-            /*AlwaysPreserve=*/true, flags)
+            current_scope(),
+            debugger_name(decl.name()),
+            arg_no.value(),
+            file,
+            line,
+            type,
+            /*AlwaysPreserve=*/true,
+            flags)
         : unit->builder->createAutoVariable(
-            current_scope(), debugger_name(decl.name()), file, line, type,
-            /*AlwaysPreserve=*/true, flags);
+            current_scope(),
+            debugger_name(decl.name()),
+            file,
+            line,
+            type,
+            /*AlwaysPreserve=*/true,
+            flags);
 
     // **at the alloca, not at the declaration's statement.** A slot lives in the entry block (see
     // CodegenContext::entry_alloca), so a record placed there dominates every use of it - where one
@@ -731,12 +742,12 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
         box_layout->getElementOffsetInBits(ClassBox::payload_index),
         elements);
 
+    // **named after the class, not `<Name>.box`.** The box is how a class is stored rather than a
+    // second type, so a variable reads `(Thing *) t` the way a person wrote it. The `identifier:`
+    // below still carries the `.box` suffix and is what actually uniques it across units, so
+    // nothing depends on this name being distinct from the payload's
     llvm::DICompositeType *box = unit->builder->createStructType(
         unit->cu,
-        // **named after the class, not `<Name>.box`.** The box is how a class is stored rather than a
-        // second type, so a variable reads `(Thing *) t` the way a person wrote it. The `identifier:`
-        // below still carries the `.box` suffix and is what actually uniques it across units, so
-        // nothing depends on this name being distinct from the payload's
         name,
         decl_file,
         decl_line,
@@ -778,14 +789,14 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
         llvm::DIType *has = unit->builder->createBasicType(
             "__has", 8, llvm::dwarf::DW_ATE_boolean);
 
+        // **the type's own spelling, not the constant "optional".** Every wrapped optional shared
+        // one name, so `int32?` and `string?` were one type as far as a debugger was concerned -
+        // information lost in the object rather than a presentation problem, and unmatchable by a
+        // formatter. get_type_desciption is the same renderer namespaced_name() uses for an
+        // instantiation's arguments, so the two spell a type the same way
         return tuple_type_of(
             type,
             cmp_unit,
-            // **the type's own spelling, not the constant "optional".** Every wrapped optional shared
-            // one name, so `int32?` and `string?` were one type as far as a debugger was concerned -
-            // information lost in the object rather than a presentation problem, and unmatchable by a
-            // formatter. get_type_desciption is the same renderer namespaced_name() uses for an
-            // instantiation's arguments, so the two spell a type the same way
             type.get_type_desciption(),
             { { "__has", has },
               { "__value", type_of(AST::ValueType::make_non_nullable(type), cmp_unit) } },

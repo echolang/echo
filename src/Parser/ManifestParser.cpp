@@ -832,7 +832,12 @@ bool expand_cc_sources(
     }
 
     return expand_manifest_patterns(
-        spec.source_patterns, out, "C sources", /*exclude=*/{}, spec.sources, into);
+        spec.source_patterns,
+        out,
+        "C sources",
+        /*exclude=*/{},
+        spec.sources,
+        into);
 }
 
 // out.targets, with every entry resolved against the manifest and proved to be one of this module's own
@@ -1000,7 +1005,12 @@ bool settle_manifest_edges(
         && resolve_manifest_require_paths(
             out.requirements, package_dir, out.directory, entry_directory, out.depends, into)
         && settle_manifest_hooks(
-            hooks_written, out, /*resolve=*/true, package_dir, entry_directory, into);
+            hooks_written,
+            out,
+            /*resolve=*/true,
+            package_dir,
+            entry_directory,
+            into);
 }
 
 bool expand_settled_manifest(
@@ -1121,7 +1131,12 @@ bool read_manifest_with(
     // about a path the author has not fetched
     if (read == Parser::ManifestRead::t_written) {
         return settle_manifest_hooks(
-            hooks_written, out, /*resolve=*/false, scratch.package_dir, scratch.entry_directory, into);
+            hooks_written,
+            out,
+            /*resolve=*/false,
+            scratch.package_dir,
+            scratch.entry_directory,
+            into);
     }
 
     // the edges and nothing else - see ManifestRead. A missing package is still refused, since the

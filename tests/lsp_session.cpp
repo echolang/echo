@@ -607,12 +607,14 @@ TEST_CASE("a dependency's test scope stays shut while the root's is analysed", "
     const ProjectDir project("dependency-test-scope");
     const std::string seen = "struct Seen\n{\n    public int64 $n;\n}\n";
 
-    project.write("lib/module.eco",
+    project.write(
+        "lib/module.eco",
         "#[module: \"lib\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n}\n");
     project.write("lib/src/l.eco", "namespace lib;\n\npublic function l() : int32 { return 1; }\n");
     const std::filesystem::path lib_test = project.write("lib/tests/seen.eco", seen);
 
-    project.write("app/module.eco",
+    project.write(
+        "app/module.eco",
         "#[module: \"app\"]\n#[depends: \"../lib\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n}\n");
     const std::filesystem::path a = project.write(
         "app/src/a.eco", "namespace app;\n\nfunction a() : int32 { return lib::l(); }\n");

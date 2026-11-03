@@ -2,12 +2,16 @@
 
 #include "AST/ASTAccess.h"
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTLiteralTyping.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTNode.h"
+#include "AST/ASTNullability.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
@@ -83,7 +87,8 @@ namespace AST
 
             const std::vector<ExprNode *> prefix(
                 arguments.begin(),
-                arguments.begin() + static_cast<std::ptrdiff_t>(remaining_start));
+                arguments.begin() + static_cast<std::ptrdiff_t>(remaining_start)
+            );
             std::vector<CallArgumentName> prefix_names;
             if (!argument_names.empty() && remaining_start > 0) {
                 const size_t n = std::min(argument_names.size(), remaining_start);
@@ -102,6 +107,21 @@ namespace AST
 
             binding.kind = ArgumentBindKind::t_ok;
             return binding;
+        }
+
+        // dest-dependent forms: wrapping is what names them. everything else that is still
+        // untyped may type as M on its own, and wrapping would nest `M(M(...))`
+        bool types_only_at_destination(ExprNode *only)
+        {
+            only = peel_move(only);
+            if (only == nullptr) {
+                return false;
+            }
+
+            return unbound_shorthand_call_of(only) != nullptr
+                || collection_literal_of(only) != nullptr
+                || is_untyped_literal(only)
+                || is_written_null(only);
         }
     }
 
@@ -206,8 +226,16 @@ namespace AST
 
         const size_t remaining_n = call.arguments.size() - remaining_start;
         ExprNode *only = remaining_n == 1 ? call.arguments[remaining_start] : nullptr;
+
+        // wrapping an unsettled value that types on its own reads it as constructor operands
+        // (`Endpoint<Show>(Endpoint<Show>('/x'))`, `$h->at` of an `M`)
+        if (only != nullptr && is_undetermined_type(only->result_type())
+            && !types_only_at_destination(only)) {
+            result.kind = ConstructWrap::Kind::t_pending;
+            return result;
+        }
+
         const bool exact_one = only != nullptr
-            && !is_undetermined_type(only->result_type())
             && argument_fit(only->result_type(), only, target) == ArgumentFit::t_exact;
         if (exact_one) {
             return result;

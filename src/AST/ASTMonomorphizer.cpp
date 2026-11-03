@@ -65,7 +65,7 @@ namespace AST
         // candidates with. everything below is the half the parser must *not* do: a template that
         // cannot take a call is an overload filter there and a diagnostic here, and this is the only
         // place that difference lives
-        const Instantiation inst = can_instantiate(tmpl, *call, _collector.type_registry);
+        const Instantiation inst = can_instantiate(tmpl, *call, _collector);
 
         switch (inst.blame) {
         case InstantiationBlame::t_type_argument_count:

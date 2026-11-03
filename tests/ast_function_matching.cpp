@@ -388,3 +388,19 @@ TEST_CASE("no candidates at all is distinct from none matching", "[fnmatch]")
     // a name nobody declared is a different mistake from a name declared differently
     REQUIRE( match({}, { t_int32 }).outcome == FunctionMatch::Outcome::t_no_candidates );
 }
+
+TEST_CASE("a rejected slot drops the candidate before argument_fit waits", "[fnmatch]")
+{
+    FunctionCandidate fillable = candidate({ t_int32 });
+    fillable.argument_types = { t_int32 };
+
+    FunctionCandidate unfillable = candidate({ t_int32 });
+    unfillable.argument_types = { ValueType::make_unknown() };
+
+    // unknown vs int32 waits, so both remain possible
+    REQUIRE( AST::match_function({ fillable, unfillable }).outcome == FunctionMatch::Outcome::t_undecidable );
+
+    // bound_slots already knows this dest cannot fill; waiting would keep it forever
+    unfillable.rejected = { true };
+    REQUIRE( AST::match_function({ fillable, unfillable }).outcome == FunctionMatch::Outcome::t_resolved );
+}

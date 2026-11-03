@@ -191,7 +191,9 @@ namespace
             };
 #else
             const std::vector<std::filesystem::path> prefixes(
-                std::begin(k_sdk_prefixes), std::end(k_sdk_prefixes));
+                std::begin(k_sdk_prefixes),
+                std::end(k_sdk_prefixes)
+            );
 #endif
 
             for (const std::filesystem::path &prefix : prefixes) {

@@ -446,7 +446,7 @@ namespace AST
         // a borrow parameter takes the address of any place - which parameters those are is
         // parameter_auto_borrows, shared with the inference that has to predict this
         const ExprNode *place = peel_move(expr);
-        if (parameter_auto_borrows(to) && place != nullptr && is_place_expression(*place)
+        if (parameter_auto_borrows(to) && place != nullptr && ranks_as_place(*place)
             && borrow_type_matches(from, to)) {
             return borrow_rank(from, to, ArgumentFit::t_borrow, ArgumentFit::t_borrow_const);
         }

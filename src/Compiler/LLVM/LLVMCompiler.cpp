@@ -406,7 +406,8 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // symbols - `echo` fetches it back by name at the call site rather than through a getter
     for (auto &cmp_unit : _ctx.cmp_units) {
         _ctx.current_cmp_unit = cmp_unit.get();
-        _ctx.libc_callee(Compiler::RuntimeSymbol::t_printf,
+        _ctx.libc_callee(
+            Compiler::RuntimeSymbol::t_printf,
             llvm::Type::getInt32Ty(*_ctx.llvm_context),
             { _ctx.opaque_ptr_type() },
             /*variadic=*/true);

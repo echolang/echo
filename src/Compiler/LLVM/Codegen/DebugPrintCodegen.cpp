@@ -285,8 +285,7 @@ void DebugPrintCodegen::render_enum(
         llvm::BasicBlock *next = llvm::BasicBlock::Create(*_ctx.llvm_context, "dprint.enum.next", function);
 
         flush();
-        llvm::Value *want = llvm::ConstantInt::get(
-            tag_ty, static_cast<uint64_t>(entry.discriminant), /*isSigned=*/true);
+        llvm::Value *want = llvm::ConstantInt::get(tag_ty, static_cast<uint64_t>(entry.discriminant), /*isSigned=*/true);
         _ctx.builder->CreateCondBr(
             _ctx.builder->CreateICmpEQ(tag, want, "dprint.enum.hit"), arm, next);
 

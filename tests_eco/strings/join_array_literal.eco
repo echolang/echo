@@ -1,0 +1,11 @@
+// an array literal at `const array<string>&` used to ICE (string separator) or segfault
+// (named separator). the generator emits `str::join([...], "\n")` for multi-line help
+echo str::join(['one', 'two'], '-');
+
+string $sep = "\n";
+echo str::join(['one', 'two'], $sep);
+
+echo str::join(['one', 'two'], "\n");
+
+string $out = str::join(['a', 'b'], '|');
+echo "[{$out}]";

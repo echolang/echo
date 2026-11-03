@@ -1,0 +1,23 @@
+// a pack at variadic_args must wait, not mismatch. a dest that cannot fill `[...]` is
+// rejected, so the pack candidate is the one that remains
+struct bits
+{
+    public int32 $n;
+}
+
+extern {
+    function snprintf as take(
+        ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
+}
+
+function take(ptr<uint8> $out, usize $size, ptr<const uint8> $format, const bits& $p) : int32
+{
+    return -1;
+}
+
+ptr<uint8> $buf = mem::alloc<uint8>(16);
+string $fmt = '%d';
+int32 $n = take($buf, 16, $fmt->cstr(), [9]);
+echo $n;
+echo str::cview($buf);
+mem::free($buf);
