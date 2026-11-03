@@ -950,3 +950,117 @@ TEST_CASE("running out of input is reported, not aborted", "[callable]")
         REQUIRE(bundle->collector.has_critical_issues());
     }
 }
+
+TEST_CASE("an arrow closure plants a single return", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function<int32(int32)> $f = (int32 $a) => $a + 1;\n"
+        "echo $f(41);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *body = closure_body(m);
+    REQUIRE(body != nullptr);
+    REQUIRE(body->body != nullptr);
+    REQUIRE(body->body->children.size() == 1);
+    REQUIRE(body->body->children[0].has_type<ReturnNode>());
+    REQUIRE(body->callable_type() == ValueType::make_callable(int32_type(), { int32_type() }));
+    REQUIRE_FALSE(first_closure(m)->capture_list.has_value());
+}
+
+TEST_CASE("an arrow closure dest-types its return from a callable destination", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function apply(function<int32(int32)> $f, int32 $v) : int32 { return $f($v); }\n"
+        "echo apply((int32 $a) => $a * 2, 21);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *body = closure_body(m);
+    REQUIRE(body != nullptr);
+    REQUIRE(body->return_type != nullptr);
+    REQUIRE(body->return_type->type == int32_type());
+}
+
+TEST_CASE("grouping (1 + 2) is untouched by arrow closures", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle("echo (1 + 2);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("a written return type dest-types an arrow body", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "$f = (int32 $a) : int32 => $a + 1;\n"
+        "echo $f(41);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *body = closure_body(m);
+    REQUIRE(body != nullptr);
+    REQUIRE(body->return_type != nullptr);
+    REQUIRE(body->return_type->type == int32_type());
+}
+
+TEST_CASE("an arrow closure captures like a braced one", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function make(int32 $seed) : function<int32(int32)> {\n"
+        "    return (int32 $x) => $x + $seed;\n"
+        "}\n"
+        "function<int32(int32)> $add = make(10);\n"
+        "echo $add(32);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(first_closure(m) != nullptr);
+    REQUIRE(first_closure(m)->environment_type != nullptr);
+}
+
+TEST_CASE("an arrow inside a generic function inherits type parameters", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer<T>(T $v) : int32 {\n"
+        "    function<int32()> $f = () : int32 => 1;\n"
+        "    return $f();\n"
+        "}\n"
+        "echo outer<int32>(1);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *body = closure_body(m);
+    REQUIRE(body != nullptr);
+    REQUIRE(body->inherited_type_param_count == 1);
+}
+
+TEST_CASE("an optional callable destination dest-types an omitted arrow return", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function<int32(int32)>? $f = (int32 $a) => $a + 1;\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *body = closure_body(m);
+    REQUIRE(body != nullptr);
+    REQUIRE(body->return_type != nullptr);
+    REQUIRE(body->return_type->type == int32_type());
+}
+
+TEST_CASE("a written type-parameter return is not dest-overwritten", "[callable][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function wrap<T>(T $v) : function<int32()> {\n"
+        "    return () : T => 1;\n"
+        "}\n");
+
+    auto &m = bundle->modules.find_module("test");
+    FunctionDeclNode *body = closure_body(m);
+    REQUIRE(body != nullptr);
+    REQUIRE(body->return_type != nullptr);
+    REQUIRE(body->return_type->type.is_type_param());
+}

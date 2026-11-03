@@ -96,6 +96,38 @@ AST::ConstDeclNode *Parser::parse_constdecl(
 
     cursor.skip(); // the `=`
 
+    // a closure before the variable scan: an arrow body's `$a` is a parameter, not a
+    // constant naming an outer local
+    if (Parser::starts_closure_literal(cursor) || Parser::starts_arrow_closure(cursor)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            fmt::format(
+                "A constant's value cannot be a closure. A closure captures where it is written and a "
+                "constant is copied to where it is used, so '{}' would have no environment to capture",
+                name_token.value()));
+
+        if (Parser::starts_arrow_closure(cursor)) {
+            cursor.skip_balanced_group(Token::Type::t_open_paren, Token::Type::t_close_paren);
+
+            if (cursor.is_type(Token::Type::t_colon)) {
+                cursor.skip();
+                Parser::skip_type_shape(cursor);
+            }
+
+            if (cursor.is_type(Token::Type::t_double_arrow)) {
+                cursor.skip();
+            }
+
+            cursor.skip_until(Token::Type::t_semicolon);
+        }
+        else {
+            Parser::skip_refused_function(payload);
+        }
+
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
     if (const std::optional<TokenReference> variable = initializer_names_a_variable(cursor)) {
         const TokenReference &variable_token = variable.value();
 
@@ -106,25 +138,6 @@ AST::ConstDeclNode *Parser::parse_constdecl(
                 "the value is copied to every use site rather than read from here. Write `const {} = ...;` "
                 "for a variable that is const instead",
                 variable_token.value(), name_token.value(), variable_token.value()));
-        cursor.try_skip_to_next_statement();
-        return nullptr;
-    }
-
-    // a closure captures its environment where it is *written*, and a constant is copied to where it is
-    // *used* - so the two are in direct conflict, and the copies would share one environment besides: the
-    // monomorphizer gives a closure *expression* exactly one, which every clone of it then shares
-    if (Parser::starts_closure_literal(cursor)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(cursor.current()),
-            fmt::format(
-                "A constant's value cannot be a closure. A closure captures where it is written and a "
-                "constant is copied to where it is used, so '{}' would have no environment to capture",
-                name_token.value()));
-
-        // the closure's body goes with it, brace-depth aware - a skip to the next `;` stops at the
-        // first one *inside* the body and leaves its closing brace to be reported against whatever
-        // follows. the trailing skip is the constant's own terminator, after the body is gone
-        Parser::skip_refused_function(payload);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }

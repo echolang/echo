@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] arrow_generic_needs_return_type.eco:7:31
+
+  this shorthand returns a 'int32', so name the type - write ': int32 =>' or put it at a 'function<int32(...)>' destination
+
+  6 | 
+  7 | echo apply_generic((int32 $a) => $a + 1, 10);
+    :                               ^^
+  8 | 
+
+1 error, nothing was compiled.

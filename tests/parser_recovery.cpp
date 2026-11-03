@@ -117,6 +117,24 @@ TEST_CASE("a method with a failed parameter can still be ranked", "[parser]")
 // a closure whose `(` is missing after a capture list used to return without replace_args, so
 // implicit_arg_count() was 1 against an empty args. `function [` is what starts_closure_literal
 // accepts without a following `(`, so this is the path, not a bare `function {`
+TEST_CASE("an unterminated arrow closure does not resume inside the expression", "[parser][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function<int32(int32)> $f = (int32 $a) => $a +\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("a function-keyword arrow skip stops at the semicolon", "[parser][arrow_closure]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function<int32(int32)> $f = function(int32 $a) => $a + 1;\n"
+        "int32 $x = ;\n");
+
+    REQUIRE(has_issue_containing(*bundle, "without 'function'"));
+    REQUIRE(bundle->collector.issues.size() >= 2);
+}
+
 TEST_CASE("a closure missing its parameter list still has its environment", "[parser]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(

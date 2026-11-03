@@ -781,6 +781,36 @@ void TypeChecker::visitReturn(ReturnNode &node)
 
     // a void function's `return nothing();` is a void statement, not a consumed value.
     // the call produces no value, so rewrite_value_edge would refuse it
+    //
+    // omitted `: T` plants unknown; dest-typed or written `: void` plants a TypeNode. braced
+    // void is nullptr. the planted node is the fact, not the `=>` token
+    const bool valued_closure_return = _current_function != nullptr
+        && _current_function->is_closure
+        && node.expr != nullptr
+        && node.token_return.has_value()
+        && !expression_produces_no_value(*node.expr)
+        && !is_undetermined_type(node.expr->result_type());
+
+    if (valued_closure_return && declared.is_unknown()) {
+        const std::string got = node.expr->result_type().get_type_desciption();
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_return.value()),
+            fmt::format(
+                "this shorthand returns a '{}', so name the type - write ': {} =>' or put it "
+                "at a 'function<{}(...)>' destination",
+                got, got, got));
+    }
+    else if (valued_closure_return && declared.is_void()
+        && _current_function->return_type != nullptr) {
+        const std::string got = node.expr->result_type().get_type_desciption();
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_return.value()),
+            fmt::format(
+                "this shorthand returns a '{}', and its destination is 'function<void(...)>' - "
+                "write ': {} =>'",
+                got, got));
+    }
+
     if (declared.is_void() && node.expr != nullptr) {
         node.expr->accept(*this);
         statement_edges(node.unwind);

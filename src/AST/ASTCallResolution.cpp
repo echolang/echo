@@ -213,6 +213,7 @@ namespace AST
 
                 bind_null_to(arguments[i], expected);
                 bind_function_ref_to(arguments[i], expected, collector);
+                bind_arrow_closure_to(arguments[i], expected, nodes);
 
                 // **the one destination a shorthand cannot reach at parse time**, which is why it is
                 // here rather than only in the expression parser: a parameter's type sits on a

@@ -1,0 +1,2 @@
+// without a callable destination or a written `: T`, a valued => is void
+$f = (int32 $a) => $a + 1;

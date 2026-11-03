@@ -912,6 +912,10 @@ namespace AST
                 changed = true;
             }
 
+            if (bind_arrow_closure_to(slot, destination, _module.nodes)) {
+                changed = true;
+            }
+
             // collection literals have no type of their own. a return, a match arm, a `??` fallback
             // and a written `as` are destinations the declaration walk never sees, so this is the
             // round that tells `['a' => [1, 2]]` it fills a `map<string, array<int32>>`

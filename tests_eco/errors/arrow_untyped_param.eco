@@ -1,0 +1,3 @@
+// a shorthand still needs a written parameter type
+function<int32(int32)> $f = ($a) => $a + 1;
+echo $f(1);

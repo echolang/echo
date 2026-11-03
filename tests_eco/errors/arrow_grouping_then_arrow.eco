@@ -1,0 +1,2 @@
+// (1 + 2) is grouping. => after a group is not a closure
+echo (1 + 2) => 3;

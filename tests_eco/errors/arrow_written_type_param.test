@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  arrow_written_type_param.eco:4:5
+
+  Invalid type conversion: cannot return 'function<string()>' from a function declared 'function<int32()>'
+
+  3 | {
+  4 |     return () : T => 1;
+    :     ^^^^^^
+  5 | }
+
+[error] InvalidTypeConversion  arrow_written_type_param.eco:4:19
+
+  Invalid type conversion: cannot return 'int32' from a function declared 'string'
+
+  3 | {
+  4 |     return () : T => 1;
+    :                   ^^
+  5 | }
+
+2 errors, nothing was compiled.

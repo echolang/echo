@@ -605,6 +605,12 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
+    // **gives a `(params) => expr` the return type a `function<R(P...)>` destination names.**
+    // planted unknown is the omitted-return placeholder, so inference does not bind T = void.
+    // a written `: T` stays, type parameter included. a wrapped `function<R(P)>?` peels to
+    // the payload. a dest whose R still names a type parameter waits. NodeCollection plants
+    bool bind_arrow_closure_to(ExprNode *expr, const ValueType &destination, NodeCollection &nodes);
+
     // `$f(1, 2)` - a call through a *value* rather than to a declaration.
     //
     // a distinct node rather than a `callee` field on FunctionCallExprNode, because `decl` there is not

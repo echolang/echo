@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] arrow_echo_is_a_statement.eco:2:29
+
+  this expression could not be read as a single value.
+
+  1 | // echo is a statement, so it cannot be an implied return
+  2 | function<void()> $g = () => echo 1;
+    :                             ^^^^
+  3 | $g();
+
+1 error, nothing was compiled.

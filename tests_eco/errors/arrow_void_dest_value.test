@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] arrow_void_dest_value.eco:2:26
+
+  this shorthand returns a 'int32', and its destination is 'function<void(...)>' - write ': int32 =>'
+
+  1 | // dest-typed to function<void()>, body still produces a value
+  2 | function<void()> $f = () => 1;
+    :                          ^^
+  3 | $f();
+
+1 error, nothing was compiled.

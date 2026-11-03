@@ -1,0 +1,3 @@
+// echo is a statement, so it cannot be an implied return
+function<void()> $g = () => echo 1;
+$g();

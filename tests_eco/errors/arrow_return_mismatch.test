@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  arrow_return_mismatch.eco:2:40
+
+  Invalid type conversion: cannot return 'string' from a function declared 'int32'
+
+  1 | // a dest-typed shorthand still has to return that dest
+  2 | function<int32(int32)> $f = (int32 $a) => 'no';
+    :                                        ^^
+  3 | echo $f(1);
+
+1 error, nothing was compiled.

@@ -13,6 +13,7 @@
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/AttributeNode.h"
 #include "AST/ExprNode.h"
+#include "AST/ReturnNode.h"
 
 #include "Parser/CaptureParser.h"
 #include "Parser/DefaultBodyParser.h"
@@ -59,20 +60,24 @@ bool Parser::parse_function_body(
     Parser::Payload &payload,
     AST::FunctionDeclNode &decl,
     AST::ScopeNode &scope,
-    AST::ClosureExprNode *closure
+    AST::ClosureExprNode *closure,
+    std::optional<TokenReference> arrow
 )
 {
     auto &cursor = payload.cursor;
 
-    if (!payload.expect_token(Token::Type::t_open_brace)) {
-        return false;
+    std::optional<TokenReference> body_brace;
+
+    if (!arrow.has_value()) {
+        if (!payload.expect_token(Token::Type::t_open_brace)) {
+            return false;
+        }
+
+        // the body's opening brace, captured before it is consumed: it is the identity of the
+        // body block's lexical namespace, and the declaration pass keyed the same block on it
+        body_brace.emplace(cursor.current());
+        cursor.skip();
     }
-
-    // the body's opening brace, captured before it is consumed: it is the identity of the body block's
-    // lexical namespace, and the declaration pass keyed the same block on the same token
-    auto body_brace = cursor.current();
-
-    cursor.skip(); // the opening brace
 
     // the parameters live one frame up from the body, and that frame is where this function ends. a
     // name resolved past it belongs to another function's storage - see ScopeNode::lookup_variable.
@@ -95,14 +100,29 @@ bool Parser::parse_function_body(
         // the closure is the one thing passed *on* rather than cleared, and only to its own body
         AST::FunctionBodyScope body_scope(payload.context, &decl, closure);
 
-        decl.body = &parse_scope(payload, body_brace);
+        if (arrow.has_value()) {
+            auto &body = payload.context.emplace_node<AST::ScopeNode>();
+            payload.context.push_scope(body);
+
+            AST::ExprNode *expr = parse_expr(payload, decl.return_type);
+            auto &ret = payload.context.emplace_node<AST::ReturnNode>(expr, arrow.value());
+            body.children.push_back(AST::make_ref(ret));
+            decl.body = &body;
+
+            payload.context.pop_scope();
+        }
+        else {
+            decl.body = &parse_scope(payload, body_brace.value());
+        }
     }
 
-    if (!payload.expect_token(Token::Type::t_close_brace)) {
-        return false;
-    }
+    if (!arrow.has_value()) {
+        if (!payload.expect_token(Token::Type::t_close_brace)) {
+            return false;
+        }
 
-    cursor.skip(); // the closing brace
+        cursor.skip();
+    }
 
     payload.context.pop_scope();
 
@@ -330,6 +350,138 @@ bool Parser::starts_closure_literal(Parser::Cursor &cursor)
         || cursor.peek_is_type(1, Token::Type::t_open_bracket);
 }
 
+// skip a default `= expr` inside a parameter list: stop on `,` / `)` / `;` at depth 0 so a
+// nested arrow's `=>` and a map literal's `=>` stay inside the default. `;` is statement
+// recovery for `function (...) =>`. angles are not depth: `$a < $b` is a comparison
+static void skip_default_expression(Parser::Cursor &cursor)
+{
+    int depth = 0;
+
+    while (!cursor.is_done()) {
+        const Token::Type type = cursor.type();
+
+        if (type == Token::Type::t_open_paren
+            || type == Token::Type::t_open_bracket
+            || type == Token::Type::t_open_brace) {
+            depth++;
+            cursor.skip();
+            continue;
+        }
+
+        if (type == Token::Type::t_close_paren
+            || type == Token::Type::t_close_bracket
+            || type == Token::Type::t_close_brace) {
+            if (depth == 0) {
+                return;
+            }
+
+            depth--;
+            cursor.skip();
+            continue;
+        }
+
+        if (depth == 0
+            && (type == Token::Type::t_comma || type == Token::Type::t_semicolon)) {
+            return;
+        }
+
+        cursor.skip();
+    }
+}
+
+// one parameter of a `(params) =>` list, shape only. mirrors parse_parameter_list's prefix
+// order: mv, access effect, label, construct, then type `$name` or a bare `$name`
+static bool skip_one_parameter(Parser::Cursor &cursor)
+{
+    AST::AccessEffect ignored = AST::AccessEffect::t_none;
+
+    if (cursor.is_type(Token::Type::t_mv)) {
+        cursor.skip();
+    }
+
+    if (Parser::starts_access_effect(cursor, ignored)) {
+        cursor.skip();
+    }
+
+    if (cursor.is_type(Token::Type::t_identifier)
+        && cursor.peek_is_type(1, Token::Type::t_colon)) {
+        cursor.skip(2);
+    }
+
+    if (Parser::starts_construct_param(cursor)) {
+        cursor.skip();
+    }
+
+    if (cursor.is_type(Token::Type::t_varname)) {
+        cursor.skip();
+    }
+    else {
+        if (!Parser::skip_type_shape(cursor) || !cursor.is_type(Token::Type::t_varname)) {
+            return false;
+        }
+
+        cursor.skip();
+    }
+
+    if (cursor.is_type(Token::Type::t_assign)) {
+        cursor.skip();
+        skip_default_expression(cursor);
+    }
+
+    return true;
+}
+
+bool Parser::starts_arrow_closure(Parser::Cursor &cursor)
+{
+    if (!cursor.is_type(Token::Type::t_open_paren)) {
+        return false;
+    }
+
+    const auto snapshot = cursor.snapshot();
+    cursor.skip();
+
+    if (!cursor.is_type(Token::Type::t_close_paren)) {
+        while (true) {
+            if (!skip_one_parameter(cursor)) {
+                cursor.restore(snapshot);
+                return false;
+            }
+
+            if (cursor.is_type(Token::Type::t_comma)) {
+                cursor.skip();
+
+                if (cursor.is_type(Token::Type::t_close_paren)) {
+                    break;
+                }
+
+                continue;
+            }
+
+            break;
+        }
+    }
+
+    if (!cursor.is_type(Token::Type::t_close_paren)) {
+        cursor.restore(snapshot);
+        return false;
+    }
+
+    cursor.skip();
+
+    if (cursor.is_type(Token::Type::t_colon)) {
+        cursor.skip();
+
+        if (!Parser::skip_type_shape(cursor)) {
+            cursor.restore(snapshot);
+            return false;
+        }
+    }
+
+    const bool arrow = cursor.is_type(Token::Type::t_double_arrow);
+    cursor.restore(snapshot);
+    return arrow;
+}
+
 void Parser::skip_declaration_body(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -375,6 +527,47 @@ static void push_environment_param(
     Parser::push_implicit_param(payload, args, into, "$__env", &env_type, at);
 }
 
+static void inherit_enclosing_type_params(Parser::Payload &payload, AST::FunctionDeclNode &decl)
+{
+    if (AST::FunctionDeclNode *enclosing = payload.context.current_function_ptr) {
+        decl.type_parameters = enclosing->type_parameters;
+        decl.inherited_type_param_count = decl.type_parameters.size();
+        decl.enclosing_function = enclosing;
+    }
+}
+
+static AST::FunctionDeclNode *make_closure_decl(Parser::Payload &payload, const TokenReference &site)
+{
+    auto name_token = payload.context.make_virtual_token(
+        fmt::format("closure${}", payload.context.site_discriminator(site)),
+        Token::Type::t_identifier,
+        site);
+
+    auto *decl = payload.context.emplace_nodep<AST::FunctionDeclNode>(name_token, site);
+    decl->is_closure = true;
+    decl->ast_namespace = payload.context.current_namespace;
+    decl->declared_in = AST::origin_at(payload.context);
+    inherit_enclosing_type_params(payload, *decl);
+    return decl;
+}
+
+static void publish_closure(
+    Parser::Payload &payload,
+    AST::ClosureExprNode &expr,
+    AST::ComplexType *environment
+)
+{
+    Parser::report_unused_captures(payload, expr, *environment);
+
+    if (payload.context.publish_declarations) {
+        payload.context.declaration_scope().add_funcdecl(*expr.decl);
+    }
+
+    if (environment->property_count() > 0) {
+        expr.environment_type = environment;
+    }
+}
+
 AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -399,43 +592,7 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
         capture_list = std::move(captures);
     }
 
-    // a name nobody can spell, discriminated so two closures never share a symbol - including two written
-    // inside one block, which the enclosing lexical namespace cannot tell apart.
-    //
-    // the *position* rather than a counter, and this one carries a second reason beyond reproducibility:
-    // the environment type is minted as `<this name>.env`, and its identity, its typeinfo global and its
-    // release thunk all rest on this string alone being unique
-    auto name_token = payload.context.make_virtual_token(
-        fmt::format("closure${}", payload.context.site_discriminator(function_token)),
-        Token::Type::t_identifier,
-        function_token);
-
-    auto *closure_decl = payload.context.emplace_nodep<AST::FunctionDeclNode>(name_token, function_token);
-
-    closure_decl->is_closure = true;
-
-    // the block it was written in, which is what makes its symbol unique per block and lets a diagnostic
-    // say which function it appeared in. deliberately *not* registered in the FunctionRegistry: no name
-    // reaches a closure, so it belongs to no overload set
-    closure_decl->ast_namespace = payload.context.current_namespace;
-
-    // and where it was written, which is what the body inside it is judged against: a call to a `private`
-    // declaration made from a closure written in the same file has to be allowed, and TypeChecker asks the
-    // enclosing declaration for that. its visibility stays `t_public` and has to - no name reaches a
-    // closure, so there is nothing to hide it from
-    closure_decl->declared_in = AST::origin_at(payload.context);
-
-    // inherit the enclosing function's type parameters, the way a method inherits its
-    // owner's: so TypeChecker skips the template closure (it still names T) and the
-    // monomorphizer clones a concrete body per instance. a nested `function` stays
-    // refused - it is not cloned with its parent
-    if (AST::FunctionDeclNode *enclosing = payload.context.current_function_ptr) {
-        closure_decl->type_parameters = enclosing->type_parameters;
-        closure_decl->inherited_type_param_count = closure_decl->type_parameters.size();
-        // the method (or outer closure) this was written in. AST::enclosing_type_of
-        // walks it; a closure is not a method, so owner_type stays null
-        closure_decl->enclosing_function = enclosing;
-    }
+    auto *closure_decl = make_closure_decl(payload, function_token);
 
     auto &closure_scope = payload.context.emplace_node<AST::ScopeNode>();
 
@@ -481,6 +638,15 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
         closure_decl->return_type = parse_type(payload);
     }
 
+    if (cursor.is_type(Token::Type::t_double_arrow)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            "a shorthand closure is written '(params) => expr' without 'function' - drop the keyword");
+        cursor.skip();
+        skip_default_expression(cursor);
+        return nullptr;
+    }
+
     // the node exists before the body is parsed, because the body is what fills its capture list. it is
     // also what the body is parsed *under*, which is what makes a read of an enclosing local in there a
     // capture rather than the error it is inside a plain nested `function`
@@ -494,22 +660,74 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
         return nullptr;
     }
 
-    Parser::report_unused_captures(payload, closure_expr, *environment);
+    publish_closure(payload, closure_expr, environment);
+    return &closure_expr;
+}
 
-    // to the file root, like every other declaration: codegen emits bodies from there and
-    // AST::OwnershipPass resolves drops from the same list. skipped when the enclosing parse
-    // will not keep this tree - an instance property default is cloned into constructors, and
-    // that clone is what AST::prepend_property_defaults publishes
-    if (payload.context.publish_declarations) {
-        payload.context.declaration_scope().add_funcdecl(*closure_decl);
+AST::ClosureExprNode *Parser::parse_arrow_closure(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto &cursor = payload.cursor;
+
+    assert(starts_arrow_closure(cursor) && "parse_arrow_closure called off a (params) =>");
+
+    auto site_token = cursor.current();
+    cursor.skip();
+
+    auto *closure_decl = make_closure_decl(payload, site_token);
+    auto &closure_scope = payload.context.emplace_node<AST::ScopeNode>();
+
+    AST::ComplexType *environment = payload.collector.type_registry.create_anonymous_type(
+        closure_decl->func_name() + ".env",
+        AST::ComplexTypeKind::t_class,
+        payload.context.current_namespace);
+
+    std::vector<AST::VarDeclNode *> rebuilt;
+    push_environment_param(payload, rebuilt, closure_scope, environment, site_token);
+
+    if (!parse_parameter_list(payload, rebuilt, closure_scope, site_token)) {
+        closure_decl->replace_args(std::move(rebuilt));
+        return nullptr;
     }
 
-    // only now is it known whether anything was captured. an environment with no properties is left off
-    // the node entirely, so the closure's env slot stays null and nothing is allocated for it
-    if (environment->property_count() > 0) {
-        closure_expr.environment_type = environment;
+    closure_decl->replace_args(std::move(rebuilt));
+
+    if (cursor.is_type(Token::Type::t_colon)) {
+        cursor.skip();
+
+        if (!can_parse_type(payload)) {
+            payload.collect_unexpected_token(Token::Type::t_identifier);
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        closure_decl->return_type = parse_type(payload);
     }
 
+    if (!payload.expect_token(Token::Type::t_double_arrow)) {
+        return nullptr;
+    }
+
+    auto arrow_token = cursor.current();
+    cursor.skip();
+
+    auto &closure_expr = payload.context.emplace_node<AST::ClosureExprNode>(closure_decl, site_token);
+
+    if (closure_decl->return_type == nullptr && expected_type != nullptr) {
+        AST::bind_arrow_closure_to(&closure_expr, expected_type->type, payload.context.module.nodes);
+    }
+
+    // omitted `: T` with no concrete dest is unknown, not void: function<void(P...)> would
+    // let apply_generic bind T = void
+    if (closure_decl->return_type == nullptr) {
+        closure_decl->return_type = &payload.context.emplace_node<AST::TypeNode>(
+            AST::ValueType::make_unknown());
+    }
+
+    if (!parse_function_body(payload, *closure_decl, closure_scope, &closure_expr, arrow_token)) {
+        return nullptr;
+    }
+
+    publish_closure(payload, closure_expr, environment);
     return &closure_expr;
 }
 

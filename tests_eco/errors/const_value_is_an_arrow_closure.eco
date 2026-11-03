@@ -1,0 +1,4 @@
+// a constant cannot be a closure, arrow form included
+const HANDLER = (int32 $a) : int32 => $a + 1;
+
+echo 1;

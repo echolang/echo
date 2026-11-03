@@ -1,0 +1,144 @@
+// `(params) => expr` is a closure whose body is one returned expression
+
+function<int32(int32)> $inc = (int32 $a) => $a + 1;
+echo $inc(41);
+
+function apply(function<int32(int32)> $f, int32 $v) : int32
+{
+    return $f($v);
+}
+
+echo apply((int32 $a) => $a * 2, 21);
+
+$f = (int32 $a) : int32 => $a + 1;
+echo $f(41);
+
+function<int32()> $thunk = () : int32 => 42;
+echo $thunk();
+
+function<int32(int32, int32)> $add = (int32 $a, int32 $b) => $a + $b;
+echo $add(40, 2);
+
+function captures(int32 $seed) : int32
+{
+    function<int32(int32)> $add = (int32 $x) => $x + $seed;
+    return $add(10);
+}
+
+echo captures(32);
+
+function<int64(int32)> $wide = (int32 $a) : int64 => $a;
+echo $wide(42);
+
+function<result<int32, string>()> $ok = () => .ok(42);
+echo $ok()->or(-1);
+
+// dest on a later assignment, not only a declaration
+function<int32(int32)> $slot = (int32 $a) => $a;
+$slot = (int32 $a) => $a + 7;
+echo $slot(1);
+
+// returning one: the return type dest-types the body
+function make() : function<int32(int32)>
+{
+    return (int32 $a) => $a + 8;
+}
+
+function<int32(int32)> $made = make();
+echo $made(1);
+
+// generic inference through a callable parameter
+function apply_generic<T>(function<T(T)> $f, T $v) : T
+{
+    return $f($v);
+}
+
+echo apply_generic((int32 $a) : int32 => $a + 1, 10);
+
+// nested: inner captures the outer parameter
+function scale(int32 $n) : function<int32(int32)>
+{
+    return (int32 $a) => $a * $n;
+}
+
+function<int32(int32)> $times3 = scale(3);
+echo $times3(5);
+
+// a later write is not observed: capture copies at creation
+function frozen() : int32
+{
+    int32 $n = 5;
+    function<int32()> $read = () : int32 => $n;
+    $n = 99;
+    return $read();
+}
+
+echo frozen();
+
+function say(int32 $n) : void
+{
+    echo $n;
+}
+
+function<void()> $g = () => say(7);
+$g();
+
+function<int32(const int32&)> $id = (read int32& $n) => $n;
+int32 $x = 41;
+echo $id($x);
+
+function<int32(string)> $len = (mv string $s) => $s->size() as int32;
+string $s = 'ab';
+echo $len(mv $s);
+
+struct Handler
+{
+    function<int32(int32)> $op;
+}
+
+Handler $h = Handler((int32 $a) => $a * 2);
+echo $h->op(7);
+
+array<function<int32(int32)>> $steps = array<function<int32(int32)>>();
+$steps[] = (int32 $n) => $n + 1;
+echo $steps[0](4);
+
+map<string, function<int32(int32)>> $ops = [
+    'inc' => (int32 $a) => $a + 1,
+    'dbl' => (int32 $a) => $a * 2,
+];
+echo $ops['inc'](20);
+echo $ops['dbl'](3);
+
+enum Gate
+{
+    case open;
+    case shut;
+}
+
+function pick(Gate $g, int32 $n) : int32
+{
+    function<int32(int32)> $step = match ($g) {
+        .open => (int32 $a) => $a + 1,
+        .shut => (int32 $a) => $a,
+    };
+    return $step($n);
+}
+
+echo pick(.open, 10);
+echo pick(.shut, 10);
+
+function outer_string() : usize
+{
+    string $s = 'hello';
+    function<usize()> $f = () : usize => $s->size();
+    return $f();
+}
+
+echo outer_string();
+
+function<int32(int32)>? $opt = (int32 $a) => $a + 1;
+function<int32(int32)> $unwrapped = guard $opt else {
+    die('missing');
+};
+echo $unwrapped(41);

@@ -5,6 +5,7 @@
 #include "AST/ConstantDataExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TemporaryBindExprNode.h"
+#include "AST/TypeNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/LiteralValueNode.h"
@@ -408,6 +409,44 @@ AST::ValueType AST::ClosureExprNode::result_type() const
     }
 
     return decl->callable_type();
+}
+
+bool AST::bind_arrow_closure_to(ExprNode *expr, const ValueType &destination, NodeCollection &nodes)
+{
+    if (expr == nullptr || expr->get_node_type() != NodeType::n_expr_closure) {
+        return false;
+    }
+
+    auto *closure = static_cast<ClosureExprNode *>(expr);
+
+    if (closure->decl == nullptr) {
+        return false;
+    }
+
+    // planted unknown is the omitted-return placeholder. is_undetermined_type would also
+    // match a written `: T` and overwrite it from a concrete dest
+    if (closure->decl->return_type != nullptr
+        && !closure->decl->return_type->type.is_unknown()) {
+        return false;
+    }
+
+    ValueType dest = destination;
+    if (dest.is_wrapped_optional()) {
+        dest = dest.optional_payload();
+    }
+
+    if (!dest.is_callable()) {
+        return false;
+    }
+
+    const ValueType ret = dest.signature().return_type;
+
+    if (is_undetermined_type(ret)) {
+        return false;
+    }
+
+    closure->decl->return_type = &nodes.emplace_back<TypeNode>(ret);
+    return true;
 }
 
 AST::ValueType AST::IndirectCallExprNode::callee_type() const

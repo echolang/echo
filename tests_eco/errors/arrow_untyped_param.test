@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] ParameterNeedsType  arrow_untyped_param.eco:2:30
+
+  The parameter '$a' needs a type - write it before the name, as in 'int32 $a'.
+
+  1 | // a shorthand still needs a written parameter type
+  2 | function<int32(int32)> $f = ($a) => $a + 1;
+    :                              ^^
+  3 | echo $f(1);
+
+[error] InvalidTypeConversion  arrow_untyped_param.eco:2:24
+
+  Invalid type conversion: cannot implicitly convert 'function<int32([unknown])>' to 'function<int32(int32)>'
+
+  1 | // a shorthand still needs a written parameter type
+  2 | function<int32(int32)> $f = ($a) => $a + 1;
+    :                        ^^
+  3 | echo $f(1);
+
+2 errors, nothing was compiled.

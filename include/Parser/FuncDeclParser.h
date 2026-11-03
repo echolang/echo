@@ -11,12 +11,14 @@
 #include "Parser/ParserPayload.h"
 #include "Parser/VisibilityParser.h"
 
+#include <optional>
 #include <vector>
 
 namespace AST
 {
     class ClosureExprNode;
     class TypeDeclNode;
+    class TypeNode;
 };
 
 namespace Parser
@@ -143,20 +145,35 @@ namespace Parser
     // `args[0]` is the environment its captures will live in, exactly the way a method's is its receiver
     AST::ClosureExprNode *parse_closure_literal(Payload &payload);
 
-    // parses a function's body, from its opening brace through its closing one, into `decl->body`.
-    // `scope` is the parameter frame the body is pushed under, so a parameter resolves through it
+    // **does `(params) => expr` start here?** the shorthand closure, a planted return of one
+    // expression. snapshot/restore, same idiom as starts_vardecl: grouping `(1 + 2)` and
+    // `($x)` fail the scan, and a `$name` without a type still matches so `($a) =>` is a
+    // closure that then reports ParameterNeedsType rather than grouping plus unexpected `=>`
     //
-    // shared by parse_funcdecl and parse_closure_literal, which differ in exactly one thing: a closure
-    // hands itself in, so a read of an enclosing local in the body is a capture rather than an error.
-    // everything else - the function-boundary marker, the return-type and body frames, the recovery on a
-    // missing brace - is one body of code, and it had to be edited in two places as long as it was two
+    // two predicates, two first tokens: starts_closure_literal is `function (` / `function [`.
+    // asked before the grouping arm in parse_prefix_unary, which otherwise consumes `(`
+    bool starts_arrow_closure(Parser::Cursor &cursor);
+
+    // `(int32 $a) => $a + 1`. no capture list: `[` at expression start is a collection
+    // literal, so `function[mv $x]()` stays the closed / mv form. implicit copy capture
+    // still works. `expected_type` dest-types the return when it is a callable
+    AST::ClosureExprNode *parse_arrow_closure(Payload &payload, AST::TypeNode *expected_type = nullptr);
+
+    // parses a function's body into `decl->body`. `scope` is the parameter frame the body is
+    // pushed under, so a parameter resolves through it
+    //
+    // shared by parse_funcdecl, parse_closure_literal and parse_arrow_closure. a closure hands
+    // itself in, so a read of an enclosing local in the body is a capture rather than an error.
+    // `arrow` is the `=>` of a shorthand: one planted return of parse_expr, no braces. everything
+    // else - the function-boundary marker, the return-type and body frames - is one body of code
     //
     // answers false when a brace is missing, having reported it and recovered
     bool parse_function_body(
         Payload &payload,
         AST::FunctionDeclNode &decl,
         AST::ScopeNode &scope,
-        AST::ClosureExprNode *closure = nullptr);
+        AST::ClosureExprNode *closure = nullptr,
+        std::optional<TokenReference> arrow = std::nullopt);
 
     // **does an access effect start here, and which one?** `read` / `inout` / `out` at the head of a
     // parameter, answered in two tokens.

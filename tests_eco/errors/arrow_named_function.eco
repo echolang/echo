@@ -1,0 +1,4 @@
+// named functions do not get `=>`
+function add(int32 $a) : int32 => $a;
+
+echo add(1);

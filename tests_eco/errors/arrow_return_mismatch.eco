@@ -1,0 +1,3 @@
+// a dest-typed shorthand still has to return that dest
+function<int32(int32)> $f = (int32 $a) => 'no';
+echo $f(1);

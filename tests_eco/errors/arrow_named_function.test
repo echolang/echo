@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] UnexpectedToken  arrow_named_function.eco:2:32
+
+  Unexpected token 'double arrow (=>)' found. Expected 'open_brace '{''
+
+  1 | // named functions do not get `=>`
+  2 | function add(int32 $a) : int32 => $a;
+    :                                ^^ expected open_brace '{'
+  3 | 
+
+[error] BodylessFunction  arrow_named_function.eco:2:10
+
+  'add(int32)' was declared but never given a body - write one, or say where its implementation comes from with an 'extern' block.
+
+  1 | // named functions do not get `=>`
+  2 | function add(int32 $a) : int32 => $a;
+    :          ^^^
+  3 | 
+
+2 errors, nothing was compiled.

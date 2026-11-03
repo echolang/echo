@@ -1,0 +1,8 @@
+// a written `: T` stays; dest-typing must not overwrite it with int32
+function wrap<T>(T $v) : function<int32()>
+{
+    return () : T => 1;
+}
+
+function<int32()> $f = wrap<string>('x');
+echo $f();

@@ -1,0 +1,3 @@
+// dest-typed to function<void()>, body still produces a value
+function<void()> $f = () => 1;
+$f();

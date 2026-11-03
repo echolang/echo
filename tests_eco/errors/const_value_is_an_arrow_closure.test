@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] const_value_is_an_arrow_closure.eco:2:17
+
+  A constant's value cannot be a closure. A closure captures where it is written and a constant is copied to where it is used, so 'HANDLER' would have no environment to capture
+
+  1 | // a constant cannot be a closure, arrow form included
+  2 | const HANDLER = (int32 $a) : int32 => $a + 1;
+    :                 ^
+  3 | 
+
+1 error, nothing was compiled.

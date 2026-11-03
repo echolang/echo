@@ -2258,6 +2258,17 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
         return with_postfix(payload, AST::make_ref(unary));
     }
 
+    // `(int32 $a) => $a + 1` - asked before grouping, which otherwise consumes the `(`
+    if (Parser::starts_arrow_closure(cursor)) {
+        auto *closure = Parser::parse_arrow_closure(payload, expected_type);
+
+        if (closure == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        return with_postfix(payload, AST::make_ref(*closure));
+    }
+
     // a grouped subexpression. postfix (`as`, `instanceof`, `->`) is applied after the
     // close paren, so `((STEPS - 1) as float32)` is a cast of a group, not a second
     // operand the yard never collected. grouping is an operand, not a shunting-yard
