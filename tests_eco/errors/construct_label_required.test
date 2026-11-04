@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] MissingArgumentLabel  construct_label_required.eco:12:6
+
+  The parameter 'once' of 'bind' must be passed as 'once:'.
+
+  11 | 
+  12 | echo bind<Pair>(8, 9);
+     :      ^^^^
+  13 | 
+
+1 error, nothing was compiled.

@@ -404,3 +404,26 @@ TEST_CASE("a rejected slot drops the candidate before argument_fit waits", "[fnm
     unfillable.rejected = { true };
     REQUIRE( AST::match_function({ fillable, unfillable }).outcome == FunctionMatch::Outcome::t_resolved );
 }
+
+TEST_CASE("a short callback's parameters pick an overload before the omitted return", "[fnmatch]")
+{
+    // `(int32 $a) => expr` is function<unknown(int32)>. that used to score t_none against every
+    // function<R(P...)> because the unknown return failed equality, so two overloads that
+    // differed only in the callback's parameters both rejected the short form
+    const ValueType short_cb = ValueType::make_callable(ValueType::make_unknown(), { t_int32 });
+    const ValueType one_param = ValueType::make_callable(t_int32, { t_int32 });
+    const ValueType two_params = ValueType::make_callable(t_int32, { t_int32, t_int32 });
+
+    REQUIRE( AST::argument_fit(short_cb, nullptr, one_param) == ArgumentFit::t_undetermined );
+    REQUIRE( AST::argument_fit(short_cb, nullptr, two_params) == ArgumentFit::t_none );
+    REQUIRE( AST::argument_fit(one_param, nullptr, one_param) == ArgumentFit::t_exact );
+    REQUIRE( AST::argument_fit(one_param, nullptr, two_params) == ArgumentFit::t_none );
+    REQUIRE( AST::argument_fit(one_param, nullptr, ValueType::make_const(one_param)) == ArgumentFit::t_widening );
+
+    const std::vector<FunctionCandidate> candidates = {
+        candidate({ one_param }),
+        candidate({ two_params }),
+    };
+
+    REQUIRE( match(candidates, { short_cb }).outcome == FunctionMatch::Outcome::t_resolved );
+}

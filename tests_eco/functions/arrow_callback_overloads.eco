@@ -1,0 +1,33 @@
+// a short callback without `: R` still picks between overloads that differ only in
+// the callback's parameters
+
+class Container
+{
+}
+
+class Endpoint
+{
+}
+
+class Action
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+function get<A>(string $path, function<A(Container)> $make) : int32
+{
+    return $make(Container())->n;
+}
+
+function get<A>(string $path, function<A(Container, Endpoint)> $make) : int32
+{
+    return $make(Container(), Endpoint())->n + 100;
+}
+
+echo get<Action>('/x', (Container $c) => Action(1));
+echo get<Action>('/x', (Container $c, Endpoint $e) => Action(2));

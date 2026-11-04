@@ -42,7 +42,8 @@ namespace AST
 
     // **should this candidate gather, and which slice is the constructor args?** ranking asks
     // this and scores a virtual last argument of type M; CallResolver mints `M(...)` only after
-    // a winner is chosen
+    // a winner is chosen. a labelled construct param gathers only when the first remaining
+    // argument carries that label; unlabelled extras are an ordinary call
     struct ConstructWrap
     {
         enum class Kind

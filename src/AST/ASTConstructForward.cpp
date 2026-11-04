@@ -40,6 +40,18 @@ namespace AST
             return last;
         }
 
+        const CallArgumentName k_positional {};
+
+        // the construct param's own label, the one wrap strips from the first remaining slot
+        bool is_construct_label(const CallArgumentName &written, const VarDeclNode *param)
+        {
+            return written.kind == ArgumentNameKind::t_label
+                && param != nullptr
+                && param->has_label()
+                && written.token.has_value()
+                && written.token->value() == param->label();
+        }
+
         std::vector<CallArgumentName> construct_inner_argument_names(
             const std::vector<CallArgumentName> &argument_names,
             size_t remaining_start,
@@ -53,18 +65,11 @@ namespace AST
             }
 
             inner_names.reserve(argument_count - remaining_start);
-            const CallArgumentName k_positional {};
 
             for (size_t i = remaining_start; i < argument_count; i++) {
                 const CallArgumentName &written =
                     i < argument_names.size() ? argument_names[i] : k_positional;
-                const bool strip_label = i == remaining_start
-                    && written.kind == ArgumentNameKind::t_label
-                    && param != nullptr
-                    && param->has_label()
-                    && written.token.has_value()
-                    && written.token->value() == param->label();
-                if (strip_label) {
+                if (i == remaining_start && is_construct_label(written, param)) {
                     inner_names.emplace_back();
                 } else {
                     inner_names.push_back(written);
@@ -122,6 +127,24 @@ namespace AST
                 || collection_literal_of(only) != nullptr
                 || is_untyped_literal(only)
                 || is_written_null(only);
+        }
+
+        // a declared label opens the gather at the first remaining argument.
+        // unlabelled extras are an ordinary call, so `bind<T>(callback)` beside
+        // `bind<T>(put: construct T)` is not `T(callback)`
+        bool construct_label_opens_gather(
+            const VarDeclNode *param,
+            const std::vector<CallArgumentName> &argument_names,
+            size_t remaining_start
+        )
+        {
+            if (param == nullptr || !param->has_label()) {
+                return true;
+            }
+
+            const CallArgumentName &written = remaining_start < argument_names.size()
+                ? argument_names[remaining_start] : k_positional;
+            return is_construct_label(written, param);
         }
     }
 
@@ -183,6 +206,10 @@ namespace AST
         const size_t remaining_start = *remaining_at;
         const VarDeclNode *param = candidate.args[remaining_start];
         if (param == nullptr) {
+            return result;
+        }
+
+        if (!construct_label_opens_gather(param, call.argument_names, remaining_start)) {
             return result;
         }
 

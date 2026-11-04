@@ -13,6 +13,7 @@
 #include "AST/ExprNode.h"
 
 #include <cassert>
+#include <cstddef>
 
 namespace AST
 {
@@ -364,6 +365,49 @@ namespace AST
         return conversion;
     }
 
+    // **callable ranking.** exact P, wait on an undetermined slot (unknown R included).
+    // after `from == to` the only leftover is const, which is always t_widening
+    inline ArgumentFit callable_fit(const ValueType &from, const ValueType &to)
+    {
+        const auto consider = [](const ValueType &a, const ValueType &b) {
+            if (!type_is_determined_for_fit(a) || !type_is_determined_for_fit(b)) {
+                return ArgumentFit::t_undetermined;
+            }
+
+            return a == b ? ArgumentFit::t_exact : ArgumentFit::t_none;
+        };
+
+        const CallableSignature &from_sig = from.signature();
+        const CallableSignature &to_sig = to.signature();
+
+        if (from_sig.parameter_types.size() != to_sig.parameter_types.size()) {
+            return ArgumentFit::t_none;
+        }
+
+        bool params_wait = false;
+        for (size_t i = 0; i < from_sig.parameter_types.size(); i++) {
+            const ArgumentFit slot = consider(from_sig.parameter_types[i], to_sig.parameter_types[i]);
+            if (slot == ArgumentFit::t_none) {
+                return ArgumentFit::t_none;
+            }
+
+            if (slot == ArgumentFit::t_undetermined) {
+                params_wait = true;
+            }
+        }
+
+        if (params_wait) {
+            return ArgumentFit::t_undetermined;
+        }
+
+        const ArgumentFit ret = consider(from_sig.return_type, to_sig.return_type);
+        if (ret != ArgumentFit::t_exact) {
+            return ret;
+        }
+
+        return ArgumentFit::t_widening;
+    }
+
     // **the** rule for "does this argument answer this parameter" - the only implementation, with
     // three readers that each take a different amount of it:
     //
@@ -415,6 +459,12 @@ namespace AST
             if (as_callable != from) {
                 return argument_fit(as_callable, nullptr, to);
             }
+        }
+
+        // a short `(params) => expr` is `function<unknown(P...)>`: a top-level callable is
+        // determined, so the walk has to see inside the signature
+        if (from.is_callable() && to.is_callable()) {
+            return callable_fit(from, to);
         }
 
         // **a tagged optional accepts whatever its payload accepts.** `f($circle)` against a `Drawable?`

@@ -1,0 +1,32 @@
+// a labelled `put: construct T` must not wrap an unlabelled callback as `T(callback)`
+// when T's constructor takes that many arguments
+
+class Container
+{
+}
+
+class Service
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+class App
+{
+    public function bind<T>(function<T(Container)> $make) : int32
+    {
+        return $make(Container())->n;
+    }
+
+    public function bind<T>(put: construct T $value) : int32
+    {
+        return $value->n;
+    }
+}
+
+echo App()->bind<Service>((Container $c) => Service(7));
+echo App()->bind<Service>(put: 9);
