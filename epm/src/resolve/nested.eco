@@ -1,0 +1,100 @@
+/**
+ * A package inside another package. A requirement whose name extends another
+ * one's by whole path segments, from the same source, names that directory
+ * of the other's checkout: `echopack/carbon/drivers/mysql` is
+ * `vendor/echopack/carbon/drivers/mysql`. The repo is solved, locked and
+ * vendored once, at the outer name, so the two are always one release.
+ */
+
+namespace epm::resolve;
+
+use epm::manifest::Requirement;
+
+/**
+ * A requirement as the solver sees it: on the outer package, with the
+ * directory inside it that was asked for ('' for the package itself).
+ */
+public struct Folded
+{
+    Requirement $req;
+    string $path;
+
+    constructor(Requirement $req, string $path)
+    {
+        $this->req = $req;
+        $this->path = $path;
+    }
+}
+
+/**
+ * The directory below `$outer` that `$name` names, or '' when `$name` is
+ * not inside it. Whole segments only: `lib/sub` is inside `lib`, `libs` is not.
+ */
+public function inner_path(const string& $outer, const string& $name) : string
+{
+    usize $cut = $outer->size();
+
+    if ($outer->empty() || $name->size() <= $cut + 1 || !$name->starts($outer) || $name->byte($cut) != 47) {
+        return '';
+    }
+
+    return $name->sub($cut + 1, $name->size() - $cut - 1);
+}
+
+/**
+ * The package `$req` sits inside, or '' when it stands alone. Looked for
+ * among the requirements written beside it, then among the packages already
+ * listed. The outermost wins: that is where the checkout is.
+ */
+public function container_of(
+    const Requirement& $req,
+    const array<Requirement>& $siblings,
+    const World& $world
+) : string
+{
+    string $best = '';
+
+    foreach ($siblings as const &$s) {
+        if (holds($s->name, $s->origin, $req) && ($best->empty() || $s->name->size() < $best->size())) {
+            $best = $s->name;
+        }
+    }
+
+    foreach ($world->catalog as const &$p) {
+        if (holds($p->name, $p->origin, $req) && ($best->empty() || $p->name->size() < $best->size())) {
+            $best = $p->name;
+        }
+    }
+
+    return $best;
+}
+
+/**
+ * Every requirement of one manifest, each moved onto the package it sits inside.
+ */
+public function fold(const array<Requirement>& $reqs, const World& $world) : array<Folded>
+{
+    array<Folded> $out = array<Folded>();
+
+    foreach ($reqs as const &$r) {
+        string $outer = container_of($r, $reqs, $world);
+
+        if ($outer->empty()) {
+            $out[] = Folded($r, '');
+            continue;
+        }
+
+        $out[] = Folded(Requirement($outer, $r->version, $r->origin, $r->rev), inner_path($outer, $r->name));
+    }
+
+    return $out;
+}
+
+private function holds(
+    const string& $outer,
+    const epm::manifest::Origin& $origin,
+    const Requirement& $req
+) : bool
+{
+    return !$origin->empty() && $origin->same($req->origin) && !inner_path($outer, $req->name)->empty();
+}

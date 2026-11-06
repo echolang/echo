@@ -121,7 +121,8 @@ test fetch_manifest_loads_a_module_with_a_cc_include
     resolve::Package $cat = guard $src->list_versions();
     manifest::Manifest $man = guard $src->fetch_manifest(
         $cat->releases[0]->tag,
-        $cat->releases[0]->rev
+        $cat->releases[0]->rev,
+        ''
     );
     assert($man->name == 'lib');
     scratch::gone($dir);

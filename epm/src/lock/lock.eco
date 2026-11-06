@@ -7,6 +7,7 @@ namespace epm::lock;
 
 use epm::manifest;
 use epm::manifest::Origin;
+use epm::resolve;
 use epm::sys;
 use std::io;
 
@@ -21,6 +22,9 @@ public struct Entry
     string $sha256;
     array<string> $requires;
 
+    // directories of this checkout that are packages of their own: `packages` in the JSON
+    array<string> $paths;
+
     constructor(string $name, string $version, Origin $origin, string $rev, string $sha256)
     {
         $this->name = $name;
@@ -29,6 +33,31 @@ public struct Entry
         $this->rev = $rev;
         $this->sha256 = $sha256;
         $this->requires = array<string>();
+        $this->paths = array<string>();
+    }
+
+    /**
+     * The directory of this checkout that `$name` names as a package, or ''
+     * when it is not one: the entry's own name, or a recorded path below it
+     * from the same source.
+     */
+    const function inner(const string& $name, const Origin& $origin) : string?
+    {
+        if ($name == $this->name) {
+            return '';
+        }
+
+        if (!$this->origin->same($origin)) {
+            return null;
+        }
+
+        string $path = resolve::inner_path($this->name, $name);
+
+        if ($path->empty() || !manifest::name_seen($this->paths, $path)) {
+            return null;
+        }
+
+        return $path;
     }
 }
 
@@ -53,6 +82,21 @@ public struct Lock
             }
 
             $i = $i + 1;
+        }
+
+        return null;
+    }
+
+    /**
+     * The entry that holds the package `$name`: its own, or the one it is a
+     * directory of.
+     */
+    const function holding(const string& $name, const Origin& $origin) : Entry?
+    {
+        foreach ($this->packages as const &$e) {
+            if ($e->inner($name, $origin) != null) {
+                return $e;
+            }
         }
 
         return null;
@@ -168,6 +212,19 @@ public function load(const string& $path) : result<Lock, string>
             $j = $j + 1;
         }
 
+        array<json::Value> $inner = $one['packages']->asArray() ?? array<json::Value>();
+
+        foreach ($inner as const &$p) {
+            string $sub = $p->asStr() ?? '';
+
+            // a path below vendor/<name>, held to the rule a name is
+            if (!manifest::usable_name($sub)) {
+                return .error("{$path}: package '{$name}' has a package at '{$sub}', which is not a path below it");
+            }
+
+            $e->paths[] = $sub;
+        }
+
         $lock->packages[] = $e;
         $i = $i + 1;
     }
@@ -205,6 +262,17 @@ public function save(const string& $path, const Lock& $lock) : result<bool, stri
         }
 
         $one['requires'] = $reqs;
+
+        if ($e->paths->count() > 0) {
+            json::Value $inner = json::arr();
+
+            foreach ($e->paths as const &$path) {
+                $inner[] = json::str($path);
+            }
+
+            $one['packages'] = $inner;
+        }
+
         $pkgs[] = $one;
         $i = $i + 1;
     }

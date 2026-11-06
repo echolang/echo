@@ -63,6 +63,12 @@ something epm has to fetch into `vendor/`.
 After `epm install`, `vendor/` is on disk and `echoc build` needs no flags.
 `epm.lock.json` is committed; `vendor/` is not.
 
+A repo can hold more than one package. `#[requires: "org/lib/drivers/db" {...}]`
+beside `#[requires: "org/lib" {...}]`, from the same source, is the directory
+`drivers/db` of lib's checkout: one clone, one rev, one lock entry with
+`"packages": ["drivers/db"]`. A vendored `#[depends:]` that leaves its checkout
+is refused.
+
 A remote is a `Source`. The origin on a `#[requires:]` is a tagged locator
 (`source: git "..."`); a later host is another tag, not a new field. GitHub
 remotes list tags and fetch a `module.eco` over HTTP; every other host (and

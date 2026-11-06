@@ -43,7 +43,8 @@ public class GitHub : Source
 
     const function fetch_manifest(
         const string& $tag,
-        const string& $rev
+        const string& $rev,
+        const string& $dir
     ) : result<manifest::Manifest, string>
     {
         string $key = manifest_key($tag, $rev);
@@ -63,25 +64,26 @@ public class GitHub : Source
             return .error("cannot fetch a manifest from {$this->url}: no user cache directory");
         }
 
-        string $mod = sys::join($cache, 'module.eco');
+        string $file = module_in($dir);
+        string $mod = sys::join($cache, $file);
         result<manifest::Manifest, string> $cached = load_if_readable($mod);
 
         if (!$cached->failed()) {
             return $cached;
         }
 
-        string $body = guard raw_file($this->repo, $key, 'module.eco') else {
-            return $this->git->fetch_manifest($tag, $rev);
+        string $body = guard raw_file($this->repo, $key, $file) else {
+            return $this->git->fetch_manifest($tag, $rev, $dir);
         }
 
-        if (!sys::mkdir_p($cache)) {
-            return $this->git->fetch_manifest($tag, $rev);
+        if (!sys::mkdir_p(sys::dirname($mod))) {
+            return $this->git->fetch_manifest($tag, $rev, $dir);
         }
 
         result<usize, io::ioerror> $wrote = io::writefile($mod, $body);
 
         if ($wrote->failed()) {
-            return $this->git->fetch_manifest($tag, $rev);
+            return $this->git->fetch_manifest($tag, $rev, $dir);
         }
 
         result<manifest::Manifest, string> $loaded = load_if_readable($mod);
@@ -92,7 +94,7 @@ public class GitHub : Source
 
         // the HTTP body is only module.eco. echoc -p manifest still settles
         // #[cc: include], which needs the rest of the tree
-        return $this->git->fetch_manifest($tag, $rev);
+        return $this->git->fetch_manifest($tag, $rev, $dir);
     }
 
     const function checkout(

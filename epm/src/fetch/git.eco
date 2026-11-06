@@ -77,7 +77,8 @@ public class Git : Source
 
     const function fetch_manifest(
         const string& $tag,
-        const string& $rev
+        const string& $rev,
+        const string& $dir
     ) : result<manifest::Manifest, string>
     {
         string $key = manifest_key($tag, $rev);
@@ -96,15 +97,16 @@ public class Git : Source
             return .error("cannot fetch a manifest from {$this->url}: no user cache directory");
         }
 
-        string $mod = sys::join($cache, 'module.eco');
+        string $file = module_in($dir);
+        string $mod = sys::join($cache, $file);
         result<manifest::Manifest, string> $cached = load_if_readable($mod);
 
         if (!$cached->failed()) {
             return $cached;
         }
 
-        if (!$this->clone_manifest($key, $cache)) {
-            return .error("no module.eco at {$this->url}@{$key}");
+        if (!$this->clone_manifest($key, $cache, $file)) {
+            return .error("no {$file} at {$this->url}@{$key}");
         }
 
         return manifest::load($mod);
@@ -172,14 +174,15 @@ public class Git : Source
 
     private const function clone_manifest(
         const string& $rev,
-        const string& $cache
+        const string& $cache,
+        const string& $file
     ) : bool
     {
         string $ignored = guard $this->checkout($rev, $cache) else {
             return false;
         }
 
-        return sys::is_file(sys::join($cache, 'module.eco'));
+        return sys::is_file(sys::join($cache, $file));
     }
 }
 

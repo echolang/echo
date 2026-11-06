@@ -1,0 +1,132 @@
+/**
+ * A vendored package is built from its own checkout. A `#[depends:]` in it,
+ * or in a package inside it, that climbs out of `vendor/<name>` reaches
+ * whatever happens to sit beside it.
+ */
+
+namespace epm::manifest;
+
+use epm::sys;
+
+/**
+ * A vendored package's `#[depends:]` that leaves `vendor/<name>`. Returns
+ * the refusal, '' when every path stays inside.
+ */
+public function leaving_checkout(
+    const string& $dest,
+    const string& $name,
+    const array<string>& $paths
+) : string
+{
+    array<string> $dirs = array<string>();
+    $dirs[] = '';
+
+    foreach ($paths as const &$p) {
+        $dirs[] = $p;
+    }
+
+    foreach ($dirs as const &$dir) {
+        string $mod = sys::join($dest, 'module.eco');
+        string $label = $name;
+
+        if (!$dir->empty()) {
+            $mod = sys::join(sys::join($dest, $dir), 'module.eco');
+            $label = "{$name}/{$dir}";
+        }
+
+        if (!sys::is_file($mod)) {
+            if ($dir->empty()) {
+                continue;
+            }
+
+            return "'{$label}' has no module.eco in its checkout - is it a package of '{$name}'?";
+        }
+
+        Manifest $m = guard load($mod) else ($e) {
+            return $e;
+        }
+
+        array<string> $spelled = $m->depends;
+
+        foreach ($m->scoped_depends as const &$s) {
+            $spelled[] = $s->path;
+        }
+
+        foreach ($m->hook_depends as const &$h) {
+            $spelled[] = $h;
+        }
+
+        foreach ($spelled as const &$d) {
+            if (climbs_out($dir, $d)) {
+                return "'{$label}' depends on '{$d}', which is outside its checkout vendor/{$name} - a package can only depend by path on its own directories; anything else is a #[requires:]";
+            }
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Whether `$spelled`, written by the module.eco at `$dir` inside a checkout,
+ * leaves that checkout. Lexical: each `..` climbs one segment. `/` and `\`
+ * both cut, so a Windows-style depends is the same question on every host.
+ */
+public function climbs_out(const string& $dir, const string& $spelled) : bool
+{
+    if (sys::is_absolute($spelled)) {
+        return true;
+    }
+
+    int32 $depth = segments_of($dir);
+    usize $start = 0;
+    usize $i = 0;
+
+    while ($i <= $spelled->size()) {
+        if ($i == $spelled->size() || is_cut($spelled->byte($i))) {
+            string $part = $spelled->sub($start, $i - $start);
+
+            if ($part == '..') {
+                $depth = $depth - 1;
+
+                if ($depth < 0) {
+                    return true;
+                }
+            }
+            else if (!$part->empty() && $part != '.') {
+                $depth = $depth + 1;
+            }
+
+            $start = $i + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+private function segments_of(const string& $dir) : int32
+{
+    if ($dir->empty()) {
+        return 0;
+    }
+
+    int32 $n = 1;
+    usize $i = 0;
+
+    while ($i < $dir->size()) {
+        if (is_cut($dir->byte($i))) {
+            $n = $n + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $n;
+}
+
+// a spelled depends may use either slash; the jail does not wait for the host
+private function is_cut(uint8 $b) : bool
+{
+    return $b == 47 || $b == 92;
+}

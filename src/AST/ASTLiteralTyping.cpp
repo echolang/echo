@@ -706,13 +706,7 @@ namespace AST
             return out;
         }
 
-        // converting an address to an integer is pointer arithmetic's opposite, and a cast of
-        // `const usize&` to `int32` would do that. a literal beside a borrow is retyped above;
-        // two typed integers where one is still a borrow wait for PointerAdjuster
-        if (loser->result_type().is_pointer()) {
-            return out;
-        }
-
+        // a borrow of a number takes the same cast a value does. PointerAdjuster peels the operand
         (left_loses ? out.lhs : out.rhs) = &nodes.emplace_back<TypeCastNode>(*common, loser, true);
 
         out.result = BinaryReconciliation::Result::t_reconciled;

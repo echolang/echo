@@ -17,9 +17,11 @@ use std::env;
 public interface Source
 {
     const function list_versions() : result<resolve::Package, string>;
+    // `$dir` names a package inside the repo, '' its root
     const function fetch_manifest(
         const string& $tag,
-        const string& $rev
+        const string& $rev,
+        const string& $dir
     ) : result<manifest::Manifest, string>;
     const function checkout(
         const string& $rev,
@@ -139,6 +141,16 @@ private function cache_root() : string
     }
 
     return sys::join(str::from($home), '.cache/echo/epm');
+}
+
+// the module.eco of the package at `$dir` in a checkout, '' for the root
+internal function module_in(const string& $dir) : string
+{
+    if ($dir->empty()) {
+        return 'module.eco';
+    }
+
+    return "{$dir}/module.eco";
 }
 
 internal function load_if_readable(const string& $mod) : result<manifest::Manifest, string>

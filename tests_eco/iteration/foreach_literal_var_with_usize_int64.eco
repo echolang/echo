@@ -1,0 +1,24 @@
+// a foreach over a literal range or a literal array binds `$i` as int32, the type its literals
+// defaulted to. beside a usize or int64 operand that binding must convert the way a plain int32
+// local does (`int32 $a = 1; usize $b = 2; echo $b - $a;` prints 1). instead the binary expression
+// came out `[unknown]` and `echo` refused it as an internal compiler error. `0 .. $n` and an int32
+// `$n` never showed it: the first types the range usize, the second needs no conversion
+usize $n = 5;
+
+foreach (0 .. 4 as $i) {
+    echo $n - $i;
+}
+
+foreach (0 .. 1 as $left) {
+    echo $left + $n;
+}
+
+int64 $m = 5;
+
+foreach (0 .. 2 as $j) {
+    echo $m + $j;
+}
+
+foreach ([1, 2] as $k) {
+    echo $n + $k;
+}

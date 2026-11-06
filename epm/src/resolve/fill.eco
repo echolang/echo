@@ -13,10 +13,12 @@ public function fill_world(
     World& $world
 ) : result<bool, string>
 {
+    // a package inside another is listed as the one it is in
+    array<Folded> $folded = fold($roots, $world);
     usize $i = 0;
 
-    while ($i < $roots->count()) {
-        bool $ok = guard ensure_listed($roots[$i], $world) else ($e) {
+    while ($i < $folded->count()) {
+        bool $ok = guard ensure_listed($folded[$i]->req, $world) else ($e) {
             return .error($e);
         }
 

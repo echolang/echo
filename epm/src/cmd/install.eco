@@ -172,7 +172,7 @@ private function lock_covers(
 
     while ($i < $need->count()) {
         manifest::Requirement $req = $need[$i];
-        lock::Entry $have = guard $lock->find($req->name) else {
+        lock::Entry $have = guard $lock->holding($req->name, $req->origin) else {
             $ctx->printError("'{$req->name}' is required but not locked - run `epm update`");
             return false;
         }
@@ -280,6 +280,12 @@ private function apply_lock(
             }
         }
 
+        string $leaves = manifest::leaving_checkout($dest, $e->name, $e->paths);
+
+        if (!$leaves->empty()) {
+            return refuse_tree($dest, $leaves, $bar, $ctx);
+        }
+
         if ($got->sha256 != $e->sha256 || $got->rev != $e->rev || $lock->version < lock::LOCK_VERSION) {
             $lock->packages[$i]->sha256 = $got->sha256;
             $lock->packages[$i]->rev = $got->rev;
@@ -366,6 +372,14 @@ private function apply_plan(
             $r = $r + 1;
         }
 
+        $entry->paths = $c->paths;
+
+        string $leaves = manifest::leaving_checkout($dest, $c->name, $c->paths);
+
+        if (!$leaves->empty()) {
+            return refuse_tree($dest, $leaves, $bar, $ctx);
+        }
+
         $lock->packages[] = $entry;
         $bar->advance(1, "{$c->name}@{$ver}");
         $i = $i + 1;
@@ -446,6 +460,24 @@ function materialize(
     return .ok(Placed($got, sys::tree_sha256($dest), false));
 }
 
+private function refuse_tree(
+    const string& $dest,
+    const string& $message,
+    element::Progress $bar,
+    command::CLIContext $ctx
+) : int32
+{
+    $bar->fail();
+
+    if (sys::exists($dest) && !sys::remove_all($dest)) {
+        $ctx->printError("{$message}. {$dest} could not be removed and must not be built - delete it by hand");
+        return 1;
+    }
+
+    $ctx->printError($message);
+    return 1;
+}
+
 private function finish_lock(
     const manifest::Manifest& $man,
     const lock::Lock& $old,
@@ -461,11 +493,12 @@ private function finish_lock(
     while ($i < $old->packages->count()) {
         string $name = $old->packages[$i]->name;
 
-        if ($lock->find($name) == null) {
+        if ($lock->find($name) == null && !held_inside($lock, $name)) {
             string $dest = sys::join($vendor, $name);
 
-            if (sys::exists($dest)) {
-                sys::remove_all($dest);
+            if (sys::exists($dest) && !sys::remove_all($dest)) {
+                $ctx->printError("cannot remove leftover {$dest}");
+                return 1;
             }
         }
 
@@ -478,4 +511,17 @@ private function finish_lock(
     }
 
     return 0;
+}
+
+// an old lock entry whose dest sits inside a remaining checkout: `lib/drivers/db`
+// under `lib`. removing it would delete the nested package from the tree we kept
+private function held_inside(const lock::Lock& $lock, const string& $name) : bool
+{
+    foreach ($lock->packages as const &$e) {
+        if (!resolve::inner_path($e->name, $name)->empty()) {
+            return true;
+        }
+    }
+
+    return false;
 }

@@ -55,7 +55,7 @@ public function verify_at(const string& $start, command::CLIContext $ctx) : int3
 
     while ($i < $need->count()) {
         manifest::Requirement $req = $need[$i];
-        lock::Entry $have = guard $lock->find($req->name) else {
+        lock::Entry $have = guard $lock->holding($req->name, $req->origin) else {
             $ctx->printError("'{$req->name}' is required but not locked");
             $failed = $failed + 1;
             $i = $i + 1;
@@ -114,6 +114,14 @@ public function verify_at(const string& $start, command::CLIContext $ctx) : int3
         else if (lock::tree_hash($dir, $lock->version) != $e->sha256) {
             $errors[] = "sha256 mismatch for {$e->name}";
             $failed = $failed + 1;
+        }
+        else {
+            string $leaves = manifest::leaving_checkout($dir, $e->name, $e->paths);
+
+            if (!$leaves->empty()) {
+                $errors[] = $leaves;
+                $failed = $failed + 1;
+            }
         }
 
         $bar->advance(1, "{$e->name}@{$e->version}");
@@ -187,6 +195,14 @@ public function tree_at(const string& $start, command::CLIContext $ctx) : int32
     while ($i < $need->count()) {
         string $name = $need[$i]->name;
 
+        // a package inside another is shown under the one it is in
+        lock::Entry? $holder = $lock->holding($name, $need[$i]->origin);
+
+        if ($holder != null) {
+            lock::Entry $h = guard $holder;
+            $name = $h->name;
+        }
+
         if (!manifest::name_seen($shown, $name)) {
             $t->root->children[] = tree_node($name, $lock, 0);
             $shown[] = $name;
@@ -216,6 +232,11 @@ private function tree_node(const string& $name, const lock::Lock& $lock, int32 $
     }
 
     element::Node $n = element::Node("{$have->name}@{$have->version}  {$have->rev}");
+
+    foreach ($have->paths as const &$p) {
+        $n->children[] = element::Node("{$have->name}/{$p}  (inside)");
+    }
+
     usize $i = 0;
 
     while ($i < $have->requires->count()) {
