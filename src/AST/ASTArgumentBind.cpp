@@ -13,6 +13,7 @@
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMapLiteral.h"
 #include "AST/ASTSourceToken.h"
+#include "AST/ASTTypeUnify.h"
 #include "AST/ASTVariadic.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
@@ -502,6 +503,7 @@ AST::BoundSlots AST::bound_slots(
 
         ValueType type = ValueType::make_unknown();
         bool rejected = false;
+        bool defers = is_untyped_literal(slot.value);
 
         if ((slot.from_default || slot.from_caller) && param != nullptr && param->has_type()
             && !contains_type_param(param->type())) {
@@ -534,6 +536,33 @@ AST::BoundSlots AST::bound_slots(
                             rejected = true;
                         }
                     }
+                    else {
+                        // **a parameter that still names `T` cannot type the literal, and the literal
+                        // is the only thing that could bind `T`** - `size<T>(const array<T>&)` called as
+                        // `size([3, 1])` waited on both forever, and the body around it was never owned.
+                        // so it scores at the type its elements give it, the one `$a = [3, 1]` declares
+                        // (core array/map, never `T[N]` or a user `[]=`), and defers like an untyped
+                        // scalar: a typed sibling still decides `T`, and the literal is filled at
+                        // whatever the instance's parameter says
+                        const CollectionLiteralLookup own = collection_literal_type_for(
+                            *literal, collector.core_types, collector.type_registry);
+
+                        // a deferred unify failure is silent in can_instantiate, so a shape that
+                        // does not match is `rejected` here: an `array<int32>` is never a `map<K, V>`
+                        // pending and empty (`[]`) leave the slot unknown, so `pair([], $wide)` still
+                        // binds `T` from the sibling
+                        if (own.result == CollectionLiteralLookup::Result::t_ok) {
+                            TypeSubstitution fresh;
+
+                            if (unify_type(param->type(), own.type, fresh)) {
+                                type = own.type;
+                                defers = true;
+                            }
+                            else {
+                                rejected = true;
+                            }
+                        }
+                    }
                 }
             }
             else if (slot.value != nullptr) {
@@ -546,7 +575,7 @@ AST::BoundSlots AST::bound_slots(
 
         result.types.push_back(type);
         result.exprs.push_back(slot.value);
-        result.defers.push_back(is_untyped_literal(slot.value));
+        result.defers.push_back(defers);
         result.rejected.push_back(rejected);
     }
 

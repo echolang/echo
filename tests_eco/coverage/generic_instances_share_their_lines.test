@@ -1,0 +1,7 @@
+mode: test
+flags: --coverage
+
+--- OUT --->
+ok   1/1  main/generic_instances_share_their_lines.eco::both_instances_together_cover_the_body
+1 test passed
+coverage 100.0% lines, 100.0% branches

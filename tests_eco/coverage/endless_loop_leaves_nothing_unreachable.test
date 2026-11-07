@@ -1,0 +1,7 @@
+mode: test
+flags: --coverage
+
+--- OUT --->
+ok   1/1  main/endless_loop_leaves_nothing_unreachable.eco::returns_from_inside
+1 test passed
+coverage 100.0% lines, 66.7% branches

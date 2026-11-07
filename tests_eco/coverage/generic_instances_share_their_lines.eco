@@ -1,0 +1,16 @@
+// two instances of one generic body, each taking a different side of the `if`: every source line
+// and both edges ran, so nothing is missed, whatever each instance's own counters say
+function pick<T>(bool $first, T $a, T $b) : T
+{
+    if ($first) {
+        return $a;
+    }
+
+    return $b;
+}
+
+test both_instances_together_cover_the_body
+{
+    assert(pick(true, 1, 2) == 1);
+    assert(pick(false, 'a', 'b') == 'b');
+}

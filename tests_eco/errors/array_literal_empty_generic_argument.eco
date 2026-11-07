@@ -1,0 +1,8 @@
+// an empty list at a unique generic dest never names T; expansion reports the same empty-literal
+// refusal a declaration does. `pair([], $wide)` still binds T from the sibling
+function size<T>(const array<T>& $v) : usize
+{
+    return $v->count();
+}
+
+echo size([]);

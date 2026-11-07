@@ -11,6 +11,7 @@
 #include <eco_coverage.h>
 
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalVariable.h>
@@ -249,6 +250,14 @@ void CoverageCodegen::instrument_function(llvm::Function &fn, const AST::Functio
 void CoverageCodegen::instrument_statement(AST::Node &node)
 {
     if (!has_source_token(node)) {
+        return;
+    }
+
+    // **a statement nothing can reach is not a line to cover.** what follows a loop only `return`
+    // leaves - the drops at the end of the body among it - is emitted into a block with no
+    // predecessor, and a counter there reads as a line no test ran when no test could
+    llvm::BasicBlock *block = _ctx.builder->GetInsertBlock();
+    if (block != nullptr && block != &block->getParent()->getEntryBlock() && llvm::pred_empty(block)) {
         return;
     }
 

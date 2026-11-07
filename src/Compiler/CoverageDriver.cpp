@@ -421,10 +421,12 @@ void Compiler::coverage_report_run(const BuildLayout &layout, std::ostream &out)
         }
     }
 
-    size_t lines = 0;
-    size_t lines_hit = 0;
-    size_t branches = 0;
-    size_t branches_hit = 0;
+    // **one source line is one line, however many bodies were compiled from it.** a generic is
+    // instrumented once per instance, so counting counters would score `List<T>::show` as missed
+    // because its `List<string>` copy never ran although its `List<int32>` one did. a line, and a
+    // branch edge at its column, is covered when any counter planted there ran
+    std::map<std::string, bool> line_seen;
+    std::map<std::string, bool> branch_seen;
 
     for (const nlohmann::json &module : map["modules"]) {
         const std::string name = module.value("name", "");
@@ -435,21 +437,35 @@ void Compiler::coverage_report_run(const BuildLayout &layout, std::ostream &out)
 
         const nlohmann::json &counters = module["counters"];
         for (size_t i = 0; i < counters.size() && i < found->second.size(); i++) {
-            const std::string kind = counters[i].value("kind", "");
+            const nlohmann::json &counter = counters[i];
+            const std::string kind = counter.value("kind", "");
             const bool hit = found->second[i] > 0;
+            const std::string at = fmt::format(
+                "{}\n{}\n{}", name, counter.value("file", ""), counter.value("line", 0));
+
             if (kind == "line") {
-                lines += 1;
-                if (hit) {
-                    lines_hit += 1;
-                }
+                bool &seen = line_seen[at];
+                seen = seen || hit;
             }
             else if (kind == "branch") {
-                branches += 1;
-                if (hit) {
-                    branches_hit += 1;
-                }
+                bool &seen = branch_seen[fmt::format(
+                    "{}\n{}\n{}", at, counter.value("column", 0), counter.value("edge", ""))];
+                seen = seen || hit;
             }
         }
+    }
+
+    size_t lines = line_seen.size();
+    size_t lines_hit = 0;
+    size_t branches = branch_seen.size();
+    size_t branches_hit = 0;
+
+    for (const auto &[at, hit] : line_seen) {
+        lines_hit += hit ? 1 : 0;
+    }
+
+    for (const auto &[at, hit] : branch_seen) {
+        branches_hit += hit ? 1 : 0;
     }
 
     const double line_pct = lines == 0

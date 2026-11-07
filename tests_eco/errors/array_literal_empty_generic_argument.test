@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] array_literal_empty_generic_argument.eco:8:11
+
+  an empty array literal has nothing to go on - it takes its type from where it is going. Write the type, e.g. 'array<int32> $a = [];'.
+
+  7 | 
+  8 | echo size([]);
+    :           ^
+  9 | 
+
+1 error, nothing was compiled.

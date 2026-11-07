@@ -1,0 +1,15 @@
+// a loop only `return` leaves: the drop of the closure parameter after it can never run, and a
+// constant `true` condition has no edge out of the loop to count
+function spin(function<bool()> $ready) : void
+{
+    while (true) {
+        if ($ready()) {
+            return;
+        }
+    }
+}
+
+test returns_from_inside
+{
+    spin(() : bool => true);
+}

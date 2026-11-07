@@ -56,8 +56,9 @@ namespace AST
         std::vector<ValueType> types;
         std::vector<ExprNode *> exprs;
         std::vector<bool> defers;
-        // a collection dest that cannot fill this literal, or whose settled entries cannot sit
-        // in that fill. match_function drops the candidate before argument_fit, which would wait
+        // a collection dest that cannot fill this literal, whose settled entries cannot sit in
+        // that fill, or whose declared core array/map type does not unify with a dest that still
+        // names `T`. match_function drops the candidate before argument_fit, which would wait
         // on the still-unknown type
         std::vector<bool> rejected;
     };
@@ -65,8 +66,11 @@ namespace AST
     // ranking type of each filled slot. a `from_default` hole scores as the parameter type when
     // that type names no type parameter. an unexpanded collection whose dest can fill it scores
     // as that dest's value type (no `bound_type` write). a dest that cannot fill, or whose settled
-    // entries cannot sit in the fill, is `rejected`. a pack at `variadic_args` stays unknown so
-    // ranking waits on the elements
+    // entries cannot sit in the fill, is `rejected`. a dest that still names `T` scores as
+    // collection_literal_type_for (core array/map, the type `$a = [3, 1]` declares) and defers
+    // like an untyped scalar, so a typed sibling still decides `T`; a shape that does not unify
+    // is `rejected`. pending or empty leaves the slot unknown so a sibling can bind. a pack at
+    // `variadic_args` stays unknown so ranking waits on the elements
     BoundSlots bound_slots(
         const FunctionDeclNode &decl,
         const ArgumentBinding &binding,

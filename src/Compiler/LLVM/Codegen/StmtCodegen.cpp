@@ -703,8 +703,17 @@ void StmtCodegen::gen_loop(AST::ExprNode &condition, AST::ScopeNode *step, AST::
     condition.accept(*_ctx.visitor);
     llvm::Value *condition_value = _ctx.pop_scalar();
 
-    llvm::BasicBlock *false_dest = _ctx.coverage->false_edge(merge_block, body, "skip");
-    _ctx.builder->CreateCondBr(condition_value, body_block, false_dest);
+    // **a condition that is always true has no way out but `break`**, so there is no false edge to
+    // branch on or to count: `while (true)` with a `return` inside left a "skip" coverage edge no run
+    // could ever take, and a merge block that looked reachable to everything after it
+    auto *constant = llvm::dyn_cast<llvm::ConstantInt>(condition_value);
+    if (constant != nullptr && constant->isOne()) {
+        _ctx.builder->CreateBr(body_block);
+    }
+    else {
+        llvm::BasicBlock *false_dest = _ctx.coverage->false_edge(merge_block, body, "skip");
+        _ctx.builder->CreateCondBr(condition_value, body_block, false_dest);
+    }
 
     // body block. the back edge is only emitted when the body can actually fall out of its end -
     // a body whose every path returns already terminated its block, and a second terminator there
