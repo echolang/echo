@@ -40,6 +40,9 @@ bool Compiler::coverage_runtime_objects(
     CBuildSpec spec;
     spec.module_name = "eco_coverage";
     spec.flags = { "-O2" };
+    // UCRT deprecates getenv; clang prints that into echoc's stderr, which the
+    // coverage goldens capture
+    spec.defines = { "_CRT_SECURE_NO_WARNINGS" };
 
     std::vector<std::filesystem::path> objects;
     if (!compile_embedded_c(

@@ -1,3 +1,8 @@
+// UCRT deprecates getenv into clang's stderr, which coverage goldens capture
+#if defined(_WIN32)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "eco_coverage.h"
 
 #include <stdint.h>
@@ -200,7 +205,11 @@ void __eco_cov_start(void)
 
     const char *test_id = getenv("ECHO_TEST_ID");
     if (test_id != NULL) {
-        strncpy(header.test_id, test_id, ECO_COV_TEST_ID_BYTES - 1);
+        size_t n = strlen(test_id);
+        if (n >= ECO_COV_TEST_ID_BYTES) {
+            n = ECO_COV_TEST_ID_BYTES - 1;
+        }
+        memcpy(header.test_id, test_id, n);
     }
 
     memcpy(mapped, &header, sizeof(header));
