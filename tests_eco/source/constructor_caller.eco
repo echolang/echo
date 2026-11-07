@@ -1,0 +1,29 @@
+// `#[caller]` on a constructor: its written parameters stay written, the hidden site rides along
+class Box
+{
+    public uint32 $line = 0;
+    public string $name = '';
+
+    #[caller]
+    public constructor(named: const string& $name)
+    {
+        $this->name = $name;
+        $this->line = std::src::caller()->line;
+    }
+}
+
+class Plain
+{
+    public uint32 $line = 0;
+
+    #[caller]
+    public constructor(int32 $v)
+    {
+        $this->line = std::src::caller()->line;
+    }
+}
+
+$p = Plain(1);
+echo $p->line;
+$b = Box(named: 'x');
+echo $b->line;

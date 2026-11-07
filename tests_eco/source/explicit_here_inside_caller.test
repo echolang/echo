@@ -1,0 +1,10 @@
+mode: test
+expect: fail
+
+--- OUT --->
+FAIL 1/1  main/explicit_here_inside_caller.eco::names_the_test  (exited 1)
+1 test, 1 failed
+
+x main/explicit_here_inside_caller.eco::names_the_test  exited 1
+    fatal error: nope
+      at explicit_here_inside_caller.eco:4

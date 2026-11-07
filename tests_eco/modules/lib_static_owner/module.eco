@@ -1,0 +1,9 @@
+/*
+ * A library whose only static has a destructor, and whose consumers never name that static: it is
+ * reached through a function, so only this module's unit pushes it onto the teardown chain.
+ */
+
+#[module: "staticowner"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

@@ -1,0 +1,20 @@
+struct Token
+{
+    string $match;
+    int32 $function;
+}
+
+function labelled(function: int32 $n) : int32
+{
+    return $n;
+}
+
+$t = Token('word', 3);
+echo $t->match;
+echo $t->function;
+
+$t->function = 4;
+echo $t->function;
+
+echo labelled(function: 7);
+echo Token($function: 5, $match: 'x')->function;

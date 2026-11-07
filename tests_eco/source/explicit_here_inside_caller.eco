@@ -1,0 +1,10 @@
+#[caller]
+function fail(string $msg) : void
+{
+    die($msg, std::src::here());
+}
+
+test names_the_test
+{
+    fail("nope");
+}

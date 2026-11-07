@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: stored
+  at die_at_a_stored_site.eco:12

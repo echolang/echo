@@ -368,8 +368,8 @@ void Compiler::coverage_prepare_test(
     std::vector<std::pair<std::string, std::string>> &extra_env
 )
 {
+    // ECHO_TEST_ID, which the runtime stamps into the header, comes from run_test_isolated
     extra_env.emplace_back("ECHO_COVERAGE_OUT", coverage_test_path(layout, test).string());
-    extra_env.emplace_back("ECHO_TEST_ID", test_display_name(test));
 }
 
 void Compiler::coverage_report_run(const BuildLayout &layout, std::ostream &out)

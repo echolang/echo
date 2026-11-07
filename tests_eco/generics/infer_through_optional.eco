@@ -1,0 +1,44 @@
+function show<T>(const T?& $v) : string
+{
+    T $x = guard $v else {
+        return 'null';
+    };
+    return "{$x}";
+}
+
+function first<T>(T? $a, T? $b) : T?
+{
+    if ($a != null) {
+        return $a;
+    }
+    return $b;
+}
+
+function take<T>(T $a, T? $b) : T
+{
+    return $a;
+}
+
+function wrap<T>(T? $v) : string
+{
+    T $x = guard $v else {
+        return 'null';
+    };
+    return "{$x}";
+}
+
+function some() : int32?
+{
+    return 3;
+}
+
+function none() : int32?
+{
+    return null;
+}
+
+echo show(some());
+echo show(none());
+echo show(first(none(), some()));
+echo wrap(3);
+echo show(take(some(), none()));

@@ -159,7 +159,17 @@ void SourceLocationCodegen::abort_from_call(
 
     if (explicit_at) {
         node.arguments[at_index]->accept(*_ctx.visitor);
-        loc_addr = _ctx.pop_value().value;
+        const CodegenValue at = _ctx.pop_value();
+        loc_addr = at.value;
+
+        // **a location read out of a field or a by-value parameter can arrive as an SSA struct**,
+        // not as an address: it is small enough for the lowering to keep it first class. the
+        // reads below index into memory, so that value is spilled to a slot of its own first
+        if (loc_addr != nullptr && !loc_addr->getType()->isPointerTy()) {
+            llvm::Value *slot = _ctx.entry_alloca(loc_addr->getType(), "source.abort.at");
+            _ctx.builder->CreateStore(loc_addr, slot);
+            loc_addr = slot;
+        }
     }
     else if (llvm::Value *fwd = caller_address()) {
         loc_addr = fwd;

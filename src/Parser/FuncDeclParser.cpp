@@ -209,9 +209,11 @@ bool Parser::parse_parameter_list(
 
         // `forEvent: string $name` - the call site must use this label. read here rather than in
         // parse_varexpr because a label is a property of a parameter, and `identifier :` is not
-        // a type. peek past the colon so `Foo $x` stays a type and a name
+        // a type. peek past the colon so `Foo $x` stays a type and a name. a reserved word is a
+        // label here, same as the call site: `function: int32 $n` has no keyword meaning to collide with
         std::optional<TokenReference> label;
-        if (cursor.is_type(Token::Type::t_identifier)
+        if ((cursor.is_type(Token::Type::t_identifier)
+                || (!cursor.is_done() && token_spells_a_word(cursor.current().value())))
             && cursor.peek_is_type(1, Token::Type::t_colon)) {
             label.emplace(cursor.current());
             cursor.skip();
@@ -405,7 +407,8 @@ static bool skip_one_parameter(Parser::Cursor &cursor)
         cursor.skip();
     }
 
-    if (cursor.is_type(Token::Type::t_identifier)
+    if ((cursor.is_type(Token::Type::t_identifier)
+            || (!cursor.is_done() && token_spells_a_word(cursor.current().value())))
         && cursor.peek_is_type(1, Token::Type::t_colon)) {
         cursor.skip(2);
     }

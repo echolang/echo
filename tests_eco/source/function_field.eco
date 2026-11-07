@@ -1,0 +1,8 @@
+function named() : void
+{
+    std::src::location $at = std::src::here();
+    echo $at->function;
+}
+
+named();
+echo std::src::here()->function->empty();

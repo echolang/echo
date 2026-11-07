@@ -487,7 +487,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         // null walker: nothing to tear down
         llvm::Function *walker = nullptr;
         if (_ctx.options.codegen.has_unload()) {
-            walker = _statics.ensure_teardown_walker(true);
+            walker = _statics.ensure_teardown_walker();
         }
         _process.gen_library_lifecycle(walker);
     }

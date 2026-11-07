@@ -1,0 +1,6 @@
+mode: test
+
+--- OUT --->
+ok   1/2  main/the_child_knows_its_test.eco::reads_its_identity
+ok   2/2  main/the_child_knows_its_test.eco::an_ungrouped_test_has_an_empty_group
+2 tests passed

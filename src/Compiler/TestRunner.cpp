@@ -51,8 +51,15 @@ Compiler::TestResult Compiler::run_test_isolated(
 
     const auto started = std::chrono::steady_clock::now();
 
+    // the closed identity a test library reads to say which test it is in. set on every run, not
+    // only under --coverage: events, snapshots and a coverage file all join on ECHO_TEST_ID
     std::vector<std::pair<std::string, std::string>> env = extra_env;
     env.emplace_back(k_isolated_test_env, test.symbol);
+    env.emplace_back("ECHO_TEST_ID", test_display_name(test));
+    env.emplace_back("ECHO_TEST_NAME", test.name);
+    env.emplace_back("ECHO_TEST_FILE", test.file.string());
+    env.emplace_back("ECHO_TEST_MODULE", test.module);
+    env.emplace_back("ECHO_TEST_GROUP", test.group);
 
     const CapturedProcess captured = run_captured(
         argv,

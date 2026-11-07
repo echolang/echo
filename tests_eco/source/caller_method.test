@@ -1,0 +1,10 @@
+mode: test
+expect: fail
+
+--- OUT --->
+FAIL 1/1  main/caller_method.eco::names_the_test  (exited 1)
+1 test, 1 failed
+
+x main/caller_method.eco::names_the_test  exited 1
+    fatal error: x
+      at caller_method.eco:12

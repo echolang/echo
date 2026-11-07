@@ -88,8 +88,8 @@ namespace AST
     // drop `argument_names`. the call is then an ordinary positional exact-arity list. asked
     // after a generic callee has been instantiated, so a default mentioning T is cloned from
     // the instance, not the template. a `#[caller]` hole is a varref to the enclosing
-    // `$__caller` when that function tracks the caller, otherwise `std::src::here()`. a written
-    // `here()` default is retargeted to this call
+    // `$__caller` when that function tracks the caller, otherwise `std::src::here()`. a
+    // defaulted `here()` is replanted at this call; an explicit `here()` argument is left
     void apply_argument_binding(
         FunctionCallExprNode &call,
         const ArgumentBinding &binding,
@@ -97,8 +97,7 @@ namespace AST
         Collector &collector);
 
     // already positional exact-arity: labels were dropped, so bind_arguments must not run
-    // again. a `std::src::here()` default still sitting on the declaration token is replanted
-    // at this call
+    // again. a cloned/defaulted `here()` is replanted at this call
     void retarget_here_defaults(
         FunctionCallExprNode &call,
         NodeCollection &nodes,

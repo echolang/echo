@@ -196,6 +196,30 @@ namespace
         planted.enclosing_function = call.enclosing_function;
         return &planted;
     }
+
+    // a cloned/defaulted here() is replanted at this call. an explicit here() argument is left:
+    // die($msg, std::src::here()) inside #[caller] names this die, not the outer caller
+    AST::ExprNode *retarget_defaulted_here(
+        AST::FunctionCallExprNode &call,
+        size_t i,
+        AST::ExprNode *arg,
+        bool from_default,
+        AST::NodeCollection &nodes,
+        AST::Collector &collector
+    )
+    {
+        if (arg == nullptr || !param_is_source_location(call, i, collector)) {
+            return nullptr;
+        }
+        if (!(from_default || arg->from_parameter_default)) {
+            return nullptr;
+        }
+        if (!is_source_here_call(arg)) {
+            return nullptr;
+        }
+
+        return plant_here_at(call, true, nodes, collector);
+    }
 }
 
 AST::ArgumentBinding AST::bind_arguments(
@@ -420,13 +444,10 @@ void AST::apply_argument_binding(
             continue;
         }
 
-        if (param_is_source_location(call, i, collector)
-            && (slot.from_default || slot.value->from_parameter_default)
-            && (slot.from_default || is_source_here_call(slot.value))) {
-            if (AST::ExprNode *here = plant_here_at(call, true, nodes, collector)) {
-                filled.push_back(here);
-                continue;
-            }
+        if (AST::ExprNode *here = retarget_defaulted_here(
+                call, i, slot.value, slot.from_default, nodes, collector)) {
+            filled.push_back(here);
+            continue;
         }
 
         if (!slot.from_default) {
@@ -456,15 +477,8 @@ void AST::retarget_here_defaults(
     }
 
     for (size_t i = 0; i < call.arguments.size(); i++) {
-        ExprNode *arg = call.arguments[i];
-        if (arg == nullptr || !param_is_source_location(call, i, collector)) {
-            continue;
-        }
-        if (!arg->from_parameter_default && !is_source_here_call(arg)) {
-            continue;
-        }
-
-        if (ExprNode *here = plant_here_at(call, true, nodes, collector)) {
+        if (ExprNode *here = retarget_defaulted_here(
+                call, i, call.arguments[i], false, nodes, collector)) {
             call.arguments[i] = here;
         }
     }

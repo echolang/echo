@@ -6,7 +6,9 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -22,8 +24,29 @@ void AST::FunctionDeclNode::replace_args(std::vector<VarDeclNode *> next)
         return;
     }
 
+    // **a planted `$__caller` survives the rebuild.** a function plants it after its parameters are
+    // parsed, but a constructor publishes its markers as soon as the node exists, before the list is
+    // read - so the written list arriving here would drop it, and `implicit_arg_count` would then
+    // count the first *written* parameter as the hidden one
+    VarDeclNode *caller = nullptr;
+    if (tracks_caller) {
+        for (VarDeclNode *arg : args) {
+            if (arg != nullptr && arg->name() == "__caller") {
+                caller = arg;
+            }
+        }
+    }
+
     args = std::move(next);
-    assert(implicit_arg_count() <= args.size());
+    // `$__caller` is planted after replace_args; pass 3 rebuilds the written list first
+    assert(written_implicit_arg_count() <= args.size());
+
+    if (caller != nullptr) {
+        const bool present = std::find(args.begin(), args.end(), caller) != args.end();
+        if (!present) {
+            args.insert(args.begin() + static_cast<std::ptrdiff_t>(caller_arg_index()), caller);
+        }
+    }
 }
 
 const std::string AST::FunctionDeclNode::node_description()

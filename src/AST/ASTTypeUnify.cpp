@@ -83,14 +83,27 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         }
 
         const bool consumes_const = param.is_const() || position == UnifyPosition::t_level;
-        const ValueType incoming = consumes_const ? ValueType::make_mutable(arg) : arg;
+        ValueType incoming = consumes_const ? ValueType::make_mutable(arg) : arg;
 
         // a later argument must not replace a concrete binding. `pick($int32, $int64)` used
-        // to instantiate `pick<int32>` and silently narrow the int64
+        // to instantiate `pick<int32>` and silently narrow the int64. compare unpeeled first:
+        // `take<T>(T, T?)` with two `int32?` has already bound T=int32?, and `T??` is `T?`
         if (const ValueType *existing = out.lookup(decl)) {
             if (!contains_type_param(*existing)) {
-                return *existing == incoming;
+                if (*existing == incoming) {
+                    return true;
+                }
+                if (param.is_nullable() && incoming.is_nullable()) {
+                    return *existing == ValueType::make_non_nullable(incoming);
+                }
+                return false;
             }
+        }
+
+        // **`T?` against an optional binds the payload** when T is still open: `show<T>(T? $v)`
+        // called with an `int32?` is `show<int32>`. a non-nullable argument binds as itself
+        if (param.is_nullable() && incoming.is_nullable()) {
+            incoming = ValueType::make_non_nullable(incoming);
         }
 
         out.bind(decl, incoming);

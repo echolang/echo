@@ -397,21 +397,10 @@ namespace Compiler::LLVM
         return storage;
     }
 
-    llvm::Function *StaticStorageCodegen::ensure_teardown_walker(bool create_head)
+    llvm::Function *StaticStorageCodegen::ensure_teardown_walker()
     {
         llvm::Type *ptr = _ctx.opaque_ptr_type();
-
-        llvm::GlobalVariable *head = create_head
-            ? _ctx.get_or_create_odr_global(k_chain_head_symbol, ptr)
-            : _ctx.current_module()->getGlobalVariable(k_chain_head_symbol, true);
-
-        // nothing pushed a node, so there is nothing to walk. asked of the *module*
-        // rather than of a count kept here, so a unit that references no static
-        // emits no walk at all - unless a lib fini asked for the head, in which
-        // case a dependency's push still has somewhere to be found
-        if (head == nullptr) {
-            return nullptr;
-        }
+        llvm::GlobalVariable *head = _ctx.get_or_create_odr_global(k_chain_head_symbol, ptr);
 
         if (llvm::Function *existing = _ctx.current_module()->getFunction(k_teardown_symbol)) {
             return existing;
@@ -470,11 +459,12 @@ namespace Compiler::LLVM
 
     void StaticStorageCodegen::gen_teardown()
     {
-        llvm::Function *fn = ensure_teardown_walker(false);
-
-        if (fn == nullptr) {
-            return;
-        }
+        // **the entry point walks the chain whether or not its own unit touched a static.** a static
+        // read only inside a dependency's functions is pushed from that dependency's unit, and the
+        // head is one ODR symbol for the whole program, so asking "did *this* unit see a static"
+        // skipped every library's teardown in a program whose own code names none. the cost when
+        // nothing was pushed is one null load at exit
+        llvm::Function *fn = ensure_teardown_walker();
 
         // the call, in whichever block the caller left live - `main`'s epilogue
         _ctx.builder->CreateCall(fn);

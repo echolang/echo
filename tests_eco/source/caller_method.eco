@@ -1,0 +1,13 @@
+struct Log
+{
+    #[caller]
+    function note() : void
+    {
+        die('x');
+    }
+}
+
+test names_the_test
+{
+    Log()->note();
+}

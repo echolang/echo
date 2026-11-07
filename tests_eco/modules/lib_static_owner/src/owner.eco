@@ -1,0 +1,22 @@
+namespace staticowner;
+
+public class Journal
+{
+    public int32 $entries = 0;
+
+    destructor()
+    {
+        echo "journal closed with {$this->entries} entries";
+    }
+}
+
+public class Log
+{
+    internal static Journal $journal = Journal();
+
+    public static function write() : void
+    {
+        Journal $j = Log::$journal;
+        $j->entries = $j->entries + 1;
+    }
+}

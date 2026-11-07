@@ -287,12 +287,7 @@ namespace AST
 
         // written_implicit_arg_count() plus the hidden `$__caller` slot when `tracks_caller`
         inline size_t implicit_arg_count() const {
-            size_t n = (has_receiver() || is_closure) ? 1 : 0;
-            if (tracks_caller) {
-                n += 1;
-            }
-
-            return n;
+            return written_implicit_arg_count() + (tracks_caller ? 1 : 0);
         }
 
         // the prefix the parser actually prepended: a receiver or a closure environment.

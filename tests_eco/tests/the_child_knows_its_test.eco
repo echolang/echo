@@ -1,0 +1,17 @@
+#[group: "identity"]
+test reads_its_identity
+{
+    assert(std::env::var('ECHO_TEST_ID', '') == 'main/the_child_knows_its_test.eco::reads_its_identity', 'id');
+    assert(std::env::var('ECHO_TEST_NAME', '') == 'reads_its_identity', 'name');
+    assert(std::env::var('ECHO_TEST_MODULE', '') == 'main', 'module');
+    assert(std::env::var('ECHO_TEST_GROUP', '') == 'identity', 'group');
+
+    string $file = string(std::env::var('ECHO_TEST_FILE', ''));
+    assert($file->contains('the_child_knows_its_test.eco'), 'file');
+}
+
+test an_ungrouped_test_has_an_empty_group
+{
+    assert(std::env::has('ECHO_TEST_GROUP'), 'set');
+    assert(std::env::var('ECHO_TEST_GROUP', 'unset') == '', 'empty');
+}

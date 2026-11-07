@@ -1,0 +1,5 @@
+// a static that only a dependency names still runs its destructor at exit: the entry point walks
+// the whole program's teardown chain, not only what its own unit pushed
+staticowner::Log::write();
+staticowner::Log::write();
+echo 'done';

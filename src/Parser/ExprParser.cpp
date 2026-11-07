@@ -1361,7 +1361,15 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             return AST::make_void_ref();
         }
 
-        if (!cursor.is_type(Token::Type::t_identifier)) {
+        // **a reserved word is a member name here.** a property is declared through its varname, so
+        // `$function` and `$match` are legal fields. nothing starts after `->`, so the word has no
+        // keyword meaning to collide with. a method can never be spelled like this (FuncDeclParser
+        // refuses the declaration), so the lookup below answers an unknown member for a call rather
+        // than this arm guessing
+        const bool names_a_member = cursor.is_type(Token::Type::t_identifier)
+            || (!cursor.is_done() && token_spells_a_word(cursor.current().value()));
+
+        if (!names_a_member) {
             payload.collect_unexpected_token(Token::Type::t_identifier);
             return AST::make_void_ref();
         }

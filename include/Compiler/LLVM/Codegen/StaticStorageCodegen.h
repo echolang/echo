@@ -38,15 +38,14 @@ namespace Compiler::LLVM
         // load-and-branch that would have been written by hand
         llvm::Value *gen_address(AST::StaticPropertyExprNode &node);
 
-        // the teardown walk, emitted into `main`'s epilogue. a no-op in a program that declares no
-        // static, since nothing ever pushed a node onto the chain
+        // the teardown walk from `main`'s epilogue. always emitted: a static only a dependency
+        // pushed still has to run, and a null head is one load at exit
         void gen_teardown();
 
-        // the `linkonce_odr` walker over the teardown chain. `create_head` is a
-        // native lib's fini: this unit may reference no static of its own, and
-        // still has to walk a chain a dependency pushed. an executable passes
-        // false so a program with no static still emits no walk
-        llvm::Function *ensure_teardown_walker(bool create_head);
+        // the `linkonce_odr` walker over the teardown chain. always creates the head: a native
+        // lib's fini and an executable that names no static of its own still walk a chain a
+        // dependency pushed
+        llvm::Function *ensure_teardown_walker();
 
     private:
         CodegenContext &_ctx;

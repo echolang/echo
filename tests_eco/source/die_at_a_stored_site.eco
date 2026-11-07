@@ -1,0 +1,13 @@
+struct Report
+{
+    string $text;
+    std::src::location $at;
+}
+
+function stop(Report $r) : void
+{
+    die($r->text, $r->at);
+}
+
+$r = Report('stored', std::src::here());
+stop($r);

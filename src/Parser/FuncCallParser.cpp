@@ -197,7 +197,10 @@ static bool parse_call_arguments(
 
         const bool named_parameter = cursor.is_type(Token::Type::t_varname)
             && cursor.peek_is_type(1, Token::Type::t_colon);
-        const bool named_label = cursor.is_type(Token::Type::t_identifier)
+        // **a reserved word is a label here.** `make(function: 3)` names the parameter, and nothing
+        // starts after a label, so the word has no keyword meaning to collide with
+        const bool named_label = (cursor.is_type(Token::Type::t_identifier)
+                || (!cursor.is_done() && token_spells_a_word(cursor.current().value())))
             && cursor.peek_is_type(1, Token::Type::t_colon);
 
         if (named_parameter || named_label) {

@@ -20,9 +20,7 @@ namespace AST
 
     const TokenReference &location_of_expression(ExprNode *expr);
 
-    // **what source site this file is.** path relative to the module directory, never a leaf
-    // when the module has directories and never an absolute checkout path. coverage, abort
-    // records and `std::src::here()` all read this so they cannot drift
+    // **path relative to the module directory.** coverage, abort, and here() share this so they cannot drift
     std::string source_file_of(const File &file);
 
     // one source site: the token's file/line/column plus the module that owns the file
