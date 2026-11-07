@@ -1,0 +1,20 @@
+struct Problem
+{
+    int32 $n;
+}
+
+struct Low
+{
+    int32 $n;
+}
+
+extension Problem
+{
+    public #[implicit]
+    static function from(Low $e) : Problem
+    {
+        return Problem($e->n);
+    }
+}
+
+echo 1;

@@ -1,0 +1,16 @@
+struct Window { usize $n; }
+struct Buffer
+{
+    private usize $secret = 3;
+}
+
+extension Buffer
+{
+    #[implicit]
+    public const function window() : Window
+    {
+        return Window($this->secret);
+    }
+}
+
+echo 1;

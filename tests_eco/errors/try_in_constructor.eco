@@ -1,0 +1,22 @@
+enum Err
+{
+    case gone;
+}
+
+function load() : result<int32, Err>
+{
+    return .error(.gone);
+}
+
+struct Box
+{
+    int32 $n;
+
+    constructor()
+    {
+        $this->n = 0;
+        try load();
+    }
+}
+
+echo Box()->n;

@@ -1,5 +1,6 @@
 #include "AST/ASTGuardLowering.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTCoreTypes.h"
@@ -215,10 +216,20 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
         const std::string name = guard->failure->token_varname.value();
 
         if (plan.kind == UnwrapSource::t_builtin_nullable) {
-            refuse(*guard, guard->failure->token_varname, fmt::format(
-                "a '{}' records only that the value is absent, so there is no reason to bind to '{}'. "
-                "'else ({})' needs a subject declaring '{}<E>' - drop the '({})' to guard a 'T?'.",
-                subject_type.get_type_desciption(), name, name, failable_name, name));
+            if (guard->is_try) {
+                refuse(*guard, guard->token, fmt::format(
+                    "'try' passes a failure up, and '{}' carries none - guard it, or use ?? or ?->",
+                    subject_type.get_type_desciption()));
+                if (guard->try_error_call != nullptr) {
+                    guard->try_error_call->settlement = CallSettlement::t_failed;
+                }
+            }
+            else {
+                refuse(*guard, guard->failure->token_varname, fmt::format(
+                    "a '{}' records only that the value is absent, so there is no reason to bind to '{}'. "
+                    "'else ({})' needs a subject declaring '{}<E>' - drop the '({})' to guard a 'T?'.",
+                    subject_type.get_type_desciption(), name, name, failable_name, name));
+            }
         }
         else {
             refuse(*guard, guard->failure->token_varname, fmt::format(
@@ -337,6 +348,66 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
 
         guard->failure->set_type_node(
             &_current_module->nodes.emplace_back<TypeNode>(plan.failure_type.value()));
+    }
+
+    // missing conversion is reported at the `try`, not on the planted `.error`.
+    // parse already refused a constructor, a void return, a missing `error`: t_failed
+    if (guard->is_try && guard->try_error_call != nullptr && _current_function != nullptr
+        && guard->try_error_call->settlement != CallSettlement::t_failed) {
+        const ValueType ret = _current_function->get_return_type();
+
+        if (!is_undetermined_type(ret)) {
+            FunctionDeclNode *error = error_carrier_of(ret);
+
+            if (error == nullptr) {
+                refuse(*guard, guard->token, fmt::format(
+                    "'try' returns the failure from '{}', and '{}' cannot carry one - handle it here with guard",
+                    _current_function->func_name(),
+                    ret.get_type_desciption()));
+                guard->try_error_call->settlement = CallSettlement::t_failed;
+                return;
+            }
+
+            if (plan.failure_type.has_value()
+                && !guard->try_error_call->arguments.empty()
+                && guard->try_error_call->arguments[0] != nullptr)
+            {
+                const ValueType dest = static_owner_of_destination(ret);
+                TypeSubstitution subst;
+
+                if (dest.has_complex_type()) {
+                    const ComplexType *ct = dest.get_complex_type();
+                    const ComplexType *tmpl = ct->template_or_self();
+
+                    if (ct->is_instantiated() && tmpl != nullptr
+                        && tmpl->type_parameters.size() == ct->instantiation_args.size()) {
+                        subst = TypeSubstitution::positional(
+                            tmpl->type_parameters, ct->instantiation_args);
+                    }
+                }
+
+                const ValueType wanted = substitute_type(
+                    error->parameter_type(error->implicit_arg_count()),
+                    subst,
+                    _collector.type_registry);
+                const ValueType failure = plan.failure_type.value();
+
+                if (!is_undetermined_type(wanted) && !is_undetermined_type(failure)
+                    && argument_fit(failure, guard->try_error_call->arguments[0], wanted)
+                        == ArgumentFit::t_none)
+                {
+                    refuse(*guard, guard->token, fmt::format(
+                        "'try' cannot pass '{}' up as '{}' - there is no conversion. "
+                        "declare '#[implicit] static function from({})' on '{}', "
+                        "or in an 'extension {}' block",
+                        failure.get_type_desciption(), wanted.get_type_desciption(),
+                        failure.get_type_desciption(), wanted.get_type_desciption(),
+                        wanted.get_type_desciption()));
+                    guard->try_error_call->settlement = CallSettlement::t_failed;
+                    return;
+                }
+            }
+        }
     }
 
     guard->plan_decided = true;

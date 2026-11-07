@@ -1,0 +1,12 @@
+struct Box<T> { T $v; }
+
+extension Box
+{
+    #[implicit]
+    public static function from(int32 $n) : Box
+    {
+        return Box($n);
+    }
+}
+
+echo 1;

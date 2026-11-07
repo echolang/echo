@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] PrivateMember  extension_private_field.eco:12:30
+
+  '$secret' is private to 'Buffer' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'Buffer' instead.
+
+  11 |     {
+  12 |         return Window($this->secret);
+     :                              ^^^^^^
+  13 |     }
+
+1 error, nothing was compiled.

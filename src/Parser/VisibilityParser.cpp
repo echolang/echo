@@ -7,6 +7,7 @@
 #include "Parser/TypeAliasParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/EnumMapParser.h"
+#include "Parser/ExtensionParser.h"
 
 #include "AST/ASTIssue.h"
 #include "AST/TypeAliasDeclNode.h"
@@ -105,7 +106,8 @@ Parser::VisibilityPrefix Parser::consume_declaration_visibility(
     }
     else if (!starts_funcdecl(payload.cursor) && !starts_typedecl(payload.cursor)
         && !starts_constdecl(payload) && !payload.cursor.is_type(Token::Type::t_extern)
-        && !starts_enum_map(payload.cursor) && !starts_type_alias(payload.cursor)) {
+        && !starts_enum_map(payload.cursor) && !starts_type_alias(payload.cursor)
+        && !starts_extension(payload.cursor)) {
         refuse_visibility_prefix(
             payload,
             prefix,

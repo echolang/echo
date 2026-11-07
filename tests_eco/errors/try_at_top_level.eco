@@ -1,0 +1,7 @@
+function parse(int32 $n) : result<int32, int32>
+{
+    return .ok($n);
+}
+
+int32 $n = try parse(1);
+echo $n;

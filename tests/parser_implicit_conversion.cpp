@@ -103,7 +103,7 @@ TEST_CASE("a marked method that cannot be a conversion is refused", "[implicit_c
             "    function whole() : Window { return Window($this->count); }\n"
             "}\n");
 
-        REQUIRE(has_issue_containing(*bundle, "already declares an implicit conversion"));
+        REQUIRE(has_issue_containing(*bundle, "already converts from"));
 
         // the first one still stands - a refusal declines to publish, it does not unpublish
         auto &m = bundle->modules.find_module("test");
@@ -163,7 +163,7 @@ TEST_CASE("a marked method that cannot be a conversion is refused", "[implicit_c
             "    static function wrap(int32 $n) : Quantity { return Quantity($n); }\n"
             "}\n");
 
-        REQUIRE(has_issue_containing(*bundle, "already declares an implicit conversion from"));
+        REQUIRE(has_issue_containing(*bundle, "already converts from"));
 
         auto &m = bundle->modules.find_module("test");
         REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().size() == 1);
@@ -234,11 +234,8 @@ TEST_CASE("a class may declare an inbound conversion that allocates", "[implicit
         EchoTests::prim(ValueTypePrimitive::t_int32), quantity->value_type()) != nullptr);
 }
 
-TEST_CASE("outbound wins the scan when both directions exist for one pair", "[implicit_conversion]")
+TEST_CASE("a pair has one conversion, inbound or outbound", "[implicit_conversion]")
 {
-    // source walk first: Buffer already knows how to become Window, so Window's inbound from
-    // Buffer is not the one find_implicit_conversion answers. swapping the arms would pick
-    // Window::from and every existing outbound golden would still pass
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Buffer {\n"
         "    usize $n;\n"
@@ -251,7 +248,7 @@ TEST_CASE("outbound wins the scan when both directions exist for one pair", "[im
         "    static function from(Buffer $b) : Window { return Window($b->n); }\n"
         "}\n");
 
-    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "already converts from"));
 
     auto &m = bundle->modules.find_module("test");
     auto *buffer = type_named(m, "Buffer");
@@ -259,11 +256,6 @@ TEST_CASE("outbound wins the scan when both directions exist for one pair", "[im
     REQUIRE(buffer != nullptr);
     REQUIRE(window != nullptr);
 
-    FunctionDeclNode *found = find_implicit_conversion(buffer->value_type(), window->value_type());
-    REQUIRE(found != nullptr);
-    REQUIRE(found->has_receiver());
-    REQUIRE(found->name_token.has_value());
-    REQUIRE(found->name_token.value().value() == "window");
-
-    REQUIRE(find_inbound_implicit_conversion(&window->complex_type(), buffer->value_type()) != nullptr);
+    REQUIRE(find_implicit_conversion(buffer->value_type(), window->value_type()) != nullptr);
+    REQUIRE(find_inbound_implicit_conversion(&window->complex_type(), buffer->value_type()) == nullptr);
 }

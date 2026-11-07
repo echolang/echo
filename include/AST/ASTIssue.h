@@ -404,6 +404,10 @@ namespace AST
         MAKE_ISSUE_DEF1(DuplicateDestructor, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(InvalidImplicitConversion, IssueSeverity::Error, const std::string, _message);
 
+        // a (source, target) pair already has a conversion, in either direction, in the type or
+        // in an extension. the first declaration is a label so the sentence stays the dedup key
+        MAKE_ISSUE_DEF3(DuplicateImplicitConversion, IssueSeverity::Error, const std::string, target_type, const std::string, source_type, const TokenReference, first_declaration, std::vector<IssueLabel> labels() const override; std::vector<IssueNote> notes() const override;);
+
         // AttributeReader refusals, from a source `#[...]` or a manifest - one drain
         MAKE_ISSUE_DEF1(InvalidAttributeValue, IssueSeverity::Error, const std::string, _message);
 

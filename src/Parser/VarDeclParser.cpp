@@ -215,17 +215,25 @@ AST::ExprNode *Parser::parse_assigned_value(
     //
     // one site for all four assignment shapes, because this function is the sole owner of "the value an
     // assignment writes into `target`": `$x =`, `$s->x =`, `$a[$i] =` and `Type::$p =` all pass here
-    if (cursor.is_type(Token::Type::t_guard)) {
+    if (cursor.is_type({ Token::Type::t_guard, Token::Type::t_try })) {
+        const char *word = cursor.is_type(Token::Type::t_try) ? "try" : "guard";
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(cursor.current()),
-            "'guard' can only introduce a new declaration, and this name already holds storage. "
-            "Writing to it would have to end the value it holds on the path that binds and leave it "
-            "alone on the path that leaves. Declare a new name instead.");
-        // Parser::parse_guard owns the production. a skip_until on else/semicolon/brace
+            fmt::format(
+                "'{}' can only introduce a new declaration, and this name already holds storage. "
+                "Writing to it would have to end the value it holds on the path that binds and leave it "
+                "alone on the path that leaves. Declare a new name instead.",
+                word));
+        // Parser::parse_guard / parse_try own the production. a skip_until on else/semicolon/brace
         // stops at a `}` inside the subject and leaves the real else arm in the stream;
         // try_skip_to_next_statement stops at the first `;` of the else arm. statement
         // form, and the node is dropped: this assignment has no value to write
-        parse_guard(payload, nullptr, false);
+        if (cursor.is_type(Token::Type::t_try)) {
+            parse_try(payload, nullptr, false);
+        }
+        else {
+            parse_guard(payload, nullptr, false);
+        }
         return nullptr;
     }
 
@@ -495,6 +503,9 @@ AST::VarDeclNode *Parser::parse_varexpr(
     // local - nothing before the `=` differs
     const bool guard_initializer = allows_guard
         && cursor.is_type_sequence(0, { Token::Type::t_assign, Token::Type::t_guard });
+    const bool try_initializer = allows_guard
+        && cursor.is_type_sequence(0, { Token::Type::t_assign, Token::Type::t_try });
+    const bool unwrap_initializer = guard_initializer || try_initializer;
 
     // if we have a scope we add the variable to it
     if (scope != nullptr) {
@@ -506,7 +517,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
         //
         // a fork rather than an add-then-take-back: the child list *is* the statement order, and an
         // invariant that only holds between two lines nobody reads together is not one
-        if (guard_initializer) {
+        if (unwrap_initializer) {
             scope->declare_variable(*vardecl);
         }
         else {
@@ -539,14 +550,16 @@ AST::VarDeclNode *Parser::parse_varexpr(
     // Parser::parse_guard owns everything from the `guard` keyword to the else arm's `}` and appends
     // the statement itself; the declaration is handed back the way any other is, so the caller that
     // knows it is reading a body can still refuse a `static` on it
-    if (guard_initializer) {
-        AST::GuardNode *guard = parse_guard(payload, vardecl, is_const);
+    if (unwrap_initializer) {
+        AST::GuardNode *node = try_initializer
+            ? parse_try(payload, vardecl, is_const)
+            : parse_guard(payload, vardecl, is_const);
 
         // appended to the same scope the *name* went into above, so the two halves of the statement
         // cannot end up in different blocks. `scope` is non-null here by construction:
-        // `guard_initializer` is only true for the one caller that reads a body
-        if (guard != nullptr && scope != nullptr) {
-            scope->children.push_back(AST::make_ref(*guard));
+        // `unwrap_initializer` is only true for the one caller that reads a body
+        if (node != nullptr && scope != nullptr) {
+            scope->children.push_back(AST::make_ref(*node));
         }
 
         return vardecl;

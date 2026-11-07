@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] extension_on_primitive.eco:1:1
+
+  an 'extension' names a struct, a class or an enum, and 'int32' is not one
+
+  1 | extension int32
+    : ^^^^^^^^^
+  2 | {
+
+1 error, nothing was compiled.

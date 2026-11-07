@@ -1,0 +1,8 @@
+function go() : result<int32, int32>
+{
+    int32? $maybe = null;
+    int32 $n = try $maybe;
+    return .ok($n);
+}
+
+echo 1;

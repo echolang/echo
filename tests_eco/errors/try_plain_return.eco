@@ -1,0 +1,12 @@
+function load() : result<int32, int32>
+{
+    return .ok(1);
+}
+
+function f() : int32
+{
+    int32 $v = try load();
+    return $v;
+}
+
+echo f();

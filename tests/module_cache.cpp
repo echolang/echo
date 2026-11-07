@@ -1036,3 +1036,122 @@ TEST_CASE("echoc test reuses a library object the way run does", "[cache]")
     REQUIRE(cache_key(line_starting_with(tested.output, "cachelib")) == cache_key(lib_before));
     REQUIRE(line_starting_with(tested.output, "cachelib").find("hit") != std::string::npos);
 }
+
+TEST_CASE("a sibling conversion is in every user module's key", "[cache]")
+{
+    ScopedProject project("sibling_conversion");
+
+    write_file(project.root() / "errlib" / "module.eco",
+        "#[module: \"errlib\"]\n"
+        "#[version: \"0.1.0\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "errlib" / "src" / "lib.eco",
+        "public enum Low\n"
+        "{\n"
+        "    case gone;\n"
+        "}\n"
+        "\n"
+        "public enum High\n"
+        "{\n"
+        "    case notFound(string $what);\n"
+        "}\n"
+        "\n"
+        "public function low() : result<int32, Low>\n"
+        "{\n"
+        "    return .error(.gone);\n"
+        "}\n"
+        "\n"
+        "public function high() : result<int32, High>\n"
+        "{\n"
+        "    int32 $v = try low();\n"
+        "    return .ok($v);\n"
+        "}\n");
+
+    write_file(project.root() / "convertlib" / "module.eco",
+        "#[module: \"convertlib\"]\n"
+        "#[version: \"0.1.0\"]\n"
+        "#[depends: \"../errlib\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "convertlib" / "src" / "conv.eco",
+        "extension High\n"
+        "{\n"
+        "    #[implicit]\n"
+        "    public static function from(Low $e) : High\n"
+        "    {\n"
+        "        return .notFound('the record');\n"
+        "    }\n"
+        "}\n");
+    write_file(project.root() / "convertlib" / "src" / "extra.eco",
+        "public function dummy() : int32\n"
+        "{\n"
+        "    return 0;\n"
+        "}\n");
+
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../errlib\"]\n"
+        "#[depends: \"../convertlib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco", "echo high()->failed();\n");
+
+    const std::string args = "run --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult first = project.echoc(args, app_dir);
+    REQUIRE(first.exit_code == 0);
+    INFO(first.output);
+
+    const std::string err_before = line_starting_with(first.output, "errlib");
+    const std::string conv_before = line_starting_with(first.output, "convertlib");
+    const std::string stdlib_before = line_starting_with(first.output, "stdlib");
+
+    REQUIRE_FALSE(err_before.empty());
+    REQUIRE_FALSE(conv_before.empty());
+
+    SECTION("editing the sibling's conversion moves errlib, not the stdlib")
+    {
+        write_file(project.root() / "convertlib" / "src" / "conv.eco",
+            "extension High\n"
+            "{\n"
+            "    #[implicit]\n"
+            "    public static function from(Low $e) : High\n"
+            "    {\n"
+            "        return .notFound('elsewhere');\n"
+            "    }\n"
+            "}\n");
+
+        const ProcessResult after = project.echoc(args, app_dir);
+        REQUIRE(after.exit_code == 0);
+        INFO(after.output);
+
+        REQUIRE(cache_key(line_starting_with(after.output, "errlib")) != cache_key(err_before));
+        REQUIRE(cache_key(line_starting_with(after.output, "stdlib")) == cache_key(stdlib_before));
+    }
+
+    SECTION("editing a non-conversion file in the sibling does not move errlib")
+    {
+        write_file(project.root() / "convertlib" / "src" / "extra.eco",
+            "public function dummy() : int32\n"
+            "{\n"
+            "    return 1;\n"
+            "}\n");
+
+        const ProcessResult after = project.echoc(args, app_dir);
+        REQUIRE(after.exit_code == 0);
+        INFO(after.output);
+
+        REQUIRE(cache_key(line_starting_with(after.output, "errlib")) == cache_key(err_before));
+        REQUIRE(cache_key(line_starting_with(after.output, "convertlib")) != cache_key(conv_before));
+    }
+
+    SECTION("editing the application does not move errlib")
+    {
+        write_file(project.root() / "app" / "app.eco", "echo high()->failed();\necho dummy();\n");
+
+        const ProcessResult after = project.echoc(args, app_dir);
+        REQUIRE(after.exit_code == 0);
+        INFO(after.output);
+
+        REQUIRE(cache_key(line_starting_with(after.output, "errlib")) == cache_key(err_before));
+    }
+}

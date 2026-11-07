@@ -5,14 +5,20 @@
 #include "Parser/TypeParser.h"
 
 #include "AST/ASTControlFlow.h"
+#include "AST/ASTIssue.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
+#include "AST/ASTValueType.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTUnwrap.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
+#include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 
 #include <fmt/core.h>
 
@@ -217,6 +223,119 @@ AST::GuardNode *Parser::parse_guard(
     if (cursor.is_type(Token::Type::t_semicolon)) {
         cursor.skip();
     }
+
+    return &node;
+}
+
+AST::GuardNode *Parser::parse_try(
+    Parser::Payload &payload,
+    AST::VarDeclNode *binding,
+    bool is_const
+)
+{
+    auto &cursor = payload.cursor;
+    auto try_token = cursor.current();
+    cursor.skip(); // `try`
+
+    if (cursor.is_type(Token::Type::t_open_brace)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(try_token),
+            "Echo has no try blocks. 'try expr;' passes a failure up to the caller, "
+            "and 'guard expr else ($e) { ... }' handles it here");
+        cursor.skip_balanced_group(Token::Type::t_open_brace, Token::Type::t_close_brace);
+        return nullptr;
+    }
+
+    auto *init = Parser::parse_expr(payload);
+    if (init == nullptr) {
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
+    init = AST::optional_operand_of(init, payload.context.module, try_token);
+
+    AST::FunctionDeclNode *enclosing = payload.context.current_function_ptr;
+    bool carrier_ok = true;
+
+    if (enclosing == nullptr) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(try_token),
+            "'try' passes a failure up, and the top level cannot carry one - handle it here with guard");
+        carrier_ok = false;
+    }
+    else if (enclosing->is_constructor() || enclosing->is_destructor() || enclosing->is_init()
+        || enclosing->is_test()) {
+        const char *kind = enclosing->is_constructor() ? "a constructor"
+            : enclosing->is_destructor() ? "a destructor"
+            : enclosing->is_init() ? "an init block"
+            : "a test";
+
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(try_token),
+            fmt::format(
+                "'try' returns the failure from '{}', and {} cannot carry one - handle it here with guard",
+                enclosing->func_name(), kind));
+        carrier_ok = false;
+    }
+    else if (!AST::is_undetermined_type(enclosing->get_return_type())
+        && AST::error_carrier_of(enclosing->get_return_type()) == nullptr) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(try_token),
+            fmt::format(
+                "'try' returns the failure from '{}', and '{}' cannot carry one - handle it here with guard",
+                enclosing->func_name(),
+                enclosing->get_return_type().get_type_desciption()));
+        carrier_ok = false;
+    }
+
+    if (binding != nullptr) {
+        if (!binding->has_type()) {
+            binding->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
+                AST::infer_declaration_type(AST::ValueType::make_unknown(), is_const)));
+        }
+
+        binding->binds_unwrapped = true;
+    }
+
+    auto fail_token = payload.context.make_virtual_token(
+        "$__fail", Token::Type::t_varname, try_token);
+    auto &failure = payload.context.emplace_node<AST::VarDeclNode>(fail_token, nullptr);
+    failure.declaring_function = enclosing;
+
+    auto error_name = payload.context.make_virtual_token(
+        "error", Token::Type::t_identifier, try_token);
+    auto *fail_var = payload.context.emplace_nodep<AST::VarNode>(&failure);
+    auto *fail_ref = payload.context.emplace_nodep<AST::VarRefNode>(fail_var);
+    auto &error_call = payload.context.emplace_node<AST::FunctionCallExprNode>(
+        error_name, std::vector<AST::ExprNode *>{ fail_ref });
+    error_call.token_shorthand_dot.emplace(try_token);
+    if (payload.context.return_type_ptr != nullptr) {
+        AST::bind_shorthand_to(&error_call, payload.context.return_type_ptr->type);
+    }
+
+    auto &ret = payload.context.emplace_node<AST::ReturnNode>(&error_call, try_token);
+
+    auto &else_scope = payload.context.emplace_node<AST::ScopeNode>();
+    else_scope.add_vardecl(failure);
+    else_scope.children.push_back(AST::make_ref(ret));
+
+    auto &node = payload.context.emplace_node<AST::GuardNode>(binding, &else_scope, try_token);
+    node.set_tested(init);
+    node.failure = &failure;
+    node.is_try = true;
+    node.try_error_call = &error_call;
+    node.plan_decided = false;
+
+    if (!carrier_ok) {
+        error_call.settlement = AST::CallSettlement::t_failed;
+    }
+
+    if (!cursor.is_type(Token::Type::t_semicolon)) {
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
+        cursor.try_skip_to_next_statement();
+        return &node;
+    }
+    cursor.skip();
 
     return &node;
 }

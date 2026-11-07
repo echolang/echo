@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] extension_unknown_type.eco:1:11
+
+  Unknown type 'Nope'
+
+  1 | extension Nope
+    :           ^^^^
+  2 | {
+
+1 error, nothing was compiled.

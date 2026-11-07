@@ -1,9 +1,9 @@
 expect: fail
 
 --- OUT --->
-[error] InvalidImplicitConversion  implicit_conversion_inbound_duplicate.eco:10:7
+[error] DuplicateImplicitConversion  implicit_conversion_inbound_duplicate.eco:10:7
 
-  'Quantity' already declares an implicit conversion from 'int32'.
+  'Quantity' already converts from 'int32'
 
    9 | 
   10 |     #[implicit]
@@ -11,5 +11,12 @@ expect: fail
   11 |     static function wrap(int32 $n) : Quantity { return Quantity($n); }
      : ^^^^^^^^^^
   12 | }
+
+  7 |     #[implicit]
+  8 |     static function from(int32 $n) : Quantity { return Quantity($n); }
+    :                     ---- first conversion
+  9 | 
+
+  note: a pair has one conversion
 
 1 error, nothing was compiled.

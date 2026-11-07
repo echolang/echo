@@ -1,0 +1,2 @@
+#[module: "extconv"]
+#[sources: "src/*.eco"]

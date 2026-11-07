@@ -1,0 +1,33 @@
+enum Low
+{
+    case gone;
+}
+
+enum High
+{
+    case notFound(string $what);
+
+    #[implicit]
+    public static function from(Low $e) : High
+    {
+        return .notFound('the record');
+    }
+}
+
+function low() : result<int32, Low>
+{
+    return .error(.gone);
+}
+
+function high() : result<int32, High>
+{
+    int32 $v = try low();
+    return .ok($v);
+}
+
+result<int32, High> $out = high();
+echo $out->failed();
+string $msg = match ($out->failure()) {
+    High::notFound($what) => $what,
+};
+echo $msg;

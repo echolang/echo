@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_on_nullable.eco:4:16
+
+  'try' passes a failure up, and 'int32?' carries none - guard it, or use ?? or ?->
+
+  3 |     int32? $maybe = null;
+  4 |     int32 $n = try $maybe;
+    :                ^^^
+  5 |     return .ok($n);
+
+1 error, nothing was compiled.

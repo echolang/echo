@@ -1,0 +1,11 @@
+struct High { int32 $n; }
+
+extension High
+{
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+echo 1;

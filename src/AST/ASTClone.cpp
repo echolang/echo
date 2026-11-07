@@ -671,6 +671,9 @@ Node *GuardNode::clone(CloneContext &cc) const
     // sibling of this guard in the enclosing scope, cloned in ScopeNode's declaration pre-pass
     c->hoisted_subject = cc.rebind(c->hoisted_subject);
 
+    // the planted `.error` call lives in the else scope
+    c->try_error_call = cc.rebind(c->try_error_call);
+
     return c;
 }
 

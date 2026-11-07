@@ -1,0 +1,13 @@
+public struct High
+{
+    int32 $n;
+}
+
+extension High
+{
+    #[implicit]
+    static function from(int32 $n) : High
+    {
+        return High($n);
+    }
+}

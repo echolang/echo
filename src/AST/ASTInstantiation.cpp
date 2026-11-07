@@ -42,7 +42,15 @@ namespace AST
             }
 
             const ArgumentFit fit = argument_fit(argument, nullptr, expected);
-            return fit != ArgumentFit::t_none && fit != ArgumentFit::t_conversion;
+            if (fit != ArgumentFit::t_none && fit != ArgumentFit::t_conversion) {
+                return true;
+            }
+
+            // argument_fit needs the expression for t_declared_conversion; instantiate has types
+            // only. the instance still coerces, the same as a wrap into an existing binding
+            return find_implicit_conversion(
+                implicit_conversion_source(argument, nullptr),
+                implicit_conversion_target(expected)) != nullptr;
         }
 
         bool binding_conflict(

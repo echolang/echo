@@ -1,0 +1,14 @@
+struct Problem
+{
+    int32 $n;
+}
+
+extension Problem
+{
+    public function describe() : string
+    {
+        return 'x';
+    }
+}
+
+echo 1;

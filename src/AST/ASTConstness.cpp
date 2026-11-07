@@ -71,7 +71,7 @@ AST::ComplexType *AST::enclosing_type_of(const AST::FunctionDeclNode &decl)
                 return returned.get_complex_type();
             }
         }
-        else if (fn->owner_type != nullptr) {
+        else if (fn->owner_type != nullptr && !fn->from_extension) {
             return fn->owner_type;
         }
 

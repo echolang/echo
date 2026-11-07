@@ -1,0 +1,6 @@
+function show(High $h) : void
+{
+    echo $h->n;
+}
+
+show(3);

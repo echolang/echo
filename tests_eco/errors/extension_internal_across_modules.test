@@ -1,0 +1,19 @@
+modules: extension/lib_internal_conv
+expect: fail
+
+--- OUT --->
+[error] InaccessibleDeclaration  extension_internal_across_modules.eco:6:1
+
+  'High::from(int32)' is internal to the module 'extconv', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'extconv' offers.
+
+  5 | 
+  6 | show(3);
+    : ^^^^
+  7 | 
+
+   8 |     #[implicit]
+   9 |     static function from(int32 $n) : High
+     :                     ---- declared here
+  10 |     {
+
+1 error, nothing was compiled.

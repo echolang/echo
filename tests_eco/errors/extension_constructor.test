@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] extension_constructor.eco:5:5
+
+  an 'extension' block holds conversions, and this is not one. declare it in the type itself
+
+  4 | {
+  5 |     constructor(int32 $n)
+    :     ^^^^^^^^^^^
+  6 |     {
+
+1 error, nothing was compiled.

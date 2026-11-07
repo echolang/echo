@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] extension_visibility_before_attribute.eco:13:5
+
+  'public' cannot be written here. A visibility modifier belongs to the declaration, so it goes after the attributes and directly ahead of the member it is about.
+
+  12 | {
+  13 |     public #[implicit]
+     :     ^^^^^^
+  14 |     static function from(Low $e) : Problem
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_struct_return.eco:13:16
+
+  'try' returns the failure from 'handle', and 'Response' cannot carry one - handle it here with guard
+
+  12 | {
+  13 |     int32 $v = try load();
+     :                ^^^
+  14 |     return Response($v);
+
+1 error, nothing was compiled.

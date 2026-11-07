@@ -118,6 +118,24 @@ std::vector<AST::FunctionDeclNode *> AST::find_static_functions(const AST::Compl
     return candidates;
 }
 
+AST::FunctionDeclNode *AST::error_carrier_of(const AST::ValueType &destination)
+{
+    const ValueType owner = static_owner_of_destination(destination);
+
+    if (!owner.has_complex_type()) {
+        return nullptr;
+    }
+
+    for (FunctionDeclNode *candidate : find_static_functions(owner.get_complex_type(), "error")) {
+        if (candidate != nullptr
+            && candidate->args.size() == candidate->implicit_arg_count() + 1) {
+            return candidate;
+        }
+    }
+
+    return nullptr;
+}
+
 std::vector<AST::FunctionDeclNode *> AST::find_static_functions(
     Collector &collector,
     const ValueType &owner,
@@ -323,7 +341,8 @@ AST::FunctionDeclNode *AST::find_implicit_conversion(const AST::ValueType &from,
     // per candidate per argument per fixpoint round. a type has one or two entries here, so a flat
     // scan of them is the whole cost - and the list holds only declarations
     // publish_implicit_conversion accepted, so there is nothing left to check but the target (outbound)
-    // or the source (inbound)
+    // or the source (inbound). a pair has one conversion: the publisher refuses a second in either
+    // direction, so the order here no longer picks a winner
     if (from.has_complex_type()) {
         if (auto *found = find_outbound_implicit_conversion(from.get_complex_type(), to)) {
             return found;

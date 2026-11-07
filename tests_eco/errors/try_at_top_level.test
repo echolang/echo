@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_at_top_level.eco:6:12
+
+  'try' passes a failure up, and the top level cannot carry one - handle it here with guard
+
+  5 | 
+  6 | int32 $n = try parse(1);
+    :            ^^^
+  7 | echo $n;
+
+1 error, nothing was compiled.

@@ -614,6 +614,21 @@ ISSUE_MESSAGE_FNC(DestructorHasParameters) { return _message; }
 ISSUE_MESSAGE_FNC(DestructorHasReturnType) { return _message; }
 ISSUE_MESSAGE_FNC(DuplicateDestructor) { return _message; }
 ISSUE_MESSAGE_FNC(InvalidImplicitConversion) { return _message; }
+
+ISSUE_MESSAGE_FNC(DuplicateImplicitConversion)
+{
+    return fmt::format("'{}' already converts from '{}'", target_type, source_type);
+}
+
+std::vector<AST::IssueLabel> AST::Issue::DuplicateImplicitConversion::labels() const
+{
+    return label_outside_primary(code_ref, first_declaration, "first conversion");
+}
+
+std::vector<AST::IssueNote> AST::Issue::DuplicateImplicitConversion::notes() const
+{
+    return { IssueNote { NoteKind::t_note, "a pair has one conversion" } };
+}
 ISSUE_MESSAGE_FNC(InvalidAttributeValue) { return _message; }
 
 ISSUE_MESSAGE_FNC(UnknownAttribute) { return _message; }

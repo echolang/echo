@@ -956,12 +956,16 @@ void Parser::publish_implicit_conversion(
             return;
         }
 
-        // asked through the lookup rather than by re-walking the slot, so "which conversion does
-        // this type have from that source" stays one rule
-        if (AST::find_inbound_implicit_conversion(&owner, source) != nullptr) {
-            report(fmt::format(
-                "'{}' already declares an implicit conversion from '{}'.",
-                owner_struct->type_name(), source.get_type_desciption()));
+        // one pair, both directions: an inbound here and an outbound on the source are the
+        // same conversion, and a second inbound from this source is too. find_implicit_conversion
+        // is the lookup, so uniqueness is the same question a call would ask
+        if (AST::FunctionDeclNode *existing =
+                AST::find_implicit_conversion(source, owner_struct->value_type())) {
+            payload.collector.collect_issue<AST::Issue::DuplicateImplicitConversion>(
+                payload.context.code_ref(implicit_attr->attribute_tokens),
+                owner_struct->value_type().get_type_desciption(),
+                source.get_type_desciption(),
+                existing->declaration_site_token());
             return;
         }
 
@@ -1004,14 +1008,15 @@ void Parser::publish_implicit_conversion(
         return;
     }
 
-    // and a *different* declaration converting to the same target does need saying: nothing would
-    // decide which of them an invisible conversion meant. asked through the directed lookup rather
-    // than find_implicit_conversion, which now also walks the *target* for inbound and would refuse
-    // a legal outbound the moment the other type declared the reverse
-    if (AST::find_outbound_implicit_conversion(&owner, target) != nullptr) {
-        report(fmt::format(
-            "'{}' already declares an implicit conversion to '{}'.",
-            owner_struct->type_name(), target.get_type_desciption()));
+    // one pair, both directions. the inbound twin lives on the target, so asking the
+    // directed outbound lookup would miss it and leave a silent winner
+    if (AST::FunctionDeclNode *existing =
+            AST::find_implicit_conversion(owner_struct->value_type(), target)) {
+        payload.collector.collect_issue<AST::Issue::DuplicateImplicitConversion>(
+            payload.context.code_ref(implicit_attr->attribute_tokens),
+            target.get_type_desciption(),
+            owner_struct->value_type().get_type_desciption(),
+            existing->declaration_site_token());
         return;
     }
 
@@ -1363,6 +1368,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         // and not as a free function of the enclosing namespace. owner_type is what tells the
         // mangler and every diagnostic that the first parameter is not one the user wrote
         funcdecl->owner_type = &owner_struct->complex_type();
+        funcdecl->from_extension = payload.context.in_extension;
 
         // **two tables, because there are two ways to reach one and they must not overlap.** a static
         // is reached by naming its type and never through a receiver, so putting it in the method

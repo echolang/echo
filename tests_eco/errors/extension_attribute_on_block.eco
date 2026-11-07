@@ -1,0 +1,12 @@
+struct High { int32 $n; }
+
+#[implicit]
+extension High
+{
+}
+
+function foo() : void
+{
+}
+
+echo 1;

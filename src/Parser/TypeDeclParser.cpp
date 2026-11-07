@@ -3,6 +3,7 @@
 #include "Parser/ConstDeclParser.h"
 #include "Parser/EnumDeclParser.h"
 #include "Parser/EnumMapParser.h"
+#include "Parser/ExtensionParser.h"
 #include "Parser/ExternInterfaceParser.h"
 #include "Parser/OperatorDeclParser.h"
 
@@ -1600,6 +1601,16 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                     "it belongs at file or namespace scope.",
                     struct_node->type_name()));
             cursor.try_skip_to_next_statement();
+        }
+        else if (starts_extension(cursor)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                "An extension belongs at file or namespace scope.");
+            cursor.skip();
+            Parser::skip_type_shape(cursor);
+            if (cursor.is_type(Token::Type::t_open_brace)) {
+                cursor.skip_balanced_group(Token::Type::t_open_brace, Token::Type::t_close_brace);
+            }
         }
         // `type Iter : contract::iterator<V>;` - an interface's associated type.
         //

@@ -78,6 +78,8 @@ namespace AST
     // not - so a body could be inside its type for one rule and outside it for the other
     //
     // a closure is not a method, so it walks FunctionDeclNode::enclosing_function until it finds one
+    // an extension member has owner_type set and from_extension set: this skips it, so the body
+    // is outside the type for private members and for self::
     ComplexType *enclosing_type_of(const FunctionDeclNode &decl);
 
     // **may a body written inside `from` reach a property declared private on `owner`?**

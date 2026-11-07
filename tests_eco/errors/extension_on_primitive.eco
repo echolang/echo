@@ -1,0 +1,10 @@
+extension int32
+{
+    #[implicit]
+    public static function from(bool $b) : int32
+    {
+        return $b ? 1 : 0;
+    }
+}
+
+echo 1;

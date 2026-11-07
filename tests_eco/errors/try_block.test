@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_block.eco:3:5
+
+  Echo has no try blocks. 'try expr;' passes a failure up to the caller, and 'guard expr else ($e) { ... }' handles it here
+
+  2 | {
+  3 |     try {
+    :     ^^^
+  4 |         return .ok(1);
+
+1 error, nothing was compiled.

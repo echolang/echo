@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] AmbiguousCall  extension_overload_tie.eco:26:6
+
+  The call to 'f' is ambiguous. These overloads all match equally well:
+    f(High)
+    f(Other)
+
+  25 | 
+  26 | echo f(Low(3));
+     :      ^
+  27 | 
+
+1 error, nothing was compiled.

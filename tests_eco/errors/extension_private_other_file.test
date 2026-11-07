@@ -1,0 +1,19 @@
+modules: extension/lib_private_conv
+expect: fail
+
+--- OUT --->
+[error] InaccessibleDeclaration  use.eco:3:10
+
+  'High::from(int32)' is private to 'conv.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  2 | {
+  3 |     High $h = 3;
+    :          ^^
+  4 |     return $h->n;
+
+   8 |     #[implicit]
+   9 |     private static function from(int32 $n) : High
+     :                             ---- declared here
+  10 |     {
+
+1 error, nothing was compiled.

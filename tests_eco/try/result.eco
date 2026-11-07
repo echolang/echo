@@ -1,0 +1,25 @@
+function parse(int32 $n) : result<int32, int32>
+{
+    if ($n < 0) {
+        return .error(-1);
+    }
+
+    return .ok($n * 2);
+}
+
+function twice(int32 $n) : result<int32, int32>
+{
+    int32 $v = try parse($n);
+    return .ok($v * 2);
+}
+
+function go() : result<int32, int32>
+{
+    int32 $a = try twice(21);
+    try twice(-3);
+    return .ok($a);
+}
+
+result<int32, int32> $out = go();
+echo $out->failed();
+echo $out->failure();

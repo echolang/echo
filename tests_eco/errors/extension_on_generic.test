@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] extension_on_generic.eco:3:1
+
+  'Box' is generic, and an implicit conversion on a generic type is not supported yet
+
+  2 | 
+  3 | extension Box
+    : ^^^^^^^^^
+  4 | {
+
+1 error, nothing was compiled.

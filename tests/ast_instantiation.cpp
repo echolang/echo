@@ -126,6 +126,35 @@ TEST_CASE("A later argument may wrap or widen into an existing binding", "[insta
     REQUIRE(deferred_widen.type_arguments == std::vector<ValueType>{int64});
 }
 
+TEST_CASE("A later argument may convert into an existing binding", "[instantiation][generics]")
+{
+    // `.error($e)` at `result<T, High>`: E is already High, the argument is Low.
+    // unify sees two concretes; a declared conversion still instantiates, and CallResolver coerces
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Low {}\n"
+        "struct High {\n"
+        "    #[implicit]\n"
+        "    static function from(Low $x) : High { return High(); }\n"
+        "}\n"
+        "function choose<T>(T $a, T $b) : T { return $b; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+    auto *high_decl = EchoTests::type_named(module, "High");
+    auto *low_decl = EchoTests::type_named(module, "Low");
+    REQUIRE(high_decl != nullptr);
+    REQUIRE(low_decl != nullptr);
+
+    const auto converted = can_instantiate(
+        template_named(*bundle, "choose"),
+        {high_decl->value_type(), low_decl->value_type()},
+        bundle->collector.type_registry);
+
+    REQUIRE(converted.fit == InstantiationFit::t_yes);
+    REQUIRE(converted.type_arguments == std::vector<ValueType>{high_decl->value_type()});
+}
+
 TEST_CASE("A deferred literal that disagrees still leaves the instance decided", "[instantiation][generics]")
 {
     // pick($small, 9223372036854775807): T is int32 from the typed argument. the

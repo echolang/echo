@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_expression.eco:8:16
+
+  'try' stands where 'guard' does: on its own, or as the value of a declaration. declare the value first, then use it
+
+  7 | {
+  8 |     return .ok(try parse(1));
+    :                ^^^
+  9 | }
+
+1 error, nothing was compiled.

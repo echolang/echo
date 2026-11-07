@@ -1,0 +1,10 @@
+extension Nope
+{
+    #[implicit]
+    public static function from(int32 $n) : Nope
+    {
+        die('no');
+    }
+}
+
+echo 1;

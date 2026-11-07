@@ -1,9 +1,9 @@
 expect: fail
 
 --- OUT --->
-[error] InvalidImplicitConversion  implicit_conversion_duplicate_target.eco:11:7
+[error] DuplicateImplicitConversion  implicit_conversion_duplicate_target.eco:11:7
 
-  'Buffer' already declares an implicit conversion to 'Window'.
+  'Window' already converts from 'Buffer'
 
   10 | 
   11 |     #[implicit]
@@ -11,5 +11,12 @@ expect: fail
   12 |     function whole() : Window { return Window($this->count); }
      : ^^^^^^^^^^^^
   13 | }
+
+   8 |     #[implicit]
+   9 |     function window() : Window { return Window($this->count); }
+     :              ------ first conversion
+  10 | 
+
+  note: a pair has one conversion
 
 1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+struct Low { int32 $n; }
+struct High { int32 $n; }
+
+extension High
+{
+    #[implicit]
+    public static function from(Low $l) : High
+    {
+        return High($l->n);
+    }
+}
+
+echo High::from(Low(5))->n;

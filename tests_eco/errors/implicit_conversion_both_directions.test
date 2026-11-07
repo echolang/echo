@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] DuplicateImplicitConversion  implicit_conversion_both_directions.eco:13:7
+
+  'Window' already converts from 'Buffer'
+
+  12 | 
+  13 |     #[implicit]
+     :       ^^^^^^^^^
+  14 |     static function from(Buffer $b) : Window { return Window($b->n); }
+     : ^^^^^^^^^^
+  15 | }
+
+  5 |     #[implicit]
+  6 |     function window() : Window { return Window($this->n); }
+    :              ------ first conversion
+  7 | }
+
+  note: a pair has one conversion
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_plain_return.eco:8:16
+
+  'try' returns the failure from 'f', and 'int32' cannot carry one - handle it here with guard
+
+  7 | {
+  8 |     int32 $v = try load();
+    :                ^^^
+  9 |     return $v;
+
+1 error, nothing was compiled.

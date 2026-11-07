@@ -92,6 +92,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_return: return "return";
         case Token::Type::t_if: return "if";
         case Token::Type::t_guard: return "guard";
+        case Token::Type::t_try: return "try";
         case Token::Type::t_else: return "else";
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
@@ -179,6 +180,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_return: return "return";
         case Token::Type::t_if: return "if";
         case Token::Type::t_guard: return "guard";
+        case Token::Type::t_try: return "try";
         case Token::Type::t_else: return "else";
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
@@ -286,6 +288,7 @@ bool token_is_reserved_word(const std::string &spelling)
         Token::Type::t_return,
         Token::Type::t_if,
         Token::Type::t_guard,
+        Token::Type::t_try,
         Token::Type::t_else,
         Token::Type::t_while,
         Token::Type::t_for,

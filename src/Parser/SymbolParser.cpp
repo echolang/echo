@@ -14,6 +14,7 @@
 #include "Parser/VisibilityParser.h"
 #include "Parser/EnumMapParser.h"
 #include "Parser/TypeAliasParser.h"
+#include "Parser/ExtensionParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -151,6 +152,13 @@ void Parser::parse_type_names(Parser::Payload &payload)
                 cursor.skip();
             }
 
+            continue;
+        }
+
+        if (starts_extension(cursor)) {
+            pending = Pending {};
+            cursor.skip();
+            Parser::skip_type_shape(cursor);
             continue;
         }
 
@@ -442,6 +450,9 @@ void Parser::parse_declaration_surface(
         }
         else if (starts_enum_map(cursor)) {
             parse_file_scope_enum_map(payload, block_token, visibility);
+        }
+        else if (starts_extension(cursor)) {
+            parse_file_scope_extension(payload, block_token, visibility);
         }
         else if (starts_type_alias(cursor)) {
             skip_type_alias(payload);

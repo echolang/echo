@@ -1,0 +1,17 @@
+struct Response
+{
+    int32 $n;
+}
+
+function load() : result<int32, int32>
+{
+    return .ok(1);
+}
+
+function handle() : Response
+{
+    int32 $v = try load();
+    return Response($v);
+}
+
+echo handle()->n;

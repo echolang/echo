@@ -75,6 +75,15 @@ namespace AST
         // the `guard` keyword, for the diagnostics that are about the form rather than about its parts
         TokenReference token;
 
+        // `try expr` is this node with a planted `return .error($__fail)` else. codegen is
+        // identical; the bit is the diagnostics, the dump, and the conversion check
+        bool is_try = false;
+
+        // **not an owned edge.** the planted `.error($__fail)` call, so GuardLowering can
+        // dest-type it once E is known, or mark it failed when the function cannot carry one.
+        // clone rebinds it
+        FunctionCallExprNode *try_error_call = nullptr;
+
         GuardNode(VarDeclNode *decl, ScopeNode *else_scope, TokenReference token) :
             decl(decl),
             else_scope(else_scope),
@@ -106,7 +115,7 @@ namespace AST
         // and a protocol. a `T?` guard renders exactly as it always did. the statement form names the
         // expression rather than a binding
         const std::string node_description() override {
-            std::string desc = "guard ";
+            std::string desc = is_try ? "try " : "guard ";
 
             if (decl != nullptr) {
                 desc += decl->node_description();

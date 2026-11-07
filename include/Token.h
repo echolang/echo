@@ -85,6 +85,7 @@ public:
         t_return,                   // return
         t_if,                       // if
         t_guard,                    // guard
+        t_try,                      // try
         t_else,                     // else
         t_while,                    // while
         t_for,                      // for

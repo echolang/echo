@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_missing_conversion.eco:18:16
+
+  'try' cannot pass 'Low' up as 'High' - there is no conversion. declare '#[implicit] static function from(Low)' on 'High', or in an 'extension High' block
+
+  17 | {
+  18 |     int32 $v = try low();
+     :                ^^^
+  19 |     return .ok($v);
+
+1 error, nothing was compiled.

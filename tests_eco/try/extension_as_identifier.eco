@@ -1,0 +1,17 @@
+enum Kind
+{
+    case extension(int32 $n);
+}
+
+Kind $k = .extension(7);
+int32 $n = match ($k) {
+    Kind::extension($v) => $v,
+};
+echo $n;
+
+struct Extension
+{
+    int32 $n;
+}
+
+echo Extension(3)->n;

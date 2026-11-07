@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] extension_attribute_on_block.eco:3:3
+
+  an attribute belongs to a declaration, and an 'extension' block is not one. write it on the conversion inside
+
+  2 | 
+  3 | #[implicit]
+    :   ^^^^^^^^^
+  4 | extension High
+    : ^^^^^^^^^
+  5 | {
+
+1 error, nothing was compiled.

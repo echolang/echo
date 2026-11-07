@@ -1,0 +1,8 @@
+function go() : result<int32, int32>
+{
+    try {
+        return .ok(1);
+    }
+}
+
+echo 1;

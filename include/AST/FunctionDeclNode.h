@@ -240,6 +240,10 @@ namespace AST
 
         DeclarationOrigin declared_in;
 
+        // parsed in an `extension` block. owner_type is the named type for mangling and
+        // lookup; enclosing_type_of skips it so the body cannot reach private members
+        bool from_extension = false;
+
         // a method declared in an `interface` body: a **requirement**, not an implementation. it is an
         // ordinary member declaration in every other respect - registered through
         // register_member_function, found by find_member_functions, and so callable through a receiver

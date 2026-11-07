@@ -238,6 +238,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_if);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_else);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_guard);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_try);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_while);
     // `foreach` before `for`, though the order here does not decide it: insert_function_into_tree
     // truncates at three characters so both land in the "for" node, and sort_functiontree orders by

@@ -1,0 +1,16 @@
+struct Low { int32 $n; }
+struct High { int32 $n; }
+
+function f(Low $l) : int32 { return $l->n; }
+function f(High $h) : int32 { return $h->n + 100; }
+
+extension High
+{
+    #[implicit]
+    public static function from(Low $l) : High
+    {
+        return High($l->n);
+    }
+}
+
+echo f(Low(3));

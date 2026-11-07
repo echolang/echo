@@ -1,0 +1,19 @@
+struct Window { usize $n; }
+struct Buffer { usize $n; }
+
+extension Buffer
+{
+    #[implicit]
+    public const function window() : Window
+    {
+        return Window($this->n);
+    }
+}
+
+function show(Window $w) : void
+{
+    echo $w->n;
+}
+
+show(Buffer(7));
+echo Buffer(7)->window()->n;

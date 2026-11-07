@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] DuplicateFunctionSignature  extension_duplicate_intype.eco:16:28
+
+  'High::from(Low)' is already declared with these parameter types. Overloads must differ in their parameters or labels.
+
+  15 |     #[implicit]
+  16 |     public static function from(Low $l) : High
+     :                            ^^^^
+  17 |     {
+
+[error] DuplicateImplicitConversion  extension_duplicate_intype.eco:15:7
+
+  'High' already converts from 'Low'
+
+  14 | {
+  15 |     #[implicit]
+     :       ^^^^^^^^^
+  16 |     public static function from(Low $l) : High
+     : ^^^^^^^^^^
+  17 |     {
+
+  6 |     #[implicit]
+  7 |     public static function from(Low $l) : High
+    :                            ---- first conversion
+  8 |     {
+
+  note: a pair has one conversion
+
+2 errors, nothing was compiled.

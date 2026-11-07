@@ -1,0 +1,22 @@
+struct A { int32 $n; }
+struct B { int32 $n; }
+struct C { int32 $n; }
+
+extension B
+{
+    #[implicit]
+    public static function from(A $a) : B { return B($a->n); }
+}
+
+extension C
+{
+    #[implicit]
+    public static function from(B $b) : C { return C($b->n); }
+}
+
+function show(C $c) : void
+{
+    echo $c->n;
+}
+
+show(A(1));

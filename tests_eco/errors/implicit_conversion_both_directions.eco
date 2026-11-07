@@ -1,0 +1,17 @@
+struct Buffer
+{
+    usize $n;
+
+    #[implicit]
+    function window() : Window { return Window($this->n); }
+}
+
+struct Window
+{
+    usize $n;
+
+    #[implicit]
+    static function from(Buffer $b) : Window { return Window($b->n); }
+}
+
+echo 1;

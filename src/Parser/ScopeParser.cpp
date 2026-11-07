@@ -34,6 +34,7 @@
 #include "Parser/VisibilityParser.h"
 #include "Parser/EnumMapParser.h"
 #include "Parser/TypeAliasParser.h"
+#include "Parser/ExtensionParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
 {
@@ -255,6 +256,11 @@ AST::ScopeNode & Parser::parse_scope(
                 scope_node.children.push_back(AST::make_ref(*guard));
             }
         }
+        else if (cursor.is_type(Token::Type::t_try)) {
+            if (auto *node = parse_try(payload, nullptr, false)) {
+                scope_node.children.push_back(AST::make_ref(*node));
+            }
+        }
         else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
         }
@@ -312,6 +318,9 @@ AST::ScopeNode & Parser::parse_scope(
 
         else if (starts_enum_map(cursor)) {
             parse_file_scope_enum_map(payload, block_token, visibility);
+        }
+        else if (starts_extension(cursor)) {
+            parse_file_scope_extension(payload, block_token, visibility);
         }
         else if (starts_type_alias(cursor)) {
             parse_type_alias(payload, visibility, block_token.has_value());

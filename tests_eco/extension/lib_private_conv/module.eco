@@ -1,0 +1,2 @@
+#[module: "extpriv"]
+#[sources: "src/*.eco"]

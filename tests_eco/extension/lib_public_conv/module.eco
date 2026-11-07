@@ -1,0 +1,2 @@
+#[module: "extpub"]
+#[sources: "src/*.eco"]

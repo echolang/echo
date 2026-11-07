@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] extension_not_a_conversion.eco:8:12
+
+  an 'extension' block holds conversions, and this is a method. declare it in the type itself
+
+  7 | {
+  8 |     public function describe() : string
+    :            ^^^^^^^^
+  9 |     {
+
+1 error, nothing was compiled.

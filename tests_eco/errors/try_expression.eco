@@ -1,0 +1,11 @@
+function parse(int32 $n) : result<int32, int32>
+{
+    return .ok($n);
+}
+
+function go() : result<int32, int32>
+{
+    return .ok(try parse(1));
+}
+
+echo 1;

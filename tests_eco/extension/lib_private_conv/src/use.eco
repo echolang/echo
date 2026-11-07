@@ -1,0 +1,5 @@
+function uses_private_conversion() : int32
+{
+    High $h = 3;
+    return $h->n;
+}

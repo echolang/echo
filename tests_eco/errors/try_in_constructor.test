@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] try_in_constructor.eco:18:9
+
+  'try' returns the failure from 'Box', and a constructor cannot carry one - handle it here with guard
+
+  17 |         $this->n = 0;
+  18 |         try load();
+     :         ^^^
+  19 |     }
+
+1 error, nothing was compiled.

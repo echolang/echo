@@ -2393,6 +2393,15 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         return AST::make_void_ref();
     }
 
+    if (cursor.is_type(Token::Type::t_try)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            "'try' stands where 'guard' does: on its own, or as the value of a declaration. "
+            "declare the value first, then use it");
+        cursor.try_skip_to_next_statement();
+        return AST::make_void_ref();
+    }
+
     std::vector<ExprPart> expr_parts;
 
     auto token = cursor.here();

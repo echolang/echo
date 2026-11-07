@@ -17,12 +17,52 @@
 #include <cstdlib>
 #include <fstream>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace
 {
 
 using Compiler::k_fnv_offset_basis;
+
+bool ident_char(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9') || c == '_';
+}
+
+bool contains_word(const std::string &bytes, std::string_view word)
+{
+    size_t from = 0;
+
+    while (from < bytes.size()) {
+        const size_t at = bytes.find(word.data(), from, word.size());
+
+        if (at == std::string::npos) {
+            return false;
+        }
+
+        const bool before_ok = at == 0 || !ident_char(bytes[at - 1]);
+        const size_t after = at + word.size();
+        const bool after_ok = after >= bytes.size() || !ident_char(bytes[after]);
+
+        if (before_ok && after_ok) {
+            return true;
+        }
+
+        from = at + 1;
+    }
+
+    return false;
+}
+
+// `#[implicit]` publishes a conversion; `extension` is the block that can publish one onto a
+// type this module does not own. a comment or a string that happens to hold either is a false
+// miss of the cache, never a stale object
+bool source_publishes_a_conversion(const std::string &bytes)
+{
+    return bytes.find("#[implicit]") != std::string::npos || contains_word(bytes, "extension");
+}
 
 };
 
@@ -180,6 +220,39 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         std::string(Compiler::exec_model_environment(options)), environment);
 
+    // **every conversion this program can see**, including one a sibling module published onto a
+    // type this module uses. an `extension` in B can mint a call into A's object without A
+    // depending on B, so A's own sources and its depends are not enough. compiler-supplied
+    // objects stay out: they do not call into user conversions, and folding the program in
+    // would make the stdlib's cache a per-project store
+    uint64_t conversion_set = k_fnv_offset_basis;
+
+    for (const Parser::ModuleManifest *entry : manifests) {
+        if (is_compiler_supplied_module(*entry)) {
+            continue;
+        }
+
+        const Parser::ModuleContribution contribution =
+            Parser::module_contribution_for(*entry, active_targets);
+
+        for (const std::filesystem::path &source : contribution.sources) {
+            const std::optional<std::string> bytes = read_whole_file(source);
+
+            if (!bytes.has_value()) {
+                out_error = fmt::format("{}: cannot be read to compute a cache key.", source.string());
+                return false;
+            }
+
+            if (!source_publishes_a_conversion(bytes.value())) {
+                continue;
+            }
+
+            const uint64_t digest = fnv1a64(bytes.value(), k_fnv_offset_basis);
+            conversion_set = fnv1a64(source.filename().string(), conversion_set);
+            conversion_set = fnv1a64(&digest, sizeof(digest), conversion_set);
+        }
+    }
+
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;
 
@@ -312,6 +385,10 @@ bool Compiler::compute_module_keys(
         // library ahead of this one invalidates it - but the alternative is a stale object that links
         // silently, and the conservative direction is the only safe one to be wrong in
         hash = fnv1a64(&preceding, sizeof(preceding), hash);
+
+        if (!is_compiler_supplied_module(manifest)) {
+            hash = fnv1a64(&conversion_set, sizeof(conversion_set), hash);
+        }
 
         key.hex = to_hex(hash);
 

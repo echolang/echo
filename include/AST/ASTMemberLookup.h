@@ -50,6 +50,10 @@ namespace AST
         const TokenReference &at
     );
 
+    // the arity-1 static `error` a destination names, or null. `try` plants `return .error($__fail)`,
+    // and the two askers (parse_try and GuardLowering) have to agree on whether that call exists
+    FunctionDeclNode *error_carrier_of(const ValueType &destination);
+
     // **`->name(` through a callable property**, not a method. the property exists, its type
     // has a signature, and the type declares no member function of that name - so `$h->op(21)`
     // cannot steal a real method. one owner: the parser asks it when the receiver is already
@@ -111,7 +115,8 @@ namespace AST
 
     // the `#[implicit]` method that converts `from` to `to`, or null. source first: outbound method
     // on `from` (parameterless, return exactly `to`), then inbound static on `to` (sole parameter
-    // exactly `from`). exact match, no chains. ranked t_declared_conversion, below every built-in
+    // exactly `from`). exact match, no chains. ranked t_declared_conversion, below every built-in.
+    // a pair has one conversion: publish_implicit_conversion refuses a second in either direction
     FunctionDeclNode *find_implicit_conversion(const ValueType &from, const ValueType &to);
 
     // the outbound conversion `owner` already published to `to`, or null. the half of the lookup

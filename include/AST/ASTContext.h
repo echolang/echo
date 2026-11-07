@@ -81,6 +81,10 @@ namespace AST
         // calling each other, and only one of them in the chain cares
         TypeDeclNode *self_struct_ptr = nullptr;
 
+        // the body being parsed is an `extension` block. parse_funcdecl stamps from_extension
+        // so enclosing_type_of does not treat the member as inside the type
+        bool in_extension = false;
+
         // the receiver type `$this` binds to - the non-nullable borrow `Foo&`, or the borrow of the
         // interned self-application `Foo<T>&` for a generic owner. held as a node so every method
         // of one struct shares a single TypeNode, the way the constructor shares its return type
@@ -365,6 +369,26 @@ namespace AST
             context.self_struct_ptr = previous_struct;
             context.self_type_ptr = previous_type;
             context.self_const_type_ptr = previous_const_type;
+        }
+    };
+
+    struct ExtensionScope
+    {
+        Context &context;
+        bool previous;
+
+        explicit ExtensionScope(Context &context) :
+            context(context),
+            previous(context.in_extension)
+        {
+            context.in_extension = true;
+        }
+
+        ExtensionScope(const ExtensionScope &) = delete;
+        ExtensionScope &operator=(const ExtensionScope &) = delete;
+
+        ~ExtensionScope() {
+            context.in_extension = previous;
         }
     };
 

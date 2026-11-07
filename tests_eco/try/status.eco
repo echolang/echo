@@ -1,0 +1,19 @@
+function check(int32 $n) : status<int32>
+{
+    if ($n < 0) {
+        return .error($n);
+    }
+
+    return .ok;
+}
+
+function run() : status<int32>
+{
+    try check(1);
+    try check(-4);
+    return .ok;
+}
+
+status<int32> $out = run();
+echo $out->failed();
+echo $out->failure();

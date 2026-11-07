@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  extension_chain.eco:22:1
+
+  Invalid type conversion: cannot implicitly convert 'A' to 'C'
+
+  21 | 
+  22 | show(A(1));
+     : ^^^^
+  23 | 
+
+1 error, nothing was compiled.
