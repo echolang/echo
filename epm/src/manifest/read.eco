@@ -531,3 +531,18 @@ public function usable_name(const string& $name) : bool
 
     return $components >= 1;
 }
+
+/**
+ * The directory below `$outer` that `$name` names, or '' when `$name` is
+ * not inside it. Whole segments only: `lib/sub` is inside `lib`, `libs` is not.
+ */
+public function inner_path(const string& $outer, const string& $name) : string
+{
+    usize $cut = $outer->size();
+
+    if ($outer->empty() || $name->size() <= $cut + 1 || !$name->starts($outer) || $name->byte($cut) != 47) {
+        return '';
+    }
+
+    return $name->sub($cut + 1, $name->size() - $cut - 1);
+}

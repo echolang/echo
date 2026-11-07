@@ -231,11 +231,21 @@ private function tree_node(const string& $name, const lock::Lock& $lock, int32 $
         return element::Node($name);
     }
 
-    element::Node $n = element::Node("{$have->name}@{$have->version}  {$have->rev}");
+    string $title = "{$have->name}@{$have->version}  {$have->rev}";
 
-    foreach ($have->paths as const &$p) {
-        $n->children[] = element::Node("{$have->name}/{$p}  (inside)");
+    if ($have->paths->count() > 0) {
+        string $inside = $have->paths[0];
+        usize $p = 1;
+
+        while ($p < $have->paths->count()) {
+            $inside = "{$inside}, {$have->paths[$p]}";
+            $p = $p + 1;
+        }
+
+        $title = "{$title}  [{$inside}]";
     }
+
+    element::Node $n = element::Node($title);
 
     usize $i = 0;
 

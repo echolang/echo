@@ -8,6 +8,7 @@
 
 namespace epm::resolve;
 
+use epm::manifest;
 use epm::manifest::Requirement;
 
 /**
@@ -24,21 +25,6 @@ public struct Folded
         $this->req = $req;
         $this->path = $path;
     }
-}
-
-/**
- * The directory below `$outer` that `$name` names, or '' when `$name` is
- * not inside it. Whole segments only: `lib/sub` is inside `lib`, `libs` is not.
- */
-public function inner_path(const string& $outer, const string& $name) : string
-{
-    usize $cut = $outer->size();
-
-    if ($outer->empty() || $name->size() <= $cut + 1 || !$name->starts($outer) || $name->byte($cut) != 47) {
-        return '';
-    }
-
-    return $name->sub($cut + 1, $name->size() - $cut - 1);
 }
 
 /**
@@ -84,7 +70,10 @@ public function fold(const array<Requirement>& $reqs, const World& $world) : arr
             continue;
         }
 
-        $out[] = Folded(Requirement($outer, $r->version, $r->origin, $r->rev), inner_path($outer, $r->name));
+        $out[] = Folded(
+            Requirement($outer, $r->version, $r->origin, $r->rev),
+            manifest::inner_path($outer, $r->name)
+        );
     }
 
     return $out;
@@ -96,5 +85,7 @@ private function holds(
     const Requirement& $req
 ) : bool
 {
-    return !$origin->empty() && $origin->same($req->origin) && !inner_path($outer, $req->name)->empty();
+    return !$origin->empty()
+        && $origin->same($req->origin)
+        && !manifest::inner_path($outer, $req->name)->empty();
 }

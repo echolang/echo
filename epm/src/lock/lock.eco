@@ -7,7 +7,6 @@ namespace epm::lock;
 
 use epm::manifest;
 use epm::manifest::Origin;
-use epm::resolve;
 use epm::sys;
 use std::io;
 
@@ -43,15 +42,15 @@ public struct Entry
      */
     const function inner(const string& $name, const Origin& $origin) : string?
     {
-        if ($name == $this->name) {
-            return '';
-        }
-
         if (!$this->origin->same($origin)) {
             return null;
         }
 
-        string $path = resolve::inner_path($this->name, $name);
+        if ($name == $this->name) {
+            return '';
+        }
+
+        string $path = manifest::inner_path($this->name, $name);
 
         if ($path->empty() || !manifest::name_seen($this->paths, $path)) {
             return null;
@@ -100,6 +99,22 @@ public struct Lock
         }
 
         return null;
+    }
+
+    /**
+     * An old lock name whose dest sits inside a remaining checkout:
+     * `lib/drivers/db` under `lib`. Removing it would delete the nested
+     * package from the tree we kept.
+     */
+    const function held_inside(const string& $name) : bool
+    {
+        foreach ($this->packages as const &$e) {
+            if (!manifest::inner_path($e->name, $name)->empty()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

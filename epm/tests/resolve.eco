@@ -91,6 +91,34 @@ test a_transitive_requirement_is_picked
     assert($plan->count() == 2);
 }
 
+test nested_dests_from_different_sources_are_refused
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $outer = resolve::Package('lib', manifest::Origin::git('https://example.com/lib'));
+    $outer->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $outer;
+
+    resolve::Package $inner = resolve::Package(
+        'lib/drivers/db',
+        manifest::Origin::git('https://example.com/fork')
+    );
+    $inner->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $inner;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '^1.0', manifest::Origin::git('https://example.com/lib'), '');
+    $roots[] = manifest::Requirement(
+        'lib/drivers/db',
+        '^1.0',
+        manifest::Origin::git('https://example.com/fork'),
+        ''
+    );
+
+    result<array<resolve::Choice>, string> $out = resolve::solve($roots, $world);
+    assert($out->failed());
+    assert($out->failure()->contains('sits inside'));
+}
+
 test a_diamond_picks_one_shared_version
 {
     resolve::World $world = resolve::World();

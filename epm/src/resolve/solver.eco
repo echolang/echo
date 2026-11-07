@@ -210,17 +210,23 @@ public function solve(
 }
 
 /**
- * Two picks where one is a directory of the other's checkout: the inner one
- * was required before anything named the package it is in, so it was not
- * folded into it. Refused rather than vendored twice.
+ * Two picks whose vendor dests nest: `vendor/lib` contains `vendor/lib/x`.
+ * Same source: the inner was not folded, so ask for the outer beside it.
+ * Different source: they still cannot occupy one directory.
  */
 private function split_package(const array<Choice>& $picked) : string
 {
     foreach ($picked as const &$outer) {
         foreach ($picked as const &$inner) {
-            if ($outer->origin->same($inner->origin) && !inner_path($outer->name, $inner->name)->empty()) {
+            if (epm::manifest::inner_path($outer->name, $inner->name)->empty()) {
+                continue;
+            }
+
+            if ($outer->origin->same($inner->origin)) {
                 return "'{$inner->name}' is inside '{$outer->name}' ({$outer->origin->spelling()}) - require '{$outer->name}' beside it, in the same module.eco";
             }
+
+            return "'{$inner->name}' ({$inner->origin->spelling()}) and '{$outer->name}' ({$outer->origin->spelling()}) cannot both be vendored: vendor/{$inner->name} sits inside vendor/{$outer->name}";
         }
     }
 
@@ -259,40 +265,7 @@ private function assign_step(
         return true;
     }
 
-    // grows: a package asked for inside one already picked brings what it requires
     array<Need> $pending = $given;
-    usize $i = 0;
-
-    while ($i < $pending->count()) {
-        usize $at = picked_index($picked, $pending[$i]->req->name);
-
-        if ($at != $picked->count()) {
-            if (!accept_more($pending[$i], $picked, $err)) {
-                return false;
-            }
-
-            string $path = $pending[$i]->path;
-
-            if (!$path->empty() && !epm::manifest::name_seen($picked[$at]->paths, $path)) {
-                array<Need> $more = guard inside_picked($world, $picked[$at], $path, $err) else {
-                    return false;
-                }
-
-                $picked[$at]->paths[] = $path;
-
-                foreach ($more as const &$m) {
-                    if (!epm::manifest::name_seen($picked[$at]->requires, $m->req->name)) {
-                        $picked[$at]->requires[] = $m->req->name;
-                    }
-
-                    $pending[] = $m;
-                }
-            }
-        }
-
-        $i = $i + 1;
-    }
-
     usize $head = $pending->count();
     bool $found = false;
 
@@ -315,7 +288,7 @@ private function assign_step(
     }
 
     string $why = "{$pending[$head]->who} asked for {$pending[$head]->req->version}";
-    $i = 0;
+    usize $i = 0;
 
     while ($i < $pending->count()) {
         if ($pending[$i]->req->name == $name) {
@@ -381,17 +354,12 @@ private function assign_step(
         }
 
         // the packages asked for inside this one: a release without one of them is not a candidate
-        array<Need> $inner = array<Need>();
         bool $has_all = true;
 
         foreach ($paths as const &$path) {
-            array<Need> $got = guard sub_needs($world, $pkg, $v, $path, $err) else {
+            if (sub_needs($world, $pkg, $v, $path, $err) == null) {
                 $has_all = false;
                 break;
-            }
-
-            foreach ($got as const &$g) {
-                $inner[] = $g;
             }
         }
 
@@ -427,9 +395,16 @@ private function assign_step(
         }
 
         array<Need> $more = needs_of($needs, $name, $world);
+        $choice->paths = $paths;
 
-        foreach ($inner as const &$n) {
-            $more[] = $n;
+        foreach ($rel->subs as const &$s) {
+            if (!epm::manifest::name_seen($choice->paths, $s->path)) {
+                $choice->paths[] = $s->path;
+            }
+
+            foreach (needs_of($s->requires, "{$name}/{$s->path}", $world) as const &$n) {
+                $more[] = $n;
+            }
         }
 
         // carbon and a driver inside it often require the same packages
@@ -439,7 +414,6 @@ private function assign_step(
             }
         }
 
-        $choice->paths = $paths;
         $picked[] = $choice;
 
         array<Need> $next = array<Need>();
@@ -450,8 +424,10 @@ private function assign_step(
             $r = $r + 1;
         }
 
-        foreach ($more as const &$m) {
-            $next[] = $m;
+        if (!absorb($more, $next, $world, $picked, $err)) {
+            restore($picked, $at);
+            $v = $v + 1;
+            continue;
         }
 
         if (assign($next, $world, $picked, $err)) {
@@ -506,6 +482,19 @@ private function hydrate(
     // recorded, not listed: listing fetches tags, and a transitive package's tools are never in the solve
     $world->catalog[$pkg]->releases[$rel_i]->requires = $reqs;
     $world->catalog[$pkg]->releases[$rel_i]->tool_requires = epm::manifest::tool_requires($man);
+
+    string $pkg_name = $world->catalog[$pkg]->name;
+
+    foreach (fold($reqs, $world) as const &$f) {
+        if ($f->path->empty() || $f->req->name != $pkg_name) {
+            continue;
+        }
+
+        if (sub_needs($world, $pkg, $rel_i, $f->path, $err) == null) {
+            return false;
+        }
+    }
+
     $world->catalog[$pkg]->releases[$rel_i]->hydrated = true;
     return true;
 }
@@ -514,7 +503,7 @@ private function hydrate(
 private function list_all(const array<Requirement>& $reqs, World& $world, string& $err) : bool
 {
     foreach (fold($reqs, $world) as const &$f) {
-        bool $listed = guard ensure_listed($f->req, $world) else ($e) {
+        guard ensure_listed($f->req, $world) else ($e) {
             $err = $e;
             return false;
         }
@@ -529,6 +518,10 @@ private function needs_of(const array<Requirement>& $reqs, const string& $who, c
     array<Need> $out = array<Need>();
 
     foreach (fold($reqs, $world) as const &$f) {
+        if (!$f->path->empty() && $f->req->name == $who) {
+            continue;
+        }
+
         $out[] = Need($f->req, $who, false, $f->path);
     }
 
@@ -571,6 +564,64 @@ private function sub_needs(
 
     $world->catalog[$pkg]->releases[$rel_i]->subs[] = Sub($path, $man->requires);
     return needs_of($man->requires, $who, $world);
+}
+
+/**
+ * Needs that name a package already picked attach here, so they never
+ * re-enter pending. A new inner path is read onto that choice; what it
+ * requires is absorbed the same way.
+ */
+private function absorb(
+    const array<Need>& $incoming,
+    array<Need>& $next,
+    World& $world,
+    array<Choice>& $picked,
+    string& $err
+) : bool
+{
+    array<Need> $work = array<Need>();
+
+    foreach ($incoming as const &$n) {
+        $work[] = $n;
+    }
+
+    usize $i = 0;
+
+    while ($i < $work->count()) {
+        usize $at = picked_index($picked, $work[$i]->req->name);
+
+        if ($at == $picked->count()) {
+            $next[] = $work[$i];
+            $i = $i + 1;
+            continue;
+        }
+
+        if (!accept_more($work[$i], $picked, $err)) {
+            return false;
+        }
+
+        string $path = $work[$i]->path;
+
+        if (!$path->empty() && !epm::manifest::name_seen($picked[$at]->paths, $path)) {
+            array<Need> $more = guard inside_picked($world, $picked[$at], $path, $err) else {
+                return false;
+            }
+
+            $picked[$at]->paths[] = $path;
+
+            foreach ($more as const &$m) {
+                if (!epm::manifest::name_seen($picked[$at]->requires, $m->req->name)) {
+                    $picked[$at]->requires[] = $m->req->name;
+                }
+
+                $work[] = $m;
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
 }
 
 // sub_needs for a package that is already picked: the release it was picked at

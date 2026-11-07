@@ -493,7 +493,7 @@ private function finish_lock(
     while ($i < $old->packages->count()) {
         string $name = $old->packages[$i]->name;
 
-        if ($lock->find($name) == null && !held_inside($lock, $name)) {
+        if ($lock->find($name) == null && !$lock->held_inside($name)) {
             string $dest = sys::join($vendor, $name);
 
             if (sys::exists($dest) && !sys::remove_all($dest)) {
@@ -511,17 +511,4 @@ private function finish_lock(
     }
 
     return 0;
-}
-
-// an old lock entry whose dest sits inside a remaining checkout: `lib/drivers/db`
-// under `lib`. removing it would delete the nested package from the tree we kept
-private function held_inside(const lock::Lock& $lock, const string& $name) : bool
-{
-    foreach ($lock->packages as const &$e) {
-        if (!resolve::inner_path($e->name, $name)->empty()) {
-            return true;
-        }
-    }
-
-    return false;
 }

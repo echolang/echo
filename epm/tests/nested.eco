@@ -10,7 +10,12 @@ use epm::sys;
  * lib by path and on `dep` by requires. What `$depends` the inner package
  * writes is the test's choice.
  */
-function repo_with_inner(const string& $dir, const string& $dep, const string& $depends) : void
+function repo_with_inner(
+    const string& $dir,
+    const string& $dep,
+    const string& $depends,
+    const string& $extra = ''
+) : void
 {
     scratch::file(
         $dir,
@@ -18,7 +23,7 @@ function repo_with_inner(const string& $dir, const string& $dep, const string& $
         "#[module: \"lib-db\"]\n#[version: \"1.0.0\"]\n#[depends: \"{$depends}\"]\n#[requires: \"dep\" { version: \"^1.0\", source: git \"{$dep}\" }]\n#[sources: \"src/*.eco\"]\n"
     );
     scratch::file($dir, 'drivers/db/src/db.eco', "namespace lib::db;\n");
-    scratch::git_module($dir, 'lib', '1.0.0', '');
+    scratch::git_module($dir, 'lib', '1.0.0', $extra);
 }
 
 function app_requiring(const string& $app, const string& $lib, const string& $inner) : void
@@ -33,12 +38,12 @@ function app_requiring(const string& $app, const string& $lib, const string& $in
 
 test inner_path_takes_whole_segments
 {
-    assert(resolve::inner_path('lib', 'lib/drivers/db') == 'drivers/db');
-    assert(resolve::inner_path('org/lib', 'org/lib/x') == 'x');
-    assert(resolve::inner_path('lib', 'libs/x')->empty());
-    assert(resolve::inner_path('lib', 'lib')->empty());
-    assert(resolve::inner_path('lib', 'lib/')->empty());
-    assert(resolve::inner_path('', 'lib')->empty());
+    assert(manifest::inner_path('lib', 'lib/drivers/db') == 'drivers/db');
+    assert(manifest::inner_path('org/lib', 'org/lib/x') == 'x');
+    assert(manifest::inner_path('lib', 'libs/x')->empty());
+    assert(manifest::inner_path('lib', 'lib')->empty());
+    assert(manifest::inner_path('lib', 'lib/')->empty());
+    assert(manifest::inner_path('', 'lib')->empty());
 }
 
 test a_requirement_inside_a_sibling_from_the_same_source_folds_into_it
@@ -157,6 +162,9 @@ test a_lock_keeps_the_packages_inside_an_entry
     assert($held->name == 'lib');
     assert($back->holding('lib/drivers/other', manifest::Origin::git('https://example.com/lib')) == null);
     assert($back->holding('lib/drivers/db', manifest::Origin::git('https://example.com/fork')) == null);
+    assert($back->holding('lib', manifest::Origin::git('https://example.com/fork')) == null);
+    lock::Entry $own = guard $back->holding('lib', manifest::Origin::git('https://example.com/lib'));
+    assert($own->name == 'lib');
 
     scratch::gone($dir);
 }
@@ -248,4 +256,61 @@ test a_lock_with_a_package_path_climbing_out_is_refused
     assert($loaded->failed());
 
     scratch::gone($dir);
+}
+
+test nested_names_from_different_sources_are_refused
+{
+    string $a = scratch::dir('nested-split-a');
+    scratch::git_module($a, 'lib', '1.0.0', '');
+    string $b = scratch::dir('nested-split-b');
+    scratch::git_module($b, 'other', '1.0.0', '');
+    string $app = scratch::dir('nested-split-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"{$a}\" }]\n#[requires: \"lib/drivers/db\" { version: \"^1.0\", source: git \"{$b}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+
+    assert(cmd::install_at($app) == 1);
+    assert(!sys::exists(sys::join($app, 'vendor/lib')));
+
+    scratch::gone($a);
+    scratch::gone($b);
+    scratch::gone($app);
+}
+
+test a_package_that_requires_its_own_inner_is_vendored_once
+{
+    string $dep = scratch::dir('nested-self-dep');
+    scratch::git_module($dep, 'dep', '1.0.0', '');
+    string $lib = scratch::dir('nested-self-lib');
+    repo_with_inner(
+        $lib,
+        $dep,
+        '../..',
+        "#[requires: \"lib/drivers/db\" { version: \"^1.0\", source: git \"{$lib}\" }]\n"
+    );
+    string $app = scratch::dir('nested-self-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"{$lib}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'vendor/lib/module.eco')));
+    assert(sys::is_file(sys::join($app, 'vendor/lib/drivers/db/module.eco')));
+    assert(sys::is_file(sys::join($app, 'vendor/dep/module.eco')));
+
+    lock::Lock $lock = guard lock::load(lock::path_beside(sys::join($app, 'module.eco')));
+    lock::Entry $outer = guard $lock->find('lib');
+    assert($outer->paths->count() == 1);
+    assert($outer->paths[0] == 'drivers/db');
+    assert($lock->find('lib/drivers/db') == null);
+
+    scratch::gone($dep);
+    scratch::gone($lib);
+    scratch::gone($app);
 }
