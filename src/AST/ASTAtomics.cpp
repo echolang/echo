@@ -71,6 +71,8 @@ namespace AST
             case BuiltinKind::t_embed_text:
             case BuiltinKind::t_embed_bytes:
             case BuiltinKind::t_attr_of:
+            case BuiltinKind::t_source_here:
+            case BuiltinKind::t_source_caller:
                 return false;
         }
 

@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] caller_outside.eco:1:16
+
+  'std::src::caller' is only available in a function marked '#[caller]'.
+
+  1 | echo std::src::caller()->line;
+    :                ^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

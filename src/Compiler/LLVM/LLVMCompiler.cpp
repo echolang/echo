@@ -39,7 +39,7 @@
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
       _abort(_ctx), _abi(_ctx), _atomics(_ctx), _simd(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx),
-      _erasure(_ctx), _debug_info(_ctx), _profile(_ctx), _backend(_ctx)
+      _erasure(_ctx), _debug_info(_ctx), _profile(_ctx), _coverage(_ctx), _source_loc(_ctx), _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
     _ctx.options = options;
@@ -62,6 +62,13 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.abi = &_abi;
     _ctx.debug_info = &_debug_info;
     _ctx.profile = &_profile;
+    _ctx.coverage = &_coverage;
+    _ctx.source_loc = &_source_loc;
+}
+
+Compiler::CoverageModuleSites LLVMCompiler::coverage_sites() const
+{
+    return _coverage.module_sites();
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -203,6 +210,7 @@ void LLVMCompiler::emit_entry_point(Compiler::LLVM::CmpUnit &main_cmp_unit, cons
     // emits and would otherwise read a global nothing had filled in yet
     _process.gen_capture(function);
     _profile.emit_start();
+    _coverage.emit_start();
 
     {
         Compiler::ScopedPhase entry_phase("entry point");
@@ -373,6 +381,17 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         }
     }
 
+    if (_ctx.core_types().has(AST::CoreTypeKind::t_source_location)) {
+        std::string layout_error;
+        _ctx.source_location_layout =
+            AST::resolve_core_source_location_layout(_ctx.core_types(), layout_error);
+
+        if (!_ctx.source_location_layout.has_value()) {
+            throw _ctx.error(fmt::format(
+                "the declared #[echoc::core: source_location] is unusable: {}", layout_error));
+        }
+    }
+
     // resolve the host target first: create_cmp_units stamps its data layout onto every module,
     // and a compile-time size_of<T>() reads it
     _backend.init_target();
@@ -480,6 +499,8 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         Compiler::ScopedPhase phase("drain");
         drain_pending_definitions();
     }
+
+    _coverage.finish_units();
 
     _profile.mark_frame_pointers();
 

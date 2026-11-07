@@ -1,0 +1,10 @@
+mode: test
+expect: fail
+
+--- OUT --->
+FAIL 1/1  main/nested_caller.eco::names_the_test  (exited 1)
+1 test, 1 failed
+
+x main/nested_caller.eco::names_the_test  exited 1
+    fatal error: x
+      at nested_caller.eco:15

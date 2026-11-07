@@ -206,7 +206,7 @@ namespace Compiler
     // PATH's DLL CRT
     void append_windows_sysroot_link_args(std::vector<std::string> &argv);
 
-    // the same spawn, capturing merged stdout+stderr instead of inheriting them.
+    // the same spawn, capturing stdout and stderr instead of inheriting them.
     //
     // a test's output belongs under its own row, and a corpus case's golden is a byte comparison, so
     // neither can inherit the streams the way clang's diagnostics do. `timeout_ms` of 0 waits forever.
@@ -216,10 +216,17 @@ namespace Compiler
     // sees end-of-file after the last line; empty inherits the caller's stdin.
     //
     // a fired deadline kills the process group (POSIX) or the job object (Windows), so `echoc build`
-    // cannot leave clang running after the parent is gone
+    // cannot leave clang running after the parent is gone.
+    //
+    // `stdout_text` / `stderr_text` are the two fds (Windows `stdout` is a stdio macro). `output` is
+    // stdout then stderr after `\r` is stripped. two pipes cannot reconstruct write-order
+    // interleaving; callers that read `output` still see both streams. two pipes, drained together:
+    // a sequential drain deadlocks when the unread side fills
     struct CapturedProcess
     {
         int exit_code = 0;
+        std::string stdout_text;
+        std::string stderr_text;
         std::string output;
         bool timed_out = false;
 

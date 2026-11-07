@@ -104,6 +104,9 @@ namespace Compiler
         t_profile,
         t_profile_calls,
         t_profile_stdlib,
+        t_coverage,
+        t_coverage_stdlib,
+        t_report,
         t_text,
         t_folded
     };

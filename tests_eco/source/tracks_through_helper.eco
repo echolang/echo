@@ -1,0 +1,10 @@
+#[caller]
+function fail(string $msg) : void
+{
+    die($msg);
+}
+
+test names_the_test
+{
+    fail("nope");
+}

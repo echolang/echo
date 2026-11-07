@@ -285,11 +285,26 @@ namespace AST
         // a closure is not a method. null for a named function, and for a closure at file scope
         FunctionDeclNode *enclosing_function = nullptr;
 
-        // how many leading `args` entries the caller did not write: a method's receiver, or a closure's
-        // environment. never both, since a closure is not a member - spelled as a count rather than a
-        // bool because every consumer wants to offset an index by it
+        // written_implicit_arg_count() plus the hidden `$__caller` slot when `tracks_caller`
         inline size_t implicit_arg_count() const {
+            size_t n = (has_receiver() || is_closure) ? 1 : 0;
+            if (tracks_caller) {
+                n += 1;
+            }
+
+            return n;
+        }
+
+        // the prefix the parser actually prepended: a receiver or a closure environment.
+        // `#[caller]`'s `$__caller` is implicit too, but it is not in the written argument
+        // list, so bind_arguments copies this many slots from `call.arguments`
+        inline size_t written_implicit_arg_count() const {
             return (has_receiver() || is_closure) ? 1 : 0;
+        }
+
+        // `$__caller`'s index when `tracks_caller`. equal to written_implicit_arg_count()
+        inline size_t caller_arg_index() const {
+            return written_implicit_arg_count();
         }
 
         // the callable type a value of this function has. the environment parameter is *not* part of it:
@@ -401,6 +416,11 @@ namespace AST
         // `always_inline` - naming it after the outcome rather than the mechanism is what lets the
         // attribute stay honest when the inliner declines.
         bool is_inline = false;
+
+        // `#[caller]`: die/assert/`std::src::caller()` name the call site, and nested `#[caller]`
+        // calls forward it. a real implicit `const std::src::location& $__caller` sits after
+        // `$this` / `$__env`
+        bool tracks_caller = false;
 
         // `#[echoc::cold]`: never inlined, laid out away from hot code. see AST::compiler_attribute::cold
         bool is_cold = false;

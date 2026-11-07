@@ -41,6 +41,8 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
+#include "Compiler/LLVM/Codegen/CoverageCodegen.h"
+#include "Compiler/LLVM/Codegen/SourceLocationCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/VarDeclNode.h"
@@ -756,6 +758,12 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         for (size_t i = 0; i < node.arguments.size(); i++) {
             AST::ExprNode *arg = node.arguments[i];
 
+            if (arg == nullptr) {
+                throw _ctx.error(fmt::format(
+                    "call to '{}' is missing argument {} {}",
+                    node.decl->func_name(), i, _ctx.function_context()));
+            }
+
             // **a variadic pack is not one argument, it is the tail.** the list written at the call
             // site becomes the arguments after the fixed ones, in order. every element already
             // carries the C promotion AST::CallResolver applied, so there is nothing to decide here -
@@ -1157,6 +1165,11 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_attr_of:
             Compiler::LLVM::gen_attr_of_builtin(_ctx, node);
             return;
+
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
+            _ctx.source_loc->gen_builtin(node, kind);
+            return;
     }
 }
 
@@ -1278,7 +1291,11 @@ void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
     const auto index = AST::builtin_message_index(AST::BuiltinKind::t_die);
 
     if (!index.has_value() || node.arguments.size() <= *index || node.arguments[*index] == nullptr) {
-        _ctx.abort->gen_abort("fatal error", "", node.token_function_name);
+        _ctx.source_loc->abort_from_call(
+            node,
+            "fatal error",
+            _ctx.builder->CreateGlobalStringPtr("", ""),
+            llvm::ConstantInt::get(_ctx.size_int_ty(), 0));
         return;
     }
 
@@ -1286,7 +1303,11 @@ void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
 
     // the same question TypeChecker asks. `folded.empty()` is not it: `die("")` is a literal
     if (const auto literal = AST::literal_string_value(message)) {
-        _ctx.abort->gen_abort("fatal error", *literal, node.token_function_name);
+        _ctx.source_loc->abort_from_call(
+            node,
+            "fatal error",
+            _ctx.builder->CreateGlobalStringPtr(*literal, ""),
+            llvm::ConstantInt::get(_ctx.size_int_ty(), literal->size()));
         return;
     }
 
@@ -1298,7 +1319,7 @@ void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
     const auto [bytes, size] = _ctx.gen_string_window(
         _ctx.string_as_view(value, message->result_type(), ""), "");
 
-    _ctx.abort->gen_abort_dynamic("fatal error", bytes, size, node.token_function_name);
+    _ctx.source_loc->abort_from_call(node, "fatal error", bytes, size);
 }
 
 void ExprCodegen::gen_assert_builtin(AST::FunctionCallExprNode &node)
@@ -1318,9 +1339,16 @@ void ExprCodegen::gen_assert_builtin(AST::FunctionCallExprNode &node)
     llvm::Value *condition = _ctx.pop_scalar();
 
     // stop on the *false* path, so the branch reads the way the source does
-    _ctx.abort->gen_abort_if(
+    const std::string detail = _ctx.abort->detail_of(node);
+    _ctx.abort->abort_when(
         _ctx.builder->CreateNot(condition, "assert.failed"),
-        "assertion failed", _ctx.abort->detail_of(node), node.token_function_name);
+        [&] {
+            _ctx.source_loc->abort_from_call(
+                node,
+                "assertion failed",
+                _ctx.builder->CreateGlobalStringPtr(detail, ""),
+                llvm::ConstantInt::get(_ctx.size_int_ty(), detail.size()));
+        });
 }
 
 void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
@@ -1431,6 +1459,8 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
         case AST::BuiltinKind::t_attr_of:
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }
@@ -1904,6 +1934,7 @@ void ExprCodegen::gen_logical_short_circuit(AST::BinaryExprNode &node)
     llvm::BasicBlock *lhs_end = _ctx.builder->GetInsertBlock();
 
     _ctx.set_insert_point(rhs_block);
+    _ctx.coverage->instrument_branch(node, "rhs");
     node.rhs->accept(*_ctx.visitor);
     llvm::Value *right = _ctx.pop_scalar();
     llvm::BasicBlock *rhs_end = _ctx.builder->GetInsertBlock();
@@ -1978,6 +2009,7 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // than a select: it may be a call, and calling it on the path where the left was there would be a
     // side effect the program did not ask for
     _ctx.set_insert_point(absent_block);
+    _ctx.coverage->instrument_branch(node, "fallback");
     node.rhs->accept(*_ctx.visitor);
 
     // **a right arm that never comes back is emitted and then not read.** `die('...')` leaves no value
@@ -2415,6 +2447,7 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
         const AST::MatchExprNode::Arm &arm = node.arms[i];
 
         _ctx.set_insert_point(wired.arm_blocks[i]);
+        _ctx.coverage->instrument_branch(node, fmt::format("arm{}", i));
 
         // the arm's scope first - the bindings are ordinary locals of that block, so this
         // is what seats and initializes them, and a block arm's statements follow in the same walk

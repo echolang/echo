@@ -27,6 +27,8 @@
 #include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/Codegen/ProfileCodegen.h"
+#include "Compiler/LLVM/Codegen/CoverageCodegen.h"
+#include "Compiler/LLVM/Codegen/SourceLocationCodegen.h"
 #include "Compiler/LLVM/Codegen/Backend.h"
 
 #include <filesystem>
@@ -71,6 +73,8 @@ public:
     // `cached_modules` names the modules whose compiled object is being reused, so no code is generated for
     // them at all - see TypeLowering::create_cmp_units for why that is the only place it has to be said
     void compile_bundle(const AST::Bundle &bundle, const std::set<std::string> &cached_modules = {});
+
+    Compiler::CoverageModuleSites coverage_sites() const;
 
     // every ODR-shared symbol defined in more than one unit must be defined *identically*, or the linker
     // keeps an arbitrary one and the program silently gets the wrong body. That is the obligation
@@ -244,6 +248,8 @@ private:
     Compiler::LLVM::ErasureCodegen _erasure;
     Compiler::LLVM::DebugInfoCodegen _debug_info;
     Compiler::LLVM::ProfileCodegen _profile;
+    Compiler::LLVM::CoverageCodegen _coverage;
+    Compiler::LLVM::SourceLocationCodegen _source_loc;
     Compiler::LLVM::Backend _backend;
 };
 

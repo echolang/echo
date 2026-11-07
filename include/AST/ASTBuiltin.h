@@ -91,6 +91,11 @@ namespace AST
         t_die,
         t_assert,
 
+        // the call site as a value. here() is this expression; caller() is the enclosing
+        // `#[caller]` function's hidden location parameter
+        t_source_here,
+        t_source_caller,
+
         // the unspellable stop a `guard` without `else` lowers to. no arguments: the headline
         // and the location come from the call site, which is the `guard` keyword. distinct from
         // `die` so `--no-stdlib` can mint one without a `string` type and without the stdlib

@@ -4,6 +4,7 @@
 #include "Compiler/ProgressReporter.h"
 
 #include <chrono>
+#include <string_view>
 
 namespace
 {
@@ -41,7 +42,8 @@ namespace
 Compiler::TestResult Compiler::run_test_isolated(
     const TestCase &test,
     const std::vector<std::string> &argv,
-    unsigned timeout_ms
+    unsigned timeout_ms,
+    const std::vector<std::pair<std::string, std::string>> &extra_env
 )
 {
     TestResult result;
@@ -49,16 +51,26 @@ Compiler::TestResult Compiler::run_test_isolated(
 
     const auto started = std::chrono::steady_clock::now();
 
+    std::vector<std::pair<std::string, std::string>> env = extra_env;
+    env.emplace_back(k_isolated_test_env, test.symbol);
+
     const CapturedProcess captured = run_captured(
         argv,
         timeout_ms,
         {},
-        { { k_isolated_test_env, test.symbol } });
+        env);
 
     result.milliseconds = progress_elapsed_ms(started);
+    result.stdout_text = captured.stdout_text;
+    result.stderr_text = captured.stderr_text;
     result.output = captured.output;
     result.status = captured.exit_code;
     result.signal = captured.signal;
+
+    const std::string_view abort_text = !captured.stderr_text.empty()
+        ? std::string_view(captured.stderr_text)
+        : std::string_view(captured.output);
+    result.failure = parse_abort_report(abort_text);
 
     result.outcome = isolated_outcome(test, captured.timed_out, captured.signal, result.status);
     return result;

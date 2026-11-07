@@ -765,6 +765,9 @@ static AST::CallResolver::Result resolve_funccall(Parser::Payload &payload, AST:
     // OwnershipPass all already guard the pointer. nothing reaches codegen unsettled, because the
     // finalizing sweep at the end of the fixpoint reports whatever never resolved
     AST::CallResolver resolver(payload.collector);
+    if (funcall.enclosing_function == nullptr) {
+        funcall.enclosing_function = payload.context.current_function_ptr;
+    }
 
     // the deferrable diagnostic belongs to the fixpoint, which reports it once when it is out of
     // rounds. reporting it here would reject a program that is perfectly well typed

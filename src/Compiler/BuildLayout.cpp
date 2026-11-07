@@ -332,6 +332,19 @@ std::filesystem::path Compiler::BuildLayout::profile_path(const std::string &ste
     return dir / file;
 }
 
+std::filesystem::path Compiler::BuildLayout::coverage_dir() const
+{
+    if (!_flag_directory.empty()) {
+        return _flag_directory / "coverage";
+    }
+
+    if (!_entry_dir.empty() && !_scratch_is_temporary) {
+        return _entry_dir / "coverage";
+    }
+
+    return std::filesystem::current_path() / "coverage";
+}
+
 void Compiler::BuildLayout::discard_temporary_scratch() const
 {
     if (!_scratch_is_temporary || _scratch.empty()) {

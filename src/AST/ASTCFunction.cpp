@@ -297,6 +297,11 @@ std::optional<std::string> AST::c_function_ref_refusal(const AST::FunctionDeclNo
                 "pass '&name'.");
         }
 
+        if (decl.tracks_caller) {
+            return std::string(
+                "a function marked '#[caller]' has a hidden location C has nowhere to put.");
+        }
+
         return std::string(
             "a method or constructor has a receiver C has nowhere to put.");
     }

@@ -1,0 +1,12 @@
+mode: test
+flags: --coverage
+expect: fail
+
+--- OUT --->
+FAIL 1/1  main/dying_test_keeps_counts.eco::dies_after_a_call  (exited 1)
+1 test, 1 failed
+
+x main/dying_test_keeps_counts.eco::dies_after_a_call  exited 1
+    assertion failed: nope
+      at dying_test_keeps_counts.eco:9
+coverage 100.0% lines, 100.0% branches

@@ -10,7 +10,8 @@ $out->writeline('through a copy');
 std::io::print('print');
 std::io::println(' then println');
 
-// stderr is reachable the same way. the corpus merges both streams, so this lands in order
+// stderr is reachable the same way. capture concatenates stdout then stderr, so these two
+// lines sit after the last stdout write in the golden
 std::io::eprintln('to stderr');
 std::io::stderr->writeline('and again');
 

@@ -281,6 +281,15 @@ bool Compiler::compute_module_keys(
         hash = fnv1a64(
             TargetFacts::for_module(facts, manifest.name, modules_with_tests).cache_signature(), hash);
 
+        // **only modules that actually grow counters.** `--coverage` without `--coverage-stdlib`
+        // leaves compiler-supplied objects byte for byte what they were
+        if (options.coverage()
+            && (options.coverage_stdlib() || !is_compiler_supplied_module(manifest))) {
+            hash = fnv1a64(std::string("coverage"), hash);
+            hash = fnv1a64(
+                options.coverage_stdlib() ? std::string("cstdlib") : std::string("nocstdlib"), hash);
+        }
+
         // the manifest's own bytes: its source list, its dependencies and its comments are all part of what
         // the module is. Hashing the expanded file list instead would miss a pattern that stopped matching
         const std::optional<std::string> manifest_bytes = read_whole_file(manifest.path);

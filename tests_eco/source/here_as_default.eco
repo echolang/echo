@@ -1,0 +1,7 @@
+function log(std::src::location $at = std::src::here()) : void
+{
+    echo $at->line;
+}
+
+log();
+log();

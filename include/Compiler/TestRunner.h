@@ -3,9 +3,12 @@
 
 #pragma once
 
+#include "Compiler/AbortReport.h"
 #include "Compiler/TestSelection.h"
 
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Compiler
@@ -27,10 +30,11 @@ namespace Compiler
 
     // one finished test.
     //
-    // `output` is everything the test wrote on either stream, captured rather than inherited: a passing
-    // test's chatter has no place in a summary, and a failing one's is the whole of what a reader wants.
-    // That is the opposite call Compiler::run_tool makes, and for the opposite reason - a clang diagnostic
-    // should reach the terminal as clang wrote it, where a test's output belongs *under* its own row
+    // `output` is stdout then stderr, captured rather than inherited: a passing test's chatter has
+    // no place in a summary, and a failing one's is the whole of what a reader wants. That is the
+    // opposite call Compiler::run_tool makes, and for the opposite reason - a clang diagnostic
+    // should reach the terminal as clang wrote it, where a test's output belongs *under* its own row.
+    // `failure` is parse_abort_report of stderr (falling back to output) when `__eco_abort` printed
     struct TestResult
     {
         TestCase test;
@@ -44,7 +48,11 @@ namespace Compiler
 
         unsigned int milliseconds = 0;
 
+        std::string stdout_text;
+        std::string stderr_text;
         std::string output;
+
+        std::optional<AbortReport> failure;
 
         bool failed() const {
             return outcome != TestOutcome::t_passed;
@@ -65,15 +73,17 @@ namespace Compiler
     // `env::exit` and a segfault alike, and changes nothing about how any of them lower.
     //
     // `#[tests: expects death]` inverts the pass condition: a non-zero *exit* is a pass. a fired
-    // `--timeout` stays `t_timed_out`. a signal stays `t_signalled`. v1 does not distinguish `die`
-    // from a failed `assert` - both are `__eco_abort` - and does not match the abort message.
+    // `--timeout` stays `t_timed_out`. a signal stays `t_signalled`. `die` and a failed `assert`
+    // are both `__eco_abort`; `failure` is filled whenever the abort text parses, expected death
+    // included.
     //
     // the child is the linked runner spawned as `argv` with `ECO_INTERNAL_RUN_TEST` naming this
     // test. `timeout_ms` is `--timeout`. zero waits forever. a fired deadline is `t_timed_out`
     TestResult run_test_isolated(
         const TestCase &test,
         const std::vector<std::string> &argv,
-        unsigned timeout_ms = 0);
+        unsigned timeout_ms = 0,
+        const std::vector<std::pair<std::string, std::string>> &extra_env = {});
 };
 
 #endif

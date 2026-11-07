@@ -1,0 +1,10 @@
+function subject() : int32
+{
+    return 7;
+}
+
+test dies_after_a_call
+{
+    assert(subject() == 7);
+    assert(false, 'nope');
+}

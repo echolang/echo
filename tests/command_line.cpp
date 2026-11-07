@@ -200,7 +200,7 @@ TEST_CASE("a flag carries no value machinery and a valued one carries exactly on
     // valued option with no acceptance rule fails here rather than accepting anything forever
     const std::set<Opt> free_text = {
         Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_package_dir, Opt::t_link, Opt::t_define,
-        Opt::t_target_cpu, Opt::t_target_features, Opt::t_dir
+        Opt::t_target_cpu, Opt::t_target_features, Opt::t_dir, Opt::t_report
     };
 
     for (const CommandLineOption &option : Compiler::command_line_options()) {
@@ -708,6 +708,24 @@ TEST_CASE("profile implies tracking and debug info without dropping optimize", "
     REQUIRE(with_g.optimize == OptimizeMode::t_none);
 
     REQUIRE(contains(refusal({ "test", "--profile", "a.eco" }), "does not take '--profile'"));
+}
+
+TEST_CASE("coverage is test-only and implies from coverage-stdlib", "[cli]")
+{
+    REQUIRE(resolved({ "test", "--coverage", "a.eco" }).options.coverage());
+    REQUIRE_FALSE(resolved({ "test", "a.eco" }).options.coverage());
+
+    const DriverOptions stdlib = resolved({ "test", "--coverage-stdlib", "a.eco" });
+    REQUIRE(stdlib.options.coverage());
+    REQUIRE(stdlib.options.coverage_stdlib());
+
+    REQUIRE(contains(refusal({ "run", "--coverage", "a.eco" }), "does not take '--coverage'"));
+    REQUIRE(contains(refusal({ "build", "--coverage", "-o", "x", "a.eco" }), "does not take '--coverage'"));
+    REQUIRE(contains(refusal({ "install", "--coverage" }), "does not take '--coverage'"));
+
+    const DriverOptions report = resolved({ "test", "--report", "out.jsonl", "a.eco" });
+    REQUIRE(report.report == "out.jsonl");
+    REQUIRE(contains(refusal({ "run", "--report", "out.jsonl", "a.eco" }), "does not take '--report'"));
 }
 
 TEST_CASE("the profile subcommand reads a file and its report flags", "[cli]")

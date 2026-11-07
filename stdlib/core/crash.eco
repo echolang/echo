@@ -28,10 +28,11 @@ public function die() : void;
 
 /**
  * The message may be any `string`. A literal is folded into the binary with the source location.
- * A computed one is written at the crash, and the location is still the `die` itself.
+ * A computed one is written at the crash. `$at` defaults to this `die` call; pass one to name a
+ * different site, or mark the helper `#[caller]` and leave the default off.
  */
 #[echoc::builtin: die]
-public function die(string $message) : void;
+public function die(string $message, std::src::location $at = std::src::here()) : void;
 
 /**
  * Stops the program when `$condition` is false.
@@ -50,4 +51,4 @@ public function assert(bool $condition) : void;
  * The message must be a **string literal**, because the call is compiled out in release.
  */
 #[echoc::builtin: assert]
-public function assert(bool $condition, string $message) : void;
+public function assert(bool $condition, string $message, std::src::location $at = std::src::here()) : void;

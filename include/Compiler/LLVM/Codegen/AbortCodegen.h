@@ -60,6 +60,15 @@ namespace Compiler::LLVM
             llvm::Value *detail_len,
             const TokenReference &at);
 
+        // the same stop, when the site is a runtime `std::src::location` (file view + line)
+        void gen_abort_at(
+            const std::string &headline,
+            llvm::Value *detail_ptr,
+            llvm::Value *detail_len,
+            llvm::Value *file_ptr,
+            llvm::Value *file_len,
+            llvm::Value *line);
+
         // stop with a chosen exit code, printing nothing. what `std::env::exit` lowers to
         //
         // here rather than in ProcessCodegen because *how a program stops* is this subsystem's question,
@@ -79,6 +88,8 @@ namespace Compiler::LLVM
             const std::string &headline,
             const std::string &detail,
             const TokenReference &at);
+
+        void abort_when(llvm::Value *condition, llvm::function_ref<void()> emit_stop);
 
         // the same stop from inside a `linkonce_odr` body that has no source location.
         // anonymous globals would differ per unit and fail the ODR comparison; pieces
@@ -157,8 +168,6 @@ namespace Compiler::LLVM
 
         // a named linkonce_odr string constant, for the unlocated stop above
         llvm::Constant *odr_string(const std::string &symbol, const std::string &text);
-
-        void abort_when(llvm::Value *condition, llvm::function_ref<void()> emit_stop);
 
         void emit_unlocated_abort(
             const std::string &headline,

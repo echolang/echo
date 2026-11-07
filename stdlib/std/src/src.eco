@@ -1,0 +1,40 @@
+/**
+ * Where in the source a call was written.
+ *
+ * `die` and `assert` already fold the call site into the crash they print. This is that
+ * site as a value you can store, pass, or ask for from a helper that is not itself the
+ * line the user wrote.
+ *
+ * The strings are views over constants the compiler interned. Nothing here allocates.
+ */
+
+namespace std::src;
+
+/**
+ * One site in the program. `$file` is relative to the module directory, so two files of
+ * the same leaf name stay distinct. `$function` is empty at file scope.
+ */
+#[echoc::core: source_location]
+public struct location
+{
+    public string::view $module;
+    public string::view $file;
+    public uint32 $line;
+    public uint32 $column;
+    public string::view $function;
+}
+
+/**
+ * This call expression's own site. Legal anywhere, including as a default argument: the
+ * default is filled at the call, so `function log(location $at = std::src::here())` records
+ * the `log(...)` line, not the declaration.
+ */
+#[echoc::builtin: source_here]
+public function here() : location;
+
+/**
+ * The site the enclosing `#[caller]` function was itself called from. Refused anywhere
+ * else: a closure that wants the outer site binds it to a local first.
+ */
+#[echoc::builtin: source_caller]
+public function caller() : location;

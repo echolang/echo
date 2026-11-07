@@ -7,6 +7,6 @@ expect: fail
 
 --- OUT --->
 fatal error: duration divided by zero
-  at duration.eco:240
+  at std/time/duration.eco:240
 --- IR --->
-CHECK: at duration.eco:
+CHECK: at std/time/duration.eco:

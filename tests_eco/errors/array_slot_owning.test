@@ -5,4 +5,4 @@ expect: fail
 
 --- OUT --->
 fatal error: slot() needs elements that are just bytes - writing through T& would destroy leftover storage
-  at array.eco:603
+  at core/array.eco:603

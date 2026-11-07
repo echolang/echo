@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 #include "subprocess.h"
@@ -272,4 +274,29 @@ TEST_CASE("a test build and a normal build are keyed apart", "[test_targets]")
 
     // the report names each module's key, so two runs that agreed about it would print the same hex
     REQUIRE(built.output != tested.output);
+}
+
+TEST_CASE("a report names the abort site", "[test_targets][report]")
+{
+    ScopedProject project("report_abort_site");
+    write_file(project.root() / "gives_up.eco",
+        "test gives_up\n"
+        "{\n"
+        "    die('nothing to do here');\n"
+        "}\n");
+
+    const ProcessResult ran = project.echoc("test --report results.jsonl gives_up.eco");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code != 0);
+
+    std::ifstream in(project.root() / "results.jsonl");
+    REQUIRE(in);
+    const std::string jsonl((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+    REQUIRE(jsonl.find("\"v\":2") != std::string::npos);
+    REQUIRE(jsonl.find("\"headline\":\"fatal error\"") != std::string::npos);
+    REQUIRE(jsonl.find("\"message\":\"nothing to do here\"") != std::string::npos);
+    REQUIRE(jsonl.find("\"file\":\"gives_up.eco\"") != std::string::npos);
+    REQUIRE(jsonl.find("\"line\":3") != std::string::npos);
 }

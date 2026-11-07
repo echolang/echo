@@ -1,0 +1,11 @@
+mode: test
+flags: --coverage
+
+--- IR --->
+CHECK: __eco_cov_base_
+CHECK: eco.cov.slot
+CHECK: __eco_cov_start
+--- OUT --->
+ok   1/1  main/counters_present.eco::hits_then
+1 test passed
+coverage 66.7% lines, 50.0% branches

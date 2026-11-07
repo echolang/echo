@@ -151,6 +151,10 @@ namespace AST
 
         FunctionDeclNode *decl = nullptr;
 
+        // the function this call was written in. a `#[caller]` callee plants a varref to that
+        // function's `$__caller` when it also tracks the caller, otherwise `std::src::here()`
+        FunctionDeclNode *enclosing_function = nullptr;
+
         // maintained by AST::CallResolver, which is the one thing that coerces the arguments, and by
         // AST::OwnershipPass for the calls it synthesizes with their callee already named - which it
         // publishes as t_uncoerced, so the state and `decl` cannot disagree about what is done

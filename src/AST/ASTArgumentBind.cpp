@@ -2,7 +2,9 @@
 
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTBuiltin.h"
 #include "AST/ASTClone.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTCollector.h"
@@ -14,6 +16,8 @@
 #include "AST/ASTVariadic.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 
 #include <fmt/core.h>
 
@@ -128,6 +132,70 @@ namespace
 
         return false;
     }
+
+    AST::FunctionCallExprNode *as_call(AST::ExprNode *expr)
+    {
+        if (expr == nullptr || expr->get_node_type() != AST::NodeType::n_expr_call) {
+            return nullptr;
+        }
+
+        return static_cast<AST::FunctionCallExprNode *>(expr);
+    }
+
+    bool is_source_here_call(AST::ExprNode *expr)
+    {
+        AST::FunctionCallExprNode *call = as_call(expr);
+        if (call == nullptr || call->decl == nullptr || !call->decl->is_builtin()
+            || !call->decl->builtin.has_value()) {
+            return false;
+        }
+
+        return AST::builtin_kind_for(call->decl->builtin.value()) == AST::BuiltinKind::t_source_here;
+    }
+
+    bool param_is_source_location(
+        const AST::FunctionCallExprNode &call,
+        size_t i,
+        AST::Collector &collector
+    )
+    {
+        if (call.decl == nullptr || i >= call.decl->args.size() || call.decl->args[i] == nullptr) {
+            return false;
+        }
+        if (!collector.core_types.has(AST::CoreTypeKind::t_source_location)) {
+            return false;
+        }
+
+        AST::ValueType have = call.decl->args[i]->type();
+        AST::ValueType want = collector.core_types.type(AST::CoreTypeKind::t_source_location);
+        if (have.is_pointer()) {
+            have = AST::value_type_of(have);
+        }
+
+        return AST::ValueType::make_mutable(have) == AST::ValueType::make_mutable(want);
+    }
+
+    AST::ExprNode *plant_here_at(
+        AST::FunctionCallExprNode &call,
+        bool from_default,
+        AST::NodeCollection &nodes,
+        AST::Collector &collector
+    )
+    {
+        AST::FunctionDeclNode *here = collector.core_types.source_here();
+        if (here == nullptr) {
+            return nullptr;
+        }
+
+        auto &planted = nodes.emplace_back<AST::FunctionCallExprNode>(
+            call.token_function_name, std::vector<AST::ExprNode *>{});
+        planted.decl = here;
+        planted.settlement = AST::CallSettlement::t_settled;
+        planted.is_implcit = true;
+        planted.from_parameter_default = from_default;
+        planted.enclosing_function = call.enclosing_function;
+        return &planted;
+    }
 }
 
 AST::ArgumentBinding AST::bind_arguments(
@@ -138,18 +206,26 @@ AST::ArgumentBinding AST::bind_arguments(
 {
     ArgumentBinding result;
 
+    const size_t written_implicit = decl.written_implicit_arg_count();
     const size_t implicit = decl.implicit_arg_count();
     const size_t arity = decl.args.size();
 
-    if (arguments.size() < implicit) {
+    if (arguments.size() < written_implicit) {
         result.kind = ArgumentBindKind::t_too_many_positional;
         return result;
     }
 
     result.filled.assign(arity, BoundArgument {});
 
-    for (size_t i = 0; i < implicit && i < arguments.size(); i++) {
+    for (size_t i = 0; i < written_implicit && i < arguments.size(); i++) {
         result.filled[i].value = arguments[i];
+    }
+
+    if (decl.tracks_caller && written_implicit < arity) {
+        result.filled[written_implicit].from_caller = true;
+        if (argument_names.empty() && arguments.size() == arity) {
+            result.filled[written_implicit].value = arguments[written_implicit];
+        }
     }
 
     std::unordered_map<std::string, size_t> by_parameter;
@@ -175,7 +251,7 @@ AST::ArgumentBinding AST::bind_arguments(
 
     size_t next_positional = implicit;
 
-    for (size_t w = implicit; w < arguments.size(); w++) {
+    for (size_t w = written_implicit; w < arguments.size(); w++) {
         const CallArgumentName &name = name_at(argument_names, w);
 
         if (name.kind == ArgumentNameKind::t_none) {
@@ -305,7 +381,7 @@ void AST::apply_argument_binding(
     AST::FunctionCallExprNode &call,
     const AST::ArgumentBinding &binding,
     AST::NodeCollection &nodes,
-    AST::TypeRegistry &registry
+    AST::Collector &collector
 )
 {
     assert(binding.kind == ArgumentBindKind::t_ok && "applying a refused binding");
@@ -313,10 +389,44 @@ void AST::apply_argument_binding(
     std::vector<ExprNode *> filled;
     filled.reserve(binding.filled.size());
 
-    for (const BoundArgument &slot : binding.filled) {
+    for (size_t i = 0; i < binding.filled.size(); i++) {
+        const BoundArgument &slot = binding.filled[i];
+        if (slot.from_caller) {
+            if (slot.value != nullptr) {
+                filled.push_back(slot.value);
+                continue;
+            }
+
+            AST::FunctionDeclNode *enclosing = call.enclosing_function;
+            if (enclosing != nullptr && enclosing->tracks_caller
+                && enclosing->caller_arg_index() < enclosing->args.size()) {
+                AST::VarDeclNode *param = enclosing->args[enclosing->caller_arg_index()];
+                if (param != nullptr) {
+                    auto &var = nodes.emplace_back<AST::VarNode>(
+                        param, call.token_function_name);
+                    auto &ref = nodes.emplace_back<AST::VarRefNode>(&var);
+                    ref.is_implcit = true;
+                    filled.push_back(&ref);
+                    continue;
+                }
+            }
+
+            filled.push_back(plant_here_at(call, false, nodes, collector));
+            continue;
+        }
+
         if (slot.value == nullptr) {
             filled.push_back(nullptr);
             continue;
+        }
+
+        if (param_is_source_location(call, i, collector)
+            && (slot.from_default || slot.value->from_parameter_default)
+            && (slot.from_default || is_source_here_call(slot.value))) {
+            if (AST::ExprNode *here = plant_here_at(call, true, nodes, collector)) {
+                filled.push_back(here);
+                continue;
+            }
         }
 
         if (!slot.from_default) {
@@ -325,7 +435,7 @@ void AST::apply_argument_binding(
         }
 
         AST::TypeSubstitution subst;
-        AST::CloneContext cc(nodes, subst, registry);
+        AST::CloneContext cc(nodes, subst, collector.type_registry);
         ExprNode *cloned = AST::clone_sharing_closures(slot.value, cc);
         cloned->from_parameter_default = true;
         filled.push_back(cloned);
@@ -333,6 +443,31 @@ void AST::apply_argument_binding(
 
     call.arguments = std::move(filled);
     call.argument_names.clear();
+}
+
+void AST::retarget_here_defaults(
+    AST::FunctionCallExprNode &call,
+    AST::NodeCollection &nodes,
+    AST::Collector &collector
+)
+{
+    if (call.decl == nullptr) {
+        return;
+    }
+
+    for (size_t i = 0; i < call.arguments.size(); i++) {
+        ExprNode *arg = call.arguments[i];
+        if (arg == nullptr || !param_is_source_location(call, i, collector)) {
+            continue;
+        }
+        if (!arg->from_parameter_default && !is_source_here_call(arg)) {
+            continue;
+        }
+
+        if (ExprNode *here = plant_here_at(call, true, nodes, collector)) {
+            call.arguments[i] = here;
+        }
+    }
 }
 
 AST::BoundSlots AST::bound_slots(
@@ -354,14 +489,14 @@ AST::BoundSlots AST::bound_slots(
         ValueType type = ValueType::make_unknown();
         bool rejected = false;
 
-        if (slot.from_default && param != nullptr && param->has_type()
+        if ((slot.from_default || slot.from_caller) && param != nullptr && param->has_type()
             && !contains_type_param(param->type())) {
             // a generic template's default is often still untyped; the parameter is concrete
             // (`map<string, string>`). a parameter that still names `T` must not score here:
             // `Engine<string>()` would stay pending on `array<M>`
             type = param->type();
         }
-        else if (!slot.from_default && param != nullptr && param->has_type()) {
+        else if (!slot.from_default && !slot.from_caller && param != nullptr && param->has_type()) {
             CollectionLiteralExprNode *literal = collection_literal_of(slot.value);
 
             if (literal != nullptr && !literal->expansion_decided) {

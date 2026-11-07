@@ -1235,6 +1235,9 @@ Parser::ModuleContribution Parser::module_contribution_for(
             }
 
             out.sources.push_back(source);
+            if (target.kind == Parser::TargetKind::t_test) {
+                out.test_scoped_sources.push_back(source);
+            }
         }
 
         for (const std::filesystem::path &depend : target.depends) {

@@ -10,6 +10,7 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Instructions.h>
@@ -427,6 +428,68 @@ void AbortCodegen::gen_abort_dynamic(
 )
 {
     call_thunk(headline, detail_ptr, detail_len, at);
+}
+
+void AbortCodegen::gen_abort_at(
+    const std::string &headline,
+    llvm::Value *detail_ptr,
+    llvm::Value *detail_len,
+    llvm::Value *file_ptr,
+    llvm::Value *file_len,
+    llvm::Value *line
+)
+{
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
+    llvm::Type *size_ty = _ctx.size_int_ty();
+    llvm::Type *buf_ty = llvm::ArrayType::get(i8, 16);
+
+    llvm::Value *buf = _ctx.entry_alloca(buf_ty, "crash.itoa");
+    llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
+    llvm::Value *n64 = _ctx.builder->CreateZExt(line, i64, "crash.line64");
+    llvm::Value *idx = llvm::ConstantInt::get(i64, 16);
+
+    llvm::BasicBlock *pred = _ctx.builder->GetInsertBlock();
+    llvm::Function *parent = pred->getParent();
+    llvm::BasicBlock *loop = llvm::BasicBlock::Create(*_ctx.llvm_context, "crash.itoa.loop", parent);
+    llvm::BasicBlock *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "crash.itoa.done", parent);
+    _ctx.builder->CreateBr(loop);
+
+    _ctx.set_insert_point(loop);
+    llvm::PHINode *rest = _ctx.builder->CreatePHI(i64, 2, "crash.rest");
+    llvm::PHINode *at = _ctx.builder->CreatePHI(i64, 2, "crash.at");
+    rest->addIncoming(n64, pred);
+    at->addIncoming(idx, pred);
+
+    llvm::Value *next = _ctx.builder->CreateSub(at, llvm::ConstantInt::get(i64, 1), "crash.next");
+    llvm::Value *digit = _ctx.builder->CreateURem(rest, llvm::ConstantInt::get(i64, 10));
+    _ctx.builder->CreateStore(
+        _ctx.builder->CreateTrunc(
+            _ctx.builder->CreateAdd(digit, llvm::ConstantInt::get(i64, '0')), i8),
+        _ctx.builder->CreateInBoundsGEP(buf_ty, buf, { zero, next }));
+    llvm::Value *more = _ctx.builder->CreateUDiv(rest, llvm::ConstantInt::get(i64, 10));
+    rest->addIncoming(more, loop);
+    at->addIncoming(next, loop);
+    _ctx.builder->CreateCondBr(
+        _ctx.builder->CreateICmpNE(more, llvm::ConstantInt::get(i64, 0)), loop, done);
+
+    _ctx.set_insert_point(done);
+    llvm::Value *start = next;
+    llvm::Value *len = _ctx.builder->CreateSub(idx, start, "crash.n");
+
+    _ctx.builder->CreateCall(get_or_create_abort_thunk(), {
+        _ctx.builder->CreateGlobalStringPtr(headline, ""),
+        llvm::ConstantInt::get(size_ty, headline.size()),
+        detail_ptr,
+        _ctx.as_size(detail_len),
+        file_ptr,
+        _ctx.as_size(file_len),
+        _ctx.builder->CreateTrunc(line, i32),
+        _ctx.builder->CreateInBoundsGEP(buf_ty, buf, { zero, start }, "crash.digits"),
+        _ctx.as_size(len),
+    });
+    _ctx.builder->CreateUnreachable();
 }
 
 void AbortCodegen::gen_exit(llvm::Value *code)

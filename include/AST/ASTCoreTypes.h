@@ -12,6 +12,7 @@
 namespace AST
 {
     class TypeDeclNode;
+    class FunctionDeclNode;
 
     // the stdlib types the *compiler itself* has to be able to name, bound by `#[echoc::core: ...]` on the
     // declaration.
@@ -130,6 +131,11 @@ namespace AST
         // `struct abi::header` - version, slot_count, fingerprint. bound so the
         // table producer and `abi::bind` share one layout, by property name
         t_abi_header,
+
+        // `struct std::src::location` - module, file, line, column, function. bound so
+        // `std::src::here()` / `std::src::caller()` and the hidden `#[caller]` parameter
+        // fill one layout by property name
+        t_source_location,
     };
 
     // resolves a core-type name to its kind, or nullopt when the name is not one. the single place that
@@ -186,6 +192,11 @@ namespace AST
             return type(CoreTypeKind::t_string_view);
         }
 
+        // `std::src::here`. the one decl apply_argument_binding plants for `$__caller` and a
+        // `here()` default, so CallResolver does not walk the function registry
+        void bind_source_here(FunctionDeclNode *decl);
+        FunctionDeclNode *source_here() const;
+
         // **is this one of the two string types?** asked by `echo` and by `.`, so it is one predicate
         // rather than a comparison spelled at each site. const is dropped, because a `const string` is
         // still a string to something only reading it
@@ -207,6 +218,7 @@ namespace AST
 
     private:
         std::unordered_map<CoreTypeKind, TypeDeclNode *> _bound;
+        FunctionDeclNode *_source_here = nullptr;
     };
 
     // where the compiler finds the fields it must fill in when it builds a `string` constant for a
@@ -248,6 +260,22 @@ namespace AST
     };
 
     std::optional<CoreCrashInfoLayout> resolve_core_crash_info_layout(
+        const CoreTypes &types, std::string &out_error);
+
+    // where here()/caller() fill `std::src::location`. by name, crash_info's reason
+    struct CoreSourceLocationLayout
+    {
+        size_t module_index;
+        size_t file_index;
+        size_t line_index;
+        size_t column_index;
+        size_t function_index;
+
+        size_t view_bytes_index;
+        size_t view_size_index;
+    };
+
+    std::optional<CoreSourceLocationLayout> resolve_core_source_location_layout(
         const CoreTypes &types, std::string &out_error);
 };
 

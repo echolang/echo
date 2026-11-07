@@ -1,0 +1,2 @@
+echo std::src::here()->line;
+echo std::src::here()->file;

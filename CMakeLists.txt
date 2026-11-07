@@ -341,6 +341,18 @@ echo_embed_runtime(
         k_alloc_runtime_c eco_cache.c
 )
 
+set(ECO_COVERAGE_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/runtime/coverage")
+set(ECO_COVERAGE_EMBEDDED "${CMAKE_BINARY_DIR}/generated/coverage_runtime_embedded.h")
+echo_embed_runtime(
+    OUTPUT "${ECO_COVERAGE_EMBEDDED}"
+    GUARD COVERAGE_RUNTIME_EMBEDDED_H
+    DELIM echo_coverage
+    DIR "${ECO_COVERAGE_RUNTIME_DIR}"
+    FILES
+        k_coverage_runtime_header eco_coverage.h
+        k_coverage_runtime_c eco_coverage.c
+)
+
 set(ECO_SPAWN_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/runtime/process")
 set(ECO_SPAWN_EMBEDDED "${CMAKE_BINARY_DIR}/generated/spawn_runtime_embedded.h")
 echo_embed_runtime(
@@ -359,10 +371,12 @@ target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
+target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/coverage)
 target_include_directories(${LIBNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
+target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/coverage)
 target_include_directories(${APPNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 target_sources(${LIBNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
 target_sources(${APPNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")

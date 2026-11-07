@@ -402,21 +402,24 @@ namespace AST
     void apply_binding_to_call(
         FunctionCallExprNode &call,
         NodeCollection &nodes,
-        TypeRegistry &registry
+        Collector &collector
     )
     {
         if (call.decl == nullptr) {
             return;
         }
 
+        // names were dropped on the first apply. re-binding would demand labels that are gone
+        // (`from(glfw:)`, `name:`, `put:`), and NDEBUG would plant nullptrs
         if (call.argument_names.empty() && call.arguments.size() == call.decl->args.size()) {
+            retarget_here_defaults(call, nodes, collector);
             return;
         }
 
         const ArgumentBinding binding = bind_arguments(*call.decl, call.arguments, call.argument_names);
         assert(binding.kind == ArgumentBindKind::t_ok && "choose_declaration already bound this call");
 
-        apply_argument_binding(call, binding, nodes, registry);
+        apply_argument_binding(call, binding, nodes, collector);
     }
     }
 
@@ -893,7 +896,7 @@ namespace AST
         // after the instance exists, so a default still mentioning T is cloned from the substituted
         // recipe rather than the template's. names stay on the call until here, which is what lets
         // can_instantiate bind a named list against the template before this runs
-        apply_binding_to_call(call, nodes, _collector.type_registry);
+        apply_binding_to_call(call, nodes, _collector);
 
         return fit_arguments(
             call.arguments,

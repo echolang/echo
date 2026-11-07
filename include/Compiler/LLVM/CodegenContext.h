@@ -67,6 +67,8 @@ namespace Compiler::LLVM
     class DebugInfoCodegen;
     class StmtCodegen;
     class ProfileCodegen;
+    class CoverageCodegen;
+    class SourceLocationCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -121,6 +123,13 @@ namespace Compiler::LLVM
         const AST::CoreCrashInfoLayout &core_crash_info_layout() const {
             assert(crash_info_layout.has_value() && "crash info layout not resolved - compile_bundle must resolve it");
             return crash_info_layout.value();
+        }
+
+        std::optional<AST::CoreSourceLocationLayout> source_location_layout;
+
+        const AST::CoreSourceLocationLayout &core_source_location_layout() const {
+            assert(source_location_layout.has_value() && "source location layout not resolved");
+            return source_location_layout.value();
         }
 
         // the two words a string is read as: the bytes and how many of them.
@@ -374,6 +383,8 @@ namespace Compiler::LLVM
         // rather than a fact about the node in hand
         DebugInfoCodegen *debug_info = nullptr;
         ProfileCodegen *profile = nullptr;
+        CoverageCodegen *coverage = nullptr;
+        SourceLocationCodegen *source_loc = nullptr;
 
         // `__eco_static_once` names pthread_self / sched_yield. set when that helper is
         // emitted, read by the driver so the compiler-introduced symbols carry their own

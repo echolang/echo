@@ -8,6 +8,7 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTAttributes.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTOperatorSemantics.h"
@@ -28,6 +29,7 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -784,6 +786,56 @@ std::string Parser::take_pending_doc(Parser::Payload &payload)
     return text;
 }
 
+static void plant_caller_param(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    const TokenReference &at
+)
+{
+    if (decl.is_closure) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            "'#[caller]' cannot mark a closure - bind `std::src::caller()` to a local first.");
+        decl.tracks_caller = false;
+        return;
+    }
+
+    if (decl.is_test() || decl.is_destructor() || decl.has_synthesized_body()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            "'#[caller]' cannot mark this declaration.");
+        decl.tracks_caller = false;
+        return;
+    }
+
+    if (!payload.collector.core_types.has(AST::CoreTypeKind::t_source_location)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            fmt::format(
+                "'#[caller]' needs {}.",
+                payload.collector.core_types.spelling(AST::CoreTypeKind::t_source_location)));
+        decl.tracks_caller = false;
+        return;
+    }
+
+    for (AST::VarDeclNode *arg : decl.args) {
+        if (arg != nullptr && arg->name() == "__caller") {
+            return;
+        }
+    }
+
+    const AST::ValueType loc = payload.collector.core_types.type(AST::CoreTypeKind::t_source_location);
+    auto &type_node = payload.context.emplace_node<AST::TypeNode>(
+        AST::ValueType::make_pointer(AST::ValueType::make_const(loc), false));
+
+    auto token = payload.context.make_virtual_token("$__caller", Token::Type::t_varname, at);
+    auto *vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(token, &type_node);
+    vardecl->declaring_function = &decl;
+
+    const size_t index = decl.written_implicit_arg_count();
+    decl.args.insert(decl.args.begin() + static_cast<std::ptrdiff_t>(index), vardecl);
+}
+
 void Parser::publish_declaration_markers(
     Parser::Payload &payload,
     AST::FunctionDeclNode *funcdecl,
@@ -799,6 +851,11 @@ void Parser::publish_declaration_markers(
     // it ever looks at this flag, so the combination costs nothing and refusing it would break that file
     funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
     funcdecl->is_cold = funcdecl->attributes.get_first(std::string(AST::compiler_attribute::cold)) != nullptr;
+    funcdecl->tracks_caller = funcdecl->attributes.get_first("caller") != nullptr;
+
+    if (funcdecl->tracks_caller) {
+        plant_caller_param(payload, *funcdecl, nametoken);
+    }
 
     // both passes: the symbol name must agree between them, the reason the comment at the
     // extern_symbol arm gives. a bare `#[export]` takes the name token; a valued one is a string
@@ -1520,6 +1577,10 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
 
             if (!funcdecl->builtin) {
                 return nullptr;
+            }
+
+            if (AST::builtin_kind_for(funcdecl->builtin.value()) == AST::BuiltinKind::t_source_here) {
+                payload.collector.core_types.bind_source_here(funcdecl);
             }
         }
 

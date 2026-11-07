@@ -3,6 +3,7 @@
 #include "eco.h"
 #include "AST/ASTAccessPass.h"
 #include "AST/ASTConstantExpander.h"
+#include "AST/ASTFile.h"
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMonomorphizer.h"
@@ -224,6 +225,16 @@ namespace
 
             if (auto failure = parse_one_input(parser, input)) {
                 return failure;
+            }
+
+            for (AST::File &file : module.files()) {
+                const auto found = std::find(
+                    contribution.test_scoped_sources.begin(),
+                    contribution.test_scoped_sources.end(),
+                    file.get_path());
+                if (found != contribution.test_scoped_sources.end()) {
+                    file.test_scoped = true;
+                }
             }
 
             step.finish(true);

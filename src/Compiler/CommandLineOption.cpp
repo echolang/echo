@@ -1039,6 +1039,42 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_coverage, "coverage", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::test, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "count which lines and branches tests ran",
+            "Instrument the test runner and write per-test coverage under the build directory:\n"
+            "  echoc test --coverage\n"
+            "Each child maps a file so a failed assert still leaves its counts. After the run echoc "
+            "prints one summary line and keeps the files. A compile without this flag is unchanged. "
+            "run and build do not take it: covering a binary with no test id is a different product.",
+            {}, nullptr
+        },
+        {
+            Opt::t_coverage_stdlib, "coverage-stdlib", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_build,
+            accepts::test, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "also count the standard library",
+            "With --coverage, also plant counters in the standard library:\n"
+            "  echoc test --coverage --coverage-stdlib\n"
+            "Implies --coverage. Test bodies themselves stay uncounted either way.",
+            {}, nullptr
+        },
+        {
+            Opt::t_report, "report", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_report,
+            accepts::test, 0, ExclusionGroup::t_none,
+            "<file>", "",
+            "write a JSON Lines result stream",
+            "Write one JSON object per line for the run, each test, and the totals:\n"
+            "  echoc test --report results.jsonl\n"
+            "A test that stopped with die or a failed assert carries a failure object parsed\n"
+            "from the abort text. The terminal listing is unchanged.",
+            {}, nullptr
+        },
+        {
             Opt::t_text, "text", nullptr, '\0',
             OptionArity::t_flag, OptionCategory::t_report,
             accepts::profile, 0, ExclusionGroup::t_none,

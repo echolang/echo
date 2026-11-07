@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] UnknownAttribute  bare_compiler_attribute.eco:2:3
 
-  unknown attribute 'builtin', expected one of: inline, implicit, unique, atomic, group, tests, export, wasm
+  unknown attribute 'builtin', expected one of: inline, implicit, caller, unique, atomic, group, tests, export, wasm
 
   1 | // a bare compiler stem is unknown, not reserved. the note is what points at the real spelling
   2 | #[builtin: size_of]

@@ -5,6 +5,7 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/Codegen/ProfileCodegen.h"
+#include "Compiler/LLVM/Codegen/CoverageCodegen.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -130,6 +131,7 @@ void StmtCodegen::gen_statement(AST::Node &node)
     // granularity a `step` command means, and a location per expression node triples the metadata
     // for no debugger benefit
     _ctx.debug_info->set_location(node);
+    _ctx.coverage->instrument_statement(node);
 
     node.accept(*_ctx.visitor);
 
@@ -382,6 +384,9 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         _ctx.debug_info->declare_local(alloca, *declared, arg.getArgNo() - abi_offset + 1);
     }
 
+    // before the body: t_fn is local 0 on first emission, and later units seal then replay
+    _ctx.coverage->instrument_function(*func, node);
+
     // a synthesized constructor arrives here like any other function - the struct parser builds its
     // body out of the same nodes a user would write, which is what keeps one implementation of the
     // member write and of the pointer re-seat
@@ -597,6 +602,7 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     // through - but the branch is emitted defensively rather than assumed: an unterminated block is an
     // llvm verifier failure with no source location, and this is cheap insurance against one
     _ctx.set_insert_point(else_block);
+    _ctx.coverage->instrument_branch(node, "else");
     node.else_scope->accept(*_ctx.visitor);
 
     if (!_ctx.block_is_terminated()) {
@@ -615,21 +621,19 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
     node.condition->accept(*_ctx.visitor);
     llvm::Value *condition = _ctx.pop_scalar();
 
-    // if there is no else block we directly jump to the merge block
     if (!node.else_scope) {
-        merge_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "merge", _ctx.builder->GetInsertBlock()->getParent());
-        _ctx.builder->CreateCondBr(condition, if_block, merge_block);
+        llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+        merge_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "merge", function);
+        llvm::BasicBlock *false_dest = _ctx.coverage->false_edge(merge_block, node, "else");
+        _ctx.builder->CreateCondBr(condition, if_block, false_dest);
 
-        // if block
         _ctx.set_insert_point(if_block);
+        _ctx.coverage->instrument_branch(node, "then");
         node.if_scope->accept(*_ctx.visitor);
 
-        // if last instruction is not a terminator we need to add a branch to the merge block
         if (!_ctx.block_is_terminated()) {
             _ctx.builder->CreateBr(merge_block);
         }
-
-        // _ctx.builder->CreateBr(merge_block);
     } else {
         llvm::BasicBlock *else_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "else", _ctx.builder->GetInsertBlock()->getParent());
 
@@ -637,6 +641,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
 
         // if block
         _ctx.set_insert_point(if_block);
+        _ctx.coverage->instrument_branch(node, "then");
         node.if_scope->accept(*_ctx.visitor);
         // _ctx.builder->CreateBr(merge_block);
 
@@ -647,6 +652,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
 
         // else block
         _ctx.set_insert_point(else_block);
+        _ctx.coverage->instrument_branch(node, "else");
         node.else_scope->accept(*_ctx.visitor);
         // _ctx.builder->CreateBr(merge_block);
 
@@ -697,7 +703,8 @@ void StmtCodegen::gen_loop(AST::ExprNode &condition, AST::ScopeNode *step, AST::
     condition.accept(*_ctx.visitor);
     llvm::Value *condition_value = _ctx.pop_scalar();
 
-    _ctx.builder->CreateCondBr(condition_value, body_block, merge_block);
+    llvm::BasicBlock *false_dest = _ctx.coverage->false_edge(merge_block, body, "skip");
+    _ctx.builder->CreateCondBr(condition_value, body_block, false_dest);
 
     // body block. the back edge is only emitted when the body can actually fall out of its end -
     // a body whose every path returns already terminated its block, and a second terminator there
@@ -709,6 +716,7 @@ void StmtCodegen::gen_loop(AST::ExprNode &condition, AST::ScopeNode *step, AST::
         // written anyway
         LoopTargetScope loop(_ctx, merge_block, next_block);
 
+        _ctx.coverage->instrument_branch(body, "body");
         body.accept(*_ctx.visitor);
     }
     if (!_ctx.block_is_terminated()) {

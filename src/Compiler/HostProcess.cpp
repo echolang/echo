@@ -274,14 +274,20 @@ namespace
         return merged;
     }
 #else
-    std::string drain_fd(int fd, unsigned timeout_ms, bool &timed_out)
+    // both fds at once: draining one then the other deadlocks when the unread side fills
+    void drain_two_fds(
+        int out_fd,
+        int err_fd,
+        unsigned timeout_ms,
+        bool &timed_out,
+        std::string &out_text,
+        std::string &err_text)
     {
         timed_out = false;
-        std::string collected;
         char buffer[4096];
         const auto started = std::chrono::steady_clock::now();
 
-        while (true) {
+        while (out_fd >= 0 || err_fd >= 0) {
             int wait_ms = -1;
 
             if (timeout_ms > 0) {
@@ -290,43 +296,71 @@ namespace
 
                 if (elapsed >= static_cast<long long>(timeout_ms)) {
                     timed_out = true;
-                    return collected;
+                    return;
                 }
 
                 wait_ms = static_cast<int>(static_cast<long long>(timeout_ms) - elapsed);
             }
 
-            pollfd pfd{};
-            pfd.fd = fd;
-            pfd.events = POLLIN;
+            pollfd pfds[2]{};
+            nfds_t n = 0;
+            int out_idx = -1;
+            int err_idx = -1;
 
-            const int ready = poll(&pfd, 1, wait_ms);
+            if (out_fd >= 0) {
+                pfds[n].fd = out_fd;
+                pfds[n].events = POLLIN;
+                out_idx = static_cast<int>(n);
+                n += 1;
+            }
+
+            if (err_fd >= 0) {
+                pfds[n].fd = err_fd;
+                pfds[n].events = POLLIN;
+                err_idx = static_cast<int>(n);
+                n += 1;
+            }
+
+            const int ready = poll(pfds, n, wait_ms);
 
             if (ready < 0) {
                 if (errno == EINTR) {
                     continue;
                 }
 
-                return collected;
+                return;
             }
 
             if (ready == 0) {
                 timed_out = true;
-                return collected;
+                return;
             }
 
-            const ssize_t read_bytes = read(fd, buffer, sizeof(buffer));
+            auto take = [&](int idx, int &fd, std::string &into) {
+                if (idx < 0) {
+                    return;
+                }
 
-            if (read_bytes > 0) {
-                collected.append(buffer, static_cast<size_t>(read_bytes));
-                continue;
-            }
+                if ((pfds[idx].revents & (POLLIN | POLLHUP | POLLERR)) == 0) {
+                    return;
+                }
 
-            if (read_bytes < 0 && errno == EINTR) {
-                continue;
-            }
+                const ssize_t read_bytes = read(fd, buffer, sizeof(buffer));
 
-            return collected;
+                if (read_bytes > 0) {
+                    into.append(buffer, static_cast<size_t>(read_bytes));
+                    return;
+                }
+
+                if (read_bytes < 0 && errno == EINTR) {
+                    return;
+                }
+
+                fd = -1;
+            };
+
+            take(out_idx, out_fd, out_text);
+            take(err_idx, err_fd, err_text);
         }
     }
 
@@ -569,6 +603,18 @@ enum class ChildStdio
     t_stream_to_stderr,
 };
 
+void strip_cr(std::string &text)
+{
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+}
+
+void finish_captured(Compiler::CapturedProcess &result)
+{
+    strip_cr(result.stdout_text);
+    strip_cr(result.stderr_text);
+    result.output = result.stdout_text + result.stderr_text;
+}
+
 Compiler::CapturedProcess run_child(
     const std::vector<std::string> &argv,
     unsigned timeout_ms,
@@ -597,23 +643,40 @@ Compiler::CapturedProcess run_child(
     inherit.nLength = sizeof(inherit);
     inherit.bInheritHandle = TRUE;
 
-    HANDLE read_pipe = INVALID_HANDLE_VALUE;
-    HANDLE write_pipe = INVALID_HANDLE_VALUE;
+    HANDLE stdout_read = INVALID_HANDLE_VALUE;
+    HANDLE stdout_write = INVALID_HANDLE_VALUE;
+    HANDLE stderr_read = INVALID_HANDLE_VALUE;
+    HANDLE stderr_write = INVALID_HANDLE_VALUE;
     HANDLE stdin_read = INVALID_HANDLE_VALUE;
     HANDLE stdin_write = INVALID_HANDLE_VALUE;
 
+    auto close_handle = [](HANDLE &handle) {
+        if (handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle);
+            handle = INVALID_HANDLE_VALUE;
+        }
+    };
+
     if (capture) {
-        if (!CreatePipe(&read_pipe, &write_pipe, &inherit, 0)) {
+        if (!CreatePipe(&stdout_read, &stdout_write, &inherit, 0)
+            || !CreatePipe(&stderr_read, &stderr_write, &inherit, 0)) {
+            close_handle(stdout_read);
+            close_handle(stdout_write);
+            close_handle(stderr_read);
+            close_handle(stderr_write);
             result.exit_code = 127;
             result.output = "could not open a pipe to capture the child's output.\n";
             return result;
         }
 
-        SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
 
         if (!stdin_content.empty() && !CreatePipe(&stdin_read, &stdin_write, &inherit, 0)) {
-            CloseHandle(read_pipe);
-            CloseHandle(write_pipe);
+            close_handle(stdout_read);
+            close_handle(stdout_write);
+            close_handle(stderr_read);
+            close_handle(stderr_write);
             result.exit_code = 127;
             result.output = "could not open a pipe to feed the child's input.\n";
             return result;
@@ -630,8 +693,8 @@ Compiler::CapturedProcess run_child(
     startup.hStdInput = stdin_read != INVALID_HANDLE_VALUE
         ? stdin_read
         : GetStdHandle(STD_INPUT_HANDLE);
-    startup.hStdOutput = capture ? write_pipe : GetStdHandle(STD_ERROR_HANDLE);
-    startup.hStdError = capture ? write_pipe : GetStdHandle(STD_ERROR_HANDLE);
+    startup.hStdOutput = capture ? stdout_write : GetStdHandle(STD_ERROR_HANDLE);
+    startup.hStdError = capture ? stderr_write : GetStdHandle(STD_ERROR_HANDLE);
 
     std::wstring command = windows_command_line(resolved);
     std::wstring wprogram = std::filesystem::path(program).wstring();
@@ -674,22 +737,14 @@ Compiler::CapturedProcess run_child(
         &startup,
         &process);
 
-    if (write_pipe != INVALID_HANDLE_VALUE) {
-        CloseHandle(write_pipe);
-    }
-
-    if (stdin_read != INVALID_HANDLE_VALUE) {
-        CloseHandle(stdin_read);
-    }
+    close_handle(stdout_write);
+    close_handle(stderr_write);
+    close_handle(stdin_read);
 
     if (!created) {
-        if (read_pipe != INVALID_HANDLE_VALUE) {
-            CloseHandle(read_pipe);
-        }
-
-        if (stdin_write != INVALID_HANDLE_VALUE) {
-            CloseHandle(stdin_write);
-        }
+        close_handle(stdout_read);
+        close_handle(stderr_read);
+        close_handle(stdin_write);
 
         if (job != nullptr) {
             CloseHandle(job);
@@ -717,41 +772,41 @@ Compiler::CapturedProcess run_child(
             static_cast<DWORD>(stdin_content.size()),
             &written,
             nullptr);
-        CloseHandle(stdin_write);
+        close_handle(stdin_write);
     }
 
     if (capture) {
         const auto started = std::chrono::steady_clock::now();
-        std::string collected;
         char buffer[4096];
 
-        while (true) {
+        auto read_available = [&](HANDLE pipe, std::string &into) {
             DWORD available = 0;
 
-            if (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) && available > 0) {
-                DWORD got = 0;
-                const DWORD want = available > sizeof(buffer) ? static_cast<DWORD>(sizeof(buffer)) : available;
+            if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) || available == 0) {
+                return false;
+            }
 
-                if (ReadFile(read_pipe, buffer, want, &got, nullptr) && got > 0) {
-                    collected.append(buffer, static_cast<size_t>(got));
-                    continue;
-                }
+            DWORD got = 0;
+            const DWORD want = available > sizeof(buffer) ? static_cast<DWORD>(sizeof(buffer)) : available;
+
+            if (!ReadFile(pipe, buffer, want, &got, nullptr) || got == 0) {
+                return false;
+            }
+
+            into.append(buffer, static_cast<size_t>(got));
+            return true;
+        };
+
+        while (true) {
+            while (read_available(stdout_read, result.stdout_text)
+                || read_available(stderr_read, result.stderr_text)) {
             }
 
             const DWORD wait = WaitForSingleObject(process.hProcess, 15);
 
             if (wait == WAIT_OBJECT_0) {
-                DWORD leftover = 0;
-
-                while (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &leftover, nullptr) && leftover > 0) {
-                    DWORD got = 0;
-                    const DWORD want = leftover > sizeof(buffer) ? static_cast<DWORD>(sizeof(buffer)) : leftover;
-
-                    if (!ReadFile(read_pipe, buffer, want, &got, nullptr) || got == 0) {
-                        break;
-                    }
-
-                    collected.append(buffer, static_cast<size_t>(got));
+                while (read_available(stdout_read, result.stdout_text)
+                    || read_available(stderr_read, result.stderr_text)) {
                 }
 
                 break;
@@ -777,9 +832,9 @@ Compiler::CapturedProcess run_child(
             }
         }
 
-        result.output = std::move(collected);
-        result.output.erase(std::remove(result.output.begin(), result.output.end(), '\r'), result.output.end());
-        CloseHandle(read_pipe);
+        finish_captured(result);
+        close_handle(stdout_read);
+        close_handle(stderr_read);
     }
     else {
         WaitForSingleObject(process.hProcess, INFINITE);
@@ -798,19 +853,34 @@ Compiler::CapturedProcess run_child(
     result.exit_code = result.timed_out ? 1 : static_cast<int>(code);
     return result;
 #else
-    int pipe_ends[2] = { -1, -1 };
+    int stdout_pipe[2] = { -1, -1 };
+    int stderr_pipe[2] = { -1, -1 };
     int stdin_pipe[2] = { -1, -1 };
 
+    auto close_pipe = [](int fds[2]) {
+        if (fds[0] != -1) {
+            close(fds[0]);
+            fds[0] = -1;
+        }
+
+        if (fds[1] != -1) {
+            close(fds[1]);
+            fds[1] = -1;
+        }
+    };
+
     if (capture) {
-        if (pipe(pipe_ends) != 0) {
+        if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0) {
+            close_pipe(stdout_pipe);
+            close_pipe(stderr_pipe);
             result.exit_code = 127;
             result.output = "could not open a pipe to capture the child's output.\n";
             return result;
         }
 
         if (!stdin_content.empty() && pipe(stdin_pipe) != 0) {
-            close(pipe_ends[0]);
-            close(pipe_ends[1]);
+            close_pipe(stdout_pipe);
+            close_pipe(stderr_pipe);
             result.exit_code = 127;
             result.output = "could not open a pipe to feed the child's input.\n";
             return result;
@@ -823,16 +893,9 @@ Compiler::CapturedProcess run_child(
     const pid_t child = fork();
 
     if (child < 0) {
-        if (pipe_ends[0] != -1) {
-            close(pipe_ends[0]);
-            close(pipe_ends[1]);
-        }
-
-        if (stdin_pipe[0] != -1) {
-            close(stdin_pipe[0]);
-            close(stdin_pipe[1]);
-        }
-
+        close_pipe(stdout_pipe);
+        close_pipe(stderr_pipe);
+        close_pipe(stdin_pipe);
         result.exit_code = 127;
         result.output = "could not fork.\n";
         return result;
@@ -841,10 +904,12 @@ Compiler::CapturedProcess run_child(
     if (child == 0) {
         if (capture) {
             setpgid(0, 0);
-            close(pipe_ends[0]);
-            dup2(pipe_ends[1], STDOUT_FILENO);
-            dup2(pipe_ends[1], STDERR_FILENO);
-            close(pipe_ends[1]);
+            close(stdout_pipe[0]);
+            close(stderr_pipe[0]);
+            dup2(stdout_pipe[1], STDOUT_FILENO);
+            dup2(stderr_pipe[1], STDERR_FILENO);
+            close(stdout_pipe[1]);
+            close(stderr_pipe[1]);
 
             if (stdin_pipe[0] != -1) {
                 dup2(stdin_pipe[0], STDIN_FILENO);
@@ -868,7 +933,8 @@ Compiler::CapturedProcess run_child(
 
     if (capture) {
         setpgid(child, child);
-        close(pipe_ends[1]);
+        close(stdout_pipe[1]);
+        close(stderr_pipe[1]);
 
         if (stdin_pipe[0] != -1) {
             close(stdin_pipe[0]);
@@ -878,8 +944,16 @@ Compiler::CapturedProcess run_child(
         }
 
         bool timed_out = false;
-        result.output = drain_fd(pipe_ends[0], timeout_ms, timed_out);
-        close(pipe_ends[0]);
+        drain_two_fds(
+            stdout_pipe[0],
+            stderr_pipe[0],
+            timeout_ms,
+            timed_out,
+            result.stdout_text,
+            result.stderr_text);
+        close(stdout_pipe[0]);
+        close(stderr_pipe[0]);
+        finish_captured(result);
 
         if (timed_out) {
             if (kill(-child, SIGKILL) != 0) {
@@ -912,11 +986,6 @@ Compiler::CapturedProcess run_child(
     }
 
     result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 127;
-
-    if (capture) {
-        result.output.erase(std::remove(result.output.begin(), result.output.end(), '\r'), result.output.end());
-    }
-
     return result;
 #endif
 }

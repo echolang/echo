@@ -9,6 +9,8 @@
 #include "AST/ConstRefExprNode.h"
 #include "AST/GenericValueExprNode.h"
 #include "AST/ExprNode.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTModule.h"
 #include "AST/ForeachNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
@@ -39,6 +41,7 @@
 #include "AST/ForStatementNode.h"
 
 #include <cassert>
+#include <filesystem>
 
 namespace AST
 {
@@ -322,6 +325,52 @@ const TokenReference &location_of_expression(ExprNode *expr)
     assert(token != nullptr && "no token to locate this expression at");
 
     return *token;
+}
+
+std::string source_file_of(const File &file)
+{
+    const std::filesystem::path &path = file.get_path();
+
+    if (file.module == nullptr || file.module->directory.empty()) {
+        return path.filename().generic_string();
+    }
+
+    const std::filesystem::path relative = path.lexically_relative(file.module->directory);
+
+    if (relative.empty() || relative == ".") {
+        return path.filename().generic_string();
+    }
+
+    const std::string generic = relative.generic_string();
+    if (generic == ".." || generic.starts_with("../")) {
+        return path.generic_string();
+    }
+
+    return generic;
+}
+
+SourceSite source_site_of(const Node &node)
+{
+    SourceSite site;
+    const TokenReference *token = source_token_of(node);
+    if (token == nullptr || !token->is_valid()) {
+        return site;
+    }
+
+    const File *file = token->file();
+    if (file != nullptr) {
+        site.file = source_file_of(*file);
+        if (file->module != nullptr) {
+            site.module = file->module->name;
+        }
+    }
+
+    if (!token->is_minted()) {
+        site.line = token->line();
+        site.column = token->column();
+    }
+
+    return site;
 }
 
 };  // namespace AST

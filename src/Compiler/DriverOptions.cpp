@@ -58,6 +58,7 @@ bool Compiler::resolve_driver_options(
     out.emit_stdlib_header = cli.flag(Opt::t_emit_stdlib_header);
     out.silent = cli.flag(Opt::t_silent);
     out.verbose = cli.flag(Opt::t_verbose);
+    out.report = cli.value(Opt::t_report);
     out.dry_run = cli.flag(Opt::t_dry_run);
     out.with_stdlib = cli.flag(Opt::t_with_stdlib);
 
@@ -103,6 +104,9 @@ bool Compiler::resolve_driver_options(
     out.options.profile = cli.flag(Opt::t_profile)
         || out.options.profile_calls
         || out.options.profile_stdlib;
+    out.options.coverage_stdlib_enabled = cli.flag(Opt::t_coverage_stdlib);
+    out.options.coverage_enabled = cli.flag(Opt::t_coverage)
+        || out.options.coverage_stdlib_enabled;
 
     // **--explain memory implies --track-allocations**, settled here rather than at the two readers: a
     // report over a counter nothing maintains does not fail, it reads zero forever - which is the answer

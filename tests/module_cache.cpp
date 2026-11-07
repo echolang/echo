@@ -1037,6 +1037,151 @@ TEST_CASE("echoc test reuses a library object the way run does", "[cache]")
     REQUIRE(line_starting_with(tested.output, "cachelib").find("hit") != std::string::npos);
 }
 
+TEST_CASE("coverage without stdlib leaves the stdlib key alone", "[cache][coverage]")
+{
+    ScopedProject project("coverage_stdlib_key");
+
+    write_library(project.root() / "lib", "cachelib");
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco",
+        "test doubles\n"
+        "{\n"
+        "    assert(cachelib::twice(21) == 42);\n"
+        "}\n");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult plain = project.echoc("test" + cache, app_dir);
+    REQUIRE(plain.exit_code == 0);
+    const std::string stdlib_before = line_starting_with(plain.output, "stdlib");
+    REQUIRE_FALSE(stdlib_before.empty());
+
+    const ProcessResult covered = project.echoc("test --coverage" + cache, app_dir);
+    REQUIRE(covered.exit_code == 0);
+    INFO(covered.output);
+    REQUIRE(cache_key(line_starting_with(covered.output, "stdlib")) == cache_key(stdlib_before));
+    REQUIRE(cache_key(line_starting_with(covered.output, "cachelib"))
+        != cache_key(line_starting_with(plain.output, "cachelib")));
+}
+
+TEST_CASE("a second coverage run reuses an instrumented library", "[cache][coverage]")
+{
+    ScopedProject project("coverage_reuses_library");
+
+    write_library(project.root() / "lib", "cachelib");
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco",
+        "test doubles\n"
+        "{\n"
+        "    assert(cachelib::twice(21) == 42);\n"
+        "}\n");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult first = project.echoc("test --coverage" + cache, app_dir);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+    REQUIRE(first.output.find("coverage") != std::string::npos);
+
+    const std::string lib_before = line_starting_with(first.output, "cachelib");
+    REQUIRE_FALSE(lib_before.empty());
+
+    const ProcessResult second = project.echoc("test --coverage" + cache, app_dir);
+    REQUIRE(second.exit_code == 0);
+    INFO(second.output);
+    REQUIRE(second.output.find("bypassed") == std::string::npos);
+    REQUIRE(cache_key(line_starting_with(second.output, "cachelib")) == cache_key(lib_before));
+    REQUIRE(line_starting_with(second.output, "cachelib").find("hit") != std::string::npos);
+    REQUIRE(second.output.find("coverage") != std::string::npos);
+}
+
+TEST_CASE("coverage of an inline library body does not hang", "[cache][coverage]")
+{
+    ScopedProject project("coverage_inline_odr");
+
+    write_file(project.root() / "lib" / "module.eco",
+        "#[module: \"inlinelib\"]\n"
+        "#[version: \"0.1.0\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "lib" / "src" / "lib.eco",
+        "namespace inlinelib;\n"
+        "\n"
+        "#[inline]\n"
+        "public function twice(int32 $n) : int32\n"
+        "{\n"
+        "    return $n * 2;\n"
+        "}\n");
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco",
+        "test doubles\n"
+        "{\n"
+        "    assert(inlinelib::twice(21) == 42);\n"
+        "}\n");
+
+    const ProcessResult covered = project.echoc(
+        "test --coverage --timeout 5000 --build-dir " + quoted(project.build_dir()),
+        project.root() / "app");
+    INFO(covered.output);
+    REQUIRE(covered.exit_code == 0);
+    REQUIRE(covered.output.find("coverage") != std::string::npos);
+}
+
+TEST_CASE("coverage map files are relative to the module directory", "[cache][coverage]")
+{
+    ScopedProject project("coverage_relative_paths");
+
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[sources: \"tests/*.eco\"]\n"
+        "}\n");
+    write_file(project.root() / "app" / "src" / "util.eco",
+        "function product(int32 $n) : int32\n"
+        "{\n"
+        "    return $n * 2;\n"
+        "}\n");
+    write_file(project.root() / "app" / "tests" / "util.eco",
+        "function helper(int32 $n) : int32\n"
+        "{\n"
+        "    return $n + 1;\n"
+        "}\n");
+    write_file(project.root() / "app" / "src" / "app.eco",
+        "test doubles\n"
+        "{\n"
+        "    assert(product(21) == 42);\n"
+        "}\n");
+
+    const ProcessResult covered = project.echoc(
+        "test --coverage --build-dir " + quoted(project.build_dir()),
+        project.root() / "app");
+    REQUIRE(covered.exit_code == 0);
+    INFO(covered.output);
+
+    const fs::path map = project.build_dir() / "coverage" / "map.json";
+    REQUIRE(fs::exists(map));
+    std::ifstream in(map);
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const std::string json = buf.str();
+    INFO(json);
+
+    REQUIRE(json.find("\"v\": 2") != std::string::npos);
+    REQUIRE(json.find("src/util.eco") != std::string::npos);
+    REQUIRE(json.find("tests/util.eco") == std::string::npos);
+}
+
 TEST_CASE("a sibling conversion is in every user module's key", "[cache]")
 {
     ScopedProject project("sibling_conversion");

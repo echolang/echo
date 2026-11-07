@@ -33,6 +33,8 @@
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/ProfileDriver.h"
+#include "Compiler/CoverageDriver.h"
+#include "Compiler/TestReportWriter.h"
 #include "Compiler/AllocRuntime.h"
 #include "Compiler/SpawnRuntime.h"
 #include "Compiler/ProgramStamp.h"
@@ -1957,6 +1959,15 @@ static std::optional<int> compile_and_link_program(
             compiler.link_into_main();
         }
 
+        if (front.options.coverage()) {
+            std::string map_error;
+            if (!Compiler::write_coverage_map(
+                    front.layout(), compiler.coverage_sites(), plan.cached, map_error)) {
+                diagnostics.render_untyped("Coverage Map Failed", map_error);
+                return 1;
+            }
+        }
+
         step.finish(true);
     } catch (Compiler::CompilerException &e) {
         return report_compiler_exception(diagnostics, e);
@@ -2002,6 +2013,12 @@ static std::optional<int> compile_and_link_program(
                 link,
                 runtime_error)) {
             diagnostics.render_untyped("Spawn Helper Failed", runtime_error);
+            return 1;
+        }
+
+        if (!Compiler::coverage_link_runtime(
+                front.options, front.layout(), link, runtime_error)) {
+            diagnostics.render_untyped("Coverage Runtime Failed", runtime_error);
             return 1;
         }
     }
@@ -2425,6 +2442,18 @@ int main_test(
         return failed.value();
     }
 
+    std::ofstream report_file;
+    std::optional<Compiler::TestReportWriter> json_report;
+    if (!driver.report.empty()) {
+        report_file.open(driver.report);
+        if (!report_file) {
+            diagnostics.render_untyped("Cannot Write Report", fmt::format(
+                "could not open '{}'", driver.report.string()));
+            return 1;
+        }
+        json_report.emplace(report_file);
+    }
+
     // **the facts main() settled, never a second resolve.** Two places deciding independently whether to
     // emit an escape sequence is how a redirected stream ends up with half of them in it - and these are
     // the same facts the diagnostics and the checklist were built from
@@ -2435,13 +2464,32 @@ int main_test(
         driver.verbose ? Compiler::TestDetail::t_listing : Compiler::TestDetail::t_counter);
 
     reporter.begin(selected.size());
+    if (json_report.has_value()) {
+        json_report->begin(selected.size());
+    }
 
     for (const Compiler::TestCase &test : selected) {
-        reporter.result(Compiler::run_test_isolated(
-            test, { runner.string() }, driver.timeout_ms));
+        std::vector<std::pair<std::string, std::string>> extra_env;
+        if (driver.options.coverage()) {
+            Compiler::coverage_prepare_test(front.layout(), test, extra_env);
+        }
+
+        const Compiler::TestResult result = Compiler::run_test_isolated(
+            test, { runner.string() }, driver.timeout_ms, extra_env);
+        reporter.result(result);
+        if (json_report.has_value()) {
+            json_report->result(result);
+        }
     }
 
     const bool passed = reporter.finish();
+    if (json_report.has_value()) {
+        json_report->finish();
+    }
+
+    if (driver.options.coverage()) {
+        Compiler::coverage_report_run(front.layout(), std::cout);
+    }
 
     std::cout << Compiler::PhaseTimings::instance().report();
 

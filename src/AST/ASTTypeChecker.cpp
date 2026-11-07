@@ -1950,6 +1950,16 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         // the declaration, so it is the same answer for a template and for every instance of it - the
         // monomorphizer having copied the flag along with everything else
         check_call_visibility(node);
+
+        if (node.decl->is_builtin()
+            && builtin_kind_for(node.decl->builtin.value()) == BuiltinKind::t_source_caller
+            && (_current_function == nullptr || !_current_function->tracks_caller)) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_function_name),
+                fmt::format(
+                    "'{}' is only available in a function marked '#[caller]'.",
+                    node.decl->namespaced_func_name()));
+        }
     }
 
     // generic templates are resolved to concrete instances by the monomorphizer; only a

@@ -1,0 +1,9 @@
+mode: test
+
+--- IR --->
+CHECK: source_filename
+CHECK-NOT: __eco_cov
+CHECK: define
+--- OUT --->
+ok   1/1  main/off_is_untouched.eco::hits_then
+1 test passed

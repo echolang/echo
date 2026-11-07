@@ -108,6 +108,9 @@ namespace Compiler
         // vocabulary, settled at the one call site that builds a reporter
         bool verbose = false;
 
+        // `test` only. empty means no JSONL report. not on `options`: the file is a rendering
+        std::filesystem::path report;
+
         // `install` only, and stated only: empty means no `--dir`
         // Compiler::resolve_install_dir is the arm order
         // not on `options`, because where a binary is copied changes no emitted byte

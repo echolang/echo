@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ASTValueType.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Token.h"

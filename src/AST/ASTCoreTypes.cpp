@@ -1,5 +1,6 @@
 #include "AST/ASTCoreTypes.h"
 
+#include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
 
 #include <fmt/core.h>
@@ -30,6 +31,7 @@ namespace
             { "type_id", AST::CoreTypeKind::t_type_id },
             { "erased", AST::CoreTypeKind::t_erased },
             { "abi_header", AST::CoreTypeKind::t_abi_header },
+            { "source_location", AST::CoreTypeKind::t_source_location },
         };
 
         return table;
@@ -46,6 +48,18 @@ std::optional<AST::CoreTypeKind> AST::core_type_kind_for(const std::string &name
 void AST::CoreTypes::bind(AST::CoreTypeKind kind, AST::TypeDeclNode *decl)
 {
     _bound[kind] = decl;
+}
+
+void AST::CoreTypes::bind_source_here(AST::FunctionDeclNode *decl)
+{
+    if (_source_here == nullptr || _source_here == decl) {
+        _source_here = decl;
+    }
+}
+
+AST::FunctionDeclNode *AST::CoreTypes::source_here() const
+{
+    return _source_here;
 }
 
 AST::TypeDeclNode *AST::CoreTypes::declaration(AST::CoreTypeKind kind) const
@@ -224,6 +238,87 @@ std::optional<AST::CoreCrashInfoLayout> AST::resolve_core_crash_info_layout(
 
     if (!line.is_primitive() || line.get_primitive_type() != AST::ValueTypePrimitive::t_int32) {
         out_error = fmt::format("'{}'s $line must be 'int32'", info.namespaced_name());
+        return std::nullopt;
+    }
+
+    return layout;
+}
+
+std::optional<AST::CoreSourceLocationLayout> AST::resolve_core_source_location_layout(
+    const AST::CoreTypes &types,
+    std::string &out_error
+)
+{
+    AST::TypeDeclNode *decl = types.declaration(AST::CoreTypeKind::t_source_location);
+
+    if (decl == nullptr) {
+        out_error = "no type is declared with #[echoc::core: source_location]";
+        return std::nullopt;
+    }
+
+    if (!types.has(AST::CoreTypeKind::t_string_view)) {
+        out_error = "#[echoc::core: source_location] needs #[echoc::core: string_view] for its text fields";
+        return std::nullopt;
+    }
+
+    auto require = [&out_error](const AST::ComplexType &ct, const char *property, size_t &out_index) {
+        const AST::ComplexType::Property *found = ct.find_property(property);
+
+        if (found == nullptr) {
+            out_error = fmt::format("'{}' has no property '${}'", ct.namespaced_name(), property);
+            return false;
+        }
+
+        out_index = found->index;
+        return true;
+    };
+
+    AST::CoreSourceLocationLayout layout {};
+    const AST::ComplexType &loc = decl->complex_type();
+
+    if (!require(loc, "module", layout.module_index)
+        || !require(loc, "file", layout.file_index)
+        || !require(loc, "line", layout.line_index)
+        || !require(loc, "column", layout.column_index)
+        || !require(loc, "function", layout.function_index)) {
+        return std::nullopt;
+    }
+
+    AST::TypeDeclNode *view_decl = types.declaration(AST::CoreTypeKind::t_string_view);
+
+    if (!require(view_decl->complex_type(), "bytes", layout.view_bytes_index)
+        || !require(view_decl->complex_type(), "size", layout.view_size_index)) {
+        return std::nullopt;
+    }
+
+    const AST::ValueType view = types.string_view_type();
+    auto require_view = [&out_error, &loc, &view](size_t index, const char *name) {
+        if (loc.get_property_type(index) != view) {
+            out_error = fmt::format("'{}'s ${} is not the #[echoc::core: string_view] type", loc.namespaced_name(), name);
+            return false;
+        }
+
+        return true;
+    };
+
+    if (!require_view(layout.module_index, "module")
+        || !require_view(layout.file_index, "file")
+        || !require_view(layout.function_index, "function")) {
+        return std::nullopt;
+    }
+
+    auto require_uint32 = [&out_error, &loc](size_t index, const char *name) {
+        const AST::ValueType ty = loc.get_property_type(index);
+        if (!ty.is_primitive() || ty.get_primitive_type() != AST::ValueTypePrimitive::t_uint32) {
+            out_error = fmt::format("'{}'s ${} must be 'uint32'", loc.namespaced_name(), name);
+            return false;
+        }
+
+        return true;
+    };
+
+    if (!require_uint32(layout.line_index, "line")
+        || !require_uint32(layout.column_index, "column")) {
         return std::nullopt;
     }
 

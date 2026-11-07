@@ -166,6 +166,8 @@ Node *FunctionCallExprNode::clone(CloneContext &cc) const
         c->decl = cc.rebind(c->decl);
     }
 
+    c->enclosing_function = cc.rebind(c->enclosing_function);
+
     // **the owner of a static call is a *type*, so it substitutes like a parameter type does.**
     // cc.shallow copy-constructs, so without this line a `result<T, E>::ok(...)` written inside a
     // generic body keeps the template's `result<T, E>` in every instance - and since the owner is what

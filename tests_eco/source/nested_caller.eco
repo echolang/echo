@@ -1,0 +1,16 @@
+#[caller]
+function inner() : void
+{
+    die('x');
+}
+
+#[caller]
+function outer() : void
+{
+    inner();
+}
+
+test names_the_test
+{
+    outer();
+}

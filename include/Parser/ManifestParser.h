@@ -283,6 +283,10 @@ namespace Parser
         // byte what it was** - a module whose targets carry no scope, or whose scopes this program does
         // not activate, folds nothing new and so still shares one object across every target
         std::vector<std::string> active_targets;
+
+        // sources a `#[target: test]` scope added that the unscoped module list did not already
+        // hold. coverage skips them; File::test_scoped is the per-file stamp
+        std::vector<std::filesystem::path> test_scoped_sources;
     };
 
     // which of each module's targets a program opens the scopes of, by module name.

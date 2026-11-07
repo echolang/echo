@@ -37,6 +37,7 @@ namespace AST
         // apply_argument_binding clones a default; ranking only reads result_type()
         ExprNode *value = nullptr;
         bool from_default = false;
+        bool from_caller = false;
     };
 
     struct ArgumentBinding
@@ -86,12 +87,22 @@ namespace AST
     // rewrite `call.arguments` into parameter order, cloning each default that was used, and
     // drop `argument_names`. the call is then an ordinary positional exact-arity list. asked
     // after a generic callee has been instantiated, so a default mentioning T is cloned from
-    // the instance, not the template
+    // the instance, not the template. a `#[caller]` hole is a varref to the enclosing
+    // `$__caller` when that function tracks the caller, otherwise `std::src::here()`. a written
+    // `here()` default is retargeted to this call
     void apply_argument_binding(
         FunctionCallExprNode &call,
         const ArgumentBinding &binding,
         NodeCollection &nodes,
-        TypeRegistry &registry);
+        Collector &collector);
+
+    // already positional exact-arity: labels were dropped, so bind_arguments must not run
+    // again. a `std::src::here()` default still sitting on the declaration token is replanted
+    // at this call
+    void retarget_here_defaults(
+        FunctionCallExprNode &call,
+        NodeCollection &nodes,
+        Collector &collector);
 
     // word a bind that no candidate survived. a unique name, or every candidate failing the same
     // way (a name nobody has, a missing label, an unfilled required), keeps its own issue; mixed

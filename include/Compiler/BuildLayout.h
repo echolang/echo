@@ -204,6 +204,10 @@ namespace Compiler
         std::filesystem::path profile_dir() const;
         std::filesystem::path profile_path(const std::string &stem) const;
 
+        // `<entry build dir>/coverage/`, honouring `--build-dir`. a loose `.eco` with
+        // no `--build-dir` writes `./coverage` in cwd: the temp scratch is discarded
+        std::filesystem::path coverage_dir() const;
+
         // removes the scratch directory, but **only when it is the temporary one**.
         //
         // A project's scratch lives inside its build directory, where `echoc clean` reaches it and where a

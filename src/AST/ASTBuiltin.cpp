@@ -74,6 +74,8 @@ namespace
             { "embed_text", AST::BuiltinKind::t_embed_text },
             { "embed_bytes", AST::BuiltinKind::t_embed_bytes },
             { "attr_of", AST::BuiltinKind::t_attr_of },
+            { "source_here", AST::BuiltinKind::t_source_here },
+            { "source_caller", AST::BuiltinKind::t_source_caller },
         };
         return table;
     }
@@ -184,6 +186,8 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
         case AST::BuiltinKind::t_attr_of:
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
             return AST::BuiltinFoldability::t_not_a_query;
     }
 
@@ -257,6 +261,8 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
         case AST::BuiltinKind::t_attr_of:
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
             return false;
     }
 
@@ -332,6 +338,8 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
         case AST::BuiltinKind::t_attr_of:
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
             return false;
     }
 
@@ -415,6 +423,8 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
         case AST::BuiltinKind::t_attr_of:
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
             return std::nullopt;
     }
 
@@ -487,6 +497,8 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_embed_text:
         case AST::BuiltinKind::t_embed_bytes:
         case AST::BuiltinKind::t_attr_of:
+        case AST::BuiltinKind::t_source_here:
+        case AST::BuiltinKind::t_source_caller:
             return false;
     }
 

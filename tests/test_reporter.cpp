@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <Compiler/AbortReport.h>
 #include <Compiler/ProgressReporter.h>
 #include <Compiler/TerminalCapabilities.h>
 #include <Compiler/TestReporter.h>
+#include <Compiler/TestReportWriter.h>
 
 #include <sstream>
 #include <string>
@@ -27,6 +29,7 @@ using Compiler::TestCase;
 using Compiler::TestDetail;
 using Compiler::TestOutcome;
 using Compiler::TestReporter;
+using Compiler::TestReportWriter;
 using Compiler::TestResult;
 
 namespace
@@ -299,4 +302,49 @@ TEST_CASE("a live counter still commits a failure row and closes itself", "[test
 
     // and the results stream carries no per-test line at all - that is the checklist's job here
     REQUIRE(out.str().find("ok ") == std::string::npos);
+}
+
+TEST_CASE("a report writer is a third sink and leaves the listing alone", "[testreporter]")
+{
+    std::ostringstream out;
+    std::ostringstream report;
+    ProgressReporter progress;
+    TestReporter reporter(out, progress, a_terminal());
+    TestReportWriter writer(report);
+
+    reporter.begin(1);
+    writer.begin(1);
+    const TestResult result = a_result("src/math.eco", "adds_up", 3);
+    reporter.result(result);
+    writer.result(result);
+    REQUIRE(reporter.finish());
+    writer.finish();
+
+    REQUIRE(out.str().find("ok   1/1  mylib/math.eco::adds_up") != std::string::npos);
+    REQUIRE(report.str().find("\"type\":\"run\"") != std::string::npos);
+    REQUIRE(report.str().find("\"v\":2") != std::string::npos);
+    REQUIRE(report.str().find("\"type\":\"test\"") != std::string::npos);
+    REQUIRE(report.str().find("\"name\":\"adds_up\"") != std::string::npos);
+    REQUIRE(report.str().find("\"type\":\"end\"") != std::string::npos);
+    REQUIRE(report.str().find("\"failure\"") == std::string::npos);
+}
+
+TEST_CASE("a report writer names an abort as failure", "[testreporter]")
+{
+    std::ostringstream report;
+    TestReportWriter writer(report);
+
+    TestResult result = a_result("src/math.eco", "divides", 4, TestOutcome::t_failed);
+    result.output = "assertion failed: nope\n  at math.eco:16\n";
+    result.failure = Compiler::AbortReport { "assertion failed", "nope", "math.eco", 16 };
+
+    writer.begin(1);
+    writer.result(result);
+    writer.finish();
+
+    REQUIRE(report.str().find("\"v\":2") != std::string::npos);
+    REQUIRE(report.str().find("\"headline\":\"assertion failed\"") != std::string::npos);
+    REQUIRE(report.str().find("\"message\":\"nope\"") != std::string::npos);
+    REQUIRE(report.str().find("\"file\":\"math.eco\"") != std::string::npos);
+    REQUIRE(report.str().find("\"line\":16") != std::string::npos);
 }

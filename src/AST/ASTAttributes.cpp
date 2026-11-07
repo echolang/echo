@@ -16,6 +16,7 @@ namespace
     // for its standard library. those three live in k_compiler_attributes, spelled `echoc::`.
     //
     //   inline      FuncDeclParser  -> FunctionDeclNode::is_inline
+    //   caller      FuncDeclParser  -> FunctionDeclNode::tracks_caller
     //   implicit    FuncDeclParser  -> publish_implicit_conversion
     //   unique      TypeDeclParser  -> bind_unique_attribute, read by AST::classify_copy
     //   atomic      TypeDeclParser  -> bind_atomic_attribute, read by AST::counts_are_atomic
@@ -48,6 +49,7 @@ namespace
     constexpr DeclarationAttribute k_declaration_attributes[] = {
         { "inline",   k_on_function },
         { "implicit", k_on_function },
+        { "caller",   k_on_function },
         { "unique",   k_on_type },
         { "atomic",   k_on_type },
         { "group",    k_on_test },

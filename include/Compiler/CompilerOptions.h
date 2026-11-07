@@ -87,6 +87,11 @@ namespace Compiler
         bool profile_calls = false;
         bool profile_stdlib = false;
 
+        // `echoc test --coverage`. its own flag: a test compile without it emits the bytes
+        // it emits today. `--coverage-stdlib` implies this
+        bool coverage_enabled = false;
+        bool coverage_stdlib_enabled = false;
+
         // **turns off type-based alias metadata**, for differential testing and for bisecting a
         // miscompile against the aliasing model rather than against the optimizer.
         //
@@ -185,6 +190,14 @@ namespace Compiler
 
         bool profiling_stdlib() const {
             return profile_stdlib;
+        }
+
+        bool coverage() const {
+            return coverage_enabled;
+        }
+
+        bool coverage_stdlib() const {
+            return coverage_stdlib_enabled;
         }
 
         bool no_optimize() const {

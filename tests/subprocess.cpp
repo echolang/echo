@@ -62,6 +62,32 @@ TEST_CASE("run_capturing kills a hung command", "[subprocess]")
     REQUIRE(elapsed < 5000);
 }
 
+TEST_CASE("run_captured keeps stdout and stderr apart", "[subprocess]")
+{
+#if defined(_WIN32)
+    const Compiler::CapturedProcess captured = Compiler::run_captured(
+        { "cmd.exe", "/c", "echo OUT& echo ERR 1>&2" },
+        2000);
+    REQUIRE_FALSE(captured.timed_out);
+    REQUIRE(captured.exit_code == 0);
+    REQUIRE(captured.stdout_text.find("OUT") != std::string::npos);
+    REQUIRE(captured.stderr_text.find("ERR") != std::string::npos);
+    REQUIRE(captured.stdout_text.find("ERR") == std::string::npos);
+    REQUIRE(captured.stderr_text.find("OUT") == std::string::npos);
+    REQUIRE(captured.output.find("OUT") != std::string::npos);
+    REQUIRE(captured.output.find("ERR") != std::string::npos);
+#else
+    const Compiler::CapturedProcess captured = Compiler::run_captured(
+        { "/bin/sh", "-c", "printf OUT; printf ERR >&2" },
+        2000);
+    REQUIRE_FALSE(captured.timed_out);
+    REQUIRE(captured.exit_code == 0);
+    REQUIRE(captured.stdout_text == "OUT");
+    REQUIRE(captured.stderr_text == "ERR");
+    REQUIRE(captured.output == "OUTERR");
+#endif
+}
+
 TEST_CASE("run_capturing still reports a clean exit", "[subprocess]")
 {
 #if defined(_WIN32)

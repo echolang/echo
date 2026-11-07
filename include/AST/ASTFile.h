@@ -82,6 +82,11 @@ namespace AST
         // the plain text content of the file
         std::optional<std::string> content;
 
+        // this file was contributed only by a `#[target: test]` scope. coverage skips it so a
+        // helper in tests/ does not count as product code. a file also listed at module scope
+        // stays false
+        bool test_scoped = false;
+
 
         // out of line: `enum_maps` holds unique_ptr to EnumMap, complete only in ASTFile.cpp
         File(const std::filesystem::path &path);
