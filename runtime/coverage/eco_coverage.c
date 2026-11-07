@@ -1,8 +1,3 @@
-// UCRT deprecates getenv into clang's stderr, which coverage goldens capture
-#if defined(_WIN32)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "eco_coverage.h"
 
 #include <stdint.h>
