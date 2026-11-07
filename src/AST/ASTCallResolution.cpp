@@ -842,6 +842,14 @@ namespace AST
         // resolver made, and differ for the one other producer of a decided call - the ownership
         // pass, whose drops and copies name their callee outright and owe only the coercion
         if (call.settlement == CallSettlement::t_unresolved) {
+            // parser planted AddrOf of an unknown receiver (`$c->arg($k)->arg($v)` while `$k`
+            // was still untyped). once the inner call settles to `C&`, that AddrOf is `C&&` and
+            // ranking is final. replay the peel before choose_declaration so both overloads
+            // see `C&`. coerce_arguments still replays after a winner, for by-value `$this`
+            if (call.is_member_lookup() && !call.arguments.empty()) {
+                call.arguments[0] = address_member_receiver(nodes, call.arguments[0], /*replay=*/true);
+            }
+
             const auto candidates = candidates_for(call);
 
             // retryable, deliberately: a member call's candidates come from its receiver's type,

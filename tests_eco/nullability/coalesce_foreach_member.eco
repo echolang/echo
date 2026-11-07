@@ -1,0 +1,11 @@
+// `($v ?? '')->size()` used to look up size on `const string?` because `??` did not
+// peel a `const T?&` foreach binding. the same hole made `($v ?? '') as int64` an
+// unclassified written cast
+
+string? $x = 'abc';
+echo ($x ?? '')->size();
+
+array<string?> $vs = ['abc'];
+foreach ($vs as const &$v) {
+    echo ($v ?? '')->size();
+}

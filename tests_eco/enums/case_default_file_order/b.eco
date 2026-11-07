@@ -1,0 +1,7 @@
+namespace hold;
+
+public enum P
+{
+    case x;
+    case y;
+}

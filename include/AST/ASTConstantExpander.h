@@ -18,6 +18,7 @@ namespace AST
     class ConstRefExprNode;
     class ExprNode;
     class File;
+    class IndexExprNode;
     class Module;
     class Namespace;
     class NamespaceManager;
@@ -44,6 +45,10 @@ namespace AST
         // what gets a member access's base expanded as readily as an argument
         ExprNode *rewrite_value_edge(ExprNode *expr) override;
 
+        // `T[$i]`: splice interned_table as the base so resolve_index can GEP. other place uses still
+        // clone the initializer through rewrite_value_edge
+        void visit_index_expr(IndexExprNode &node) override;
+
         // tracked so `self::` can be answered: which type a body belongs to is a fact about the declaration
         // the walk is inside, and the parser could not have recorded it - AST::FunctionBodyScope carries no
         // self type, by design
@@ -55,6 +60,12 @@ namespace AST
         // chain of constants is walked once rather than once per use site. `expansion` is the memo and the
         // cycle guard both
         void expand_initializer(ConstDeclNode &decl);
+
+        // intern a foldable integer array as ConstantData on the declaration. no-op otherwise
+        void try_intern_table(ConstDeclNode &decl);
+
+        // the clone a use site wants: the initializer, already expanded
+        ExprNode *expand_use(ConstRefExprNode &ref);
 
         // the RHS of a named map lives on File::enum_maps, not as an edge of any function until
         // mint clones it. rewrite those expressions here so check_enum_maps folds the same tree

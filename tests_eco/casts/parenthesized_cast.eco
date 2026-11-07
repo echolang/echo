@@ -16,3 +16,9 @@ echo $d;
 
 echo (7 + 1) as int64;
 echo 1 + 2 as int64;
+
+// a group that *is* a cast, then another `as`. with_postfix used to skip TypeCast
+// because n_type_cast was missing from is_expression_node
+float64 $f = 2.0;
+echo ($f as int64) as float64;
+echo (($f as int64) as float64);

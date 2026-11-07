@@ -1,0 +1,21 @@
+// `??` on a `const T?&` foreach binding must copy the payload. extractvalue of the
+// optional through the borrow aliases the element's handle; `$s` and the array both
+// freed it. a field, a parameter, and `$vs[$i]` already copied. heap strings only:
+// SSO has no str::buf to double-free
+
+array<string?> $vs = [str::repeat('y', 40), null];
+foreach ($vs as const &$v) {
+    string $s = $v ?? '';
+    echo $s->size();
+}
+
+function from_param(const string?& $v) : int64
+{
+    string $s = $v ?? '';
+    return $s->size();
+}
+
+string? $field = str::repeat('y', 40);
+echo ($field ?? '')->size();
+echo from_param($vs[0]);
+echo ($vs[0] ?? '')->size();

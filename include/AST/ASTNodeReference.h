@@ -85,6 +85,7 @@ namespace AST
                    parent_type == NodeType::n_expr_indirect_call ||
                    parent_type == NodeType::n_expr_function_ref ||
                    parent_type == NodeType::n_expr_instanceof ||
+                   parent_type == NodeType::n_type_cast ||
                    parent_type == NodeType::n_expr_temp_bind ||
                    parent_type == NodeType::n_expr_match ||
                    parent_type == NodeType::n_expr_const_ref ||

@@ -1,5 +1,6 @@
 #include "AST/ExprNode.h"
 #include "AST/ASTControlFlow.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ConstantDataExprNode.h"
@@ -329,7 +330,7 @@ AST::ValueType AST::NullCoalesceExprNode::result_type() const
     // `$n ?? die('gone')` is an `int32`, which is the whole of the expression form of
     // `else { die('gone'); }`
     if (expression_never_returns(*rhs)) {
-        return ValueType::make_non_nullable(lhs->result_type());
+        return unwrapped_type_of(lhs->result_type());
     }
 
     const ValueType right = rhs->result_type();
@@ -341,8 +342,9 @@ AST::ValueType AST::NullCoalesceExprNode::result_type() const
     }
 
     // otherwise the left's payload, which is the point: the value is there on both paths, so the type
-    // stops carrying a `?` and the result needs no further unwrapping
-    return ValueType::make_non_nullable(lhs->result_type());
+    // stops carrying a `?` and the result needs no further unwrapping. unwrapped_type_of peels a
+    // `const T?&` foreach binding the same way `?->` does
+    return unwrapped_type_of(lhs->result_type());
 }
 
 const std::string AST::NullCoalesceExprNode::node_description()

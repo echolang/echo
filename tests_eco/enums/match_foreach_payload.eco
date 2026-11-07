@@ -1,0 +1,40 @@
+// a match binding is `unknown&` until MatchResolution. ForeachLowering runs first and
+// used to refuse `[unknown]&` instead of waiting. `$xs->count()` already waited
+
+enum R
+{
+    case list(array<int32> $xs);
+    case none;
+}
+
+function sum_borrow(const R& $r) : int32
+{
+    int32 $n = 0;
+    match ($r) {
+        R::list($xs) => {
+            foreach ($xs as const &$x) {
+                $n = $n + $x;
+            }
+        },
+        R::none => {},
+    }
+    return $n;
+}
+
+function sum_copy(const R& $r) : int32
+{
+    int32 $n = 0;
+    match ($r) {
+        R::list($xs) => {
+            foreach ($xs as $x) {
+                $n = $n + $x;
+            }
+        },
+        R::none => {},
+    }
+    return $n;
+}
+
+echo sum_borrow(R::list([1, 2, 3]));
+echo sum_copy(R::list([4, 5]));
+echo sum_borrow(R::none);

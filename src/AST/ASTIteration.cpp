@@ -57,9 +57,12 @@ AST::IterationLookup AST::iteration_plan_for(
             "'#[echoc::core: iterator]'. it lives in the standard library, which this compilation left out.");
     }
 
-    // not settled yet - a type parameter awaiting substitution, or a call that has not resolved. asking
-    // again next round is the answer, and it must not read as a refusal
-    if (AST::is_undetermined_type(source)) {
+    // not settled yet: a type parameter, an unresolved call, or a match binding still
+    // seated as `unknown&`. is_undetermined_type asks the level it is given, so that
+    // placeholder would peel to unknown and refuse as '[unknown]&' cannot be iterated
+    // in the round before MatchResolution types it. type_is_determined_for_fit is
+    // CallResolver's wait for the same shape
+    if (!AST::type_is_determined_for_fit(source)) {
         return pending();
     }
 

@@ -1,0 +1,10 @@
+// a typed growable table constant used as A[$i] is the interned global, same GEP
+// as fixed_array. value uses still clone the dest-typed literal
+
+const array<int32> A = [1, 2, 3];
+
+echo A[0];
+echo A[2];
+
+array<int32> $copy = A;
+echo $copy[1];

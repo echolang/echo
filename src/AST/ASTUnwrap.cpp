@@ -389,9 +389,11 @@ AST::UnwrapLookup AST::unwrap_plan_for(
         return lookup;
     }
 
-    // not settled yet - a type parameter awaiting substitution, or a call that has not resolved. asking
-    // again next round is the answer, and it must not read as a refusal
-    if (AST::is_undetermined_type(subject)) {
+    // not settled yet: a type parameter, an unresolved call, or a match binding still
+    // seated as `unknown&`. is_undetermined_type asks the level it is given, so that
+    // placeholder would refuse as always present in the round before MatchResolution
+    // types it. type_is_determined_for_fit is iteration_plan_for's wait for the same shape
+    if (!AST::type_is_determined_for_fit(subject)) {
         return pending();
     }
 

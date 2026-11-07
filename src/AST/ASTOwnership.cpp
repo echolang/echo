@@ -2345,7 +2345,11 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 const ValueType payload = unwrapped_type_of(lhs->result_type());
 
                 if (copy_needs_constructor(payload)) {
-                    ExprNode *source = lhs->result_type().is_wrapped_optional()
+                    // a `const T?&` place is the optional behind the borrow. is_wrapped_optional
+                    // on the pointer level is false, so peel first or extractvalue aliases the
+                    // element's handle and both ends free it
+                    const ValueType through = borrow_target_of(lhs->result_type());
+                    ExprNode *source = through.is_wrapped_optional()
                         ? optional_payload_place(lhs, coalesce->token)
                         : lhs;
 

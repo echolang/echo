@@ -71,9 +71,11 @@ namespace AST
     ExprNode *optional_operand_of(ExprNode *expr, Module &module, const TokenReference &at);
 
     // the type a form yields once the operand has been unwrapped: the non-null of a nullable, and the
-    // class named by a weak. asked *after* optional_operand_of, so the weak case is already a nullable by
-    // the time it gets here - it is spelled out anyway, because a caller reading a type off the operand it
-    // was handed rather than off the rewritten one is an easy and silent mistake
+    // class named by a weak. peels a non-nullable borrow first (`const T?&` is the optional, the
+    // borrow is not) so `??` agrees with unwrap_plan_for and `?->`. asked *after* optional_operand_of,
+    // so the weak case is already a nullable by the time it gets here - it is spelled out anyway,
+    // because a caller reading a type off the operand it was handed rather than off the rewritten
+    // one is an easy and silent mistake
     ValueType unwrapped_type_of(const ValueType &type);
 
     // the type a `?->` marker holds. the chain tests the *value* a read of the base yields, so a

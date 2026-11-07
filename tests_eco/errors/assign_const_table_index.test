@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  assign_const_table_index.eco:9:1
+
+  Invalid type conversion: cannot implicitly convert 'const uint16' to 'uint16&'
+
+   8 | 
+   9 | set(T[0]);
+     : ^^^
+  10 | 
+
+1 error, nothing was compiled.

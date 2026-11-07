@@ -1,0 +1,10 @@
+/*
+ * Two files of one module, the user of P listed first. P::x as a field default
+ * used to be UnknownConstant because pass 2 parsed a.eco before b.eco registered
+ * the cases. The program that consumes this is case_default_later_file.eco.
+ */
+
+#[module: "caseorder"]
+#[version: "0.1.0"]
+
+#[sources: ["a.eco", "b.eco"]]

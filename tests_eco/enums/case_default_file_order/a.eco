@@ -1,0 +1,6 @@
+namespace hold;
+
+public struct H
+{
+    public P $p = P::x;
+}

@@ -1014,7 +1014,12 @@ AST::ExprNode *Parser::try_parse_static_call(Parser::Payload &payload)
 
         const AST::ComplexType *ct = owner.get_complex_type()->template_or_self();
 
-        if (ct->is_enum_kind() && ct->find_enum_case(cursor.current().value()) != nullptr) {
+        // an enum case is the call that builds it. pass 2 of this file may run before pass 2
+        // of the file that lists the cases, so find_enum_case can still miss: mint the call
+        // anyway and let CallResolver settle it. a name that is not a case is UnknownFunction
+        // there, which is the sentence for an enum. constants in an enum body are already
+        // refused at the declaration
+        if (ct->is_enum_kind()) {
             const TokenReference case_token = cursor.current();
             cursor.skip();
 

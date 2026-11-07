@@ -5,11 +5,10 @@
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTCollectionLiteral.h"
-#include "AST/ASTConstFold.h"
+#include "AST/ASTConstantData.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
-#include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMapLiteral.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
@@ -426,34 +425,12 @@ bool CollectionLiteralExpansion::fill_from_constant_data(
         return false;
     }
 
-    const ValueType &element = fill.element;
+    // a miss walks the appends, which keep every diagnostic at this same literal
+    std::optional<std::vector<uint64_t>> bits =
+        fold_integer_table(literal, fill.element, _module.nodes);
 
-    if (!element.is_integer_type() || element.is_const()) {
+    if (!bits.has_value()) {
         return false;
-    }
-
-    std::vector<uint64_t> bits;
-    bits.reserve(literal.elements.size());
-
-    for (ExprNode *&written : literal.elements) {
-        // a refusal belongs to the appends, at this same literal
-        const LiteralTyping typing = type_literal_at(written, element, _module.nodes);
-
-        if (typing.result == LiteralTyping::Result::t_refused) {
-            return false;
-        }
-
-        if (typing.result == LiteralTyping::Result::t_typed) {
-            written = typing.node;
-        }
-
-        const ConstFoldResult folded = const_fold(written);
-
-        if (!folded.is_folded() || ValueType::make_mutable(folded.type) != element) {
-            return false;
-        }
-
-        bits.push_back(folded.bits);
     }
 
     for (ExprNode *written : literal.elements) {
@@ -462,10 +439,10 @@ bool CollectionLiteralExpansion::fill_from_constant_data(
 
     literal.elements.clear();
 
-    const size_t count = bits.size();
+    const size_t count = bits->size();
 
     auto &data = _module.nodes.emplace_back<ConstantDataExprNode>(
-        literal.token_bracket, element, std::move(bits));
+        literal.token_bracket, fill.element, std::move(*bits));
 
     auto &length = _module.nodes.emplace_back<LiteralIntExprNode>(
         _module.make_virtual_token(

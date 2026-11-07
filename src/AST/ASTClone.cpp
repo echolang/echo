@@ -536,6 +536,7 @@ Node *ConstDeclNode::clone(CloneContext &cc) const
     ConstDeclNode *c = cc.shallow(this);
     c->_type_node = cc.child(c->_type_node);
     c->value = cc.child(c->value);
+    c->interned_table = cc.rebind(c->interned_table);
     return c;
 }
 

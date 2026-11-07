@@ -1,0 +1,4 @@
+// the library lists H's file before P's. P::x in the field default used to be
+// UnknownConstant because the case was not registered yet
+hold::H $h = hold::H();
+echo $h->p == hold::P::x;

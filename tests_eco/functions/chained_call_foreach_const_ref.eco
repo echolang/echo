@@ -1,0 +1,31 @@
+// `$c->arg($k)->arg($v)` planted AddrOf of an unsettled inner call. after `$v` was
+// typed `const string&`, the outer receiver was `C&&` and ranking missed both
+// overloads. splitting the chain already worked
+
+struct C
+{
+    string $out = '';
+
+    function arg(const string& $v) : C&
+    {
+        $this->out->append($v);
+        return $this;
+    }
+
+    function arg(int64 $n) : C&
+    {
+        $this->out->append("{$n}");
+        return $this;
+    }
+}
+
+map<string, string> $m = ['a' => 'b'];
+C $chained = C();
+C $split = C();
+foreach ($m as $k => const &$v) {
+    $chained->arg($k)->arg($v);
+    $split->arg($k);
+    $split->arg($v);
+}
+echo $chained->out;
+echo $split->out;

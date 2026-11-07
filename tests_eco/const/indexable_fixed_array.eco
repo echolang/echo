@@ -1,0 +1,22 @@
+// a typed collection constant used to clone the literal at each index and expand
+// it as a growable array (alloc/realloc/free per read). interned as ConstantData
+// so T[$i] is a GEP of one global. value uses still clone the dest-typed literal
+
+const fixed_array<uint16, 8> T = [1, 2, 3, 4, 5, 6, 7, 8];
+
+function at(usize $i) : uint16
+{
+    return T[$i];
+}
+
+echo at(3);
+echo T[0];
+
+fixed_array<uint16, 8> $copy = T;
+echo $copy[3];
+
+usize $i = 0;
+while ($i < 8) {
+    echo T[$i];
+    $i++;
+}

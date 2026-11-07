@@ -1,7 +1,10 @@
 #include "AST/ASTConstantExpander.h"
 
+#include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
+#include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstantData.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTEnumMapType.h"
 #include "AST/ASTFile.h"
@@ -11,13 +14,17 @@
 #include "AST/ASTRegion.h"
 #include "AST/ASTSymbol.h"
 #include "AST/ConstRefExprNode.h"
+#include "AST/ConstantDataExprNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/TypeNode.h"
 #include "AST/ASTValueType.h"
 
 #include <fmt/core.h>
+#include <optional>
+#include <vector>
 
 namespace AST
 {
@@ -170,6 +177,12 @@ void ConstantExpander::expand_initializer(ConstDeclNode &decl)
 
     decl.value = rewrite_value_edge(decl.value);
 
+    if (TypeNode *written = decl.optional_type_node()) {
+        bind_collection_literal_to(decl.value, written->type, _collector);
+    }
+
+    try_intern_table(decl);
+
     _current_self = previous_self;
     decl.expansion = ConstExpansion::t_expanded;
 }
@@ -295,18 +308,49 @@ bool ConstantExpander::refuse_if_later_module(const ConstDeclNode &decl, const C
     return true;
 }
 
-ExprNode *ConstantExpander::rewrite_value_edge(ExprNode *expr)
+void ConstantExpander::try_intern_table(ConstDeclNode &decl)
 {
-    // the base's descent first, so a reference nested anywhere inside this expression is expanded before
-    // this node is looked at
-    expr = RecursiveVisitor::rewrite_value_edge(expr);
+    auto *array = array_literal_of(decl.value);
 
-    if (expr == nullptr || expr->get_node_type() != NodeType::n_expr_const_ref) {
-        return expr;
+    if (array == nullptr || array->elements.empty() || array->is_variadic_pack) {
+        return;
     }
 
-    auto &ref = static_cast<ConstRefExprNode &>(*expr);
+    ValueType dest = ValueType::make_unknown();
 
+    if (TypeNode *written = decl.optional_type_node()) {
+        dest = written->type;
+    }
+    else {
+        const CollectionLiteralLookup look = array_literal_type_for(
+            *array, _collector.core_types, _collector.type_registry);
+
+        if (look.result != CollectionLiteralLookup::Result::t_ok) {
+            return;
+        }
+
+        dest = look.type;
+    }
+
+    const CollectionFill fill = collection_fill_of(dest, _collector, *array);
+
+    if (fill.kind == CollectionFill::Kind::t_none) {
+        return;
+    }
+
+    std::optional<std::vector<uint64_t>> bits =
+        fold_integer_table(*array, fill.element, _current_module->nodes);
+
+    if (!bits.has_value()) {
+        return;
+    }
+
+    decl.interned_table = &_current_module->nodes.emplace_back<ConstantDataExprNode>(
+        array->token_bracket, fill.element, std::move(*bits));
+}
+
+ExprNode *ConstantExpander::expand_use(ConstRefExprNode &ref)
+{
     ConstDeclNode *decl = resolve(ref);
 
     if (decl == nullptr) {
@@ -329,9 +373,41 @@ ExprNode *ConstantExpander::rewrite_value_edge(ExprNode *expr)
     // on which applications consume it, which tests/module_cache.cpp compares byte for byte
     CloneContext cc(_current_module->nodes, _no_substitution, _collector.type_registry);
 
-    Node *copy = decl->value->clone(cc);
+    return static_cast<ExprNode *>(decl->value->clone(cc));
+}
 
-    return static_cast<ExprNode *>(copy);
+ExprNode *ConstantExpander::rewrite_value_edge(ExprNode *expr)
+{
+    // the base's descent first, so a reference nested anywhere inside this expression is expanded before
+    // this node is looked at
+    expr = RecursiveVisitor::rewrite_value_edge(expr);
+
+    if (expr == nullptr || expr->get_node_type() != NodeType::n_expr_const_ref) {
+        return expr;
+    }
+
+    return expand_use(static_cast<ConstRefExprNode &>(*expr));
+}
+
+void ConstantExpander::visit_index_expr(IndexExprNode &node)
+{
+    // splice the interned table as the index base before the walk expands the ConstRef as a
+    // value. resolve_index then GEPs; other place uses still clone the initializer
+    if (node.base != nullptr && node.base->get_node_type() == NodeType::n_expr_const_ref) {
+        auto &ref = static_cast<ConstRefExprNode &>(*node.base);
+        ConstDeclNode *decl = resolve(ref);
+
+        if (decl != nullptr) {
+            expand_initializer(*decl);
+
+            if (decl->interned_table != nullptr) {
+                CloneContext cc(_current_module->nodes, _no_substitution, _collector.type_registry);
+                node.base = static_cast<ExprNode *>(decl->interned_table->clone(cc));
+            }
+        }
+    }
+
+    RecursiveVisitor::visit_index_expr(node);
 }
 
 void ConstantExpander::visitFunctionDecl(FunctionDeclNode &node)

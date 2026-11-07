@@ -84,6 +84,16 @@ TEST_CASE("an unsettled subject is pending, never refused", "[AST][nullability]"
 
     REQUIRE(unknown.result == AST::UnwrapLookup::Result::t_pending);
     REQUIRE(unknown.refusal.empty());
+
+    // a match binding is `unknown&` until MatchResolution. GuardLowering runs first, and
+    // is_undetermined_type would see a determined pointer and refuse as always present
+    const AST::UnwrapLookup unknown_borrow = AST::unwrap_plan_for(
+        AST::ValueType::make_pointer(AST::ValueType::make_unknown(), false),
+        empty,
+        registry);
+
+    REQUIRE(unknown_borrow.result == AST::UnwrapLookup::Result::t_pending);
+    REQUIRE(unknown_borrow.refusal.empty());
 }
 
 TEST_CASE("a non-nullable subject with no protocol bound is refused, and says so", "[AST][nullability]")

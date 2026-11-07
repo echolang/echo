@@ -112,11 +112,15 @@ AST::ExprNode *AST::optional_operand_of(
 
 AST::ValueType AST::unwrapped_type_of(const AST::ValueType &type)
 {
-    if (type.is_weak()) {
-        return ValueType::make_non_nullable(type.weak_target());
+    // a `const T?&` foreach binding is the optional, the borrow is not. peel T& (not ptr<T>)
+    // so `??` / `?->` / `unwrapped_type_of` agree with unwrap_plan_for's T?& arm
+    const ValueType subject = borrow_target_of(type);
+
+    if (subject.is_weak()) {
+        return ValueType::make_non_nullable(subject.weak_target());
     }
 
-    return ValueType::make_non_nullable(type);
+    return ValueType::make_non_nullable(subject);
 }
 
 AST::ValueType AST::chain_base_type_of(const AST::ExprNode &base)

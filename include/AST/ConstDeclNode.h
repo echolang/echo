@@ -15,6 +15,7 @@ namespace AST
 {
     class ExprNode;
     class ComplexType;
+    class ConstantDataExprNode;
 
     // how far AST::ConstantExpander has got with one declaration's own initializer. one field serving as
     // both the memo and the cycle guard, because they are the same question asked at two moments: a
@@ -44,6 +45,11 @@ namespace AST
 
         // what every reference to this constant is replaced by, cloned once per use site
         ExprNode *value = nullptr;
+
+        // a foldable integer table interned from `value`, so `T[$i]` is a GEP of one global
+        // rather than a reconstruct. null when the initializer is not a foldable array of
+        // integers. index bases clone this; value uses still clone `value`
+        ConstantDataExprNode *interned_table = nullptr;
 
         // the struct or class this constant belongs to, null outside one. What `self::MAX` resolves against,
         // and the reason a constant in a *generic* type is refused: there is no substitution for its `T`
@@ -87,6 +93,10 @@ namespace AST
 
         const std::string &name() const {
             return token_name.value();
+        }
+
+        TypeNode *optional_type_node() const {
+            return _type_node;
         }
 
         const std::string node_description() override;

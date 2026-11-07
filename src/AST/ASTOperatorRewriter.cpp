@@ -259,9 +259,14 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
 
     // **a raw pointer, and the one spelling of it is `$p:$[n]`.** every operation on an address goes
     // through `:$` - comparison, arithmetic, casting - and indexing was the one hole in that rule
-    //. closing it is what lets a bare `[` mean exactly one thing: ask the container
+    //. closing it is what lets a bare `[` mean exactly one thing: ask the container.
+    // ConstantData is already the table's address (`ptr<const E>`), so `T[$i]` on an interned
+    // constant GEPs without a written `:$`
     if (base_type.is_pointer()) {
-        if (!index_expr.base_was_peeled) {
+        const bool interned_table = index_expr.base != nullptr
+            && index_expr.base->get_node_type() == NodeType::n_expr_constant_data;
+
+        if (!index_expr.base_was_peeled && !interned_table) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(index_expr.token_bracket),
                 fmt::format(

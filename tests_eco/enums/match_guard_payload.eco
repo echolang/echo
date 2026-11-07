@@ -1,0 +1,25 @@
+// a match binding is `unknown&` until MatchResolution. GuardLowering runs first and
+// used to refuse `[unknown]&` as always present. iteration_plan_for already waited
+
+enum R
+{
+    case some(int32? $n);
+    case none;
+}
+
+function take(const R& $r) : int32
+{
+    match ($r) {
+        R::some($n) => {
+            int32 $v = guard $n else {
+                return 0;
+            }
+            return $v;
+        },
+        R::none => 0,
+    }
+}
+
+echo take(R::some(7));
+echo take(R::some(null));
+echo take(R::none);
