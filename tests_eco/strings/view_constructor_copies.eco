@@ -1,0 +1,67 @@
+// string($view) copies the window. a view into a heap buffer, a line, a split
+// part, or view()->sub() used to alias the source bytes with a null owner, so
+// the new string read freed memory once the source died
+
+function prefix(const string& $text) : string
+{
+    return string($text->view()->sub(0, 20));
+}
+
+function from_named(const string& $text) : string
+{
+    return string::from($text->view()->sub(0, 20));
+}
+
+function from_str(const string& $text) : string
+{
+    return str::from($text->view()->sub(0, 20));
+}
+
+function first_line(const string& $text) : string
+{
+    return string(str::lines($text)->at(0));
+}
+
+function first_part(const string& $text) : string
+{
+    return string(str::split($text, ',')->at(0));
+}
+
+function heap() : string
+{
+    string $t = '';
+    $t->append('0123456789abcdefghij, long enough to live in a heap buffer');
+    return $t;
+}
+
+function heap_lines() : string
+{
+    string $t = '';
+    $t->append("0123456789abcdefghij\nto be a second line");
+    return $t;
+}
+
+$p = prefix(heap());
+$named = from_named(heap());
+$via_str = from_str(heap());
+$line = first_line(heap_lines());
+$part = first_part(heap());
+
+string $junk = '';
+for (int32 $i = 0; $i < 50; $i++) {
+    $junk->append('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+}
+
+echo $p;
+echo $named;
+echo $via_str;
+echo $line;
+echo $part;
+
+// a short view copies into SSO. mutating the source leaves the copy alone
+string $short = '';
+$short->append('hello');
+string $head = string($short->view()->sub(0, 4));
+$short->append('xxxx');
+echo $head;
+echo $short;

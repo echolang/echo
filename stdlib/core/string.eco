@@ -452,14 +452,36 @@ public struct string : contract::comparable<string>
         return $this->window->size == ($this->owner?->used ?? 0);
     }
 
+    /**
+     * An independent string holding `$window`'s bytes. Short values stay inline.
+     *
+     * A view keeps nothing alive, so this copies. `string::from` is the same
+     * constructor under a name.
+     */
     constructor(string::view $window)
     {
-        $this->window = $window;
         $this->sso_lo = 0;
         $this->sso_hi = 0;
+
+        usize $n = $window->size;
+
+        if ($n <= self::INLINE) {
+            $this->seat_inline($window->bytes, $n);
+            return;
+        }
+
+        str::buf $buf = str::buf($n, 0, str::text_block($n));
+        $buf->append($window->bytes, $n);
+        $this->owner = $buf;
+        $this->window = string::view($buf->bytes, $n);
     }
 
-    constructor(string::view $window, str::buf? $owner)
+    /**
+     * A window over `$owner`'s bytes, sharing the buffer. `sub()` and
+     * `str::text::take` are the callers; a view with no owner goes through
+     * `string($window)` and copies.
+     */
+    internal constructor(string::view $window, str::buf? $owner)
     {
         $this->window = $window;
         $this->owner = $owner;
@@ -468,13 +490,11 @@ public struct string : contract::comparable<string>
     }
 
     /**
-     * An independent string holding `$w`'s bytes. Short values stay inline.
+     * The named form of `string($w)`. An independent string holding `$w`'s bytes.
      */
     public static function from(string::view $w) : string
     {
-        string $tmp = string($w);
-
-        return $tmp->clone();
+        return string($w);
     }
 
     /**
@@ -665,11 +685,7 @@ public struct string : contract::comparable<string>
         usize $n = $this->window->size;
 
         if ($n <= self::INLINE && $extra <= self::INLINE - $n) {
-            string $out = string(string::view($bytes, $n));
-
-            $out->seat_inline($bytes, $n);
-
-            return $out;
+            return string($this->as_view());
         }
 
         // `$n + $extra` past the largest usize is a length no string can have, and would wrap to a small one
