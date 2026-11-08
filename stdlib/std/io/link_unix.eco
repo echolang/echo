@@ -1,0 +1,59 @@
+/**
+ * POSIX symlink, hard link, and readlink.
+ */
+
+namespace std::io;
+
+#[if: os != windows]
+internal function symlink_path(const std::fs::path& $target, const std::fs::path& $link) : status<ioerror>
+{
+    if (c_symlink($target->cstr(), $link->cstr()) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok;
+}
+
+internal function hard_link_path(const std::fs::path& $from, const std::fs::path& $to) : status<ioerror>
+{
+    if (c_link($from->cstr(), $to->cstr()) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok;
+}
+
+internal function readlink_of(const std::fs::path& $path) : result<string, ioerror>
+{
+    usize $capacity = PATH_GROW;
+
+    while ($capacity <= PATH_GROW_MAX) {
+        ptr<uint8> $raw = mem::alloc<uint8>($capacity + 1);
+
+        if ($raw:$ == null) {
+            return .error(ioerror(ENOMEM));
+        }
+
+        int64 $written = c_readlink($path->cstr(), $raw, $capacity);
+
+        if ($written < 0) {
+            mem::free<uint8>($raw);
+            return .error(last_error());
+        }
+
+        if ($written >= $capacity) {
+            mem::free<uint8>($raw);
+            $capacity = $capacity * 2;
+            continue;
+        }
+
+        $raw:$[$written as usize] = 0;
+        string $out = str::from($raw);
+        mem::free<uint8>($raw);
+
+        return .ok($out);
+    }
+
+    return .error(ioerror(ENOMEM));
+}
+#[end]

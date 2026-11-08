@@ -12,7 +12,8 @@
 // why the arm is still there to assert on.
 //
 // running it is not available here in any case - on Linux the readlink succeeds and prints a path only
-// that machine knows, and on Darwin it dies - so the arm is asserted against the IR rather than OUT.
+// that machine knows, and on Darwin the arm is the wrong syscall - so it is asserted against the IR
+// rather than OUT.
 //
 // without this, half of every `#[if: os == ...]` in the stdlib would be verified only by CI on a host the
 // author does not have. It caught a real error in this very function the first time it ran: a `->` on a

@@ -198,11 +198,7 @@ public class dir : contract::iterable<dirent>
     static function open(const path& $path) : result<dir, std::io::ioerror>
     {
 #[if: os == windows]
-        std::env::wide_string $wide = std::env::wide_string();
-        if (!$wide->load_utf8($path->string())) {
-            return .error(std::io::wide_error());
-        }
-
+        std::env::wide_string $wide = try std::env::wide_of($path);
         uint32 $attr = std::io::c_GetFileAttributesW($wide->data());
 
         if ($attr == std::io::INVALID_FILE_ATTRIBUTES) {
@@ -213,10 +209,7 @@ public class dir : contract::iterable<dirent>
             return .error(std::io::ioerror(std::io::ENOTDIR));
         }
 
-        std::env::wide_string $pat = std::env::wide_string();
-        if (!$pat->load_utf8(($path / '*')->string())) {
-            return .error(std::io::wide_error());
-        }
+        std::env::wide_string $pat = try std::env::wide_of($path / '*');
 
         ptr<uint8> $find = mem::alloc<uint8>(std::io::FIND_DATA_BYTES);
 

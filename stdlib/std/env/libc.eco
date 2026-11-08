@@ -29,10 +29,10 @@ internal extern {
 
 #[if: family != windows]
 internal extern {
-    // writes the path into `$buf` and hands it back, or null when it does not fit - which is the
-    // only failure `cwd` has to distinguish, and why it grows its buffer rather than
-    // reading errno
+    // writes the path into `$buf` and hands it back, or null when it does not fit.
+    // `ERANGE` grows the buffer; any other errno is the answer
     function getcwd as c_getcwd(ptr<uint8> $buf, usize $size) : ptr<uint8>;
+    function chdir as c_chdir(ptr<const uint8> $path) : int32;
 }
 #[end]
 
@@ -54,7 +54,8 @@ internal function c_getpid() : int32
 
 #[if: os == windows]
 internal extern {
-    function _getcwd as c_getcwd(ptr<uint8> $buf, usize $size) : ptr<uint8>;
+    function _wgetcwd as c_wgetcwd(ptr<uint16> $buf, int32 $size) : ptr<uint16>;
+    function _wchdir as c_wchdir(ptr<uint16> $path) : int32;
     function _getpid as c_getpid() : int32;
 
     function GetModuleFileNameW as c_GetModuleFileNameW(
@@ -96,11 +97,5 @@ internal extern {
     // was too small - and on that path it has already overwritten `$size` with the length required, which
     // is what makes the retry exact rather than a doubling guess
     function _NSGetExecutablePath as c_exe_path(ptr<uint8> $buf, ptr<uint32> $size) : int32;
-}
-#[elif: family == linux]
-internal extern {
-    // the byte count written, or -1. It does **not** terminate, which is the one thing a caller here has to
-    // remember - `str::from` would read past the end
-    function readlink as c_readlink(ptr<const uint8> $path, ptr<uint8> $buf, usize $size) : int64;
 }
 #[end]

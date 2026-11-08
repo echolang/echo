@@ -29,12 +29,20 @@ public class file : contract::iterable<string>
 
     /**
      * Opens `$path` for `$mode`. The descriptor is closed when the last handle is gone.
+     * `$perms` is the mode a new file starts with, before the umask; an existing file keeps its own.
      */
     static function open(const std::fs::path& $path, filemode $mode) : result<file, ioerror>
     {
-        int32 $fd = guard open_path($path->string(), flags_of($mode)) else ($e) {
-            return .error($e);
-        }
+        return file::open($path, $mode, perms: std::fs::fileperms(OPEN_MODE));
+    }
+
+    static function open(
+        const std::fs::path& $path,
+        filemode $mode,
+        perms: std::fs::fileperms $perms
+    ) : result<file, ioerror>
+    {
+        int32 $fd = try open_path($path, flags_of($mode), $perms->mode());
 
         return .ok(file($fd));
     }
@@ -192,6 +200,50 @@ public class file : contract::iterable<string>
         }
 
         return .ok($i->size);
+    }
+
+    /**
+     * Sets the size of the file. Growing fills with zeros. The write window is flushed first.
+     */
+    function truncate(int64 $size) : status<ioerror>
+    {
+        if (!$this->io->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        usize $rewound = guard rewind_unread($this->io, $this->rin) else ($e) {
+            return .error($e);
+        }
+
+        if (c_ftruncate($this->io->fd, $size) < 0) {
+            return .error(last_error());
+        }
+
+        return .ok;
+    }
+
+    /**
+     * Flushes the write window, then asks the kernel to put the bytes on disk.
+     */
+    function sync() : status<ioerror>
+    {
+        if (!$this->io->is_open()) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        if (c_fsync($this->io->fd) < 0) {
+            return .error(last_error());
+        }
+
+        return .ok;
     }
 
     /**

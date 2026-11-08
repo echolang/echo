@@ -92,16 +92,13 @@ private function same_file(const handle_info& $a, const handle_info& $b) : bool
 // a handle opened to ask about the file, or to chmod it. shared with everyone, and allowed to be
 // a directory. `$follow` false opens the link itself. `$access` is 0 to query, `FILE_WRITE_ATTRIBUTES`
 // to chmod
-private function query_handle(
-    const string& $path,
+internal function query_handle(
+    const std::fs::path& $path,
     bool $follow,
     uint32 $access = 0
 ) : result<ptr<uint8>, ioerror>
 {
-    std::env::wide_string $wide = std::env::wide_string();
-    if (!$wide->load_utf8($path)) {
-        return .error(wide_error());
-    }
+    std::env::wide_string $wide = try std::env::wide_of($path);
 
     uint32 $flags = FILE_FLAG_BACKUP_SEMANTICS;
 
@@ -164,16 +161,12 @@ private function final_path(ptr<uint8> $h) : result<string, ioerror>
     return .ok($full);
 }
 
-internal function stat_path(const string& $path, bool $follow) : result<fileinfo, ioerror>
+internal function stat_path(const std::fs::path& $path, bool $follow) : result<fileinfo, ioerror>
 {
-    ptr<uint8> $raw = guard query_handle($path, $follow) else ($e) {
-        return .error($e);
-    }
+    ptr<uint8> $raw = try query_handle($path, $follow);
 
     owned_handle $h = owned_handle($raw);
-    handle_info $hi = guard handle_info_of($h->h) else ($e) {
-        return .error($e);
-    }
+    handle_info $hi = try handle_info_of($h->h);
 
     uint32 $tag = 0;
 
@@ -188,7 +181,7 @@ internal function stat_path(const string& $path, bool $follow) : result<fileinfo
         $tag = $ti->tag;
     }
 
-    return .ok(info_of($hi, $tag, executable_name($path)));
+    return .ok(info_of($hi, $tag, executable_name($path->string())));
 }
 
 // a descriptor has no name to read an extension from, so a file's `x` is never set here - which
@@ -201,25 +194,19 @@ internal function stat_fd(int32 $fd) : result<fileinfo, ioerror>
         return .error(ioerror(EBADF));
     }
 
-    handle_info $hi = guard handle_info_of($h) else ($e) {
-        return .error($e);
-    }
+    handle_info $hi = try handle_info_of($h);
 
     return .ok(info_of($hi, 0, false));
 }
 
 // Windows has one permission bit, and `chmod` reads only whether the owner may write. the handle
 // is opened following, so a symlink's target is what is marked read-only
-internal function chmod_path(const string& $path, fileperms $perms) : result<bool, ioerror>
+internal function chmod_path(const std::fs::path& $path, fileperms $perms) : result<bool, ioerror>
 {
-    ptr<uint8> $raw = guard query_handle($path, true, FILE_WRITE_ATTRIBUTES) else ($e) {
-        return .error($e);
-    }
+    ptr<uint8> $raw = try query_handle($path, true, FILE_WRITE_ATTRIBUTES);
 
     owned_handle $h = owned_handle($raw);
-    handle_info $hi = guard handle_info_of($h->h) else ($e) {
-        return .error($e);
-    }
+    handle_info $hi = try handle_info_of($h->h);
 
     uint32 $attr = $hi->attributes;
 
@@ -246,16 +233,12 @@ internal function chmod_path(const string& $path, fileperms $perms) : result<boo
     return .ok(true);
 }
 
-internal function realpath_of(const string& $path) : result<string, ioerror>
+internal function realpath_of(const std::fs::path& $path) : result<string, ioerror>
 {
-    ptr<uint8> $raw = guard query_handle($path, true) else ($e) {
-        return .error($e);
-    }
+    ptr<uint8> $raw = try query_handle($path, true);
 
     owned_handle $h = owned_handle($raw);
-    string $full = guard final_path($h->h) else ($e) {
-        return .error($e);
-    }
+    string $full = try final_path($h->h);
 
     return .ok(strip_verbatim($full));
 }
@@ -292,10 +275,7 @@ private function make_verbatim(const string& $full) : string
 // absolute `\\?\` form of a path that may not exist yet. `final_path` is the handle half
 private function full_path(const string& $path) : result<string, ioerror>
 {
-    std::env::wide_string $src = std::env::wide_string();
-    if (!$src->load_utf8($path)) {
-        return .error(wide_error());
-    }
+    std::env::wide_string $src = try std::env::wide_of($path);
 
     std::env::wide_string $buf = std::env::wide_string();
     uint32 $room = MAX_PATH;
@@ -327,11 +307,9 @@ private function full_path(const string& $path) : result<string, ioerror>
 }
 
 // CopyFileW copies the source's timestamps. stamp them to now so dest matches Unix O_CREAT
-private function stamp_copy_now(const string& $path) : result<bool, ioerror>
+private function stamp_copy_now(const std::fs::path& $path) : result<bool, ioerror>
 {
-    ptr<uint8> $raw = guard query_handle($path, true, FILE_WRITE_ATTRIBUTES) else ($e) {
-        return .error($e);
-    }
+    ptr<uint8> $raw = try query_handle($path, true, FILE_WRITE_ATTRIBUTES);
 
     owned_handle $h = owned_handle($raw);
     uint64 $now = 0;
@@ -354,15 +332,8 @@ private function stamp_copy_now(const string& $path) : result<bool, ioerror>
 
 private function copy_wide(const string& $from, const string& $to) : result<bool, ioerror>
 {
-    std::env::wide_string $from_w = std::env::wide_string();
-    if (!$from_w->load_utf8($from)) {
-        return .error(wide_error());
-    }
-
-    std::env::wide_string $to_w = std::env::wide_string();
-    if (!$to_w->load_utf8($to)) {
-        return .error(wide_error());
-    }
+    std::env::wide_string $from_w = try std::env::wide_of($from);
+    std::env::wide_string $to_w = try std::env::wide_of($to);
 
     if (c_CopyFileW($from_w->data(), $to_w->data(), 0) == 0) {
         return .error(win32_ioerror());
@@ -373,28 +344,17 @@ private function copy_wide(const string& $from, const string& $to) : result<bool
 
 // CopyFileW of the resolved source, so a symlink copies the target's bytes. dest is resolved too
 // when it already exists, so a symlink dest is overwritten at the target the way Unix `open` does
-internal function copy_file(const string& $from, const string& $to) : result<bool, ioerror>
+internal function copy_file(const std::fs::path& $from, const std::fs::path& $to) : result<bool, ioerror>
 {
-    ptr<uint8> $src_raw = guard query_handle($from, true) else ($e) {
-        return .error($e);
-    }
+    ptr<uint8> $src_raw = try query_handle($from, true);
 
     owned_handle $src = owned_handle($src_raw);
-    handle_info $src_hi = guard handle_info_of($src->h) else ($e) {
-        return .error($e);
-    }
+    handle_info $src_hi = try handle_info_of($src->h);
 
-    bool $ok = guard require_regular_file(kind_from_attributes($src_hi->attributes, 0)) else ($e) {
-        return .error($e);
-    }
+    try require_regular_file(kind_from_attributes($src_hi->attributes, 0));
 
-    string $src_path = guard final_path($src->h) else ($e) {
-        return .error($e);
-    }
-
-    string $dst_path = guard full_path($to) else ($e) {
-        return .error($e);
-    }
+    string $src_path = try final_path($src->h);
+    string $dst_path = try full_path($to->string());
 
     result<ptr<uint8>, ioerror> $dst_r = query_handle($dst_path, true);
 
@@ -407,28 +367,19 @@ internal function copy_file(const string& $from, const string& $to) : result<boo
     }
     else {
         owned_handle $dst = owned_handle($dst_r->unwrap());
-        handle_info $dst_hi = guard handle_info_of($dst->h) else ($e) {
-            return .error($e);
-        }
+        handle_info $dst_hi = try handle_info_of($dst->h);
 
-        bool $dst_ok = guard require_regular_file(kind_from_attributes($dst_hi->attributes, 0)) else ($e) {
-            return .error($e);
-        }
+        try require_regular_file(kind_from_attributes($dst_hi->attributes, 0));
 
         if (same_file($src_hi, $dst_hi)) {
             return .error(ioerror(EINVAL));
         }
 
-        string $resolved = guard final_path($dst->h) else ($e) {
-            return .error($e);
-        }
-
+        string $resolved = try final_path($dst->h);
         $dst_path = $resolved;
     }
 
-    bool $copied = guard copy_wide($src_path, $dst_path) else ($e) {
-        return .error($e);
-    }
+    try copy_wide($src_path, $dst_path);
 
     return stamp_copy_now($dst_path);
 }

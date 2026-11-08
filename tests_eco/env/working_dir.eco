@@ -6,7 +6,7 @@
 // block and the byte buffer inside it. The scratch buffer the growth loop allocated is *not* among
 // them, which is the thing worth pinning - it is freed on both the success and the retry path.
 
-std::fs::path $cwd = std::env::cwd();
+std::fs::path $cwd = guard std::env::cwd();
 
 echo $cwd->string()->size() > 0;
 #[if: os == windows]

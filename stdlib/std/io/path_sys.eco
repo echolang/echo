@@ -1,0 +1,193 @@
+/**
+ * Path syscalls. `std::fs` verbs call these; the C symbols stay in libc.eco.
+ */
+
+namespace std::io;
+
+internal function open_path(const std::fs::path& $path, int32 $flags) : result<int32, ioerror>
+{
+    return open_path($path, $flags, OPEN_MODE);
+}
+
+// `$mode` is what a file O_CREAT makes starts with, before the umask
+internal function open_path(
+    const std::fs::path& $path,
+    int32 $flags,
+    uint32 $mode
+) : result<int32, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = try std::env::wide_of($path);
+    int32 $fd = c_wopen($wide->data(), $flags, [$mode]);
+#[else]
+    int32 $fd = c_open($path->cstr(), $flags, [$mode]);
+#[end]
+
+    if ($fd < 0) {
+        return .error(last_error());
+    }
+
+    return .ok($fd);
+}
+
+internal function unlink_path(const std::fs::path& $path) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = try std::env::wide_of($path);
+
+    if (c_wunlink($wide->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_unlink($path->cstr()) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function rename_path(
+    const std::fs::path& $from,
+    const std::fs::path& $to
+) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $from_w = try std::env::wide_of($from);
+    std::env::wide_string $to_w = try std::env::wide_of($to);
+
+    if (c_wrename($from_w->data(), $to_w->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_rename($from->cstr(), $to->cstr()) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function access_path(const std::fs::path& $path, int32 $amode) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = try std::env::wide_of($path);
+
+    if (c_waccess($wide->data(), $amode) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_access($path->cstr(), $amode) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function truncate_path(const std::fs::path& $path, int64 $size) : status<ioerror>
+{
+    int32 $fd = try open_path($path, O_WRONLY | O_CLOEXEC | O_BINARY);
+
+    if (c_ftruncate($fd, $size) < 0) {
+        ioerror $e = last_error();
+        c_close($fd);
+        return .error($e);
+    }
+
+    if (c_close($fd) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok;
+}
+
+internal function mkdir_path(const std::fs::path& $path) : result<bool, ioerror>
+{
+    return mkdir_path($path, MKDIR_MODE);
+}
+
+internal function mkdir_path(const std::fs::path& $path, uint32 $mode) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = try std::env::wide_of($path);
+
+    if (c_wmkdir($wide->data()) < 0) {
+        return .error(last_error());
+    }
+
+    if (($mode & S_IWUSR) == 0) {
+        result<bool, ioerror> $ok = chmod_path($path, std::fs::fileperms($mode));
+
+        if ($ok->failed()) {
+            ioerror $e = $ok->failure();
+            result<bool, ioerror> $drop = rmdir_path($path);
+            return .error($e);
+        }
+    }
+#[else]
+    if (c_mkdir($path->cstr(), $mode) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+internal function rmdir_path(const std::fs::path& $path) : result<bool, ioerror>
+{
+#[if: os == windows]
+    std::env::wide_string $wide = try std::env::wide_of($path);
+
+    if (c_wrmdir($wide->data()) < 0) {
+        return .error(last_error());
+    }
+#[else]
+    if (c_rmdir($path->cstr()) < 0) {
+        return .error(last_error());
+    }
+#[end]
+
+    return .ok(true);
+}
+
+/**
+ * Seats `$from` at `$to`. POSIX `rename` replaces an existing file. Windows uses
+ * `ReplaceFileW` when `$to` is already there, so the original is not unlinked first.
+ */
+internal function replace_over(
+    const std::fs::path& $from,
+    const std::fs::path& $to
+) : status<ioerror>
+{
+#[if: os == windows]
+    guard access_path($to, F_OK) else ($e) {
+        if ($e->missing()) {
+            try rename_path($from, $to);
+            return .ok;
+        }
+
+        return .error($e);
+    }
+
+    std::env::wide_string $to_w = try std::env::wide_of($to);
+    std::env::wide_string $from_w = try std::env::wide_of($from);
+
+    if (c_ReplaceFileW(
+        $to_w->data(),
+        $from_w->data(),
+        ptr<uint16>(null),
+        0,
+        ptr<uint8>(null),
+        ptr<uint8>(null)
+    ) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok;
+#[else]
+    try rename_path($from, $to);
+
+    return .ok;
+#[end]
+}

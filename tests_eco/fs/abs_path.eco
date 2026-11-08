@@ -1,0 +1,7 @@
+std::fs::path $here = guard std::env::cwd();
+std::fs::path $abs = guard std::fs::abs(std::fs::path('a') / 'b');
+echo $abs->is_absolute();
+echo $abs == ($here / 'a' / 'b')->clean();
+
+std::fs::path $rooted = guard std::fs::abs($here);
+echo $rooted == $here->clean();

@@ -34,7 +34,7 @@ if (std::env::argc() > 1) {
     die('unknown role');
 }
 
-string $self = std::env::exe();
+std::fs::path $self = guard std::env::exe();
 
 std::process::output $flood = guard std::process::command($self, ['flood'])->output() else ($e) { die("flood: {$e}"); };
 echo "flood: {$flood->stdout->size()} {$flood->stderr->size()} {$flood->status}";

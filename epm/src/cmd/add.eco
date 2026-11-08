@@ -97,7 +97,12 @@ private function add_path(
     string $probe = $path;
 
     if (!sys::is_absolute($probe)) {
-        $probe = sys::join(env::cwd(), $path);
+        std::fs::path $here = guard env::cwd() else ($e) {
+            $ctx->printError($e->message());
+            return 1;
+        };
+
+        $probe = sys::join($here, $path);
     }
 
     string $lib = $probe;

@@ -1,0 +1,16 @@
+std::fs::path $dir = guard std::fs::tempdir();
+std::fs::path $a = $dir / 'a.txt';
+std::fs::path $b = $dir / 'b.txt';
+guard std::fs::writefile($a, 'one');
+guard std::fs::writefile($b, 'two');
+
+result<bool, std::io::ioerror> $ren = std::fs::rename($a, $b);
+string $body = guard std::fs::readfile($b);
+bool $a_here = guard std::fs::exists($a);
+bool $replaced = !$ren->failed() && $body == 'one' && !$a_here;
+bool $refused = $ren->failed() && $body == 'two' && $a_here;
+echo $replaced || $refused;
+bool $b_here = guard std::fs::exists($b);
+echo $b_here;
+
+guard std::fs::remove_all($dir);

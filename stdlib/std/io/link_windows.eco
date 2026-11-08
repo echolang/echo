@@ -1,0 +1,137 @@
+/**
+ * Windows symlink, hard link, and readlink. Reparse-point walk lives here, not in info.
+ */
+
+namespace std::io;
+
+#[if: os == windows]
+use std::fs::fileinfo;
+
+#[unique]
+private struct link_handle
+{
+    ptr<uint8> $h;
+
+    destructor()
+    {
+        c_CloseHandle($this->h);
+    }
+}
+
+#[unique]
+private struct link_bytes
+{
+    ptr<uint8> $p;
+
+    destructor()
+    {
+        mem::free<uint8>($this->p);
+    }
+}
+
+internal function symlink_path(const std::fs::path& $target, const std::fs::path& $link) : status<ioerror>
+{
+    uint32 $flags = 0;
+    result<fileinfo, ioerror> $look = stat_path($target, true);
+
+    if (!$look->failed()) {
+        fileinfo $info = $look->unwrap();
+
+        if ($info->kind == std::fs::filekind::directory) {
+            $flags = SYMLINK_FLAG_DIRECTORY;
+        }
+    }
+
+    std::env::wide_string $target_w = try std::env::wide_of($target);
+    std::env::wide_string $link_w = try std::env::wide_of($link);
+
+    uint32 $try = $flags | SYMLINK_FLAG_ALLOW_UNPRIVILEGED;
+
+    if (c_CreateSymbolicLinkW($link_w->data(), $target_w->data(), $try) != 0) {
+        return .ok;
+    }
+
+    if ($try != $flags && c_CreateSymbolicLinkW($link_w->data(), $target_w->data(), $flags) != 0) {
+        return .ok;
+    }
+
+    return .error(win32_ioerror());
+}
+
+internal function hard_link_path(const std::fs::path& $from, const std::fs::path& $to) : status<ioerror>
+{
+    std::env::wide_string $from_w = try std::env::wide_of($from);
+    std::env::wide_string $to_w = try std::env::wide_of($to);
+
+    if (c_CreateHardLinkW($to_w->data(), $from_w->data(), ptr<uint8>(null)) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    return .ok;
+}
+
+internal function readlink_of(const std::fs::path& $path) : result<string, ioerror>
+{
+    ptr<uint8> $raw = try query_handle($path, false, GENERIC_READ);
+
+    link_handle $h = link_handle($raw);
+    ptr<uint8> $buf = mem::alloc<uint8>(REPARSE_BUF);
+
+    if ($buf:$ == null) {
+        return .error(ioerror(ENOMEM));
+    }
+
+    link_bytes $hold = link_bytes($buf);
+    uint32 $got = 0;
+
+    if (c_DeviceIoControl(
+        $h->h, FSCTL_GET_REPARSE_POINT, ptr<uint8>(null), 0, $buf, REPARSE_BUF as uint32, &$got, ptr<uint8>(null)
+    ) == 0) {
+        return .error(win32_ioerror());
+    }
+
+    if ($got < REPARSE_MIN) {
+        return .error(ioerror(EINVAL));
+    }
+
+    ptr<uint32> $tagp = ptr<uint32>($buf:$);
+    uint32 $tag = $tagp:$[0];
+
+    if ($tag != IO_REPARSE_TAG_SYMLINK && $tag != IO_REPARSE_TAG_MOUNT_POINT) {
+        return .error(ioerror(EINVAL));
+    }
+
+    // print name offset/length sit after the header; symlink has a flags word, a mount point does not
+    usize $name_base = REPARSE_HEADER;
+    usize $path_off = REPARSE_MOUNT_PATH;
+
+    if ($tag == IO_REPARSE_TAG_SYMLINK) {
+        $path_off = REPARSE_SYMLINK_PATH;
+    }
+
+    ptr<uint16> $hdr = ptr<uint16>($buf:$ + $name_base);
+    uint16 $print_off = $hdr:$[2];
+    uint16 $print_len = $hdr:$[3];
+    uint16 $sub_off = $hdr:$[0];
+    uint16 $sub_len = $hdr:$[1];
+    uint16 $use_off = $sub_off;
+    uint16 $use_len = $sub_len;
+
+    if ($print_len > 0) {
+        $use_off = $print_off;
+        $use_len = $print_len;
+    }
+
+    int32 $chars = ($use_len as int32) / 2;
+    ptr<uint16> $wname = ptr<uint16>($buf:$ + $path_off + ($use_off as usize));
+    string $name = guard std::env::wide_to_utf8($wname, $chars) else {
+        return .error(wide_error());
+    };
+
+    if ($name->starts("\u{5C}??\u{5C}")) {
+        return .ok($name->sub(NT_PREFIX, $name->size() - NT_PREFIX));
+    }
+
+    return .ok($name);
+}
+#[end]

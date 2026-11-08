@@ -1,0 +1,15 @@
+std::fs::path $p = guard std::fs::tempfile();
+guard std::fs::remove($p);
+
+usize $n = guard std::fs::writefile($p, 'secret', perms: std::fs::fileperms(0x180));
+echo $n;
+
+std::fs::fileinfo $i = guard std::fs::info($p);
+echo $i->perms->owner_writable();
+#[if: os == windows]
+echo 0;
+#[else]
+echo $i->perms->other_readable();
+#[end]
+
+guard std::fs::remove($p);

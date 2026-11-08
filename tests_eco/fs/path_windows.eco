@@ -2,6 +2,7 @@ echo std::fs::path("C:\u{5C}echo")->is_absolute();
 echo std::fs::path('C:/echo')->is_absolute();
 echo std::fs::path("\u{5C}\u{5C}server\u{5C}share\u{5C}a")->is_absolute();
 echo std::fs::path('echo')->is_absolute();
+echo std::fs::path('C:foo')->is_absolute();
 echo std::fs::path("C:\u{5C}echo\u{5C}bin")->dirname()->string();
 echo std::fs::path("C:\u{5C}echo\u{5C}bin")->basename();
 echo std::fs::path('foo')->join('bar')->string();

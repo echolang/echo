@@ -8,6 +8,17 @@ echo $m;
 bool $again = guard std::fs::mkdir($deep, recursive: true);
 echo $again;
 
+bool $dot = guard std::fs::mkdir('.', recursive: true);
+echo $dot;
+
+bool $empty = guard std::fs::mkdir('', recursive: true);
+echo $empty;
+
+string $file = std::fs::join($root, 'as-file')->string();
+guard std::fs::writefile($file, 'x');
+result<bool, std::io::ioerror> $through = std::fs::mkdir(std::fs::join($file, 'child'), recursive: true);
+echo $through->failed();
+
 guard std::fs::remove_all(std::fs::path($root));
 bool $here = guard std::fs::exists($root);
 echo $here;

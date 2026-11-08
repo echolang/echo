@@ -167,9 +167,9 @@ public function argv() : array<string>
 /**
  * The path to the running executable.
  *
- * An owning `string` rather than a view, and that is forced rather than chosen: both platform calls write
+ * An owning `std::fs::path`, the same reason `cwd` owns its answer: both platform calls write
  * into a buffer this function allocated, so a window over them would dangle the moment it was handed
- * back. The same reason `cwd` owns its answer.
+ * back.
  *
  * **On a platform this module has not been taught, it falls back to `argv[0]`** - the path as invoked,
  * which is absolute when the program was launched by an absolute path and whatever the caller felt like
@@ -181,7 +181,7 @@ public function argv() : array<string>
  * the process. Reach for `arg(0)` when what you want is the name the program was invoked under - that one
  * *is* the source file there.
  */
-public function exe() : string
+public function exe() : result<std::fs::path, std::io::ioerror>
 {
 #[if: family == darwin]
     // `_NSGetExecutablePath` reports the size it needs through the same parameter it reads, so the retry is
@@ -190,70 +190,49 @@ public function exe() : string
     uint32 $needed = 0;
     ptr<uint8> $probe = mem::alloc<uint8>(1);
 
+    if ($probe:$ == null) {
+        return .error(std::io::ioerror(std::io::ENOMEM));
+    }
+
     c_exe_path($probe, &$needed);
     mem::free($probe);
 
     ptr<uint8> $raw = mem::alloc<uint8>($needed + 1);
+
+    if ($raw:$ == null) {
+        return .error(std::io::ioerror(std::io::ENOMEM));
+    }
+
     $raw:$[$needed] = 0;
 
     if (c_exe_path($raw, &$needed) != 0) {
         mem::free($raw);
-        die('_NSGetExecutablePath refused a buffer it asked for');
+        return .error(std::io::ioerror(std::io::EINVAL));
     }
 
     string $path = str::from($raw);
     mem::free($raw);
 
-    return $path;
+    return .ok(std::fs::path($path));
 #[elif: family == linux]
-    // `readlink` does not terminate what it writes and will not say how much it needed, so the buffer is
-    // grown until the answer stops filling it - a result shorter than the buffer is the proof it fit
-    usize $capacity = 256;
+    string $raw = try std::io::readlink_of('/proc/self/exe');
 
-    // bound to a local because `->` on a literal is not a readable expression - a method call needs
-    // something with storage to be the receiver
-    string $link = '/proc/self/exe';
-
-    while ($capacity <= 65536) {
-        ptr<uint8> $raw = mem::alloc<uint8>($capacity + 1);
-        int64 $written = c_readlink($link->cstr(), $raw, $capacity);
-
-        if ($written < 0) {
-            mem::free($raw);
-            die('readlink("/proc/self/exe") failed');
-        }
-
-        if ($written >= $capacity) {
-            mem::free($raw);
-            $capacity = $capacity * 2;
-            continue;
-        }
-
-        // the terminator readlink did not write
-        $raw:$[$written] = 0;
-
-        string $path = str::from($raw);
-        mem::free($raw);
-
-        return $path;
-    }
-
-    die('the executable path does not fit in 64 KiB');
+    return .ok(std::fs::path($raw));
 #[elif: os == windows]
     // GetModuleFileNameW writes UTF-16. grow until it fits, then wide_to_utf8
     wide_string $buf = wide_string();
-    uint32 $wide_cap = 256;
+    uint32 $wide_cap = std::io::PATH_GROW as uint32;
 
-    while ($wide_cap <= 32768) {
+    while ($wide_cap <= std::io::WIDE_PATH_MAX as uint32) {
         if (!$buf->resize($wide_cap)) {
-            die('GetModuleFileNameW out of memory');
+            return .error(std::io::ioerror(std::io::ENOMEM));
         }
 
         uint32 $written = c_GetModuleFileNameW(
             ptr<uint8>(null), $buf->data(), $wide_cap);
 
         if ($written == 0) {
-            die('GetModuleFileNameW failed');
+            return .error(std::io::win32_ioerror());
         }
 
         if ($written >= $wide_cap) {
@@ -262,19 +241,19 @@ public function exe() : string
         }
 
         string $path = guard wide_to_utf8($buf->data(), $written as int32) else {
-            die('WideCharToMultiByte failed');
+            return .error(std::io::wide_error());
         }
 
-        return $path;
+        return .ok(std::fs::path($path));
     }
 
-    die('the executable path does not fit in 32 KiB of UTF-16');
+    return .error(std::io::ioerror(std::io::ENOMEM));
 #[else]
     if (argc() == 0) {
-        return '';
+        return .ok(std::fs::path(''));
     }
 
-    return str::from(arg(0)->cstr());
+    return .ok(std::fs::path(str::from(arg(0)->cstr())));
 #[end]
 }
 

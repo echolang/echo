@@ -33,7 +33,8 @@ string $tool_file = std::fs::join($dir->view(), 'tool.exe')->string();
 string $tool_file = std::fs::join($dir->view(), 'tool')->string();
 #[end]
 
-bool $copied = guard std::fs::copy(std::env::exe(), $tool_file) else ($e) { die("copy: {$e}"); };
+std::fs::path $self = guard std::env::exe();
+bool $copied = guard std::fs::copy($self, $tool_file) else ($e) { die("copy: {$e}"); };
 
 // found on the child's PATH
 std::process::command $found = std::process::command('tool', ['hello']);

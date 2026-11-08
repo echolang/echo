@@ -84,6 +84,22 @@ internal struct wide_string
     {
         return $this->load_utf8($s->cstr(), -1);
     }
+
+    function load_utf8(const std::fs::path& $path) : bool
+    {
+        return $this->load_utf8($path->string());
+    }
+}
+
+internal function wide_of(const std::fs::path& $path) : result<wide_string, std::io::ioerror>
+{
+    wide_string $wide = wide_string();
+
+    if (!$wide->load_utf8($path)) {
+        return .error(std::io::wide_error());
+    }
+
+    return .ok($wide);
 }
 
 internal function wide_to_utf8(ptr<uint16> $wide, int32 $wide_n) : string?

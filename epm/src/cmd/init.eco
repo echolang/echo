@@ -13,7 +13,13 @@ use std::env;
 
 public function init(const cli::App& $app, const command::Parsed& $cli) : int32
 {
-    return init_at($app, $cli, env::cwd()->string());
+    std::fs::path $here = guard env::cwd() else ($e) {
+        command::CLIContext $ctx = .from($cli, $app->cmd, .stderr);
+        $ctx->printError($e->message());
+        return 1;
+    };
+
+    return init_at($app, $cli, $here->string());
 }
 
 public function init_at(

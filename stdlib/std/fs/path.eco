@@ -26,6 +26,11 @@ private const uint8 UPPER_Z = 0x5A;
 private const uint8 LOWER_A = 0x61;
 private const uint8 LOWER_Z = 0x7A;
 private const HEX_DIGITS = '0123456789ABCDEF';
+private const int32 HEX_NIBBLE = 16;
+private const usize UNIX_ROOT = 1;
+private const usize UNC_PREFIX = 2;
+private const usize UNC_SHARE_SEPS = 2;
+private const usize DRIVE_ABS = 3;
 
 internal function is_separator(uint8 $b) : bool
 {
@@ -83,14 +88,14 @@ private function root_of(const string& $raw) : string
     }
 
 #[if: os == windows]
-    if ($raw->size() >= 2 && is_separator($raw->byte(0)) && is_separator($raw->byte(1))) {
+    if ($raw->size() >= UNC_PREFIX && is_separator($raw->byte(0)) && is_separator($raw->byte(1))) {
         usize $seps = 0;
-        usize $i = 2;
+        usize $i = UNC_PREFIX;
 
         while ($i < $raw->size()) {
             if (is_separator($raw->byte($i))) {
                 $seps = $seps + 1;
-                if ($seps == 2) {
+                if ($seps == UNC_SHARE_SEPS) {
                     return $raw->sub(0, $i + 1);
                 }
             }
@@ -102,11 +107,11 @@ private function root_of(const string& $raw) : string
     }
 
     if (!is_separator($raw->byte(0))) {
-        return $raw->sub(0, 3);
+        return $raw->sub(0, DRIVE_ABS);
     }
 #[end]
 
-    return $raw->sub(0, 1);
+    return $raw->sub(0, UNIX_ROOT);
 }
 
 private function is_absolute_raw(const string& $raw) : bool
@@ -120,7 +125,7 @@ private function is_absolute_raw(const string& $raw) : bool
     }
 
 #[if: os == windows]
-    if ($raw->size() >= 3 && $raw->byte(1) == COLON && is_separator($raw->byte(2))) {
+    if ($raw->size() >= DRIVE_ABS && $raw->byte(1) == COLON && is_separator($raw->byte(2))) {
         uint8 $d = $raw->byte(0);
         bool $letter = ($d >= UPPER_A && $d <= UPPER_Z) || ($d >= LOWER_A && $d <= LOWER_Z);
 
@@ -158,6 +163,32 @@ private function segments_of(const string& $raw) : array<string>
 
     if (!$part->empty() && $part != '.') {
         $out[] = $part;
+    }
+
+    return $out;
+}
+
+private function fold_dotdot(array<string> $parts, const string& $root) : array<string>
+{
+    array<string> $out = array<string>();
+    usize $i = 0;
+
+    while ($i < $parts->count()) {
+        string $part = $parts[$i];
+
+        if ($part == '..') {
+            if ($out->count() > 0 && $out[$out->count() - 1] != '..') {
+                $out->pop();
+            }
+            else if ($root->empty()) {
+                $out[] = $part;
+            }
+        }
+        else {
+            $out[] = $part;
+        }
+
+        $i = $i + 1;
     }
 
     return $out;
@@ -431,14 +462,42 @@ public struct path : contract::comparable<path>
                 int32 $wide = $b;
 
                 $out->push(PERCENT);
-                $out->push($hex->byte($wide / 16));
-                $out->push($hex->byte($wide % 16));
+                $out->push($hex->byte($wide / HEX_NIBBLE));
+                $out->push($hex->byte($wide % HEX_NIBBLE));
             }
 
             $i = $i + 1;
         }
 
         return $out;
+    }
+
+    /**
+     * A lexical cleanup: drop `.`, collapse separators, drop `name/..` except above the root.
+     * Does not touch the filesystem. Two spellings still compare unequal until you clean both.
+     */
+    const function clean() : path
+    {
+        string $root = root_of($this->raw);
+        array<string> $parts = fold_dotdot(segments_of($this->raw), $root);
+        string $out = $root;
+        uint8 $sep = separator_to_append($this->raw);
+        usize $p = 0;
+
+        while ($p < $parts->count()) {
+            if (!$out->empty() && !is_separator($out->byte($out->size() - 1))) {
+                $out->push($sep);
+            }
+
+            $out->append($parts[$p]);
+            $p = $p + 1;
+        }
+
+        if ($out->empty()) {
+            return path('.');
+        }
+
+        return path($out);
     }
 
     const function string() : string

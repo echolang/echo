@@ -24,11 +24,13 @@ internal function find_program(const string& $name, const string& $search) : res
     }
 
     if (has_separator($name)) {
-        if (is_absolute($name)) {
+        if (std::fs::path($name)->is_absolute()) {
             return .ok($name);
         }
 
-        return .ok((std::env::cwd() / $name)->string());
+        std::fs::path $here = try std::env::cwd();
+
+        return .ok(($here / $name)->string());
     }
 
     // a file that is there but may not be run is remembered, so the answer is `denied()` when
@@ -90,24 +92,6 @@ private function has_separator(const string& $s) : bool
     }
 
     return false;
-}
-
-private function is_absolute(const string& $s) : bool
-{
-    if ($s->empty()) {
-        return false;
-    }
-
-    if (std::fs::is_separator($s->byte(0))) {
-        return true;
-    }
-
-#[if: os == windows]
-    // `C:\x`. a bare `C:x` is relative to that drive's own directory, which is not absolute either
-    return $s->size() > 2 && $s->byte(1) == 58 && std::fs::is_separator($s->byte(2));
-#[else]
-    return false;
-#[end]
 }
 
 #[if: os == windows]

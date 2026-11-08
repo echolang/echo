@@ -7,3 +7,12 @@ guard std::fs::writefile($f, 'x');
 guard std::fs::remove_all(std::fs::path($root));
 bool $here = guard std::fs::exists($root);
 echo $here;
+
+status<std::io::ioerror> $gone = std::fs::remove_all(std::fs::path($root));
+echo $gone->has_value();
+
+string $leaf = std::fs::join(std::env::tmp(), "echo-rm-file-{$pid}.txt")->string();
+guard std::fs::writefile($leaf, 'y');
+guard std::fs::remove_all(std::fs::path($leaf));
+bool $file_here = guard std::fs::exists($leaf);
+echo $file_here;

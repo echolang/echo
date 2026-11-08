@@ -76,7 +76,7 @@ private function info_of(const stat_buf& $st) : fileinfo
     );
 }
 
-internal function stat_path(const string& $path, bool $follow) : result<fileinfo, ioerror>
+internal function stat_path(const std::fs::path& $path, bool $follow) : result<fileinfo, ioerror>
 {
     stat_buf $st = stat_buf();
     int32 $rc = 0;
@@ -162,7 +162,7 @@ private function id_of_kernel(const kernel_stat& $st) : unix_id
     return unix_id(info_of_kernel($st), $st->ino, $st->dev);
 }
 
-internal function stat_path(const string& $path, bool $follow) : result<fileinfo, ioerror>
+internal function stat_path(const std::fs::path& $path, bool $follow) : result<fileinfo, ioerror>
 {
     int32 $flags = 0;
 
@@ -216,14 +216,12 @@ private function fstat_of(int32 $fd) : result<unix_id, ioerror>
 
 internal function stat_fd(int32 $fd) : result<fileinfo, ioerror>
 {
-    unix_id $st = guard fstat_of($fd) else ($e) {
-        return .error($e);
-    }
+    unix_id $st = try fstat_of($fd);
 
     return .ok($st->info);
 }
 
-internal function chmod_path(const string& $path, fileperms $perms) : result<bool, ioerror>
+internal function chmod_path(const std::fs::path& $path, fileperms $perms) : result<bool, ioerror>
 {
     if (c_chmod($path->cstr(), $perms->mode()) < 0) {
         return .error(last_error());
@@ -232,7 +230,7 @@ internal function chmod_path(const string& $path, fileperms $perms) : result<boo
     return .ok(true);
 }
 
-internal function realpath_of(const string& $path) : result<string, ioerror>
+internal function realpath_of(const std::fs::path& $path) : result<string, ioerror>
 {
     ptr<uint8> $buf = mem::alloc<uint8>(PATH_MAX);
 
@@ -250,37 +248,27 @@ internal function realpath_of(const string& $path) : result<string, ioerror>
     return .ok(str::from(ptr<const uint8>($buf:$)));
 }
 
-internal function copy_file(const string& $from, const string& $to) : result<bool, ioerror>
+internal function copy_file(const std::fs::path& $from, const std::fs::path& $to) : result<bool, ioerror>
 {
-    int32 $in_fd = guard open_path($from, O_RDONLY | O_CLOEXEC) else ($e) {
-        return .error($e);
-    }
+    int32 $in_fd = try open_path($from, O_RDONLY | O_CLOEXEC);
 
     owned_fd $in = owned_fd($in_fd);
 
     // one stat of the open source answers all three: is it a regular file, what are its
     // permissions, and which file is it. open already followed a symlink
-    unix_id $src = guard fstat_of($in->fd) else ($e) {
-        return .error($e);
-    }
+    unix_id $src = try fstat_of($in->fd);
 
     fileinfo $src_info = $src->info;
-    bool $ok = guard require_regular_file($src_info->kind) else ($e) {
-        return .error($e);
-    }
+    try require_regular_file($src_info->kind);
 
     uint32 $mode = $src_info->perms->mode();
 
     // no O_TRUNC yet: if `$to` is `$from` under another name, truncating it here is the data gone
-    int32 $out_fd = guard open_path($to, O_WRONLY | O_CREAT | O_CLOEXEC, $mode) else ($e) {
-        return .error($e);
-    }
+    int32 $out_fd = try open_path($to, O_WRONLY | O_CREAT | O_CLOEXEC, $mode);
 
     owned_fd $out = owned_fd($out_fd);
 
-    unix_id $dst = guard fstat_of($out->fd) else ($e) {
-        return .error($e);
-    }
+    unix_id $dst = try fstat_of($out->fd);
 
     if (same_file($src, $dst)) {
         return .error(ioerror(EINVAL));
@@ -290,9 +278,7 @@ internal function copy_file(const string& $from, const string& $to) : result<boo
         return .error(last_error());
     }
 
-    bool $copied = guard copy_data($in->fd, $out->fd) else ($e) {
-        return .error($e);
-    }
+    try copy_data($in->fd, $out->fd);
 
 #[if: family != wasi]
     // the mode O_CREAT used went through the umask, and a file that already existed kept its

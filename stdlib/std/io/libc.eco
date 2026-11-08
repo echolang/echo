@@ -51,6 +51,11 @@ internal extern {
     function chmod as c_chmod(ptr<const uint8> $path, uint32 $mode) : int32;
     function fchmod as c_fchmod(int32 $fd, uint32 $mode) : int32;
     function ftruncate as c_ftruncate(int32 $fd, int64 $length) : int32;
+    function fsync as c_fsync(int32 $fd) : int32;
+    function symlink as c_symlink(ptr<const uint8> $target, ptr<const uint8> $link) : int32;
+    function link as c_link(ptr<const uint8> $from, ptr<const uint8> $to) : int32;
+    // the byte count written, or -1. it does not terminate
+    function readlink as c_readlink(ptr<const uint8> $path, ptr<uint8> $buf, usize $size) : int64;
 
     // the caller's buffer, never the malloc'd one a null second argument asks for: that one is
     // libc's allocation, and this module frees through `mem::`
@@ -226,6 +231,9 @@ internal extern {
     // through `console_write` first. pinned in the JIT next to `_write` for
     // the same msvcrt-vs-UCRT reason
     function _get_osfhandle as c_get_osfhandle(int32 $fd) : ptr<uint8>;
+    function _commit as c_fsync(int32 $fd) : int32;
+    // 0 on success, an errno otherwise - wrapped as c_ftruncate below
+    function _chsize_s as c_chsize_s(int32 $fd, int64 $length) : int32;
 }
 
 // layout matches Win32 CONSOLE_SCREEN_BUFFER_INFO: SHORT is int16, WORD is
@@ -312,6 +320,20 @@ internal extern {
         uint32 $flags,
         ptr<uint8> $exclude,
         ptr<uint8> $reserved
+    ) : int32;
+    function CreateHardLinkW as c_CreateHardLinkW(
+        ptr<uint16> $to, ptr<uint16> $from, ptr<uint8> $security) : int32;
+    function CreateSymbolicLinkW as c_CreateSymbolicLinkW(
+        ptr<uint16> $link, ptr<uint16> $target, uint32 $flags) : uint8;
+    function DeviceIoControl as c_DeviceIoControl(
+        ptr<uint8> $h,
+        uint32 $code,
+        ptr<uint8> $in,
+        uint32 $in_n,
+        ptr<uint8> $out,
+        uint32 $out_n,
+        ptr<uint32> $returned,
+        ptr<uint8> $overlapped
     ) : int32;
 
     // an overlapped pipe end, read and written through `raw_end`. kernel32, so no JIT pin either
@@ -414,6 +436,7 @@ internal const int32 O_WRONLY = 1;
 internal const int32 O_RDWR = 2;
 internal const int32 O_APPEND = 8;
 internal const int32 O_CREAT = 512;
+internal const int32 O_EXCL = 2048;
 internal const int32 O_TRUNC = 1024;
 internal const int32 O_CLOEXEC = 16777216;
 internal const int32 O_BINARY = 0;
@@ -422,6 +445,7 @@ internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
 internal const int32 O_RDWR = 2;
 internal const int32 O_CREAT = 64;
+internal const int32 O_EXCL = 128;
 internal const int32 O_TRUNC = 512;
 internal const int32 O_APPEND = 1024;
 internal const int32 O_CLOEXEC = 524288;
@@ -432,6 +456,7 @@ internal const int32 O_WRONLY = 1;
 internal const int32 O_RDWR = 2;
 internal const int32 O_APPEND = 8;
 internal const int32 O_CREAT = 256;
+internal const int32 O_EXCL = 1024;
 internal const int32 O_TRUNC = 512;
 internal const int32 O_CLOEXEC = 0;
 internal const int32 O_BINARY = 32768;
@@ -439,6 +464,7 @@ internal const int32 O_BINARY = 32768;
 // wasi-libc `__header_fcntl.h`. O_RDWR is the two access bits or'd, not 2
 internal const int32 O_APPEND = 1;
 internal const int32 O_CREAT = 4096;
+internal const int32 O_EXCL = 16384;
 internal const int32 O_TRUNC = 32768;
 internal const int32 O_RDONLY = 67108864;
 internal const int32 O_WRONLY = 268435456;
@@ -450,6 +476,7 @@ internal const int32 O_RDONLY = 0;
 internal const int32 O_WRONLY = 1;
 internal const int32 O_RDWR = 2;
 internal const int32 O_CREAT = 64;
+internal const int32 O_EXCL = 128;
 internal const int32 O_TRUNC = 512;
 internal const int32 O_APPEND = 1024;
 internal const int32 O_CLOEXEC = 524288;
@@ -468,6 +495,7 @@ internal const int32 EEXIST = 20;
 internal const int32 ENOTDIR = 54;
 internal const int32 EISDIR = 31;
 internal const int32 EINVAL = 28;
+internal const int32 ERANGE = 32;
 internal const int32 EPIPE = 64;
 internal const int32 ESPIPE = 70;
 #[else]
@@ -482,6 +510,7 @@ internal const int32 EISDIR = 21;
 internal const int32 EINVAL = 22;
 internal const int32 ESPIPE = 29;
 internal const int32 EPIPE = 32;
+internal const int32 ERANGE = 34;
 #[end]
 
 // the file-type half of a mode. the same numbers on Darwin, Linux and wasi-libc
@@ -622,6 +651,16 @@ internal const uint32 ERROR_NO_DATA = 232;
 internal const uint32 ERROR_IO_PENDING = 997;
 // the most one overlapped ReadFile or WriteFile is asked for. a DWORD count, kept well inside it
 internal const uint32 PIPE_IO_MAX = 1073741824;
+internal const uint32 GENERIC_READ = 2147483648;
+internal const uint32 FSCTL_GET_REPARSE_POINT = 589992;
+internal const uint32 SYMLINK_FLAG_DIRECTORY = 1;
+internal const uint32 SYMLINK_FLAG_ALLOW_UNPRIVILEGED = 2;
+internal const usize REPARSE_BUF = 16384;
+internal const usize REPARSE_MIN = 20;
+internal const usize REPARSE_HEADER = 8;
+internal const usize REPARSE_MOUNT_PATH = 16;
+internal const usize REPARSE_SYMLINK_PATH = 20;
+internal const usize NT_PREFIX = 4;
 #[end]
 
 /**
@@ -636,6 +675,18 @@ internal function last_error() : ioerror
 
     return ioerror($code);
 }
+
+#[if: os == windows]
+// `_chsize_s` answers 0 or an errno; POSIX `ftruncate` answers 0 or -1
+internal function c_ftruncate(int32 $fd, int64 $length) : int32
+{
+    if (c_chsize_s($fd, $length) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
+#[end]
 
 #[if: os == windows]
 internal function invalid_handle(ptr<uint8> $h) : bool
@@ -696,134 +747,3 @@ internal function wide_error() : ioerror
     return win32_ioerror();
 }
 #[end]
-
-internal function open_path(const string& $path, int32 $flags) : result<int32, ioerror>
-{
-    return open_path($path, $flags, OPEN_MODE);
-}
-
-// `$mode` is what a file O_CREAT makes starts with, before the umask
-internal function open_path(const string& $path, int32 $flags, uint32 $mode) : result<int32, ioerror>
-{
-#[if: os == windows]
-    std::env::wide_string $wide = std::env::wide_string();
-    if (!$wide->load_utf8($path)) {
-        return .error(wide_error());
-    }
-
-    int32 $fd = c_wopen($wide->data(), $flags, [$mode]);
-#[else]
-    int32 $fd = c_open($path->cstr(), $flags, [$mode]);
-#[end]
-
-    if ($fd < 0) {
-        return .error(last_error());
-    }
-
-    return .ok($fd);
-}
-
-internal function unlink_path(const string& $path) : result<bool, ioerror>
-{
-#[if: os == windows]
-    std::env::wide_string $wide = std::env::wide_string();
-    if (!$wide->load_utf8($path)) {
-        return .error(wide_error());
-    }
-
-    if (c_wunlink($wide->data()) < 0) {
-        return .error(last_error());
-    }
-#[else]
-    if (c_unlink($path->cstr()) < 0) {
-        return .error(last_error());
-    }
-#[end]
-
-    return .ok(true);
-}
-
-internal function rename_path(const string& $from, const string& $to) : result<bool, ioerror>
-{
-#[if: os == windows]
-    std::env::wide_string $from_w = std::env::wide_string();
-    if (!$from_w->load_utf8($from)) {
-        return .error(wide_error());
-    }
-
-    std::env::wide_string $to_w = std::env::wide_string();
-    if (!$to_w->load_utf8($to)) {
-        return .error(wide_error());
-    }
-
-    if (c_wrename($from_w->data(), $to_w->data()) < 0) {
-        return .error(last_error());
-    }
-#[else]
-    if (c_rename($from->cstr(), $to->cstr()) < 0) {
-        return .error(last_error());
-    }
-#[end]
-
-    return .ok(true);
-}
-
-internal function access_path(const string& $path, int32 $amode) : result<bool, ioerror>
-{
-#[if: os == windows]
-    std::env::wide_string $wide = std::env::wide_string();
-    if (!$wide->load_utf8($path)) {
-        return .error(wide_error());
-    }
-
-    if (c_waccess($wide->data(), $amode) < 0) {
-        return .error(last_error());
-    }
-#[else]
-    if (c_access($path->cstr(), $amode) < 0) {
-        return .error(last_error());
-    }
-#[end]
-
-    return .ok(true);
-}
-
-internal function mkdir_path(const string& $path) : result<bool, ioerror>
-{
-#[if: os == windows]
-    std::env::wide_string $wide = std::env::wide_string();
-    if (!$wide->load_utf8($path)) {
-        return .error(wide_error());
-    }
-
-    if (c_wmkdir($wide->data()) < 0) {
-        return .error(last_error());
-    }
-#[else]
-    if (c_mkdir($path->cstr(), MKDIR_MODE) < 0) {
-        return .error(last_error());
-    }
-#[end]
-
-    return .ok(true);
-}
-
-internal function rmdir_path(const string& $path) : result<bool, ioerror>
-{
-#[if: os == windows]
-    std::env::wide_string $wide = std::env::wide_string();
-    if (!$wide->load_utf8($path)) {
-        return .error(wide_error());
-    }
-
-    if (c_wrmdir($wide->data()) < 0) {
-        return .error(last_error());
-    }
-#[else]
-    if (c_rmdir($path->cstr()) < 0) {
-        return .error(last_error());
-    }
-#[end]
-
-    return .ok(true);
-}

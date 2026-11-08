@@ -1,11 +1,6 @@
-// `info` follows a symlink and `linkinfo` does not, and a listing reports the link as one. the
-// standard library has no `symlink` of its own, so this program binds libc's. Windows CI cannot
-// create a symlink without a privilege, so that host pins follow/realpath/listing on the file
-#[if: os != windows]
-extern {
-    function symlink as c_symlink(ptr<const uint8> $target, ptr<const uint8> $link) : int32;
-}
-#[end]
+// `info` follows a symlink and `linkinfo` does not, and a listing reports the link as one.
+// Windows CI cannot create a symlink without a privilege, so that host pins follow/realpath/listing
+// on the file
 
 string $tmp = str::from(std::env::tmp());
 string $pid = str::from(std::env::pid());
@@ -25,8 +20,8 @@ usize $w = guard std::fs::writefile($target, 'twelve bytes') else ($e) {
 }
 
 #[if: os != windows]
-if (c_symlink($target->cstr(), $link->cstr()) != 0) {
-    echo 'symlink failed';
+guard std::fs::symlink($target, $link) else ($e) {
+    echo $e->message();
     return 1;
 }
 

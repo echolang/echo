@@ -50,7 +50,11 @@ public function dispatch(const cli::App& $app, const command::Parsed& $cli) : in
 
 function project() : result<manifest::Manifest, string>
 {
-    return project_at(env::cwd()->string());
+    std::fs::path $here = guard env::cwd() else ($e) {
+        return .error($e->message());
+    };
+
+    return project_at($here->string());
 }
 
 function project_at(const string& $start) : result<manifest::Manifest, string>

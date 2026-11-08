@@ -125,7 +125,9 @@ public function parse_offer(const string& $text) : result<Offer, string>
 public function offered_tools(const string& $path) : result<Offer, string>
 {
     array<string> $argv = array<string>();
-    $argv[] = echoc_bin();
+    string $bin = try echoc_bin();
+
+    $argv[] = $bin;
     $argv[] = 'build';
     $argv[] = '-p';
     $argv[] = 'tools';

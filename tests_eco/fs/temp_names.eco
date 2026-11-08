@@ -1,0 +1,17 @@
+std::fs::path $a = guard std::fs::tempfile();
+std::fs::path $b = guard std::fs::tempfile();
+echo $a != $b;
+
+bool $file_here = guard std::fs::exists($a);
+echo $file_here;
+
+std::fs::path $d = guard std::fs::tempdir();
+bool $dir_here = guard std::fs::exists($d);
+echo $dir_here;
+
+std::fs::fileinfo $i = guard std::fs::info($d);
+echo $i->kind == std::fs::filekind::directory;
+
+guard std::fs::remove($a);
+guard std::fs::remove($b);
+guard std::fs::remove_all($d);

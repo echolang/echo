@@ -38,7 +38,8 @@ string $closed_reader_ends = 'exit 141';
 
 function after_first_line(const string& $role) : string
 {
-    std::process::command $c = std::process::command(std::env::exe(), [$role]);
+    std::fs::path $self = guard std::env::exe();
+    std::process::command $c = std::process::command($self, [$role]);
     $c->stdin(.piped);
     $c->stdout(.piped);
     std::process::child $child = guard $c->spawn() else ($e) { die("spawn: {$e}"); };

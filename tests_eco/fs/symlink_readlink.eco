@@ -1,0 +1,42 @@
+std::fs::path $dir = guard std::fs::tempdir();
+std::fs::path $target = $dir / 'target.txt';
+std::fs::path $link = $dir / 'link.txt';
+guard std::fs::writefile($target, 'twelve bytes');
+
+std::fs::fileinfo $plain = guard std::fs::info($target);
+echo $plain->kind == std::fs::filekind::file;
+echo $plain->size;
+result<std::fs::path, std::io::ioerror> $not_link = std::fs::readlink($target);
+echo $not_link->failed();
+
+status<std::io::ioerror> $made = std::fs::symlink($target, $link);
+
+if ($made->failed()) {
+    echo $made->failure()->denied();
+    echo 1;
+    echo 1;
+    echo 1;
+    guard std::fs::remove_all($dir);
+    return 0;
+}
+
+std::fs::fileinfo $itself = guard std::fs::linkinfo($link);
+echo $itself->kind == std::fs::filekind::symlink;
+
+std::fs::path $got = guard std::fs::readlink($link);
+echo $got == $target;
+
+std::fs::path $rel = $dir / 'rel.txt';
+guard std::fs::symlink(std::fs::path('target.txt'), $rel);
+std::fs::path $rel_got = guard std::fs::readlink($rel);
+echo $rel_got->string() == 'target.txt';
+
+std::fs::path $canary_dir = guard std::fs::tempdir();
+std::fs::path $canary = $canary_dir / 'keep.txt';
+guard std::fs::writefile($canary, 'safe');
+std::fs::path $dir_link = $dir / 'to-canary';
+guard std::fs::symlink($canary_dir, $dir_link);
+guard std::fs::remove_all($dir);
+bool $kept = guard std::fs::exists($canary);
+echo $kept;
+guard std::fs::remove_all($canary_dir);

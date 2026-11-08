@@ -96,14 +96,14 @@ public struct command
     internal stdout? $out = null;
     internal stderr? $err = null;
 
-    constructor(string $program)
+    constructor(const std::fs::path& $program)
     {
-        $this->program = $program;
+        $this->program = $program->string();
     }
 
-    constructor(string $program, array<string> $arguments)
+    constructor(const std::fs::path& $program, array<string> $arguments)
     {
-        $this->program = $program;
+        $this->program = $program->string();
         $this->arguments = $arguments;
     }
 

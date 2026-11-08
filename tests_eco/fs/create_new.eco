@@ -1,0 +1,16 @@
+std::fs::path $dir = guard std::fs::tempdir();
+std::fs::path $p = $dir / 'only-once.txt';
+
+std::io::file $f = guard std::fs::create_new($p);
+usize $n = guard $f->write('hi');
+echo $n;
+$f->close();
+
+result<std::io::file, std::io::ioerror> $again = std::fs::create_new($p);
+echo $again->failed();
+echo $again->failure()->exists();
+
+string $body = guard std::fs::readfile($p);
+echo $body;
+
+guard std::fs::remove_all($dir);

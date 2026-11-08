@@ -1,0 +1,20 @@
+std::fs::path $here = guard std::env::cwd();
+std::fs::path $tmp = guard std::fs::tempdir();
+
+guard std::env::chdir($tmp);
+std::fs::path $now = guard std::env::cwd();
+std::fs::path $want = guard std::fs::realpath($tmp);
+std::fs::path $got = guard std::fs::realpath($now);
+echo $want == $got;
+
+guard std::env::chdir($here);
+std::fs::path $here_now = guard std::env::cwd();
+std::fs::path $back = guard std::fs::realpath($here_now);
+std::fs::path $orig = guard std::fs::realpath($here);
+echo $back == $orig;
+
+status<std::io::ioerror> $missing = std::env::chdir($tmp / 'definitely-missing-echo-chdir-xyz');
+echo $missing->failed();
+echo $missing->failure()->missing();
+
+guard std::fs::remove_all($tmp);

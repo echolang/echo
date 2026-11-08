@@ -475,14 +475,18 @@ public function echoc_from(const string& $exe_dir, const string& $from_env) : st
     return sys::host_exe('echoc');
 }
 
-public function echoc_bin() : string
+public function echoc_bin() : result<string, string>
 {
-    return echoc_from(sys::dirname(env::exe()), str::from(env::var('ECHOC', '')));
+    std::fs::path $exe = guard env::exe() else ($e) {
+        return .error($e->message());
+    };
+
+    return .ok(echoc_from(sys::dirname($exe), str::from(env::var('ECHOC', ''))));
 }
 
 public function load(const string& $path) : result<Manifest, string>
 {
-    string $bin = echoc_bin();
+    string $bin = try echoc_bin();
     array<string> $argv = array<string>();
     $argv[] = $bin;
     $argv[] = 'build';

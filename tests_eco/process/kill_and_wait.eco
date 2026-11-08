@@ -14,7 +14,8 @@ string $killed_as = 'exit 1';
 string $killed_as = 'signal 9';
 #[end]
 
-std::process::command $blocked = std::process::command(std::env::exe(), ['block']);
+std::fs::path $self = guard std::env::exe();
+std::process::command $blocked = std::process::command($self, ['block']);
 $blocked->stdin(.piped);
 std::process::child $c = guard $blocked->spawn() else ($e) { die("spawn: {$e}"); };
 

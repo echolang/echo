@@ -1,0 +1,12 @@
+std::fs::path $dir = guard std::fs::tempdir();
+std::fs::path $a = $dir / 'a.txt';
+std::fs::path $b = $dir / 'b.txt';
+guard std::fs::writefile($a, 'shared');
+
+guard std::fs::hard_link($a, $b);
+string $body = guard std::fs::readfile($b);
+echo $body;
+result<bool, std::io::ioerror> $self = std::fs::copy($a, $b);
+echo $self->failed();
+
+guard std::fs::remove_all($dir);

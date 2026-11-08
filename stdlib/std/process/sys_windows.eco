@@ -301,7 +301,7 @@ private function relay_copy(std::io::raw_end $from, ptr<uint8> $to) : void
     uint8[8192] $buf;
 
     while (true) {
-        isize $n = std::io::raw_read($source, &$buf[0], 8192);
+        isize $n = std::io::raw_read($source, &$buf[0], std::io::IO_BUF);
 
         if ($n <= 0) {
             break;

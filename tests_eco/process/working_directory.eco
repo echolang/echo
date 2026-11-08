@@ -37,7 +37,7 @@ usize $n = guard std::fs::writefile($marker, 'here\n') else ($e) {
     die("marker: {$e}");
 };
 
-string $self = std::env::exe();
+std::fs::path $self = guard std::env::exe();
 std::process::command $c = std::process::command($self, ['in']);
 $c->dir($hold->path);
 std::process::output $o = guard $c->output() else ($e) {

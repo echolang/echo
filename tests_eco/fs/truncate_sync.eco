@@ -1,0 +1,20 @@
+std::fs::path $p = guard std::fs::tempfile();
+guard std::fs::writefile($p, 'abcdef');
+
+guard std::fs::truncate($p, 3);
+string $short = guard std::fs::readfile($p);
+echo $short;
+
+guard std::fs::truncate($p, 6);
+std::fs::fileinfo $grown = guard std::fs::info($p);
+echo $grown->size;
+
+std::io::file $f = guard std::fs::open($p, .readwrite);
+guard $f->truncate(1);
+guard $f->sync();
+$f->close();
+
+string $one = guard std::fs::readfile($p);
+echo $one;
+
+guard std::fs::remove($p);

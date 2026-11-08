@@ -1,6 +1,7 @@
 /**
- * Files and directories the stdlib does not cover: listing, mkdir -p, rm -r,
- * and "is this a directory".
+ * epm's bool-shaped filesystem helpers. mkdir -p and rm -r wrap `std::fs`;
+ * listing, kind, and the tree hash still talk to the C helpers, because those
+ * answers are `bool` / `''` rather than `ioerror`.
  */
 
 namespace epm::sys;
@@ -57,23 +58,11 @@ public function mkdir(const string& $path) : bool
 
 public function mkdir_p(const string& $path) : bool
 {
-    if ($path->empty() || $path == '.') {
-        return true;
-    }
+    bool $ok = guard std::fs::mkdir($path, recursive: true) else {
+        return false;
+    };
 
-    if (is_dir($path)) {
-        return true;
-    }
-
-    string $parent = dirname($path);
-
-    if ($parent != $path) {
-        if (!mkdir_p($parent)) {
-            return false;
-        }
-    }
-
-    return mkdir($path);
+    return $ok;
 }
 
 public function rmdir(const string& $path) : bool
@@ -112,39 +101,13 @@ public function readdir(const string& $path) : array<string>
 
 public function remove_all(const string& $path) : bool
 {
-    // **the link, never what it points at.** epm_kind follows one, and a directory reached through it
-    // would be emptied: a vendored `home -> $HOME` made `epm update` delete a home directory
-    if (is_link($path)) {
-        if (epm_unlink($path->cstr()) == 0) {
-            return true;
-        }
+    status<std::io::ioerror> $gone = std::fs::remove_all($path);
 
-        // a directory link or a junction on Windows is removed as a directory, which removes the link
-        return rmdir($path);
+    if ($gone->failed()) {
+        return false;
     }
 
-    int32 $k = epm_kind($path->cstr());
-
-    if ($k == 0) {
-        return true;
-    }
-
-    if ($k == 1) {
-        return epm_unlink($path->cstr()) == 0;
-    }
-
-    array<string> $kids = readdir($path);
-    usize $i = 0;
-
-    while ($i < $kids->count()) {
-        if (!remove_all(join($path, $kids[$i]))) {
-            return false;
-        }
-
-        $i = $i + 1;
-    }
-
-    return rmdir($path);
+    return true;
 }
 
 public function sha256_hex(const string& $data) : string

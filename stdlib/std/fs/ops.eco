@@ -7,50 +7,67 @@ namespace std::fs;
 use std::io::ioerror;
 use std::io::filemode;
 
+private const uint32 TEMP_TRIES = 10000;
+
 public function open(const path& $path, filemode $mode) : result<std::io::file, ioerror>
 {
-    return std::io::file::open($path->string(), $mode);
+    return std::io::file::open($path, $mode);
 }
 
 public function create(const path& $path) : result<std::io::file, ioerror>
 {
-    return std::io::file::open($path->string(), .write);
+    return std::io::file::open($path, .write);
+}
+
+/**
+ * Creates `$path` and fails if it is already there. Write-only, same bargain as `create`.
+ */
+public function create_new(const path& $path) : result<std::io::file, ioerror>
+{
+    return create_new($path, perms: fileperms(std::io::OPEN_MODE));
+}
+
+public function create_new(
+    const path& $path,
+    perms: fileperms $perms
+) : result<std::io::file, ioerror>
+{
+    return std::io::file::open($path, .create_new, perms: $perms);
 }
 
 public function append(const path& $path) : result<std::io::file, ioerror>
 {
-    return std::io::file::open($path->string(), .append);
+    return std::io::file::open($path, .append);
 }
 
 public function readfile(const path& $path) : result<string, ioerror>
 {
-    std::io::file $f = guard std::io::file::open($path->string(), .read) else ($e) {
-        return .error($e);
-    }
+    std::io::file $f = try std::io::file::open($path, .read);
 
     return $f->readall();
 }
 
 public function writefile(const path& $path, const string& $text) : result<usize, ioerror>
 {
-    std::io::file $f = guard std::io::file::open($path->string(), .write) else ($e) {
-        return .error($e);
-    }
+    return writefile($path, $text, perms: fileperms(std::io::OPEN_MODE));
+}
 
-    usize $n = guard $f->write($text) else ($e) {
-        return .error($e);
-    }
-
-    usize $flushed = guard $f->flush() else ($e) {
-        return .error($e);
-    }
+public function writefile(
+    const path& $path,
+    const string& $text,
+    perms: fileperms $perms
+) : result<usize, ioerror>
+{
+    std::io::file $f = try std::io::file::open($path, .write, perms: $perms);
+    usize $n = try $f->write($text);
+    try $f->flush();
 
     return .ok($n);
 }
 
 public function exists(const path& $path) : result<bool, ioerror>
 {
-    bool $ok = guard std::io::access_path($path->string(), std::io::F_OK) else ($e) {
+    bool $ok = guard std::io::access_path($path, std::io::F_OK) else ($e) {
         if ($e->missing()) {
             return .ok(false);
         }
@@ -63,41 +80,39 @@ public function exists(const path& $path) : result<bool, ioerror>
 
 public function remove(const path& $path) : result<bool, ioerror>
 {
-    return std::io::unlink_path($path->string());
+    return std::io::unlink_path($path);
 }
 
 public function rename(const path& $from, const path& $to) : result<bool, ioerror>
 {
-    return std::io::rename_path($from->string(), $to->string());
+    return std::io::rename_path($from, $to);
 }
 
 public function info(const path& $path) : result<fileinfo, ioerror>
 {
-    return std::io::stat_path($path->string(), true);
+    return std::io::stat_path($path, true);
 }
 
 public function linkinfo(const path& $path) : result<fileinfo, ioerror>
 {
-    return std::io::stat_path($path->string(), false);
+    return std::io::stat_path($path, false);
 }
 
 public function chmod(const path& $path, fileperms $perms) : result<bool, ioerror>
 {
-    return std::io::chmod_path($path->string(), $perms);
+    return std::io::chmod_path($path, $perms);
 }
 
 public function realpath(const path& $path) : result<path, ioerror>
 {
-    string $raw = guard std::io::realpath_of($path->string()) else ($e) {
-        return .error($e);
-    };
+    string $raw = try std::io::realpath_of($path);
 
     return .ok(path($raw));
 }
 
 public function copy(const path& $from, const path& $to) : result<bool, ioerror>
 {
-    return std::io::copy_file($from->string(), $to->string());
+    return std::io::copy_file($from, $to);
 }
 
 public function opendir(const path& $path) : result<dir, ioerror>
@@ -107,17 +122,27 @@ public function opendir(const path& $path) : result<dir, ioerror>
 
 /**
  * Creates `$path`. `recursive: true` creates every missing parent and treats an existing
- * directory as success.
+ * directory as success. `$perms` is the mode a new directory starts with, before the umask.
  */
-public function mkdir(const path& $path, recursive: bool $recursive = false) : result<bool, ioerror>
+public function mkdir(
+    const path& $path,
+    recursive: bool $recursive = false
+) : result<bool, ioerror>
+{
+    return mkdir($path, recursive: $recursive, perms: fileperms(std::io::MKDIR_MODE));
+}
+
+public function mkdir(
+    const path& $path,
+    recursive: bool $recursive = false,
+    perms: fileperms $perms
+) : result<bool, ioerror>
 {
     if (!$recursive) {
-        return std::io::mkdir_path($path->string());
+        return std::io::mkdir_path($path, $perms->mode());
     }
 
-    string $raw = $path->string();
-
-    if ($raw->empty() || $raw == '.') {
+    if ($path->view()->size == 0 || $path->string() == '.') {
         return .ok(true);
     }
 
@@ -133,12 +158,10 @@ public function mkdir(const path& $path, recursive: bool $recursive = false) : r
         path $parent = $path->dirname();
 
         if ($parent != $path) {
-            bool $made = guard std::fs::mkdir($parent, recursive: true) else ($err) {
-                return .error($err);
-            }
+            try std::fs::mkdir($parent, recursive: true, perms: $perms);
         }
 
-        return std::io::mkdir_path($raw);
+        return std::io::mkdir_path($path, $perms->mode());
     }
 
     fileinfo $here = $look->unwrap();
@@ -152,7 +175,7 @@ public function mkdir(const path& $path, recursive: bool $recursive = false) : r
 
 public function rmdir(const path& $path) : result<bool, ioerror>
 {
-    return std::io::rmdir_path($path->string());
+    return std::io::rmdir_path($path);
 }
 
 /**
@@ -170,24 +193,28 @@ public function remove_all(const path& $path) : status<ioerror>
     };
 
     if ($look->kind == filekind::symlink) {
-        bool $gone = guard remove($path) else ($e) {
-            return .error($e);
-        };
+        result<bool, ioerror> $gone = remove($path);
 
-        return .ok;
+        if (!$gone->failed()) {
+            return .ok;
+        }
+
+        result<bool, ioerror> $rd = rmdir($path);
+
+        if (!$rd->failed()) {
+            return .ok;
+        }
+
+        return .error($gone->failure());
     }
 
     if ($look->kind != filekind::directory) {
-        bool $gone = guard remove($path) else ($e) {
-            return .error($e);
-        };
+        try remove($path);
 
         return .ok;
     }
 
-    dir $listing = guard opendir($path) else ($e) {
-        return .error($e);
-    };
+    dir $listing = try opendir($path);
 
     foreach ($listing as const &$entry) {
         path $child = $entry->path();
@@ -201,60 +228,132 @@ public function remove_all(const path& $path) : status<ioerror>
 
     $listing->close();
 
-    bool $rd = guard rmdir($path) else ($e) {
-        return .error($e);
-    };
+    try rmdir($path);
 
     return .ok;
 }
 
 /**
- * Writes `$text` to `$path` whole: into `$path.tmp` first, then renamed over.
- * POSIX `rename` replaces an existing file. Windows uses `ReplaceFileW` when
- * `$path` is already there, so the original is not unlinked first.
+ * Writes `$text` to `$path` whole: into a unique temp beside it, then renamed over.
  */
 public function replace(const path& $path, const string& $text) : status<ioerror>
 {
-    path $tmp = $path->concat('.tmp');
+    path $tmp = try tempfile($path->dirname());
 
-    usize $n = guard writefile($tmp, $text) else ($e) {
-        return .error($e);
-    };
-
-#[if: os == windows]
-    bool $present = guard exists($path) else ($e) {
-        return .error($e);
-    };
-
-    if ($present) {
-        std::env::wide_string $dest_w = std::env::wide_string();
-        std::env::wide_string $tmp_w = std::env::wide_string();
-
-        if (!$dest_w->load_utf8($path->string()) || !$tmp_w->load_utf8($tmp->string())) {
-            bool $drop = remove($tmp)->or(false);
-            return .error(std::io::wide_error());
-        }
-
-        if (std::io::c_ReplaceFileW(
-            $dest_w->data(),
-            $tmp_w->data(),
-            ptr<uint16>(null),
-            0,
-            ptr<uint8>(null),
-            ptr<uint8>(null)
-        ) == 0) {
-            bool $drop = remove($tmp)->or(false);
-            return .error(std::io::win32_ioerror());
-        }
-
-        return .ok;
+    guard writefile($tmp, $text) else ($e) {
+        return drop_tmp($tmp, $e);
     }
-#[end]
 
-    bool $moved = guard rename($tmp, $path) else ($e) {
-        bool $drop = remove($tmp)->or(false);
-        return .error($e);
-    };
+    guard std::io::replace_over($tmp, $path) else ($e) {
+        return drop_tmp($tmp, $e);
+    }
 
     return .ok;
+}
+
+private function drop_tmp(const path& $tmp, ioerror $e) : status<ioerror>
+{
+    bool $drop = remove($tmp)->or(false);
+    return .error($e);
+}
+
+public function symlink(const path& $target, const path& $link) : status<ioerror>
+{
+    return std::io::symlink_path($target, $link);
+}
+
+public function hard_link(const path& $from, const path& $to) : status<ioerror>
+{
+    return std::io::hard_link_path($from, $to);
+}
+
+public function readlink(const path& $path) : result<path, ioerror>
+{
+    string $raw = try std::io::readlink_of($path);
+
+    return .ok(path($raw));
+}
+
+public function truncate(const path& $path, int64 $size) : status<ioerror>
+{
+    return std::io::truncate_path($path, $size);
+}
+
+private function exclusive_temp(const path& $dir, as_dir: bool $as_dir) : result<path, ioerror>
+{
+    int32 $pid = std::env::pid();
+    int64 $t = std::time::timestamp::now()->unix_nanos();
+    uint32 $n = 0;
+
+    while ($n < TEMP_TRIES) {
+        path $p = $dir / "eco-{$pid}-{$t}-{$n}";
+
+        if ($as_dir) {
+            guard mkdir($p) else ($e) {
+                if ($e->exists()) {
+                    $n = $n + 1;
+                    continue;
+                }
+
+                return .error($e);
+            }
+        }
+        else {
+            std::io::file $f = guard create_new($p) else ($e) {
+                if ($e->exists()) {
+                    $n = $n + 1;
+                    continue;
+                }
+
+                return .error($e);
+            };
+
+            $f->close();
+        }
+
+        return .ok($p);
+    }
+
+    return .error(ioerror(std::io::EEXIST));
+}
+
+/**
+ * A unique empty file under `$dir`, created exclusively. The path is returned closed;
+ * open it if you need the stream.
+ */
+public function tempfile(const path& $dir) : result<path, ioerror>
+{
+    return exclusive_temp($dir, as_dir: false);
+}
+
+public function tempfile() : result<path, ioerror>
+{
+    return tempfile(std::env::tmp());
+}
+
+/**
+ * A unique empty directory under `$dir`.
+ */
+public function tempdir(const path& $dir) : result<path, ioerror>
+{
+    return exclusive_temp($dir, as_dir: true);
+}
+
+public function tempdir() : result<path, ioerror>
+{
+    return tempdir(std::env::tmp());
+}
+
+/**
+ * An absolute spelling: `cwd()` joined on when this is relative, then `clean()`.
+ */
+public function abs(const path& $path) : result<path, ioerror>
+{
+    if ($path->is_absolute()) {
+        return .ok($path->clean());
+    }
+
+    path $here = try std::env::cwd();
+
+    return .ok(($here / $path)->clean());
 }

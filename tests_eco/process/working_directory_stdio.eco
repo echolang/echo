@@ -39,7 +39,7 @@ bool $made = guard std::fs::mkdir($hold->path) else ($e) {
     die("mkdir: {$e}");
 };
 
-string $self = std::env::exe();
+std::fs::path $self = guard std::env::exe();
 
 std::process::command $quiet = std::process::command($self, ['hello']);
 $quiet->dir($hold->path);

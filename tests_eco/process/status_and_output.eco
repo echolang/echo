@@ -34,7 +34,7 @@ if (std::env::argc() > 1) {
     die('unknown role');
 }
 
-string $self = std::env::exe();
+std::fs::path $self = guard std::env::exe();
 
 std::process::exit_status $s = guard std::process::command($self, ['exit3'])->status() else ($e) {
     die("exit3: {$e}");

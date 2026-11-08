@@ -77,6 +77,14 @@ echo $a_path_ok;
 
 echo $d->error() == null;
 
+int32 $again = 0;
+
+foreach ($d as $e) {
+    $again = $again + 1;
+}
+
+echo $again;
+
 $d->close();
 
 bool $ra = guard std::fs::remove($a) else ($e) {
