@@ -63,9 +63,12 @@ test yield_and_sleep_return
 #[group: "thread"]
 test thread_error_message
 {
-    std::thread::error $e = std::thread::error(11);
+    std::thread::error $e = std::thread::error(std::thread::ENOMEM);
     assert($e->message()->contains('thread'));
     assert(!$e->exhausted());
+
+    std::thread::error $again = std::thread::error(std::thread::EAGAIN);
+    assert($again->exhausted());
 }
 
 #[end]
