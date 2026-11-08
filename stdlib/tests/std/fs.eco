@@ -134,7 +134,12 @@ test tempfile_and_create
     $a->close();
     std::io::file $n = guard std::fs::create_new($dir->join('n.txt'));
     $n->close();
-    echo $tmp->string();
+    bool $tmp_there = guard std::fs::exists($tmp);
+    assert($tmp_there);
+    string $appended = guard std::fs::readfile($dir->join('c.txt'));
+    assert($appended == 'z');
+    bool $new_there = guard std::fs::exists($dir->join('n.txt'));
+    assert($new_there);
     guard std::fs::remove_all($dir);
 }
 
@@ -169,12 +174,11 @@ test missing_path_is_not_there
 {
     bool $there = guard std::fs::exists(std::fs::path('no-such-echo-stdlib-path-xyz'));
     assert(!$there);
-    string $missing = guard std::fs::readfile(std::fs::path('no-such-echo-stdlib-path-xyz')) else ($e) {
+    guard std::fs::readfile(std::fs::path('no-such-echo-stdlib-path-xyz')) else ($e) {
         assert($e->missing());
         return;
     };
     assert(false, 'read of a missing file succeeded');
-    echo $missing;
 }
 
 #[group: "fs"]
@@ -205,7 +209,7 @@ test symlink_and_readlink
     std::fs::path $target = guard std::fs::readlink($link);
     assert($target->basename() == 't.txt');
     std::fs::fileinfo $info = guard std::fs::linkinfo($link);
-    echo $info->size;
+    assert($info->kind == std::fs::filekind::symlink);
     guard std::fs::remove_all($dir);
 }
 

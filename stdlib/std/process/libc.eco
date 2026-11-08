@@ -265,6 +265,7 @@ internal struct security_attributes
 
 internal const uint32 STARTF_USESTDHANDLES = 256;
 internal const uint32 CREATE_SUSPENDED = 4;
+internal const uint32 RESUME_FAILED = 4294967295;
 internal const uint32 CREATE_UNICODE_ENVIRONMENT = 1024;
 internal const uint32 EXTENDED_STARTUPINFO_PRESENT = 524288;
 internal const usize PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 131074;

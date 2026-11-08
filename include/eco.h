@@ -35,6 +35,11 @@
 // against the tag it resolved. Composed here rather than formatted at the call site
 #define ECO_VERSION_STRING ECO_STRINGIFY(ECO_VERSION_MAJOR) "." ECO_STRINGIFY(ECO_VERSION_MINOR) "." ECO_STRINGIFY(ECO_VERSION_PATCH) ECO_VERSION_SUFFIX
 
+namespace Compiler
+{
+    const char *version_string();
+};
+
 // When set to "1", the standard library will be embedded into the "echoc" binary and loaded from there.
 //
 // Otherwise, the standard library will be loaded and recompiled from its

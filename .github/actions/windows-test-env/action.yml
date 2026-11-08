@@ -1,0 +1,19 @@
+name: Windows test environment
+description: MSVC environment, LLVM and the build job's binaries in build/
+
+runs:
+  using: composite
+  steps:
+    - name: MSVC environment
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Setup LLVM
+      uses: ZhongRuoyu/setup-llvm@v0
+      with:
+        llvm-version: 20
+
+    - name: Download test binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-test-binaries
+        path: build

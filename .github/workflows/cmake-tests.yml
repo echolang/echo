@@ -3,14 +3,19 @@ name: Tests
 on:
   push:
     branches:
-      - '**'
+      - master
+    paths-ignore: &docs_only
+      - 'docs/**'
+      - 'docs_legacy/**'
+      - 'notes/**'
+      - 'todo/**'
+      - '**/*.md'
   pull_request:
-    branches:
-      - '**'
+    paths-ignore: *docs_only
+  workflow_dispatch:
 
-# the release job creates a tag and a release, which is a write to the repository
 permissions:
-  contents: write
+  contents: read
 
 # master is serialized rather than cancelled: the patch number is resolved from the tags that exist
 # when a run starts, so two pushes landing close together would otherwise both resolve to the same
@@ -20,7 +25,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
+env:
+  CCACHE_BASEDIR: ${{ github.workspace }}
+
 jobs:
+  # host `echoc test` of stdlib runs last here, after the upload. cheaper than the e2e corpus, so it
+  # gates those shards: a stdlib failure skips e2e rather than burning time on tests_eco. no WASI:
+  # `echoc test` is the host. unit stays beside this, not behind it
   build_linux:
     strategy:
       fail-fast: false
@@ -31,6 +42,7 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     env:
       BUILD_TYPE: RelWithDebInfo
       USE_CLANG: 1
@@ -57,12 +69,21 @@ jobs:
           libc++abi-dev \
           zlib1g-dev
 
+    - name: Compiler cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: build-linux-${{ matrix.arch }}
+        max-size: 1G
+        save: ${{ github.ref == 'refs/heads/master' }}
+
     - name: Configure CMake
       run: |
         cmake -B build -G Ninja \
           -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
           -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
           -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
 
     - name: Build
@@ -76,23 +97,72 @@ jobs:
           build/tests
           build/echoc
         if-no-files-found: error
+        retention-days: 1
 
-  test_linux:
+    # x86_64 Linux only, and deliberately: the embedded file order comes from expanding the
+    # manifest's #[sources:] globs, which is filesystem order, so comparing bytes across two
+    # hosts would be a flake
+    - name: Check the committed stdlib header is not stale
+      if: matrix.arch == 'x86_64'
+      run: |
+        : > emit.eco
+        ./build/echoc run --emit-stdlib-header emit.eco
+        rm emit.eco
+        if ! git diff --exit-code -- stdlib/build/stdlib_embedded.h; then
+          echo "::error file=stdlib/build/stdlib_embedded.h::The committed embedded stdlib header does not match the stdlib sources. Regenerate it with 'echoc run --emit-stdlib-header <file>.eco' and commit the result."
+          exit 1
+        fi
+
+    - name: Test stdlib
+      working-directory: ${{github.workspace}}/build
+      run: ./echoc test -m ../stdlib --track-allocations
+
+  test_linux_unit:
     needs: build_linux
-    # one matrix cell of build_linux failing must not skip the other arch's tests
+    # a stdlib failure in build_linux must not skip unit, and one arch failing must not skip the other
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit, e2e-0, e2e-1, stdlib]
-        os:
+        include:
           - arch: x86_64
             runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.os.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     env:
-      ECO_SHARD: ${{ matrix.shard }}
+      # the tests binary was compiled on the build job; these override the baked-in absolute paths
+      ECHOC_BINARY: ${{ github.workspace }}/build/echoc
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Test environment
+      uses: ./.github/actions/linux-test-env
+      with:
+        arch: ${{ matrix.arch }}
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ./tests "~[e2e]"
+
+  test_linux_e2e:
+    needs: build_linux
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
       # the tests binary was compiled on the build job; these override the baked-in absolute paths
       ECHOC_BINARY: ${{ github.workspace }}/build/echoc
       ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
@@ -104,47 +174,15 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v5
 
-    - name: Setup LLVM
-      uses: ZhongRuoyu/setup-llvm@v0
+    - name: Test environment
+      uses: ./.github/actions/linux-test-env
       with:
-        llvm-version: 20
-
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y libc++-dev libc++abi-dev zlib1g-dev
-
-    - name: Install WASI SDK and wasmtime
-      run: |
-        case "${{ matrix.os.arch }}" in
-          arm64) WASI_ARCH=arm64; WT_ARCH=aarch64 ;;
-          *)     WASI_ARCH=x86_64; WT_ARCH=x86_64 ;;
-        esac
-        curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-${WASI_ARCH}-linux.tar.gz" \
-          | sudo tar xz -C /opt
-        sudo ln -sfn "/opt/wasi-sdk-27.0-${WASI_ARCH}-linux" /opt/wasi-sdk
-        echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
-        curl -sL "https://github.com/bytecodealliance/wasmtime/releases/download/v29.0.1/wasmtime-v29.0.1-${WT_ARCH}-linux.tar.xz" \
-          | tar xJ
-        sudo mv "wasmtime-v29.0.1-${WT_ARCH}-linux/wasmtime" /usr/local/bin/
-
-    - name: Download test binaries
-      uses: actions/download-artifact@v4
-      with:
-        name: linux-${{ matrix.os.arch }}-test-binaries
-        path: build
+        arch: ${{ matrix.arch }}
+        wasi: 'true'
 
     - name: Test
       working-directory: ${{github.workspace}}/build
-      run: |
-        chmod +x ./tests ./echoc
-        case "${ECO_SHARD}" in
-          unit)    ./tests "~[e2e]" ;;
-          e2e-0)   ./tests "[e2e]" --shard 0/2 ;;
-          e2e-1)   ./tests "[e2e]" --shard 1/2 ;;
-          stdlib)  ./echoc test -m ../stdlib --track-allocations ;;
-          *)       echo "unknown shard ${ECO_SHARD}" >&2; exit 1 ;;
-        esac
+      run: ./tests "[e2e]" --shard ${{ matrix.shard }}/2
 
   build_windows:
     runs-on: windows-2022
@@ -167,6 +205,13 @@ jobs:
     - name: Install Ninja
       run: choco install ninja --yes --no-progress
 
+    - name: Compiler cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: build-windows
+        max-size: 1G
+        save: ${{ github.ref == 'refs/heads/master' }}
+
     - name: Configure CMake
       shell: pwsh
       run: |
@@ -174,6 +219,8 @@ jobs:
           "-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}" `
           "-DCMAKE_C_COMPILER=$env:LLVM_PATH\bin\clang.exe" `
           "-DCMAKE_CXX_COMPILER=$env:LLVM_PATH\bin\clang++.exe" `
+          "-DCMAKE_C_COMPILER_LAUNCHER=ccache" `
+          "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" `
           "-DLLVM_DIR=$env:LLVM_PATH\lib\cmake\llvm"
 
     - name: Build
@@ -187,17 +234,42 @@ jobs:
           build/tests.exe
           build/echoc.exe
         if-no-files-found: error
+        retention-days: 1
 
-  test_windows:
+    - name: Test stdlib
+      working-directory: ${{github.workspace}}/build
+      shell: pwsh
+      run: .\echoc.exe test -m ../stdlib --track-allocations
+
+  test_windows_unit:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    needs: build_windows
+    if: ${{ !cancelled() }}
+    env:
+      ECHOC_BINARY: ${{ github.workspace }}/build/echoc.exe
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Test environment
+      uses: ./.github/actions/windows-test-env
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      shell: pwsh
+      run: .\tests.exe "~[e2e]"
+
+  test_windows_e2e:
     runs-on: windows-2022
     timeout-minutes: 180
     needs: build_windows
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit, e2e-0, e2e-1, stdlib]
+        shard: [0, 1, 2]
     env:
-      ECO_SHARD: ${{ matrix.shard }}
       # the tests binary was compiled on the build job; these override the baked-in absolute paths
       ECHOC_BINARY: ${{ github.workspace }}/build/echoc.exe
       ECO_E2E_TESTS_DIR: ${{ github.workspace }}/tests_eco
@@ -210,31 +282,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v5
 
-    - name: MSVC environment
-      uses: ilammy/msvc-dev-cmd@v1
-
-    - name: Setup LLVM
-      uses: ZhongRuoyu/setup-llvm@v0
-      with:
-        llvm-version: 20
-
-    - name: Download test binaries
-      uses: actions/download-artifact@v4
-      with:
-        name: windows-test-binaries
-        path: build
+    - name: Test environment
+      uses: ./.github/actions/windows-test-env
 
     - name: Test
       working-directory: ${{github.workspace}}/build
       shell: pwsh
-      run: |
-        switch ($env:ECO_SHARD) {
-          "unit"    { .\tests.exe "~[e2e]"; break }
-          "e2e-0"   { .\tests.exe "[e2e]" --shard 0/2; break }
-          "e2e-1"   { .\tests.exe "[e2e]" --shard 1/2; break }
-          "stdlib"  { .\echoc.exe test -m ../stdlib --track-allocations; break }
-          default   { Write-Error "unknown shard $($env:ECO_SHARD)"; exit 1 }
-        }
+      run: .\tests.exe "[e2e]" --shard ${{ matrix.shard }}/3
 
   # the version the release binaries are stamped with and the tag the release gets. Resolved once, so
   # every platform and the release itself cannot disagree about what was built
@@ -244,7 +298,7 @@ jobs:
   # and no commit pushed back onto master
   resolve_version:
     runs-on: ubuntu-24.04
-    needs: [test_linux, test_windows]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       patch: ${{ steps.resolve.outputs.patch }}
@@ -301,15 +355,33 @@ jobs:
 
           echo "Resolved ${version}${suffix} (previous patch in series: ${highest})"
 
-  build_release:
-    # oldest supported glibc, so the binary runs on 22.04 and newer
-    runs-on: ubuntu-22.04
+  build_release_unix:
     needs: resolve_version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # oldest supported glibc, so the binary runs on 22.04 and newer
+          - runner: ubuntu-22.04
+            bin: echo-linux-x86_64
+            epm: epm-linux-x86_64
+            wasi: x86_64
+          - runner: ubuntu-22.04-arm
+            bin: echo-linux-arm64
+            epm: epm-linux-arm64
+            wasi: arm64
+          - runner: macos-15
+            bin: echo-macos-arm64
+            epm: epm-macos-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     env:
-      BUILD_TYPE: Release
       USE_CLANG: 1
-      BIN_NAME: echo-linux-x86_64
-      EPM_BIN_NAME: epm-linux-x86_64
+      BIN_NAME: ${{ matrix.bin }}
+      EPM_BIN_NAME: ${{ matrix.epm }}
+      VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
+      ECO_VERSION_PATCH: ${{needs.resolve_version.outputs.patch}}
+      ECO_VERSION_SUFFIX: ${{needs.resolve_version.outputs.suffix}}
 
     steps:
       - name: Checkout repository
@@ -320,9 +392,10 @@ jobs:
         with:
           llvm-version: 20
 
-      # libzstd-dev is here for its *static* half: LLVM links zstd, and the release build below puts it
+      # libzstd-dev is here for its *static* half: LLVM links zstd, and the release build puts it
       # inside the binary rather than naming it - see ECO_STATIC_ZSTD in CMakeLists.txt
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt update
           sudo apt install -y cmake \
@@ -332,459 +405,36 @@ jobs:
             libc++abi-dev \
             zlib1g-dev \
             libzstd-dev
-
-      # stage one: an ordinary compiler, reading the standard library from this checkout. It exists to
-      # regenerate the embeddable header below - a release binary carries the stdlib, and the bytes it
-      # carries have to come from the sources this commit actually has
-      - name: Configure CMake
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
-            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
-
-      - name: Build stage one
-        run: cmake --build ${{github.workspace}}/build --config Release --target echoc
-
-      # an empty program is enough: the entry point is a file's scope statements, so there is nothing
-      # to write, and `run` is used rather than `build` so no linker is involved
-      - name: Regenerate the embedded stdlib header
-        run: |
-          : > emit.eco
-          ./build/echoc run --emit-stdlib-header emit.eco
-          rm emit.eco
-
-      # x86_64 Linux only, and deliberately: the embedded file order comes from expanding the
-      # manifest's #[sources:] globs, which is filesystem order, so comparing bytes across two
-      # hosts would be a flake. Each platform builds against the header it just regenerated
-      # either way - this step is about the *committed* one being stale, which is silent otherwise
-      - name: Check the committed stdlib header is not stale
-        run: |
-          if ! git diff --exit-code -- stdlib/build/stdlib_embedded.h; then
-            echo "::error file=stdlib/build/stdlib_embedded.h::The committed embedded stdlib header does not match the stdlib sources. Regenerate it with 'echoc run --emit-stdlib-header <file>.eco' and commit the result."
-            exit 1
-          fi
-
-      - name: Install WASI SDK
-        run: |
-          curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-x86_64-linux.tar.gz" \
-            | sudo tar xz -C /opt
-          sudo ln -sfn /opt/wasi-sdk-27.0-x86_64-linux /opt/wasi-sdk
-          echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
-
-      # stage two: the binary that ships. The stdlib goes inside it, because the path stage one reads
-      # it from is this runner's and means nothing to whoever downloads the result
-      - name: Configure release build
-        run: |
-          cmake -B build-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
-            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
-            -DECO_EMBED_STDLIB=ON \
-            -DECO_STATIC_ZSTD=ON \
-            -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
-            -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
-
-      - name: Build release
-        run: cmake --build ${{github.workspace}}/build-release --config Release --target echoc
-
-      - name: Smoke test the release binary
-        env:
-          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          cp build-release/echoc "$RUNNER_TEMP/echoc"
-
-          reported=$("$RUNNER_TEMP/echoc" --version)
-          if [ "$reported" != "$EXPECTED" ]; then
-            echo "The binary reports '$reported', expected '$EXPECTED'." >&2
-            exit 1
-          fi
-
-          # from outside the checkout, and using the standard library: the one thing that proves the
-          # stdlib is really inside the binary rather than being read from this runner's source tree
-          cd "$RUNNER_TEMP"
-          printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
-          ./echoc run smoke.eco
-          if [ -n "${WASI_SDK_PATH:-}" ]; then
-            ./echoc build --target-os wasi -p ir -o smoke.wasm smoke.eco > smoke.ir
-            if grep -q pthread smoke.ir; then
-              echo "embedded wasi IR still names pthread; stdlib thread should be dropped." >&2
-              exit 1
-            fi
-          fi
-
-      # the smoke test above runs on the machine that built the binary, so it cannot see a dependency
-      # on something only that machine has - which the loader turns into a process that never starts
-      - name: Check the binary carries its dependencies
-        run: ./tools/check_release_deps.sh build-release/echoc
-
-      # epm is Echo, not a CMake target. The compiler that just shipped is the one that compiles it.
-      # libjson and libcurl are path-depends next to this checkout; the script clones them there.
-      # static curl is built in this job so the released epm does not NEED libcurl.so.
-      - name: Build a static libcurl
-        run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
-
-      - name: Build epm with the release compiler
-        env:
-          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl" "${VERSION}"
-
-      - name: Smoke test epm
-        env:
-          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          reported=$("$RUNNER_TEMP/epm" --version)
-          if [ "$reported" != "$EXPECTED" ]; then
-            echo "epm reports '$reported', expected '$EXPECTED'." >&2
-            exit 1
-          fi
-
-      - name: Check epm carries only allowed dependencies
-        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm"
-
-      - name: Package release archive
-        env:
-          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          mkdir -p stage epm-stage
-          ./tools/linux/bundle_musl.sh stage/sysroot
-          cp build-release/echoc stage/
-          cp "$RUNNER_TEMP/epm" stage/
-          cp "$RUNNER_TEMP/epm" epm-stage/
-          cp README.md LICENSE stage/
-          cp LICENSE epm-stage/
-          tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
-          tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
-
-      - name: Smoke a musl command
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP"
-          printf 'echo 1.5;\n' > smoke-musl.eco
-          "${{github.workspace}}/stage/echoc" build --target-libc musl -o smoke-musl smoke-musl.eco
-          if ldd ./smoke-musl >ldd.out 2>&1; then
-            echo "musl command is dynamic:" >&2
-            cat ldd.out >&2
-            exit 1
-          fi
-          grep -q 'not a dynamic executable' ldd.out
-          test "$(./smoke-musl)" = "1.500000"
-
-      - name: Upload release archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{env.BIN_NAME}}
-          path: ${{github.workspace}}/${{env.BIN_NAME}}.tar.gz
-
-      - name: Upload epm archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{env.EPM_BIN_NAME}}
-          path: ${{github.workspace}}/${{env.EPM_BIN_NAME}}.tar.gz
-
-  build_release_linux_arm64:
-    runs-on: ubuntu-22.04-arm
-    needs: resolve_version
-    env:
-      BUILD_TYPE: Release
-      USE_CLANG: 1
-      BIN_NAME: echo-linux-arm64
-      EPM_BIN_NAME: epm-linux-arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Setup LLVM
-        uses: ZhongRuoyu/setup-llvm@v0
-        with:
-          llvm-version: 20
-
-      # libzstd-dev is here for its *static* half: LLVM links zstd, and the release build below puts it
-      # inside the binary rather than naming it - see ECO_STATIC_ZSTD in CMakeLists.txt
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y cmake \
-            ninja-build \
-            make \
-            libc++-dev \
-            libc++abi-dev \
-            zlib1g-dev \
-            libzstd-dev
-
-      # stage one: an ordinary compiler, reading the standard library from this checkout. It exists to
-      # regenerate the embeddable header below - a release binary carries the stdlib, and the bytes it
-      # carries have to come from the sources this commit actually has
-      - name: Configure CMake
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
-            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
-
-      - name: Build stage one
-        run: cmake --build ${{github.workspace}}/build --config Release --target echoc
-
-      # an empty program is enough: the entry point is a file's scope statements, so there is nothing
-      # to write, and `run` is used rather than `build` so no linker is involved
-      - name: Regenerate the embedded stdlib header
-        run: |
-          : > emit.eco
-          ./build/echoc run --emit-stdlib-header emit.eco
-          rm emit.eco
-
-      # the committed-header byte check stays on the x86_64 Linux job: glob expansion is filesystem
-      # order, so a second Linux host would flake the same way a Mac would
-
-      - name: Install WASI SDK
-        run: |
-          curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-arm64-linux.tar.gz" \
-            | sudo tar xz -C /opt
-          sudo ln -sfn /opt/wasi-sdk-27.0-arm64-linux /opt/wasi-sdk
-          echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
-
-      # stage two: the binary that ships. The stdlib goes inside it, because the path stage one reads
-      # it from is this runner's and means nothing to whoever downloads the result
-      - name: Configure release build
-        run: |
-          cmake -B build-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
-            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
-            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
-            -DECO_EMBED_STDLIB=ON \
-            -DECO_STATIC_ZSTD=ON \
-            -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
-            -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
-
-      - name: Build release
-        run: cmake --build ${{github.workspace}}/build-release --config Release --target echoc
-
-      - name: Smoke test the release binary
-        env:
-          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          cp build-release/echoc "$RUNNER_TEMP/echoc"
-
-          reported=$("$RUNNER_TEMP/echoc" --version)
-          if [ "$reported" != "$EXPECTED" ]; then
-            echo "The binary reports '$reported', expected '$EXPECTED'." >&2
-            exit 1
-          fi
-
-          # from outside the checkout, and using the standard library: the one thing that proves the
-          # stdlib is really inside the binary rather than being read from this runner's source tree
-          cd "$RUNNER_TEMP"
-          printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
-          ./echoc run smoke.eco
-          if [ -n "${WASI_SDK_PATH:-}" ]; then
-            ./echoc build --target-os wasi -p ir -o smoke.wasm smoke.eco > smoke.ir
-            if grep -q pthread smoke.ir; then
-              echo "embedded wasi IR still names pthread; stdlib thread should be dropped." >&2
-              exit 1
-            fi
-          fi
-
-      # the smoke test above runs on the machine that built the binary, so it cannot see a dependency
-      # on something only that machine has - which the loader turns into a process that never starts
-      - name: Check the binary carries its dependencies
-        run: ./tools/check_release_deps.sh build-release/echoc
-
-      # epm is Echo, not a CMake target. The compiler that just shipped is the one that compiles it.
-      # libjson and libcurl are path-depends next to this checkout; the script clones them there.
-      # static curl is built in this job so the released epm does not NEED libcurl.so.
-      - name: Build a static libcurl
-        run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
-
-      - name: Build epm with the release compiler
-        env:
-          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl" "${VERSION}"
-
-      - name: Smoke test epm
-        env:
-          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          reported=$("$RUNNER_TEMP/epm" --version)
-          if [ "$reported" != "$EXPECTED" ]; then
-            echo "epm reports '$reported', expected '$EXPECTED'." >&2
-            exit 1
-          fi
-
-      - name: Check epm carries only allowed dependencies
-        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm"
-
-      - name: Package release archive
-        env:
-          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          mkdir -p stage epm-stage
-          ./tools/linux/bundle_musl.sh stage/sysroot
-          cp build-release/echoc stage/
-          cp "$RUNNER_TEMP/epm" stage/
-          cp "$RUNNER_TEMP/epm" epm-stage/
-          cp README.md LICENSE stage/
-          cp LICENSE epm-stage/
-          tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
-          tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
-
-      - name: Smoke a musl command
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP"
-          printf 'echo 1.5;\n' > smoke-musl.eco
-          "${{github.workspace}}/stage/echoc" build --target-libc musl -o smoke-musl smoke-musl.eco
-          if ldd ./smoke-musl >ldd.out 2>&1; then
-            echo "musl command is dynamic:" >&2
-            cat ldd.out >&2
-            exit 1
-          fi
-          grep -q 'not a dynamic executable' ldd.out
-          test "$(./smoke-musl)" = "1.500000"
-
-      - name: Upload release archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{env.BIN_NAME}}
-          path: ${{github.workspace}}/${{env.BIN_NAME}}.tar.gz
-
-      - name: Upload epm archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{env.EPM_BIN_NAME}}
-          path: ${{github.workspace}}/${{env.EPM_BIN_NAME}}.tar.gz
-
-  build_release_macos_arm64:
-    runs-on: macos-15
-    needs: resolve_version
-    env:
-      BUILD_TYPE: Release
-      USE_CLANG: 1
-      BIN_NAME: echo-macos-arm64
-      EPM_BIN_NAME: epm-macos-arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Setup LLVM
-        uses: ZhongRuoyu/setup-llvm@v0
-        with:
-          llvm-version: 20
 
       # zstd is here for its *static* half - see ECO_STATIC_ZSTD in CMakeLists.txt. The shared one is
       # already on the runner, which is exactly the problem: it lives under /opt/homebrew, and that
       # path does not exist on the Mac that downloads the result
-      - name: Install dependencies
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja zstd
+
+      - name: Install WASI SDK
+        if: matrix.wasi
         run: |
-          brew install cmake ninja zstd
+          curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-${{ matrix.wasi }}-linux.tar.gz" \
+            | sudo tar xz -C /opt
+          sudo ln -sfn "/opt/wasi-sdk-27.0-${{ matrix.wasi }}-linux" /opt/wasi-sdk
+          echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
 
-      - name: Configure CMake
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER=/usr/bin/clang \
-            -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-${{ matrix.bin }}
+          max-size: 1G
 
-      - name: Build stage one
-        run: cmake --build ${{github.workspace}}/build --config Release --target echoc
+      - name: Static libcurl cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/static-curl
+          key: static-curl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_static_curl.sh') }}
 
-      - name: Regenerate the embedded stdlib header
-        run: |
-          : > emit.eco
-          ./build/echoc run --emit-stdlib-header emit.eco
-          rm emit.eco
-
-      - name: Configure release build
-        run: |
-          cmake -B build-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER=/usr/bin/clang \
-            -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
-            -DECO_EMBED_STDLIB=ON \
-            -DECO_STATIC_ZSTD=ON \
-            -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
-            -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
-
-      - name: Build release
-        run: cmake --build ${{github.workspace}}/build-release --config Release --target echoc
-
-      - name: Smoke test the release binary
-        env:
-          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          cp build-release/echoc "$RUNNER_TEMP/echoc"
-
-          reported=$("$RUNNER_TEMP/echoc" --version)
-          if [ "$reported" != "$EXPECTED" ]; then
-            echo "The binary reports '$reported', expected '$EXPECTED'." >&2
-            exit 1
-          fi
-
-          cd "$RUNNER_TEMP"
-          printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
-          ./echoc run smoke.eco
-          if [ -n "${WASI_SDK_PATH:-}" ]; then
-            ./echoc build --target-os wasi -p ir -o smoke.wasm smoke.eco > smoke.ir
-            if grep -q pthread smoke.ir; then
-              echo "embedded wasi IR still names pthread; stdlib thread should be dropped." >&2
-              exit 1
-            fi
-          fi
-
-      # this runner has Homebrew and the machine downloading the result does not, so a /opt/homebrew
-      # load command is invisible to every step above and fatal on arrival
-      - name: Check the binary carries its dependencies
-        run: ./tools/check_release_deps.sh build-release/echoc
-
-      # epm is Echo, not a CMake target. Static curl sits on an OpenSSL we build here
-      # plus Apple SecTrust; Homebrew must not appear on the link line.
-      - name: Build a static libcurl
-        run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
-
-      - name: Build epm with the release compiler
-        env:
-          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl" "${VERSION}"
-
-      - name: Smoke test epm
-        env:
-          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
-        run: |
-          set -euo pipefail
-          reported=$("$RUNNER_TEMP/epm" --version)
-          if [ "$reported" != "$EXPECTED" ]; then
-            echo "epm reports '$reported', expected '$EXPECTED'." >&2
-            exit 1
-          fi
-
-      - name: Check epm carries only allowed dependencies
-        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm"
-
-      - name: Package release archive
-        run: |
-          set -euo pipefail
-          mkdir -p stage epm-stage
-          cp build-release/echoc stage/
-          cp "$RUNNER_TEMP/epm" stage/
-          cp "$RUNNER_TEMP/epm" epm-stage/
-          cp README.md LICENSE stage/
-          cp LICENSE epm-stage/
-          tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
-          tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
+      - name: Build, smoke and package the release
+        run: ./tools/build_release_unix.sh
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
@@ -825,6 +475,18 @@ jobs:
       - name: Install Ninja and Inno Setup
         run: choco install ninja innosetup --yes --no-progress
 
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-echo-windows-x86_64
+          max-size: 1G
+
+      - name: Static libcurl cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/static-curl
+          key: static-curl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_static_curl.sh') }}
+
       - name: Build the Windows release
         shell: pwsh
         run: ./tools/windows/build_release.ps1
@@ -851,7 +513,16 @@ jobs:
   # here pushes a ref by hand and nothing commits back onto the branch
   release:
     runs-on: ubuntu-24.04
-    needs: [resolve_version, build_release, build_release_linux_arm64, build_release_macos_arm64, build_release_windows_x86_64]
+    needs:
+      - resolve_version
+      - build_linux
+      - test_linux_unit
+      - test_linux_e2e
+      - build_windows
+      - test_windows_unit
+      - test_windows_e2e
+      - build_release_unix
+      - build_release_windows_x86_64
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
 
     # the attestation below is signed with this run's OIDC identity, and stored against the repository
@@ -870,6 +541,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: '{echo,epm}-*'
 
       # one flat directory of exactly what is published, so checksums, attestation and the release name the same files
       - name: Checksum the release assets

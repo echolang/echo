@@ -13,7 +13,7 @@ $v = $owned->view();
 echo $v->size;
 echo $v->byte(0);
 echo $v->empty();
-echo $v->chars();
+echo $v->count();
 echo $v->starts($owned->view());
 
 // a sub-view narrows without touching a reference count, because there is none to touch

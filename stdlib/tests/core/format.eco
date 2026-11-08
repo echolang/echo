@@ -61,7 +61,7 @@ test bool_and_empty_spec
 #[group: "core"]
 test hex_of_a_word_and_of_bytes
 {
-    assert(str::hex(255 as uint64)->ends('ff'));
+    assert(str::hex(255 as uint64) == '00000000000000ff');
     assert(str::hex(255 as uint64)->size() == 16);
     assert(str::hex('AB') == '4142');
     string::view $v = 'A';

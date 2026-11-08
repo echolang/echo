@@ -1,4 +1,4 @@
-# Windows release: two-stage echoc, bundled clang/lld/sysroot, epm, zip, Inno.
+# Windows release: echoc, bundled clang/lld/sysroot, epm, zip, Inno.
 #
 # Required env:
 #   LLVM_PATH, BUILD_TYPE, VERSION, ECO_VERSION_PATCH, ECO_VERSION_SUFFIX
@@ -71,30 +71,14 @@ $patch = $env:ECO_VERSION_PATCH
 $suffix = $env:ECO_VERSION_SUFFIX
 if ($null -eq $suffix) { $suffix = "" }
 
-Write-Host "configure stage one"
-Invoke-Checked -What "cmake stage one" -Block {
-    & cmake -B build -G Ninja `
-        "-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE" `
-        "-DCMAKE_C_COMPILER=$llvmClang" `
-        "-DCMAKE_CXX_COMPILER=$llvmClangxx" `
-        "-DLLVM_DIR=$llvmDir"
+$launcher = @()
+if (Get-Command ccache -ErrorAction SilentlyContinue) {
+    $launcher = @("-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
 }
-
-Write-Host "build stage one"
-Invoke-Checked -What "build echoc" -Block {
-    & cmake --build (Join-Path $root "build") --config $env:BUILD_TYPE --target echoc
-}
-
-Write-Host "regenerate embedded stdlib"
-New-Item -ItemType File -Path emit.eco -Force | Out-Null
-Invoke-Checked -What "emit-stdlib-header" -Block {
-    & .\build\echoc.exe run --emit-stdlib-header emit.eco
-}
-Remove-Item emit.eco
 
 Write-Host "configure release (static zstd required)"
 Invoke-Checked -What "cmake release" -Block {
-    & cmake -B build-release -G Ninja `
+    & cmake -B build-release -G Ninja @launcher `
         "-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE" `
         "-DCMAKE_C_COMPILER=$llvmClang" `
         "-DCMAKE_CXX_COMPILER=$llvmClangxx" `

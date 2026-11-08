@@ -18,9 +18,10 @@
  * with the same gate: a null owner owns nothing, so it is not uniquely owned, and writing through
  * it would scribble on the program's own image.
  *
- * Sizes are **bytes**, never characters. `->size()` is O(1) and `->chars()` is a walk; that
- * the two disagree is the point rather than an oversight - `'héllo'` is five characters in six
- * bytes. Nothing here validates UTF-8, and nothing here normalizes or case-folds.
+ * Sizes are **bytes**, never characters. `->size()` is O(1) bytes; `->count()` is how many
+ * characters, a walk. `'héllo'` is five characters in six bytes. `->chars()` is that walk as
+ * windows, the same job `str::lines` has for lines. Nothing here validates UTF-8, and nothing
+ * here normalizes or case-folds.
  *
  * `#[echoc::core: string]` and `#[echoc::core: string_view]` are how the compiler finds these two without
  * hardcoding a name - a literal's type, `echo`'s one non-primitive case. It resolves the shape
@@ -231,33 +232,37 @@ public struct string : contract::comparable<string>
         }
 
         /**
-         * The number of UTF-8 codepoints, in one pass.
-         *
-         * A continuation byte is `10xxxxxx`, so masking off the low six bits leaves `0x80` on exactly
-         * those and something else on every byte that begins a character. This used to divide by 64 and
-         * compare to 2 - the same statement, made the only way it could be while `&` had a precedence
-         * entry and no codegen - and it carried a paragraph about literal widening that only existed to
-         * keep that divide unsigned. The mask needs none of it.
+         * How many characters. A continuation byte is `10xxxxxx`, so masking off the low six bits
+         * leaves `0x80` on exactly those and something else on every byte that begins a character.
          *
          * **Spaces around the `&` are load-bearing**: `&$x` lexes as an address-of and `& $x` as this
          * operator, which is the one place in the language where whitespace changes meaning.
          *
-         * Invalid UTF-8 is counted, not rejected. This is a count, not a validator.
+         * Invalid UTF-8 is counted, not rejected. `str::is_utf8` is the validator. `chars()` is
+         * the walk of the same characters as windows.
          */
-        const function chars() : usize
+        const function count() : usize
         {
-            usize $count = 0;
+            usize $n = 0;
             usize $i = 0;
 
             while ($i < $this->size) {
                 if (($this->bytes:$[$i] & 192) != 128) {
-                    $count = $count + 1;
+                    $n = $n + 1;
                 }
 
                 $i = $i + 1;
             }
 
-            return $count;
+            return $n;
+        }
+
+        /**
+         * Each character as a window into this view. Invalid UTF-8 is a window of one byte.
+         */
+        const function chars() : str::parts
+        {
+            return str::chars(string($this));
         }
 
         /**
@@ -371,16 +376,6 @@ public struct string : contract::comparable<string>
         }
 
         return $this->window->bytes;
-    }
-
-    /**
-     * A window over the live bytes. For an inline value that is `$sso_*` of
-     * *this* object, rebuilt every time, so a move leaves it correct.
-     */
-    #[inline]
-    private const function as_view() : string::view
-    {
-        return string::view($this->live_bytes(), $this->window->size);
     }
 
     /**
@@ -514,11 +509,11 @@ public struct string : contract::comparable<string>
     #[implicit]
     const function view() : string::view
     {
-        return $this->as_view();
+        return string::view($this->live_bytes(), $this->window->size);
     }
 
     /**
-     * The byte count. O(1) - it is a field, not a walk. See `chars`.
+     * The byte count. O(1) - it is a field, not a walk. See `count`.
      */
     #[inline]
     const function size() : usize
@@ -555,7 +550,7 @@ public struct string : contract::comparable<string>
      */
     const function sub(usize $from, usize $len) : string
     {
-        string::view $w = $this->as_view()->sub($from, $len);
+        string::view $w = $this->view()->sub($from, $len);
 
         // inline bytes live inside *this* value. a window into them with a
         // null owner would dangle when this string is dropped, so the
@@ -577,18 +572,18 @@ public struct string : contract::comparable<string>
     #[inline]
     const function equals(const string& $other) : bool
     {
-        return $this->as_view()->equals($other->as_view());
+        return $this->view()->equals($other->view());
     }
 
     #[inline]
     const function starts(const string& $prefix) : bool
     {
-        return $this->as_view()->starts($prefix->as_view());
+        return $this->view()->starts($prefix->view());
     }
 
     const function ends(const string& $suffix) : bool
     {
-        return $this->as_view()->ends($suffix->as_view());
+        return $this->view()->ends($suffix->view());
     }
 
     /**
@@ -597,7 +592,7 @@ public struct string : contract::comparable<string>
     #[inline]
     const function find(const string& $needle) : usize
     {
-        return $this->as_view()->find($needle->as_view());
+        return $this->view()->find($needle->view());
     }
 
     /**
@@ -606,21 +601,29 @@ public struct string : contract::comparable<string>
     #[inline]
     const function find(const string& $needle, usize $from) : usize
     {
-        return $this->as_view()->find($needle->as_view(), $from);
+        return $this->view()->find($needle->view(), $from);
     }
 
     #[inline]
     const function contains(const string& $needle) : bool
     {
-        return $this->as_view()->contains($needle->as_view());
+        return $this->view()->contains($needle->view());
     }
 
     /**
-     * The number of UTF-8 codepoints. A walk, unlike `size()`.
+     * How many characters. A walk, unlike `size()` which is O(1) bytes.
      */
-    const function chars() : usize
+    const function count() : usize
     {
-        return $this->as_view()->chars();
+        return $this->view()->count();
+    }
+
+    /**
+     * Each character as a window into this string. Invalid UTF-8 is a window of one byte.
+     */
+    const function chars() : str::parts
+    {
+        return str::chars($this);
     }
 
     /**
@@ -628,7 +631,7 @@ public struct string : contract::comparable<string>
      */
     const function terminated() : bool
     {
-        return $this->as_view()->terminated();
+        return $this->view()->terminated();
     }
 
     /**
@@ -636,9 +639,9 @@ public struct string : contract::comparable<string>
      */
     const function cstr() : ptr<const uint8>
     {
-        // a local, not `$this->as_view()->cstr()`: that returns a pointer
+        // a local, not `$this->view()->cstr()`: that returns a pointer
         // the compiler reads as into the temporary view
-        string::view $v = $this->as_view();
+        string::view $v = $this->view();
 
         return $v->cstr();
     }
@@ -685,7 +688,7 @@ public struct string : contract::comparable<string>
         usize $n = $this->window->size;
 
         if ($n <= self::INLINE && $extra <= self::INLINE - $n) {
-            return string($this->as_view());
+            return string($this->view());
         }
 
         // `$n + $extra` past the largest usize is a length no string can have, and would wrap to a small one

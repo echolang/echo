@@ -1,5 +1,5 @@
 # str::boundary snaps a cut back to a character start. is_utf8 is the validator
-# chars() on the string is the count; str::chars is the walk of those characters
+# count() on the string is how many characters; str::chars is the walk
 
 --- OUT --->
 6

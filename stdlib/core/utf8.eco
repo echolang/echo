@@ -1,13 +1,14 @@
 /**
  * UTF-8 encode and decode for walks that need a scalar, not a count.
  *
- * `string::chars()` only asks whether a byte begins a character. Case conversion, and anything
+ * `$s->count()` only asks whether a byte begins a character. Case conversion, and anything
  * else that maps a codepoint, has to know which scalar the bytes spell - or that they spell
- * none. Invalid sequences are one raw byte; the same contract `chars()` already has, so a
+ * none. Invalid sequences are one raw byte; the same contract `count()` already has, so a
  * later feature does not invent a stricter one.
  *
- * The public half is `boundary`, `is_utf8`, and `str::chars`: a cut that keeps every character
- * whole, a well-formedness test, and a walk of those characters as windows into the source.
+ * The public half is `boundary`, `is_utf8`, and `str::chars`: a cut that keeps every
+ * character whole, a well-formedness test, and a walk of those characters as windows into the
+ * source. `$s->count()` is how many; `$s->size()` is bytes.
  */
 
 namespace str;
@@ -151,16 +152,21 @@ internal function decode_before(const string& $text, usize $end) : utf8_step
     }
 
     ptr<const uint8> $bytes = $text->data();
-    usize $i = $end - 1;
+    usize $n = $text->size();
+
+    return decode_at_ptr($bytes, $n, utf8_lead_index($bytes, $n, $end - 1));
+}
+
+private function utf8_lead_index(ptr<const uint8> $bytes, usize $n, usize $at) : usize
+{
+    if ($at >= $n) {
+        return $n;
+    }
+
+    usize $i = $at;
     usize $steps = 0;
 
-    while ($i > 0) {
-        uint8 $b = $bytes:$[$i];
-
-        if (($b & 192) != 128) {
-            break;
-        }
-
+    while ($i > 0 && ($bytes:$[$i] & 192) == 128) {
         if ($steps >= 3) {
             break;
         }
@@ -169,7 +175,7 @@ internal function decode_before(const string& $text, usize $end) : utf8_step
         $steps = $steps + 1;
     }
 
-    return decode_at_ptr($bytes, $text->size(), $i);
+    return $i;
 }
 
 /**
@@ -231,32 +237,14 @@ internal function write_cp(ptr<uint8> $dst, usize $used, uint32 $cp) : usize
  */
 public function boundary(const string& $text, usize $at) : usize
 {
-    usize $n = $text->size();
-
-    if ($at >= $n) {
-        return $n;
-    }
-
-    usize $i = $at;
-    usize $steps = 0;
-
-    while ($i > 0 && ($text->byte($i) & 192) == 128) {
-        if ($steps >= 3) {
-            break;
-        }
-
-        $i = $i - 1;
-        $steps = $steps + 1;
-    }
-
-    return $i;
+    return utf8_lead_index($text->data(), $text->size(), $at);
 }
 
 /**
  * True when every byte is part of a well-formed scalar. Empty is well-formed. A truncated
  * sequence, an overlong encoding, a surrogate half, or a stray continuation is not.
  *
- * `$s->chars()` still counts those; this is the validator that count is not.
+ * `$s->count()` still counts those; this is the validator that count is not.
  */
 public function is_utf8(const string& $text) : bool
 {
@@ -280,7 +268,7 @@ public function is_utf8(const string& $text) : bool
  * Each well-formed character as a window into `$text`, and each invalid byte as a window of
  * one. `foreach` walks them; `$p->owned()` is the list of owning strings.
  *
- * `$s->chars()` is the count of the same walk. This is the walk.
+ * `$s->count()` is how many. `str::chars` / `$s->chars()` is the walk.
  */
 public function chars(const string& $text) : parts
 {
@@ -290,14 +278,8 @@ public function chars(const string& $text) : parts
 
     while ($i < $n) {
         utf8_step $s = decode_at($text, $i);
-        usize $len = $s->len;
-
-        if ($len == 0) {
-            $len = 1;
-        }
-
-        $spans->push(part($i, $len));
-        $i = $i + $len;
+        $spans->push(part($i, $s->len));
+        $i = $i + $s->len;
     }
 
     return parts($text, $spans);

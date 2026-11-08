@@ -21,7 +21,7 @@ test a_box_frees_its_allocation
     usize $before = mem::live_allocations();
     {
         $b = box<int32>(1);
-        echo $b->get();
+        assert($b->get() == 1);
     }
     assert(mem::live_allocations() == $before);
 }

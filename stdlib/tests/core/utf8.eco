@@ -57,7 +57,7 @@ test boundary_backs_up_to_the_character
 }
 
 #[group: "core"]
-test chars_walks_scalars_and_raw_bytes
+test chars_walks_each_character
 {
     $p = str::chars('ab');
     assert($p->count() == 2);
@@ -65,12 +65,16 @@ test chars_walks_scalars_and_raw_bytes
 
     string $raw = 'a';
     $raw->push(128);
-    $q = str::chars($raw);
-    assert($q->count() == 2);
+    $q = 'a'->chars();
+    assert($q->count() == 1);
+
+    $r = str::chars($raw);
+    assert($r->count() == 2);
 }
 
 #[group: "core"]
 test chars_of_empty_is_empty
 {
     assert(str::chars('')->count() == 0);
+    assert(''->chars()->count() == 0);
 }

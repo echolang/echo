@@ -10,7 +10,7 @@
  * conditional mapping, and it is hard-coded rather than a condition engine - it is the only
  * language-independent row in SpecialCasing.
  *
- * Invalid UTF-8 is copied, not rejected. `chars()` already counts it rather than validating, and
+ * Invalid UTF-8 is copied, not rejected. `count()` already counts it rather than validating, and
  * this file does not invent a stricter contract. A raw byte that is not a scalar has no mapping.
  *
  * Already-cased text shares the input buffer. Changing case always allocates; leaving it alone

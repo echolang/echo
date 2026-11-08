@@ -391,7 +391,7 @@ void Compiler::CommandLineHelp::render_heading(const std::string &text) const
 
 void Compiler::CommandLineHelp::render_version() const
 {
-    _out << ECO_VERSION_STRING << std::endl;
+    _out << Compiler::version_string() << std::endl;
 }
 
 void Compiler::CommandLineHelp::render_usage(Subcommand subject) const
@@ -518,7 +518,7 @@ void Compiler::CommandLineHelp::render_category(
 void Compiler::CommandLineHelp::render_overview() const
 {
     write_wrapped(
-        std::string("echoc ") + ECO_VERSION_STRING + " - the echo programming language compiler.", 0);
+        std::string("echoc ") + Compiler::version_string() + " - the echo programming language compiler.", 0);
 
     _out << std::endl;
 

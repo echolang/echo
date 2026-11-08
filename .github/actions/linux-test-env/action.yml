@@ -1,0 +1,50 @@
+name: Linux test environment
+description: LLVM, runtime libraries and the build job's binaries in build/, optionally the WASI SDK and wasmtime
+
+inputs:
+  arch:
+    description: x86_64 or arm64
+    required: true
+  wasi:
+    description: also install the WASI SDK and wasmtime
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup LLVM
+      uses: ZhongRuoyu/setup-llvm@v0
+      with:
+        llvm-version: 20
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        sudo apt update
+        sudo apt install -y libc++-dev libc++abi-dev zlib1g-dev
+
+    - name: Install WASI SDK and wasmtime
+      if: inputs.wasi == 'true'
+      shell: bash
+      run: |
+        case "${{ inputs.arch }}" in
+          arm64) WASI_ARCH=arm64; WT_ARCH=aarch64 ;;
+          *)     WASI_ARCH=x86_64; WT_ARCH=x86_64 ;;
+        esac
+        curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-27/wasi-sdk-27.0-${WASI_ARCH}-linux.tar.gz" \
+          | sudo tar xz -C /opt
+        sudo ln -sfn "/opt/wasi-sdk-27.0-${WASI_ARCH}-linux" /opt/wasi-sdk
+        echo "WASI_SDK_PATH=/opt/wasi-sdk" >> "$GITHUB_ENV"
+        curl -sL "https://github.com/bytecodealliance/wasmtime/releases/download/v29.0.1/wasmtime-v29.0.1-${WT_ARCH}-linux.tar.xz" \
+          | tar xJ
+        sudo mv "wasmtime-v29.0.1-${WT_ARCH}-linux/wasmtime" /usr/local/bin/
+
+    - name: Download test binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-${{ inputs.arch }}-test-binaries
+        path: build
+
+    - name: Make the binaries executable
+      shell: bash
+      run: chmod +x build/tests build/echoc

@@ -491,16 +491,57 @@ internal function sys_wait(int32 $pid, ptr<uint8> $process, bool $block) : resul
 
 internal function sys_kill(int32 $pid, ptr<uint8> $process) : status<ioerror>
 {
-    return sys_signal($pid, $process, ptr<uint8>(null), false, SIGKILL);
+    return signal_pid($pid, false, SIGKILL);
 }
 
-internal function sys_signal(
+internal function sys_stop(
     int32 $pid,
     ptr<uint8> $process,
     ptr<uint8> $job,
     bool $grouped,
-    int32 $sig
-) : status<ioerror>
+    std::time::duration $grace
+) : result<exit_status, ioerror>
+{
+    guard signal_pid($pid, $grouped, SIGTERM) else ($e) {
+        return .error($e);
+    };
+
+    std::time::duration $wait = $grace;
+
+    if ($wait < std::time::duration::zero()) {
+        $wait = std::time::duration::zero();
+    }
+
+    std::time::instant $deadline = std::time::instant::now() + $wait;
+
+    while (std::time::instant::now() < $deadline) {
+        exit_status? $now = guard sys_wait($pid, $process, false) else ($e) {
+            return .error($e);
+        };
+
+        if ($now != null) {
+            return .ok($now ?? die('child still running'));
+        }
+
+        std::time::sleep(std::time::duration::millis(10));
+    }
+
+    exit_status? $last = guard sys_wait($pid, $process, false) else ($e) {
+        return .error($e);
+    };
+
+    if ($last != null) {
+        return .ok($last ?? die('child still running'));
+    }
+
+    guard signal_pid($pid, $grouped, SIGKILL) else ($e) {
+        return .error($e);
+    };
+
+    return reap($pid, $process);
+}
+
+private function signal_pid(int32 $pid, bool $grouped, int32 $sig) : status<ioerror>
 {
     int32 $target = $pid;
 
@@ -519,6 +560,19 @@ internal function sys_signal(
     }
 
     return .ok;
+}
+
+private function reap(int32 $pid, ptr<uint8> $process) : result<exit_status, ioerror>
+{
+    exit_status? $now = guard sys_wait($pid, $process, true) else ($e) {
+        return .error($e);
+    };
+
+    exit_status $done = guard $now else {
+        return .error(ioerror(std::io::EINVAL));
+    };
+
+    return .ok($done);
 }
 
 internal function sys_release(ptr<uint8> $process, ptr<uint8> $job) : void

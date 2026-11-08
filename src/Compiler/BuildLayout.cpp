@@ -32,7 +32,7 @@ std::string marker_contents()
         "{}\n"
         "# Compiled artifacts for an Echo module. Written by echoc {}.\n"
         "# 'echoc clean' removes this directory; nothing in it is source.\n",
-        k_cachedir_signature, k_echo_marker, ECO_VERSION_STRING);
+        k_cachedir_signature, k_echo_marker, Compiler::version_string());
 }
 
 std::filesystem::path marker_path(const std::filesystem::path &directory)

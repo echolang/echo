@@ -1,22 +1,22 @@
-// a literal is the *stdlib's* `string` now - nothing is declared here, and `size()`, `chars()`
+// a literal is the *stdlib's* `string` now - nothing is declared here, and `size()`, `count()`
 // and the rest come from stdlib/core/string.eco
 $ascii = 'hello';
 echo $ascii->size();
-echo $ascii->chars();
+echo $ascii->count();
 echo $ascii->empty();
 echo $ascii->byte(0);
 
 // the byte count and the character count are different questions, and only the first is O(1)
 $accent = 'héllo';
 echo $accent->size();
-echo $accent->chars();
+echo $accent->count();
 
 $emoji = '😀ab';
 echo $emoji->size();
-echo $emoji->chars();
+echo $emoji->count();
 
 // the empty string is a legitimate value, not a null
 $empty = '';
 echo $empty->size();
 echo $empty->empty();
-echo $empty->chars();
+echo $empty->count();

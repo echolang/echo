@@ -524,7 +524,7 @@ void Compiler::Lsp::Server::Impl::handle_initialize(const json &id, const json &
 
     json result;
     result["capabilities"] = server_capabilities_json(utf8, prepare_rename_support);
-    result["serverInfo"] = { { "name", "echoc" }, { "version", ECO_VERSION_STRING } };
+    result["serverInfo"] = { { "name", "echoc" }, { "version", Compiler::version_string() } };
 
     reply(id, std::move(result));
 }

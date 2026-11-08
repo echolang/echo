@@ -118,7 +118,7 @@ bool compute_program_echo_key(
 
     uint64_t digest = Compiler::k_fnv_offset_basis;
 
-    digest = fold_field(ECO_VERSION_STRING, digest);
+    digest = fold_field(Compiler::version_string(), digest);
 
     for (const Parser::ModuleManifest *manifest : plan.manifests) {
         const auto found = keys.find(manifest->name);

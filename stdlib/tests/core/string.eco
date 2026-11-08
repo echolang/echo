@@ -104,11 +104,11 @@ test view_sees_the_same_bytes
 }
 
 #[group: "core"]
-test chars_counts_unicode_scalars
+test count_is_characters_size_is_bytes
 {
     string $s = 'é';
     assert($s->size() == 2);
-    assert($s->chars() == 1);
+    assert($s->count() == 1);
 }
 
 #[group: "core"]

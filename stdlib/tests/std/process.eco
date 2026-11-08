@@ -140,17 +140,66 @@ test kill_a_sleeping_child
 #[group: "process"]
 test piped_stderr
 {
-    std::process::command $c = std::process::command('/bin/echo');
-    $c->arg('err');
+    std::process::command $c = std::process::command('/bin/sh', ['-c', 'echo err 1>&2']);
     $c->stderr(.piped);
     $c->stdout(.discard);
     std::process::child $ch = guard $c->spawn();
     std::io::pipe_reader $err = $ch->stderr() ?? die('stderr was piped');
     string $text = guard $err->readall();
-    echo $text;
+    assert($text->contains('err'));
     std::process::exit_status $s = guard $ch->wait();
-    echo $s->success();
+    assert($s->success());
 }
 #[end]
+
+#[group: "process"]
+test stop_ends_a_blocked_child
+{
+#[if: os == windows]
+    std::process::command $c = std::process::command('cmd', ['/c', 'pause']);
+    $c->stdin(.piped);
+    $c->stdout(.discard);
+    $c->stderr(.discard);
+#[else]
+    std::process::command $c = std::process::command('sleep');
+    $c->arg('30');
+#[end]
+    std::process::child $ch = guard $c->spawn();
+    std::process::exit_status $s = guard $ch->stop(grace: std::time::duration::millis(200));
+    assert(!$s->success());
+}
+
+#[group: "process"]
+test grouped_stop_ends_the_child
+{
+#[if: os == windows]
+    std::process::command $c = std::process::command('cmd', ['/c', 'pause']);
+    $c->stdin(.piped);
+    $c->stdout(.discard);
+    $c->stderr(.discard);
+#[else]
+    std::process::command $c = std::process::command('sleep');
+    $c->arg('30');
+#[end]
+    $c->group();
+    std::process::child $ch = guard $c->spawn();
+    std::process::exit_status $s = guard $ch->stop(grace: std::time::duration::millis(200));
+    assert(!$s->success());
+}
+
+#[group: "process"]
+test stop_after_the_end_returns_the_status
+{
+#[if: os == windows]
+    std::process::command $c = std::process::command('cmd', ['/c', 'exit', '0']);
+#[else]
+    std::process::command $c = std::process::command('true');
+#[end]
+    std::process::child $ch = guard $c->spawn();
+    std::process::exit_status $s = guard $ch->wait();
+    std::process::exit_status $again = guard $ch->stop();
+    assert($s->success());
+    assert($again->success());
+}
 
 #[end]

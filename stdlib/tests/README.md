@@ -14,6 +14,9 @@ is this module does.
 `--track-allocations` is required: some tests read `mem::live_allocations()`.
 `echoc test` already defaults to debug, so `assert` is how a test fails.
 
+CI runs this job after the build and before the e2e shards, so a stdlib
+failure skips the corpus.
+
 `--filter group:core`, `--filter group:std`, `--filter file:array`, or a test
 name all work. Compiler goldens in `tests_eco/` stay; they pin diagnostics and
 IR, not this suite.

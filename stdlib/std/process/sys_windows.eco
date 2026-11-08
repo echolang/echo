@@ -489,7 +489,7 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
             return .error($e);
         }
 
-        if (c_ResumeThread($info->thread) == 4294967295) {
+        if (c_ResumeThread($info->thread) == RESUME_FAILED) {
             ioerror $e = std::io::win32_ioerror();
             abort_spawned($info->process, $job);
             std::io::c_CloseHandle($info->thread);
@@ -608,29 +608,38 @@ internal function sys_kill(int32 $pid, ptr<uint8> $process) : status<ioerror>
     return terminate_handle($process);
 }
 
-internal function sys_signal(
+internal function sys_stop(
     int32 $pid,
     ptr<uint8> $process,
     ptr<uint8> $job,
     bool $grouped,
-    int32 $sig
-) : status<ioerror>
+    std::time::duration $grace
+) : result<exit_status, ioerror>
 {
     if ($job:$ != null) {
-        if (c_TerminateJobObject($job, 1) != 0) {
-            return .ok;
+        if (c_TerminateJobObject($job, 1) == 0) {
+            ioerror $e = std::io::win32_ioerror();
+
+            if (std::thread::c_WaitForSingleObject($process, 0) != WAIT_OBJECT_0) {
+                return .error($e);
+            }
         }
-
-        ioerror $e = std::io::win32_ioerror();
-
-        if (std::thread::c_WaitForSingleObject($process, 0) == WAIT_OBJECT_0) {
-            return .ok;
-        }
-
-        return .error($e);
+    }
+    else {
+        guard terminate_handle($process) else ($e) {
+            return .error($e);
+        };
     }
 
-    return terminate_handle($process);
+    exit_status? $now = guard sys_wait($pid, $process, true) else ($e) {
+        return .error($e);
+    };
+
+    exit_status $done = guard $now else {
+        return .error(ioerror(std::io::EINVAL));
+    };
+
+    return .ok($done);
 }
 
 private function terminate_handle(ptr<uint8> $process) : status<ioerror>

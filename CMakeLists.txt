@@ -4,6 +4,7 @@ set(APPNAME echoc)
 project(${APPNAME})
 
 set(LIBNAME ${APPNAME}_lib)
+set(CORENAME ${APPNAME}_core)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -104,9 +105,12 @@ endif()
 # as an echoc flag. the executable still compiles the driver in
 set(LIB_SOURCES ${SOURCES})
 list(FILTER LIB_SOURCES EXCLUDE REGEX "[\\/]main\\.cpp$")
+set(MAIN_SOURCES ${SOURCES})
+list(FILTER MAIN_SOURCES INCLUDE REGEX "[\\/]main\\.cpp$")
 
-add_executable(${APPNAME} ${SOURCES})
-add_library(${LIBNAME} STATIC ${LIB_SOURCES})
+add_library(${CORENAME} OBJECT ${LIB_SOURCES})
+add_executable(${APPNAME} ${MAIN_SOURCES} $<TARGET_OBJECTS:${CORENAME}>)
+add_library(${LIBNAME} STATIC $<TARGET_OBJECTS:${CORENAME}>)
 
 if(WIN32)
     set(ECO_UTF8_MANIFEST "${CMAKE_SOURCE_DIR}/tools/windows/utf8.manifest")
@@ -118,8 +122,8 @@ endif()
 # targets that do need it name it, and this variable is the one place the path is spelled
 set(ECO_STDLIB_DEFINITION "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
 
+target_compile_definitions(${CORENAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 target_compile_definitions(${APPNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
-target_compile_definitions(${LIBNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 # Catch2 drives the fork path of eco_spawn.c directly. user programs compile that
 # file without this, so they do not grow a test-only symbol
 target_compile_definitions(${LIBNAME} PRIVATE ECO_SPAWN_TESTING)
@@ -140,8 +144,8 @@ if(ECO_HOST_CLANG MATCHES "clang\\+\\+")
     endif()
 endif()
 file(TO_CMAKE_PATH "${ECO_HOST_CLANG}" ECO_HOST_CLANG_DEF)
+target_compile_definitions(${CORENAME} PRIVATE "ECO_HOST_CLANG=\"${ECO_HOST_CLANG_DEF}\"")
 target_compile_definitions(${APPNAME} PRIVATE "ECO_HOST_CLANG=\"${ECO_HOST_CLANG_DEF}\"")
-target_compile_definitions(${LIBNAME} PRIVATE "ECO_HOST_CLANG=\"${ECO_HOST_CLANG_DEF}\"")
 
 # what a *released* binary is built with. the path above is the build machine's, so a binary someone
 # downloaded can only find the standard library if it carries it - see the comment on
@@ -150,8 +154,8 @@ target_compile_definitions(${LIBNAME} PRIVATE "ECO_HOST_CLANG=\"${ECO_HOST_CLANG
 option(ECO_EMBED_STDLIB "Embed the standard library into the echoc binary" OFF)
 
 if(ECO_EMBED_STDLIB)
+    target_compile_definitions(${CORENAME} PRIVATE ECO_USE_EMBEDDED_STDLIB=1)
     target_compile_definitions(${APPNAME} PRIVATE ECO_USE_EMBEDDED_STDLIB=1)
-    target_compile_definitions(${LIBNAME} PRIVATE ECO_USE_EMBEDDED_STDLIB=1)
 endif()
 
 # the same idea one layer down: a released binary carries its libraries the way it carries the
@@ -209,15 +213,17 @@ endif()
 set(ECO_VERSION_PATCH "" CACHE STRING "Patch version to stamp into the binary. Empty: use include/eco.h's.")
 set(ECO_VERSION_SUFFIX "" CACHE STRING "Appended to the version verbatim, e.g. '-dev+abc1234'. Empty for a release.")
 
+set(ECO_VERSION_DEFINITIONS)
 if(NOT ECO_VERSION_PATCH STREQUAL "")
-    target_compile_definitions(${APPNAME} PRIVATE ECO_VERSION_PATCH=${ECO_VERSION_PATCH})
-    target_compile_definitions(${LIBNAME} PRIVATE ECO_VERSION_PATCH=${ECO_VERSION_PATCH})
+    list(APPEND ECO_VERSION_DEFINITIONS ECO_VERSION_PATCH=${ECO_VERSION_PATCH})
 endif()
 
 if(NOT ECO_VERSION_SUFFIX STREQUAL "")
-    target_compile_definitions(${APPNAME} PRIVATE "ECO_VERSION_SUFFIX=\"${ECO_VERSION_SUFFIX}\"")
-    target_compile_definitions(${LIBNAME} PRIVATE "ECO_VERSION_SUFFIX=\"${ECO_VERSION_SUFFIX}\"")
+    list(APPEND ECO_VERSION_DEFINITIONS "ECO_VERSION_SUFFIX=\"${ECO_VERSION_SUFFIX}\"")
 endif()
+
+set_source_files_properties("${CMAKE_SOURCE_DIR}/src/Compiler/Version.cpp"
+    PROPERTIES COMPILE_DEFINITIONS "${ECO_VERSION_DEFINITIONS}")
 
 # create an install target
 install(TARGETS ${APPNAME} DESTINATION bin)
@@ -368,18 +374,14 @@ echo_embed_runtime(
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CMAKE_SOURCE_DIR}/stdlib/build)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
-target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
-target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
-target_include_directories(${LIBNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/coverage)
-target_include_directories(${LIBNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
-target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
-target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
-target_include_directories(${APPNAME} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/coverage)
-target_include_directories(${APPNAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_sources(${LIBNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
-target_sources(${APPNAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
+foreach(ECO_TARGET ${CORENAME} ${APPNAME} ${LIBNAME})
+    target_include_directories(${ECO_TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/profile)
+    target_include_directories(${ECO_TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/alloc)
+    target_include_directories(${ECO_TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/process)
+    target_include_directories(${ECO_TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/runtime/coverage)
+    target_include_directories(${ECO_TARGET} PRIVATE ${CMAKE_BINARY_DIR}/generated)
+endforeach()
+target_sources(${CORENAME} PRIVATE "${ECO_ALLOC_RUNTIME_DIR}/eco_cache.c")
 target_sources(${LIBNAME} PRIVATE "${ECO_SPAWN_RUNTIME_DIR}/eco_spawn.c")
 target_sources(${APPNAME} PRIVATE "${ECO_SPAWN_RUNTIME_DIR}/eco_spawn.c")
 

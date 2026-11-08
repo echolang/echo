@@ -45,7 +45,7 @@ void Compiler::TestReportWriter::begin(size_t total)
     nlohmann::ordered_json run;
     run["v"] = 2;
     run["type"] = "run";
-    run["version"] = ECO_VERSION_STRING;
+    run["version"] = Compiler::version_string();
     run["selected"] = total;
     write_line(run.dump());
 }

@@ -251,24 +251,31 @@ private function digits_of(uint64 $value, uint64 $base, bool $upper) : string
         $i = $i - 1;
         uint64 $digit = $rest % $base;
         $rest = $rest / $base;
-
-        if ($digit < 10) {
-            uint8 $decimal = $digit + CH_ZERO;
-            $p:$[$i] = $decimal;
-        }
-        else if ($upper) {
-            uint8 $upper_letter = $digit - 10 + CH_UPPER_A;
-            $p:$[$i] = $upper_letter;
-        }
-        else {
-            uint8 $lower_letter = $digit - 10 + CH_LOWER_A;
-            $p:$[$i] = $lower_letter;
-        }
+        $p:$[$i] = digit_char($digit, $upper);
     }
 
     $out->commit($n);
 
     return $out;
+}
+
+private function digit_char(uint64 $digit, bool $upper) : uint8
+{
+    if ($digit < 10) {
+        uint8 $decimal = $digit + CH_ZERO;
+
+        return $decimal;
+    }
+
+    if ($upper) {
+        uint8 $letter = $digit - 10 + CH_UPPER_A;
+
+        return $letter;
+    }
+
+    uint8 $letter = $digit - 10 + CH_LOWER_A;
+
+    return $letter;
 }
 
 /**
@@ -536,16 +543,7 @@ public function hex(uint64 $n) : string
     while ($i < 16) {
         uint64 $shift = (15 - $i) * 4;
         uint64 $digit = ($n >> $shift) & 15;
-
-        if ($digit < 10) {
-            uint8 $decimal = $digit + CH_ZERO;
-            $p:$[$i] = $decimal;
-        }
-        else {
-            uint8 $letter = $digit - 10 + CH_LOWER_A;
-            $p:$[$i] = $letter;
-        }
-
+        $p:$[$i] = digit_char($digit, false);
         $i = $i + 1;
     }
 
@@ -557,7 +555,7 @@ public function hex(uint64 $n) : string
 /**
  * Each byte as two lowercase hex digits. Empty is empty.
  */
-public function hex(string::view $raw) : string
+public function hex(const string::view& $raw) : string
 {
     usize $n = $raw->size;
     string $out = empty_inline();
@@ -568,28 +566,9 @@ public function hex(string::view $raw) : string
 
     while ($i < $n) {
         uint8 $b = $src:$[$i];
-        uint8 $hi = $b / 16;
-        uint8 $lo = $b % 16;
         usize $at = $i * 2;
-
-        if ($hi < 10) {
-            uint8 $decimal = $hi + CH_ZERO;
-            $p:$[$at] = $decimal;
-        }
-        else {
-            uint8 $letter = $hi - 10 + CH_LOWER_A;
-            $p:$[$at] = $letter;
-        }
-
-        if ($lo < 10) {
-            uint8 $decimal = $lo + CH_ZERO;
-            $p:$[$at + 1] = $decimal;
-        }
-        else {
-            uint8 $letter = $lo - 10 + CH_LOWER_A;
-            $p:$[$at + 1] = $letter;
-        }
-
+        $p:$[$at] = digit_char($b / 16, false);
+        $p:$[$at + 1] = digit_char($b % 16, false);
         $i = $i + 1;
     }
 

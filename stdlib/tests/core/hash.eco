@@ -45,6 +45,28 @@ test float_zeroes_hash_equal
 }
 
 #[group: "core"]
+test fnv1a_is_stable_across_spellings
+{
+    assert(hash::fnv1a('hello') == hash::fnv1a('hello'));
+    string $built = '';
+    $built->append('hello');
+    assert(hash::fnv1a($built) == hash::fnv1a('hello'));
+    assert(hash::fnv1a($built->view()) == hash::fnv1a('hello'));
+}
+
+#[group: "core"]
+test fnv1a_of_empty_is_the_offset_basis
+{
+    assert(hash::fnv1a('') == hash::OFFSET_BASIS);
+}
+
+#[group: "core"]
+test fnv1a_differs_from_of
+{
+    assert(hash::fnv1a('hello') != hash::of('hello'));
+}
+
+#[group: "core"]
 test mix_step_combine_and_bytes
 {
     uint64 $m = hash::mix(1);

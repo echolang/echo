@@ -147,59 +147,18 @@ public class child
         $this->close_stdin();
 
         exit_status $already = guard $this->ended else {
-            return $this->stop_running($grace);
-        };
-
-        return .ok($already);
-    }
-
-    private function stop_running(std::time::duration $grace) : result<exit_status, ioerror>
-    {
-#[if: os == windows]
-        guard sys_signal($this->pid, $this->process, $this->job, $this->grouped, 0) else ($e) {
-            return .error($e);
-        };
-
-        return $this->wait();
-#[else]
-        guard sys_signal($this->pid, $this->process, $this->job, $this->grouped, SIGTERM) else ($e) {
-            return .error($e);
-        };
-
-        std::time::duration $wait = $grace;
-
-        if ($wait < std::time::duration::zero()) {
-            $wait = std::time::duration::zero();
-        }
-
-        std::time::instant $deadline = std::time::instant::now() + $wait;
-
-        while (std::time::instant::now() < $deadline) {
-            exit_status? $now = guard $this->try_wait() else ($e) {
+            exit_status $done = guard sys_stop(
+                $this->pid, $this->process, $this->job, $this->grouped, $grace
+            ) else ($e) {
                 return .error($e);
             };
 
-            if ($now != null) {
-                return .ok($now ?? die('child still running'));
-            }
+            $this->ended = $done;
 
-            std::time::sleep(std::time::duration::millis(10));
-        }
-
-        exit_status? $last = guard $this->try_wait() else ($e) {
-            return .error($e);
+            return .ok($done);
         };
 
-        if ($last != null) {
-            return .ok($last ?? die('child still running'));
-        }
-
-        guard sys_signal($this->pid, $this->process, $this->job, $this->grouped, SIGKILL) else ($e) {
-            return .error($e);
-        };
-
-        return $this->wait();
-#[end]
+        return .ok($already);
     }
 
     /**
