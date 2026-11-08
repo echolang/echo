@@ -19,10 +19,6 @@ std::fs::path $base = guard std::fs::realpath($tmp) else ($e) {
 }
 
 echo $up == $base;
-#[if: os == windows]
-echo $base->view()->size() >= 3;
-#[else]
 echo $base->is_absolute();
-#[end]
 
 std::fs::rmdir($sub);

@@ -14,8 +14,8 @@ echo ('dir' / 'file')->concat('.eco') == ('dir' / 'file.eco');
 // a path is a spelling: unclean forms stay themselves until clean()
 echo std::fs::path('a/./b')->string() == 'a/./b';
 echo std::fs::path('a//b')->string() == 'a//b';
-echo std::fs::path('a/./b')->clean() == ('a' / 'b');
-echo std::fs::path('a//b')->clean() == ('a' / 'b');
-echo std::fs::path('a/b/../c')->clean() == ('a' / 'c');
+echo std::fs::path('a/./b')->clean() == std::fs::path('a/b');
+echo std::fs::path('a//b')->clean() == std::fs::path('a/b');
+echo std::fs::path('a/b/../c')->clean() == std::fs::path('a/c');
 echo std::fs::path('.')->clean()->string() == '.';
 echo std::fs::path('..')->clean()->string() == '..';
