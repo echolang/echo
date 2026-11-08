@@ -6,7 +6,7 @@
  * There is no recursive walk: one directory, its children, and you recurse.
  */
 
-namespace std::io;
+namespace std::fs;
 
 /**
  * What kind of thing a path names.
@@ -28,17 +28,17 @@ public enum filekind
 /**
  * One child of a directory: a name, a joined path, and what kind of child it is.
  *
- * `path()` is `std::env::join` of the opened directory and the name. It is not
+ * `path()` is `std::fs::path` join of the opened directory and the name. It is not
  * canonical, and it is not absolute just because you asked: `opendir('foo')`
  * yields `foo/bar`.
  */
 public struct dirent
 {
     private string $name;
-    private string $path;
+    private path $path;
     private filekind $kind;
 
-    internal constructor(string $name, string $path, filekind $kind)
+    internal constructor(string $name, path $path, filekind $kind)
     {
         $this->name = $name;
         $this->path = $path;
@@ -50,7 +50,7 @@ public struct dirent
         return $this->name;
     }
 
-    const function path() : string
+    const function path() : path
     {
         return $this->path;
     }
@@ -95,19 +95,19 @@ internal function is_dot_name(const string& $name) : bool
 #[if: os != windows]
 internal function kind_from_dtype(uint8 $dt) : filekind
 {
-    if ($dt == DT_REG) {
+    if ($dt == std::io::DT_REG) {
         return filekind::file;
     }
 
-    if ($dt == DT_DIR) {
+    if ($dt == std::io::DT_DIR) {
         return filekind::directory;
     }
 
-    if ($dt == DT_LNK) {
+    if ($dt == std::io::DT_LNK) {
         return filekind::symlink;
     }
 
-    if ($dt == DT_UNKNOWN) {
+    if ($dt == std::io::DT_UNKNOWN) {
         return filekind::unknown;
     }
 
@@ -117,17 +117,17 @@ internal function kind_from_dtype(uint8 $dt) : filekind
 // the file-type half of a `stat` mode. `info`'s answer, so never `unknown`
 internal function kind_of_mode(uint32 $mode) : filekind
 {
-    uint32 $type = $mode & S_IFMT;
+    uint32 $type = $mode & std::io::S_IFMT;
 
-    if ($type == S_IFREG) {
+    if ($type == std::io::S_IFREG) {
         return filekind::file;
     }
 
-    if ($type == S_IFDIR) {
+    if ($type == std::io::S_IFDIR) {
         return filekind::directory;
     }
 
-    if ($type == S_IFLNK) {
+    if ($type == std::io::S_IFLNK) {
         return filekind::symlink;
     }
 
@@ -140,23 +140,19 @@ internal function kind_of_mode(uint32 $mode) : filekind
 // cloud placeholder or a deduplicated file is a reparse point that is still the file it stands for
 internal function kind_from_attributes(uint32 $attr, uint32 $tag) : filekind
 {
-    if (($attr & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        if ($tag == IO_REPARSE_TAG_SYMLINK || $tag == IO_REPARSE_TAG_MOUNT_POINT) {
+    if (($attr & std::io::FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        if ($tag == std::io::IO_REPARSE_TAG_SYMLINK || $tag == std::io::IO_REPARSE_TAG_MOUNT_POINT) {
             return filekind::symlink;
         }
     }
 
-    if (($attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    if (($attr & std::io::FILE_ATTRIBUTE_DIRECTORY) != 0) {
         return filekind::directory;
     }
 
     return filekind::file;
 }
 
-internal function invalid_handle(ptr<uint8> $h) : bool
-{
-    return mem::bit_cast<usize, ptr<uint8>>($h) == std::math::MAX_USIZE;
-}
 #[end]
 
 /**
@@ -168,8 +164,8 @@ internal function invalid_handle(ptr<uint8> $h) : bool
 public class dir : contract::iterable<dirent>
 {
     private ptr<uint8> $handle;
-    private string $root;
-    private ioerror? $err;
+    private path $root;
+    private std::io::ioerror? $err;
 
 #[if: os == windows]
     private ptr<uint8> $find;
@@ -177,7 +173,7 @@ public class dir : contract::iterable<dirent>
 #[end]
 
 #[if: os == windows]
-    private constructor(ptr<uint8> $handle, string $root, ptr<uint8> $find)
+    private constructor(ptr<uint8> $handle, path $root, ptr<uint8> $find)
     {
         $this->handle:$ = $handle;
         $this->root = $root;
@@ -186,7 +182,7 @@ public class dir : contract::iterable<dirent>
         $this->pending = true;
     }
 #[else]
-    private constructor(ptr<uint8> $handle, string $root)
+    private constructor(ptr<uint8> $handle, path $root)
     {
         $this->handle:$ = $handle;
         $this->root = $root;
@@ -199,48 +195,48 @@ public class dir : contract::iterable<dirent>
         $this->close();
     }
 
-    static function open(const string& $path) : result<dir, ioerror>
+    static function open(const path& $path) : result<dir, std::io::ioerror>
     {
 #[if: os == windows]
         std::env::wide_string $wide = std::env::wide_string();
-        if (!$wide->load_utf8($path)) {
-            return .error(wide_error());
+        if (!$wide->load_utf8($path->string())) {
+            return .error(std::io::wide_error());
         }
 
-        uint32 $attr = c_GetFileAttributesW($wide->data());
+        uint32 $attr = std::io::c_GetFileAttributesW($wide->data());
 
-        if ($attr == INVALID_FILE_ATTRIBUTES) {
-            return .error(win32_ioerror());
+        if ($attr == std::io::INVALID_FILE_ATTRIBUTES) {
+            return .error(std::io::win32_ioerror());
         }
 
-        if (($attr & FILE_ATTRIBUTE_DIRECTORY) == 0) {
-            return .error(ioerror(ENOTDIR));
+        if (($attr & std::io::FILE_ATTRIBUTE_DIRECTORY) == 0) {
+            return .error(std::io::ioerror(std::io::ENOTDIR));
         }
 
         std::env::wide_string $pat = std::env::wide_string();
-        if (!$pat->load_utf8(std::env::join($path, '*'))) {
-            return .error(wide_error());
+        if (!$pat->load_utf8(($path / '*')->string())) {
+            return .error(std::io::wide_error());
         }
 
-        ptr<uint8> $find = mem::alloc<uint8>(FIND_DATA_BYTES);
+        ptr<uint8> $find = mem::alloc<uint8>(std::io::FIND_DATA_BYTES);
 
         if ($find:$ == null) {
-            return .error(ioerror(ENOMEM));
+            return .error(std::io::ioerror(std::io::ENOMEM));
         }
 
-        ptr<uint8> $h = c_FindFirstFileW($pat->data(), $find);
+        ptr<uint8> $h = std::io::c_FindFirstFileW($pat->data(), $find);
 
-        if (invalid_handle($h)) {
+        if (std::io::invalid_handle($h)) {
             mem::free<uint8>($find);
-            return .error(win32_ioerror());
+            return .error(std::io::win32_ioerror());
         }
 
         return .ok(dir($h, $path, $find));
 #[else]
-        ptr<uint8> $h = c_opendir($path->cstr());
+        ptr<uint8> $h = std::io::c_opendir($path->cstr());
 
         if ($h:$ == null) {
-            return .error(last_error());
+            return .error(std::io::last_error());
         }
 
         return .ok(dir($h, $path));
@@ -251,7 +247,7 @@ public class dir : contract::iterable<dirent>
      * Null unless a `readdir` after a successful open failed. End of the
      * directory is not an error.
      */
-    const function error() : ioerror?
+    const function error() : std::io::ioerror?
     {
         return $this->err;
     }
@@ -263,7 +259,7 @@ public class dir : contract::iterable<dirent>
         }
 
 #[if: os == windows]
-        c_FindClose($this->handle);
+        std::io::c_FindClose($this->handle);
 
         if ($this->find:$ != null) {
             mem::free<uint8>($this->find);
@@ -272,7 +268,7 @@ public class dir : contract::iterable<dirent>
 
         $this->pending = false;
 #[else]
-        c_closedir($this->handle);
+        std::io::c_closedir($this->handle);
 #[end]
 
         $this->handle:$ = ptr<uint8>(null);
@@ -284,7 +280,7 @@ public class dir : contract::iterable<dirent>
         return dir_iterator($this);
     }
 
-    internal function note_error(ioerror $e) : void
+    internal function note_error(std::io::ioerror $e) : void
     {
         $this->err = $e;
     }
@@ -298,9 +294,9 @@ public class dir : contract::iterable<dirent>
 #[if: os == windows]
         while (true) {
             if (!$this->pending) {
-                if (c_FindNextFileW($this->handle, $this->find) == 0) {
-                    if (c_GetLastError() != ERROR_NO_MORE_FILES) {
-                        $this->note_error(win32_ioerror());
+                if (std::io::c_FindNextFileW($this->handle, $this->find) == 0) {
+                    if (std::io::c_GetLastError() != std::io::ERROR_NO_MORE_FILES) {
+                        $this->note_error(std::io::win32_ioerror());
                     }
 
                     return null;
@@ -311,11 +307,11 @@ public class dir : contract::iterable<dirent>
 
             ptr<uint32> $attrs = ptr<uint32>($this->find:$);
             uint32 $attr = $attrs:$[0];
-            ptr<uint32> $tags = ptr<uint32>($this->find:$ + FIND_TAG_OFF);
+            ptr<uint32> $tags = ptr<uint32>($this->find:$ + std::io::FIND_TAG_OFF);
             uint32 $tag = $tags:$[0];
-            ptr<uint16> $wname = ptr<uint16>($this->find:$ + FIND_NAME_OFF);
+            ptr<uint16> $wname = ptr<uint16>($this->find:$ + std::io::FIND_NAME_OFF);
             string $name = guard std::env::wide_to_utf8($wname) else {
-                $this->note_error(wide_error());
+                $this->note_error(std::io::wide_error());
                 return null;
             }
 
@@ -323,33 +319,33 @@ public class dir : contract::iterable<dirent>
                 continue;
             }
 
-            return dirent($name, std::env::join($this->root, $name), kind_from_attributes($attr, $tag));
+            return dirent($name, $this->root / $name, kind_from_attributes($attr, $tag));
         }
 #[else]
         while (true) {
-            ptr<int32> $slot = c_errno_location();
+            ptr<int32> $slot = std::io::c_errno_location();
             $slot:$[0] = 0;
 
-            ptr<uint8> $ent = c_readdir($this->handle);
+            ptr<uint8> $ent = std::io::c_readdir($this->handle);
 
             if ($ent:$ == null) {
                 int32 $code = $slot:$[0];
 
                 if ($code != 0) {
-                    $this->note_error(ioerror($code));
+                    $this->note_error(std::io::ioerror($code));
                 }
 
                 return null;
             }
 
-            string $name = str::from($ent:$ + DIRENT_NAME_OFF);
+            string $name = str::from($ent:$ + std::io::DIRENT_NAME_OFF);
 
             if (is_dot_name($name)) {
                 continue;
             }
 
-            uint8 $dt = $ent:$[DIRENT_TYPE_OFF];
-            return dirent($name, std::env::join($this->root, $name), kind_from_dtype($dt));
+            uint8 $dt = $ent:$[std::io::DIRENT_TYPE_OFF];
+            return dirent($name, $this->root / $name, kind_from_dtype($dt));
         }
 #[end]
     }
@@ -368,7 +364,7 @@ public struct dir_iterator : contract::iterator<dirent>
     constructor(dir $src)
     {
         $this->src = $src;
-        $this->current = dirent('', '', filekind::unknown);
+        $this->current = dirent('', path(''), filekind::unknown);
         $this->done = false;
     }
 
@@ -394,17 +390,3 @@ public struct dir_iterator : contract::iterator<dirent>
     }
 }
 
-public function opendir(const string& $path) : result<dir, ioerror>
-{
-    return dir::open($path);
-}
-
-public function mkdir(const string& $path) : result<bool, ioerror>
-{
-    return mkdir_path($path);
-}
-
-public function rmdir(const string& $path) : result<bool, ioerror>
-{
-    return rmdir_path($path);
-}

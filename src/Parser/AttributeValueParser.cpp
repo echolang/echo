@@ -1,6 +1,7 @@
 #include "Parser/AttributeValueParser.h"
 
 #include "AST/ASTStringLiteral.h"
+#include "Token.h"
 
 #include <fmt/core.h>
 
@@ -225,11 +226,28 @@ namespace
         // **a bare name, and a keyword spelled like a word is one.** `#[target: test]` names a target kind
         // with a word Echo also keeps as a keyword, and inside `#[ ]` there is nothing for that keyword's
         // meaning to collide with: the region resolves to no declaration. token_spells_a_word is the one
-        // answer to that, shared with the attribute *name* the conditional filter reads
+        // answer to that, shared with the attribute *name* the conditional filter reads.
+        //
+        // `ident (:: ident)*` is one name: `#[deprecated: std::fs::readfile]` is a replacement spelling,
+        // not a tagged value. `::` does not start an atom, so the tagged arm does not claim `std`
         if (at_a_word(cursor)) {
             out.kind = AST::AttributeValueKind::t_name;
             out.text = cursor.current().value();
             cursor.skip();
+
+            while (cursor.is_type(Token::Type::t_namespace_sep)) {
+                cursor.skip(); // `::`
+
+                if (!at_a_word(cursor)) {
+                    refuse(payload, here(cursor), "a name after '::' has to be a word.");
+                    return false;
+                }
+
+                out.text += "::";
+                out.text += cursor.current().value();
+                cursor.skip();
+            }
+
             return true;
         }
 

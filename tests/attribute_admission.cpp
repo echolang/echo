@@ -23,6 +23,7 @@ TEST_CASE("attribute_admission classifies each spelling by medium and gate", "[a
     const Row rows[] = {
         { "export",          AttributeMedium::t_source,   false, AttributeAdmission::t_language },
         { "inline",          AttributeMedium::t_source,   false, AttributeAdmission::t_language },
+        { "deprecated",      AttributeMedium::t_source,   false, AttributeAdmission::t_language },
         { "wasm",            AttributeMedium::t_source,   false, AttributeAdmission::t_language },
         { "echoc::builtin",  AttributeMedium::t_source,   false, AttributeAdmission::t_reserved_namespace },
         { "echoc::core",     AttributeMedium::t_source,   false, AttributeAdmission::t_reserved_namespace },
@@ -71,6 +72,7 @@ TEST_CASE("known_attribute_list is the public declaration names only", "[attribu
     const std::string listed = AST::known_attribute_list();
 
     REQUIRE(listed.find("inline") != std::string::npos);
+    REQUIRE(listed.find("deprecated") != std::string::npos);
     REQUIRE(listed.find("export") != std::string::npos);
     REQUIRE(listed.find("core") == std::string::npos);
     REQUIRE(listed.find("builtin") == std::string::npos);

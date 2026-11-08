@@ -8,7 +8,7 @@
  * none, and Windows permissions are the read-only bit and nothing more.
  */
 
-namespace std::io;
+namespace std::fs;
 
 /**
  * A file's permission bits: read, write and execute for its owner, its group and everyone else.
@@ -31,61 +31,61 @@ public struct fileperms
     #[inline]
     const function mode() : uint32
     {
-        return $this->mode & PERM_BITS;
+        return $this->mode & std::io::PERM_BITS;
     }
 
     #[inline]
     const function owner_readable() : bool
     {
-        return ($this->mode & S_IRUSR) != 0;
+        return ($this->mode & std::io::S_IRUSR) != 0;
     }
 
     #[inline]
     const function owner_writable() : bool
     {
-        return ($this->mode & S_IWUSR) != 0;
+        return ($this->mode & std::io::S_IWUSR) != 0;
     }
 
     #[inline]
     const function owner_executable() : bool
     {
-        return ($this->mode & S_IXUSR) != 0;
+        return ($this->mode & std::io::S_IXUSR) != 0;
     }
 
     #[inline]
     const function group_readable() : bool
     {
-        return ($this->mode & S_IRGRP) != 0;
+        return ($this->mode & std::io::S_IRGRP) != 0;
     }
 
     #[inline]
     const function group_writable() : bool
     {
-        return ($this->mode & S_IWGRP) != 0;
+        return ($this->mode & std::io::S_IWGRP) != 0;
     }
 
     #[inline]
     const function group_executable() : bool
     {
-        return ($this->mode & S_IXGRP) != 0;
+        return ($this->mode & std::io::S_IXGRP) != 0;
     }
 
     #[inline]
     const function other_readable() : bool
     {
-        return ($this->mode & S_IROTH) != 0;
+        return ($this->mode & std::io::S_IROTH) != 0;
     }
 
     #[inline]
     const function other_writable() : bool
     {
-        return ($this->mode & S_IWOTH) != 0;
+        return ($this->mode & std::io::S_IWOTH) != 0;
     }
 
     #[inline]
     const function other_executable() : bool
     {
-        return ($this->mode & S_IXOTH) != 0;
+        return ($this->mode & std::io::S_IXOTH) != 0;
     }
 
     /**
@@ -94,7 +94,7 @@ public struct fileperms
     #[inline]
     const function is_readonly() : bool
     {
-        return ($this->mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0;
+        return ($this->mode & (std::io::S_IWUSR | std::io::S_IWGRP | std::io::S_IWOTH)) == 0;
     }
 }
 
@@ -116,66 +116,17 @@ public struct fileinfo
     const std::time::timestamp? $created;
 }
 
-/**
- * What `$path` is. A symlink is followed, so the answer is about what it points at.
- */
-public function info(const string& $path) : result<fileinfo, ioerror>
-{
-    return stat_path($path, true);
-}
-
-/**
- * What `$path` is, without following a symlink. The only way to see `filekind::symlink`.
- */
-public function linkinfo(const string& $path) : result<fileinfo, ioerror>
-{
-    return stat_path($path, false);
-}
-
-/**
- * Sets `$path`'s permission bits to `$perms`. A symlink is followed.
- */
-public function chmod(const string& $path, fileperms $perms) : result<bool, ioerror>
-{
-    return chmod_path($path, $perms);
-}
-
-/**
- * The absolute path `$path` names, with every symlink, `.` and `..` resolved.
- *
- * The path has to exist - this asks the filesystem, it does not rewrite the string. On Windows
- * the `\\?\` the system puts in front of a resolved path is taken back off.
- */
-public function realpath(const string& $path) : result<string, ioerror>
-{
-    return realpath_of($path);
-}
-
-/**
- * Copies the file at `$from` to `$to`, replacing whatever `$to` was, and gives it `$from`'s
- * permissions. Times are not copied.
- *
- * Regular files only: a directory is `EISDIR`, a socket, fifo or device is `EINVAL`, and copying
- * a tree is `opendir` and a loop. A symlink is followed, so the bytes that land are the target's.
- * A file copied onto itself is refused rather than truncated to nothing. Where the kernel can
- * copy without the bytes passing through this process - `fcopyfile`, `copy_file_range`,
- * `CopyFileW` - it does.
- */
-public function copy(const string& $from, const string& $to) : result<bool, ioerror>
-{
-    return copy_file($from, $to);
-}
 
 // a directory is EISDIR so `copy($dir)` reads as the other directory errors; anything else that
 // is not a regular file is EINVAL
-internal function require_regular_file(filekind $kind) : result<bool, ioerror>
+internal function require_regular_file(filekind $kind) : result<bool, std::io::ioerror>
 {
     if ($kind == filekind::directory) {
-        return .error(ioerror(EISDIR));
+        return .error(std::io::ioerror(std::io::EISDIR));
     }
 
     if ($kind != filekind::file) {
-        return .error(ioerror(EINVAL));
+        return .error(std::io::ioerror(std::io::EINVAL));
     }
 
     return .ok(true);

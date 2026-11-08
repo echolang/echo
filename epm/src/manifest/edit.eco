@@ -10,7 +10,7 @@ use std::io;
 
 public function add_line(const string& $path, const Requirement& $req) : result<bool, string>
 {
-    string $text = guard io::readfile($path) else ($e) {
+    string $text = guard std::fs::readfile($path) else ($e) {
         return .error("cannot read {$path}: {$e}");
     }
 
@@ -21,7 +21,7 @@ public function add_line(const string& $path, const Requirement& $req) : result<
     string $line = require_line($req);
     string $out = insert_after($text, $line, '#[requires:');
 
-    result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+    result<usize, io::ioerror> $wrote = std::fs::writefile($path, $out);
 
     if ($wrote->failed()) {
         return .error("cannot write {$path}");
@@ -32,7 +32,7 @@ public function add_line(const string& $path, const Requirement& $req) : result<
 
 public function remove_line(const string& $path, const string& $name) : result<bool, string>
 {
-    string $text = guard io::readfile($path) else ($e) {
+    string $text = guard std::fs::readfile($path) else ($e) {
         return .error("cannot read {$path}: {$e}");
     }
 
@@ -43,7 +43,7 @@ public function remove_line(const string& $path, const string& $name) : result<b
     string $out = $text->sub(0, $span->start);
     $out->append($text->sub($span->end, $text->size() - $span->end));
 
-    result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+    result<usize, io::ioerror> $wrote = std::fs::writefile($path, $out);
 
     if ($wrote->failed()) {
         return .error("cannot write {$path}");
@@ -122,7 +122,7 @@ private function require_span(const string& $text, const string& $name) : result
 
 public function remove_depend_line(const string& $path, const string& $depend) : result<bool, string>
 {
-    string $text = guard io::readfile($path) else ($e) {
+    string $text = guard std::fs::readfile($path) else ($e) {
         return .error("cannot read {$path}: {$e}");
     }
 
@@ -165,7 +165,7 @@ public function remove_depend_line(const string& $path, const string& $depend) :
         string $out = $text->sub(0, $at);
         $out->append($text->sub($end, $text->size() - $end));
 
-        result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+        result<usize, io::ioerror> $wrote = std::fs::writefile($path, $out);
 
         if ($wrote->failed()) {
             return .error("cannot write {$path}");
@@ -179,7 +179,7 @@ public function remove_depend_line(const string& $path, const string& $depend) :
 
 public function add_depend_line(const string& $path, const string& $depend) : result<bool, string>
 {
-    string $text = guard io::readfile($path) else ($e) {
+    string $text = guard std::fs::readfile($path) else ($e) {
         return .error("cannot read {$path}: {$e}");
     }
 
@@ -191,7 +191,7 @@ public function add_depend_line(const string& $path, const string& $depend) : re
 
     string $out = insert_after($text, $line, '#[depends:');
 
-    result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+    result<usize, io::ioerror> $wrote = std::fs::writefile($path, $out);
 
     if ($wrote->failed()) {
         return .error("cannot write {$path}");

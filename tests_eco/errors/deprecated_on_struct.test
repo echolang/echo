@@ -1,0 +1,14 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] MisplacedAttribute  deprecated_on_struct.eco:2:3
+
+  '#[deprecated]' cannot be written on a type. It belongs on a function.
+
+  1 | // `#[deprecated:]` belongs on a function
+  2 | #[deprecated: "std::fs::readfile"]
+    :   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  3 | struct Box
+
+1 error, nothing was compiled.

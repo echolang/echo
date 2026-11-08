@@ -3,4 +3,4 @@ flags: --target-os linux
 foo/bar
 foo/bar
 bar
-foo/
+foo

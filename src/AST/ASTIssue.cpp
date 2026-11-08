@@ -647,6 +647,15 @@ std::vector<AST::IssueNote> AST::Issue::UnknownAttribute::notes() const
 ISSUE_MESSAGE_FNC(ManifestAttributeInSource) { return _message; }
 ISSUE_MESSAGE_FNC(MisplacedAttribute) { return _message; }
 
+ISSUE_MESSAGE_FNC(DeprecatedUse)
+{
+    if (replacement.empty()) {
+        return fmt::format("'{}' is deprecated.", function_name);
+    }
+
+    return fmt::format("'{}' is deprecated. Write '{}'.", function_name, replacement);
+}
+
 ISSUE_MESSAGE_FNC(UnknownManifestAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(ReservedAttributeNamespace) { return _message; }
 ISSUE_MESSAGE_FNC(RepeatedManifestAttribute) { return _message; }

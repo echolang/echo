@@ -42,18 +42,20 @@ public class library
      * contains a slash is that file. A bare name is searched the way the OS
      * searches (`dlopen` / `LoadLibrary`).
      */
-    static function open(const string& $path) : result<library, dynerror>
+    static function open(const std::fs::path& $path) : result<library, dynerror>
     {
-        if ($path->contains('/') || $path->contains('\\')) {
-            result<bool, std::io::ioerror> $stat = std::io::exists($path);
+        string $raw = $path->string();
+
+        if ($raw->contains('/') || $raw->contains('\\')) {
+            result<bool, std::io::ioerror> $stat = std::fs::exists($path);
             if ($stat->has_value() && !$stat->unwrap()) {
-                return .error(.not_found($path));
+                return .error(.not_found($raw));
             }
         }
 
 #[if: os == windows]
         std::env::wide_string $wide = std::env::wide_string();
-        if (!$wide->load_utf8($path)) {
+        if (!$wide->load_utf8($raw)) {
             return .error(.load_failed('could not convert the library path'));
         }
 

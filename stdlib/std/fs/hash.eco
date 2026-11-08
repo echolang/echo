@@ -1,0 +1,10 @@
+/**
+ * `path` is a map key: the spelling, hashed the way a string is.
+ */
+
+namespace hash;
+
+public function of(const std::fs::path& $p) : uint64
+{
+    return of($p->view());
+}

@@ -420,6 +420,11 @@ namespace AST
         // `#[echoc::cold]`: never inlined, laid out away from hot code. see AST::compiler_attribute::cold
         bool is_cold = false;
 
+        // `#[deprecated]` / `#[deprecated: "std::fs::readfile"]`. TypeChecker warns at each call.
+        // engaged empty is the bare form; a non-empty string is the replacement. stored rather than
+        // re-read off the attribute so an instance still warns
+        std::optional<std::string> deprecated_replacement;
+
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;

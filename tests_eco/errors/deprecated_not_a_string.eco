@@ -1,0 +1,6 @@
+#[deprecated: true]
+function f() : void
+{
+}
+
+f();

@@ -1,0 +1,10 @@
+flags: --target-os windows
+--- OUT --->
+1
+1
+1
+0
+C:\echo
+bin
+foo\bar
+file:///C:/Users/First%20Last/x

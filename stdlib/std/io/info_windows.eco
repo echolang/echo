@@ -9,6 +9,13 @@
 namespace std::io;
 
 #[if: os == windows]
+use std::fs::fileinfo;
+use std::fs::fileperms;
+use std::fs::kind_from_attributes;
+use std::fs::require_regular_file;
+#[end]
+
+#[if: os == windows]
 private function filetime(uint32 $lo, uint32 $hi) : std::time::timestamp
 {
     std::time::timespec $ts = std::time::filetime_to_timespec((($hi as uint64) << 32) | ($lo as uint64));

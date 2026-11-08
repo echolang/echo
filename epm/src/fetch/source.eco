@@ -136,11 +136,11 @@ private function cache_root() : string
     }
 #[end]
 
-    string::view $home = guard env::home() else {
+    std::fs::path $home = guard env::home() else {
         return '';
     }
 
-    return sys::join(str::from($home), '.cache/echo/epm');
+    return sys::join($home, '.cache/echo/epm');
 }
 
 // the module.eco of the package at `$dir` in a checkout, '' for the root

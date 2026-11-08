@@ -328,7 +328,7 @@ private function pin_checkout_bytes(const string& $tmp) : string
     }
 
     string $path = sys::join($info, 'attributes');
-    result<usize, io::ioerror> $wrote = io::writefile($path, "* -text -eol -filter -ident -working-tree-encoding\n");
+    result<usize, io::ioerror> $wrote = std::fs::writefile($path, "* -text -eol -filter -ident -working-tree-encoding\n");
 
     if ($wrote->failed()) {
         return "cannot write {$path}";

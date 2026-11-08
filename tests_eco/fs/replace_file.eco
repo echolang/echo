@@ -1,0 +1,13 @@
+string $pid = str::from(std::env::pid());
+string $path = std::fs::join(std::env::tmp(), "echo-fs-repl-{$pid}.txt")->string();
+
+guard std::fs::replace($path, 'one');
+string $a = guard std::fs::readfile($path);
+echo $a;
+
+guard std::fs::replace($path, 'two');
+string $b = guard std::fs::readfile($path);
+echo $b;
+
+bool $rm = guard std::fs::remove($path);
+echo $rm;

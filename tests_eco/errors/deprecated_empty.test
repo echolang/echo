@@ -1,0 +1,13 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] InvalidAttributeValue  deprecated_empty.eco:1:3
+
+  the 'deprecated' attribute wants a replacement spelling.
+
+  1 | #[deprecated: ""]
+    :   ^^^^^^^^^^^^^^^
+  2 | function f() : void
+
+1 error, nothing was compiled.

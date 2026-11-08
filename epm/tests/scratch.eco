@@ -10,7 +10,7 @@ use epm::util;
 
 public function dir(const string& $name) : string
 {
-    string $tmp = string::from(std::env::tmp());
+    string $tmp = std::env::tmp()->string();
     string $path = sys::join($tmp, "epm-t-{$name}");
     sys::remove_all($path);
     assert(sys::mkdir_p($path));
@@ -24,13 +24,13 @@ public function gone(const string& $path) : void
 
 public function write(const string& $path, const string& $text) : void
 {
-    result<usize, std::io::ioerror> $wrote = std::io::writefile($path, $text);
+    result<usize, std::io::ioerror> $wrote = std::fs::writefile($path, $text);
     assert(!$wrote->failed());
 }
 
 public function read(const string& $path) : string
 {
-    string $text = guard std::io::readfile($path);
+    string $text = guard std::fs::readfile($path);
     return $text;
 }
 

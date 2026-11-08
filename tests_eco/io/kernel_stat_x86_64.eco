@@ -3,6 +3,6 @@
 
 function pin_fs(std::io::file $f) : void
 {
-    result<std::io::fileinfo, std::io::ioerror> $a = std::io::info('a');
-    result<std::io::fileinfo, std::io::ioerror> $b = $f->info();
+    result<std::fs::fileinfo, std::io::ioerror> $a = std::fs::info('a');
+    result<std::fs::fileinfo, std::io::ioerror> $b = $f->info();
 }

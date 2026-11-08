@@ -42,29 +42,29 @@ std::process::output $q = guard $quiet->output() else ($e) { die("discard: {$e}"
 echo "discarded: {$q->stdout->empty()} {$q->stderr->empty()} {$q->status}";
 
 int32 $pid = std::env::pid();
-string $path = std::env::join(std::env::tmp(), "eco_process_streams_{$pid}.txt");
+string $path = std::fs::join(std::env::tmp(), "eco_process_streams_{$pid}.txt")->string();
 
 // a child writing into a file this program is also writing: the bytes this program buffered land first
-std::io::file $out = guard std::io::create($path) else ($e) { die("create: {$e}"); };
+std::io::file $out = guard std::fs::create($path) else ($e) { die("create: {$e}"); };
 usize $before = guard $out->write('before\n') else ($e) { die("write: {$e}"); };
 std::process::command $into = std::process::command($self, ['lines']);
 $into->stdout(.file($out));
 std::process::exit_status $into_status = guard $into->status() else ($e) { die("into: {$e}"); };
 usize $after = guard $out->write('after\n') else ($e) { die("write: {$e}"); };
 $out->close();
-string $written = guard std::io::readfile($path) else ($e) { die("readfile: {$e}"); };
+string $written = guard std::fs::readfile($path) else ($e) { die("readfile: {$e}"); };
 std::io::print($written);
 
 // a child reading a file this program already read a line of: it starts where this program stopped, even
 // though this program's read window holds the rest
-std::io::file $from = guard std::io::open($path, .read) else ($e) { die("open: {$e}"); };
+std::io::file $from = guard std::fs::open($path, .read) else ($e) { die("open: {$e}"); };
 string? $first = guard $from->readline() else ($e) { die("readline: {$e}"); };
 std::process::command $rest = std::process::command($self, ['upper']);
 $rest->stdin(.file($from));
 std::process::output $r = guard $rest->output() else ($e) { die("rest: {$e}"); };
 std::io::print($r->stdout);
 $from->close();
-bool $removed = guard std::io::remove($path) else ($e) { die("remove: {$e}"); };
+bool $removed = guard std::fs::remove($path) else ($e) { die("remove: {$e}"); };
 
 // two children joined directly: the first one's stdout is the second one's stdin
 std::process::command $producer = std::process::command($self, ['lines']);

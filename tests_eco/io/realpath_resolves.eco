@@ -1,28 +1,28 @@
 // realpath asks the filesystem: `x/..` is the directory `x` sits in, and the answer is absolute
 string $tmp = str::from(std::env::tmp());
 string $pid = str::from(std::env::pid());
-string $sub = std::env::join($tmp, "echo-io-real-{$pid}");
+string $sub = std::fs::join($tmp, "echo-io-real-{$pid}")->string();
 
-bool $made = guard std::io::mkdir($sub) else ($e) {
+bool $made = guard std::fs::mkdir($sub) else ($e) {
     echo $e->message();
     return 1;
 }
 
-string $up = guard std::io::realpath(std::env::join($sub, '..')) else ($e) {
+std::fs::path $up = guard std::fs::realpath($sub / '..') else ($e) {
     echo $e->message();
     return 1;
 }
 
-string $base = guard std::io::realpath($tmp) else ($e) {
+std::fs::path $base = guard std::fs::realpath($tmp) else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $up == $base;
 #[if: os == windows]
-echo $base->size() >= 3;
+echo $base->view()->size() >= 3;
 #[else]
-echo $base->starts(std::env::DS);
+echo $base->is_absolute();
 #[end]
 
-std::io::rmdir($sub);
+std::fs::rmdir($sub);

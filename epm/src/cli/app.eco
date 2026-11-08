@@ -235,7 +235,7 @@ public struct App
 public function start_from_cli(const App& $app, const command::Parsed& $cli) : result<string, string>
 {
     if (!$cli->stated($app->module)) {
-        return .ok(env::cwd());
+        return .ok(env::cwd()->string());
     }
 
     string $probe = $cli->value($app->module);

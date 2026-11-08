@@ -1,0 +1,105 @@
+/**
+ * Path-shaped verbs moved to `std::fs`. These names still compile.
+ */
+
+namespace std::io;
+
+#[deprecated: std::fs::open]
+public function open(const string& $path, filemode $mode) : result<file, ioerror>
+{
+    return std::fs::open($path, $mode);
+}
+
+#[deprecated: std::fs::create]
+public function create(const string& $path) : result<file, ioerror>
+{
+    return std::fs::create($path);
+}
+
+#[deprecated: std::fs::append]
+public function append(const string& $path) : result<file, ioerror>
+{
+    return std::fs::append($path);
+}
+
+#[deprecated: std::fs::readfile]
+public function readfile(const string& $path) : result<string, ioerror>
+{
+    return std::fs::readfile($path);
+}
+
+#[deprecated: std::fs::writefile]
+public function writefile(const string& $path, const string& $text) : result<usize, ioerror>
+{
+    return std::fs::writefile($path, $text);
+}
+
+#[deprecated: std::fs::exists]
+public function exists(const string& $path) : result<bool, ioerror>
+{
+    return std::fs::exists($path);
+}
+
+#[deprecated: std::fs::remove]
+public function remove(const string& $path) : result<bool, ioerror>
+{
+    return std::fs::remove($path);
+}
+
+#[deprecated: std::fs::rename]
+public function rename(const string& $from, const string& $to) : result<bool, ioerror>
+{
+    return std::fs::rename($from, $to);
+}
+
+#[deprecated: std::fs::info]
+public function info(const string& $path) : result<std::fs::fileinfo, ioerror>
+{
+    return std::fs::info($path);
+}
+
+#[deprecated: std::fs::linkinfo]
+public function linkinfo(const string& $path) : result<std::fs::fileinfo, ioerror>
+{
+    return std::fs::linkinfo($path);
+}
+
+#[deprecated: std::fs::chmod]
+public function chmod(const string& $path, std::fs::fileperms $perms) : result<bool, ioerror>
+{
+    return std::fs::chmod($path, $perms);
+}
+
+#[deprecated: std::fs::realpath]
+public function realpath(const string& $path) : result<string, ioerror>
+{
+    std::fs::path $full = guard std::fs::realpath($path) else ($e) {
+        return .error($e);
+    };
+
+    return .ok($full->string());
+}
+
+#[deprecated: std::fs::copy]
+public function copy(const string& $from, const string& $to) : result<bool, ioerror>
+{
+    return std::fs::copy($from, $to);
+}
+
+#[deprecated: std::fs::opendir]
+public function opendir(const string& $path) : result<std::fs::dir, ioerror>
+{
+    return std::fs::opendir($path);
+}
+
+#[deprecated: std::fs::mkdir]
+public function mkdir(const string& $path) : result<bool, ioerror>
+{
+    return std::fs::mkdir($path);
+}
+
+#[deprecated: std::fs::rmdir]
+public function rmdir(const string& $path) : result<bool, ioerror>
+{
+    return std::fs::rmdir($path);
+}

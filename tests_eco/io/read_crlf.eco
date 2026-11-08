@@ -4,19 +4,19 @@
 
 string $path = '';
 $path->append(str::from(std::env::tmp()));
-$path->append(std::env::DS);
+$path->append(std::fs::DS);
 $path->append('echo-io-crlf-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
 
-usize $w = guard std::io::writefile($path, "one\r\ntwo\r\nthree") else ($e) {
+usize $w = guard std::fs::writefile($path, "one\r\ntwo\r\nthree") else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $w;
 
-std::io::file $f = guard std::io::open($path, .read) else ($e) {
+std::io::file $f = guard std::fs::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -44,7 +44,7 @@ echo $c ?? 'null';
 
 $f->close();
 
-std::io::file $g = guard std::io::open($path, .read) else ($e) {
+std::io::file $g = guard std::fs::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -67,7 +67,7 @@ echo $v;
 
 $g->close();
 
-bool $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::fs::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }

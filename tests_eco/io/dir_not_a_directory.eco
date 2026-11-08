@@ -1,18 +1,18 @@
 string $name = 'echo-io-notdir-';
 $name->append(str::from(std::env::pid()));
 $name->append('.txt');
-string $path = std::env::join(std::env::tmp(), $name);
+string $path = std::fs::join(std::env::tmp(), $name)->string();
 
-usize $w = guard std::io::writefile($path, 'x') else ($e) {
+usize $w = guard std::fs::writefile($path, 'x') else ($e) {
     echo $e->message();
     return 1;
 }
 
-std::io::dir $d = guard std::io::opendir($path) else ($e) {
+std::fs::dir $d = guard std::fs::opendir($path) else ($e) {
     echo $e->missing();
     echo $e->not_a_directory();
 
-    bool $rm = guard std::io::remove($path) else ($err) {
+    bool $rm = guard std::fs::remove($path) else ($err) {
         echo $err->message();
         return 1;
     }
@@ -22,7 +22,7 @@ std::io::dir $d = guard std::io::opendir($path) else ($e) {
 
 echo 'opened';
 
-bool $gone = guard std::io::remove($path) else ($e) {
+bool $gone = guard std::fs::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }

@@ -1,0 +1,17 @@
+echo std::fs::path('/a/b/c.eco')->is_absolute();
+echo std::fs::path('a/b')->is_absolute();
+echo std::fs::path('/a/b/c.eco')->dirname()->string();
+echo std::fs::path('/a/b/c.eco')->basename();
+echo std::fs::path('c.test.eco')->stem();
+echo std::fs::path('.env')->stem();
+echo std::fs::path('c.test.eco')->extension();
+echo std::fs::path('.env')->extension();
+std::fs::path $rel = guard std::fs::path('/p/tests/a.eco')->relative(std::fs::path('/p'));
+echo $rel->string();
+echo std::fs::path('/a/b')->relative(std::fs::path('/x')) == null;
+echo std::fs::path('foo')->join('bar')->string();
+echo std::fs::path('/a')->dirname()->string();
+echo std::fs::path('c.eco')->dirname()->string();
+map<std::fs::path, int32> $m = map<std::fs::path, int32>();
+$m[std::fs::path('a')] = 7;
+echo $m[std::fs::path('a')];

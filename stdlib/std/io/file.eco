@@ -30,9 +30,9 @@ public class file : contract::iterable<string>
     /**
      * Opens `$path` for `$mode`. The descriptor is closed when the last handle is gone.
      */
-    static function open(const string& $path, filemode $mode) : result<file, ioerror>
+    static function open(const std::fs::path& $path, filemode $mode) : result<file, ioerror>
     {
-        int32 $fd = guard open_path($path, flags_of($mode)) else ($e) {
+        int32 $fd = guard open_path($path->string(), flags_of($mode)) else ($e) {
             return .error($e);
         }
 
@@ -175,7 +175,7 @@ public class file : contract::iterable<string>
      * opened does not matter. The write window is flushed first: a size that left out bytes this
      * program already wrote would be answering for somebody else.
      */
-    function info() : result<fileinfo, ioerror>
+    function info() : result<std::fs::fileinfo, ioerror>
     {
         // a closed file is the flush's EBADF
         usize $flushed = guard $this->flush() else ($e) {
@@ -289,67 +289,3 @@ public struct file_iterator : contract::iterator<string>, contract::keyed<usize>
     }
 }
 
-public function open(const string& $path, filemode $mode) : result<file, ioerror>
-{
-    return file::open($path, $mode);
-}
-
-public function create(const string& $path) : result<file, ioerror>
-{
-    return file::open($path, .write);
-}
-
-public function append(const string& $path) : result<file, ioerror>
-{
-    return file::open($path, .append);
-}
-
-public function readfile(const string& $path) : result<string, ioerror>
-{
-    file $f = guard file::open($path, .read) else ($e) {
-        return .error($e);
-    }
-
-    return $f->readall();
-}
-
-public function writefile(const string& $path, const string& $text) : result<usize, ioerror>
-{
-    file $f = guard file::open($path, .write) else ($e) {
-        return .error($e);
-    }
-
-    usize $n = guard $f->write($text) else ($e) {
-        return .error($e);
-    }
-
-    usize $flushed = guard $f->flush() else ($e) {
-        return .error($e);
-    }
-
-    return .ok($n);
-}
-
-public function exists(const string& $path) : result<bool, ioerror>
-{
-    bool $ok = guard access_path($path, F_OK) else ($e) {
-        // missing is an answer. denied is not "no" - EACCES is a file that is there
-        if ($e->missing()) {
-            return .ok(false);
-        }
-
-        return .error($e);
-    }
-
-    return .ok($ok);
-}
-
-public function remove(const string& $path) : result<bool, ioerror>
-{
-    return unlink_path($path);
-}
-
-public function rename(const string& $from, const string& $to) : result<bool, ioerror>
-{
-    return rename_path($from, $to);
-}

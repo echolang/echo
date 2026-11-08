@@ -2,7 +2,7 @@
 
 string $path = '';
 $path->append(str::from(std::env::tmp()));
-$path->append(std::env::DS);
+$path->append(std::fs::DS);
 $path->append('echo-io-close-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
@@ -10,7 +10,7 @@ $path->append('.txt');
 usize $before = mem::live_allocations();
 
 {
-    std::io::file $f = guard std::io::create($path) else ($e) {
+    std::io::file $f = guard std::fs::create($path) else ($e) {
         echo $e->message();
         return 1;
     }
@@ -26,7 +26,7 @@ usize $before = mem::live_allocations();
 
 echo mem::live_allocations() == $before;
 
-bool $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::fs::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }

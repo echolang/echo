@@ -1,0 +1,260 @@
+/**
+ * Filesystem verbs. A path is `std::fs::path`; a string literal still works.
+ */
+
+namespace std::fs;
+
+use std::io::ioerror;
+use std::io::filemode;
+
+public function open(const path& $path, filemode $mode) : result<std::io::file, ioerror>
+{
+    return std::io::file::open($path->string(), $mode);
+}
+
+public function create(const path& $path) : result<std::io::file, ioerror>
+{
+    return std::io::file::open($path->string(), .write);
+}
+
+public function append(const path& $path) : result<std::io::file, ioerror>
+{
+    return std::io::file::open($path->string(), .append);
+}
+
+public function readfile(const path& $path) : result<string, ioerror>
+{
+    std::io::file $f = guard std::io::file::open($path->string(), .read) else ($e) {
+        return .error($e);
+    }
+
+    return $f->readall();
+}
+
+public function writefile(const path& $path, const string& $text) : result<usize, ioerror>
+{
+    std::io::file $f = guard std::io::file::open($path->string(), .write) else ($e) {
+        return .error($e);
+    }
+
+    usize $n = guard $f->write($text) else ($e) {
+        return .error($e);
+    }
+
+    usize $flushed = guard $f->flush() else ($e) {
+        return .error($e);
+    }
+
+    return .ok($n);
+}
+
+public function exists(const path& $path) : result<bool, ioerror>
+{
+    bool $ok = guard std::io::access_path($path->string(), std::io::F_OK) else ($e) {
+        if ($e->missing()) {
+            return .ok(false);
+        }
+
+        return .error($e);
+    }
+
+    return .ok($ok);
+}
+
+public function remove(const path& $path) : result<bool, ioerror>
+{
+    return std::io::unlink_path($path->string());
+}
+
+public function rename(const path& $from, const path& $to) : result<bool, ioerror>
+{
+    return std::io::rename_path($from->string(), $to->string());
+}
+
+public function info(const path& $path) : result<fileinfo, ioerror>
+{
+    return std::io::stat_path($path->string(), true);
+}
+
+public function linkinfo(const path& $path) : result<fileinfo, ioerror>
+{
+    return std::io::stat_path($path->string(), false);
+}
+
+public function chmod(const path& $path, fileperms $perms) : result<bool, ioerror>
+{
+    return std::io::chmod_path($path->string(), $perms);
+}
+
+public function realpath(const path& $path) : result<path, ioerror>
+{
+    string $raw = guard std::io::realpath_of($path->string()) else ($e) {
+        return .error($e);
+    };
+
+    return .ok(path($raw));
+}
+
+public function copy(const path& $from, const path& $to) : result<bool, ioerror>
+{
+    return std::io::copy_file($from->string(), $to->string());
+}
+
+public function opendir(const path& $path) : result<dir, ioerror>
+{
+    return dir::open($path);
+}
+
+/**
+ * Creates `$path`. `recursive: true` creates every missing parent and treats an existing
+ * directory as success.
+ */
+public function mkdir(const path& $path, recursive: bool $recursive = false) : result<bool, ioerror>
+{
+    if (!$recursive) {
+        return std::io::mkdir_path($path->string());
+    }
+
+    string $raw = $path->string();
+
+    if ($raw->empty() || $raw == '.') {
+        return .ok(true);
+    }
+
+    result<fileinfo, ioerror> $look = info($path);
+
+    if ($look->failed()) {
+        ioerror $e = $look->failure();
+
+        if (!$e->missing()) {
+            return .error($e);
+        }
+
+        path $parent = $path->dirname();
+
+        if ($parent != $path) {
+            bool $made = guard std::fs::mkdir($parent, recursive: true) else ($err) {
+                return .error($err);
+            }
+        }
+
+        return std::io::mkdir_path($raw);
+    }
+
+    fileinfo $here = $look->unwrap();
+
+    if ($here->kind == filekind::directory) {
+        return .ok(true);
+    }
+
+    return .error(ioerror(std::io::EEXIST));
+}
+
+public function rmdir(const path& $path) : result<bool, ioerror>
+{
+    return std::io::rmdir_path($path->string());
+}
+
+/**
+ * Removes `$path` and everything below it. A symlink is unlinked, never followed.
+ * A missing path is success.
+ */
+public function remove_all(const path& $path) : status<ioerror>
+{
+    fileinfo $look = guard linkinfo($path) else ($e) {
+        if ($e->missing()) {
+            return .ok;
+        }
+
+        return .error($e);
+    };
+
+    if ($look->kind == filekind::symlink) {
+        bool $gone = guard remove($path) else ($e) {
+            return .error($e);
+        };
+
+        return .ok;
+    }
+
+    if ($look->kind != filekind::directory) {
+        bool $gone = guard remove($path) else ($e) {
+            return .error($e);
+        };
+
+        return .ok;
+    }
+
+    dir $listing = guard opendir($path) else ($e) {
+        return .error($e);
+    };
+
+    foreach ($listing as const &$entry) {
+        path $child = $entry->path();
+        status<ioerror> $gone = remove_all($child);
+
+        if ($gone->failed()) {
+            $listing->close();
+            return $gone;
+        }
+    }
+
+    $listing->close();
+
+    bool $rd = guard rmdir($path) else ($e) {
+        return .error($e);
+    };
+
+    return .ok;
+}
+
+/**
+ * Writes `$text` to `$path` whole: into `$path.tmp` first, then renamed over.
+ * POSIX `rename` replaces an existing file. Windows uses `ReplaceFileW` when
+ * `$path` is already there, so the original is not unlinked first.
+ */
+public function replace(const path& $path, const string& $text) : status<ioerror>
+{
+    path $tmp = $path->concat('.tmp');
+
+    usize $n = guard writefile($tmp, $text) else ($e) {
+        return .error($e);
+    };
+
+#[if: os == windows]
+    bool $present = guard exists($path) else ($e) {
+        return .error($e);
+    };
+
+    if ($present) {
+        std::env::wide_string $dest_w = std::env::wide_string();
+        std::env::wide_string $tmp_w = std::env::wide_string();
+
+        if (!$dest_w->load_utf8($path->string()) || !$tmp_w->load_utf8($tmp->string())) {
+            bool $drop = remove($tmp)->or(false);
+            return .error(std::io::wide_error());
+        }
+
+        if (std::io::c_ReplaceFileW(
+            $dest_w->data(),
+            $tmp_w->data(),
+            ptr<uint16>(null),
+            0,
+            ptr<uint8>(null),
+            ptr<uint8>(null)
+        ) == 0) {
+            bool $drop = remove($tmp)->or(false);
+            return .error(std::io::win32_ioerror());
+        }
+
+        return .ok;
+    }
+#[end]
+
+    bool $moved = guard rename($tmp, $path) else ($e) {
+        bool $drop = remove($tmp)->or(false);
+        return .error($e);
+    };
+
+    return .ok;
+}

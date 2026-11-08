@@ -3,7 +3,6 @@ flags: --target-os darwin
 
 --- OUT --->
 --- IR --->
-CHECK: declare i32 @fstat(
 CHECK: declare i32 @stat(
 CHECK: declare i32 @lstat(
 CHECK: declare i32 @chmod(
@@ -11,3 +10,4 @@ CHECK: declare ptr @realpath(
 CHECK: declare i32 @ftruncate(
 CHECK: declare i32 @fchmod(
 CHECK: declare i32 @fcopyfile(
+CHECK: declare i32 @fstat(

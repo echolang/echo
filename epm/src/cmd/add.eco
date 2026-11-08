@@ -46,7 +46,7 @@ public function add(const App& $app, const command::Parsed& $cli) : int32
         return 1;
     }
 
-    string $before = guard io::readfile($mod) else ($e) {
+    string $before = guard std::fs::readfile($mod) else ($e) {
         $ctx->printError("cannot read {$mod}: {$e}");
         return 1;
     }
@@ -66,7 +66,7 @@ public function add(const App& $app, const command::Parsed& $cli) : int32
     int32 $code = update_at(sys::dirname($mod), '', $ctx);
 
     if ($code != 0) {
-        result<usize, io::ioerror> $restored = io::writefile($mod, $before);
+        result<usize, io::ioerror> $restored = std::fs::writefile($mod, $before);
 
         if ($restored->failed()) {
             $ctx->printError("update failed, and the original {$mod} could not be restored");
@@ -146,7 +146,7 @@ public function remove(const App& $app, const command::Parsed& $cli) : int32
         return 1;
     }
 
-    string $before = guard io::readfile($mod) else ($e) {
+    string $before = guard std::fs::readfile($mod) else ($e) {
         $ctx->printError("cannot read {$mod}: {$e}");
         return 1;
     }
@@ -156,7 +156,7 @@ public function remove(const App& $app, const command::Parsed& $cli) : int32
         int32 $code = update_at(sys::dirname($mod), '', $ctx);
 
         if ($code != 0) {
-            result<usize, io::ioerror> $restored = io::writefile($mod, $before);
+            result<usize, io::ioerror> $restored = std::fs::writefile($mod, $before);
 
             if ($restored->failed()) {
                 $ctx->printError("update failed, and the original {$mod} could not be restored");

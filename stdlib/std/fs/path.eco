@@ -1,0 +1,493 @@
+/**
+ * A path spelling. Not canonical, not resolved, not the inode. Two spellings of one file
+ * compare unequal. Windows `C:\` and `\\server\share\` live here, once.
+ */
+
+namespace std::fs;
+
+#[if: os == windows]
+public const DS = "\u{5C}";
+#[else]
+public const DS = "/";
+#[end]
+
+private const uint8 SLASH = 0x2F;
+private const uint8 BACKSLASH = 0x5C;
+private const uint8 COLON = 0x3A;
+private const uint8 DOT = 0x2E;
+private const uint8 PERCENT = 0x25;
+private const uint8 MINUS = 0x2D;
+private const uint8 UNDERSCORE = 0x5F;
+private const uint8 TILDE = 0x7E;
+private const uint8 ZERO = 0x30;
+private const uint8 NINE = 0x39;
+private const uint8 UPPER_A = 0x41;
+private const uint8 UPPER_Z = 0x5A;
+private const uint8 LOWER_A = 0x61;
+private const uint8 LOWER_Z = 0x7A;
+private const HEX_DIGITS = '0123456789ABCDEF';
+
+internal function is_separator(uint8 $b) : bool
+{
+#[if: os == windows]
+    if ($b == BACKSLASH) {
+        return true;
+    }
+#[end]
+    if ($b == SLASH) {
+        return true;
+    }
+
+    return false;
+}
+
+private function separator_to_append(const string& $raw) : uint8
+{
+    usize? $cut = last_sep($raw);
+
+    if ($cut != null) {
+        return $raw->byte($cut ?? 0);
+    }
+
+#[if: os == windows]
+    return BACKSLASH;
+#[else]
+    return SLASH;
+#[end]
+}
+
+private function last_sep(const string& $raw) : usize?
+{
+    usize? $cut = null;
+    usize $i = 0;
+
+    while ($i < $raw->size()) {
+        if (is_separator($raw->byte($i))) {
+            $cut = $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $cut;
+}
+
+private function root_of(const string& $raw) : string
+{
+    if ($raw->empty()) {
+        return '';
+    }
+
+    if (!is_absolute_raw($raw)) {
+        return '';
+    }
+
+#[if: os == windows]
+    if ($raw->size() >= 2 && is_separator($raw->byte(0)) && is_separator($raw->byte(1))) {
+        usize $seps = 0;
+        usize $i = 2;
+
+        while ($i < $raw->size()) {
+            if (is_separator($raw->byte($i))) {
+                $seps = $seps + 1;
+                if ($seps == 2) {
+                    return $raw->sub(0, $i + 1);
+                }
+            }
+
+            $i = $i + 1;
+        }
+
+        return $raw;
+    }
+
+    if (!is_separator($raw->byte(0))) {
+        return $raw->sub(0, 3);
+    }
+#[end]
+
+    return $raw->sub(0, 1);
+}
+
+private function is_absolute_raw(const string& $raw) : bool
+{
+    if ($raw->empty()) {
+        return false;
+    }
+
+    if (is_separator($raw->byte(0))) {
+        return true;
+    }
+
+#[if: os == windows]
+    if ($raw->size() >= 3 && $raw->byte(1) == COLON && is_separator($raw->byte(2))) {
+        uint8 $d = $raw->byte(0);
+        bool $letter = ($d >= UPPER_A && $d <= UPPER_Z) || ($d >= LOWER_A && $d <= LOWER_Z);
+
+        return $letter;
+    }
+#[end]
+
+    return false;
+}
+
+private function segments_of(const string& $raw) : array<string>
+{
+    array<string> $out = array<string>();
+    string $root = root_of($raw);
+    usize $from = $root->size();
+    string $part = '';
+    usize $i = $from;
+
+    while ($i < $raw->size()) {
+        uint8 $b = $raw->byte($i);
+
+        if (is_separator($b)) {
+            if (!$part->empty() && $part != '.') {
+                $out[] = $part;
+            }
+
+            $part = '';
+        }
+        else {
+            $part->push($b);
+        }
+
+        $i = $i + 1;
+    }
+
+    if (!$part->empty() && $part != '.') {
+        $out[] = $part;
+    }
+
+    return $out;
+}
+
+private function unreserved(uint8 $b) : bool
+{
+    int32 $wide = $b;
+
+    if ($wide >= UPPER_A && $wide <= UPPER_Z) {
+        return true;
+    }
+
+    if ($wide >= LOWER_A && $wide <= LOWER_Z) {
+        return true;
+    }
+
+    if ($wide >= ZERO && $wide <= NINE) {
+        return true;
+    }
+
+    if ($b == MINUS || $b == DOT) {
+        return true;
+    }
+
+    if ($b == UNDERSCORE || $b == TILDE) {
+        return true;
+    }
+
+    return false;
+}
+
+public struct path : contract::comparable<path>
+{
+    private string $raw;
+
+    constructor(string $raw)
+    {
+        if ($raw->terminated()) {
+            $this->raw = $raw;
+        }
+        else {
+            $this->raw = string($raw->view());
+        }
+    }
+
+    constructor(string::view $raw)
+    {
+        $this->raw = string($raw);
+    }
+
+    /**
+     * A `string` at a path parameter.
+     */
+    #[implicit]
+    public static function from(string $s) : path
+    {
+        return path($s);
+    }
+
+    /**
+     * A `string::view` at a path parameter.
+     */
+    #[implicit]
+    public static function from(string::view $s) : path
+    {
+        return path($s);
+    }
+
+    /**
+     * True when this names the same place from any working directory.
+     */
+    const function is_absolute() : bool
+    {
+        return is_absolute_raw($this->raw);
+    }
+
+    /**
+     * Everything before the last separator: the root itself when that is all there is,
+     * `.` when there is no separator.
+     */
+    const function dirname() : path
+    {
+        usize? $cut = last_sep($this->raw);
+
+        if ($cut == null) {
+            return path('.');
+        }
+
+        usize $at = $cut ?? 0;
+        string $root = root_of($this->raw);
+
+        if ($at < $root->size()) {
+            return path($root);
+        }
+
+        return path($this->raw->sub(0, $at));
+    }
+
+    /**
+     * The last segment, or the whole spelling when there is no separator.
+     */
+    const function basename() : string
+    {
+        usize? $cut = last_sep($this->raw);
+
+        if ($cut == null) {
+            return $this->raw;
+        }
+
+        usize $at = $cut ?? 0;
+
+        return $this->raw->sub($at + 1, $this->raw->size() - $at - 1);
+    }
+
+    /**
+     * The basename without its last `.ext`. A leading-dot name (`.env`) has no extension.
+     */
+    const function stem() : string
+    {
+        string $b = $this->basename();
+        usize $i = $b->size();
+
+        while ($i > 1) {
+            if ($b->byte($i - 1) == DOT) {
+                return $b->sub(0, $i - 1);
+            }
+
+            $i = $i - 1;
+        }
+
+        return $b;
+    }
+
+    /**
+     * The basename's last `.ext`, or empty. A leading-dot name (`.env`) has no extension.
+     */
+    const function extension() : string
+    {
+        string $b = $this->basename();
+        usize $i = $b->size();
+
+        while ($i > 1) {
+            if ($b->byte($i - 1) == DOT) {
+                return $b->sub($i, $b->size() - $i);
+            }
+
+            $i = $i - 1;
+        }
+
+        return '';
+    }
+
+    /**
+     * `$name` joined on. An absolute `$name` replaces this. Empty `$name` is this spelling.
+     * A missing separator copies the last separator already in this spelling, or `DS`.
+     */
+    const function join(const path& $name) : path
+    {
+        if ($name->is_absolute()) {
+            return $name;
+        }
+
+        if ($name->view()->size == 0) {
+            return $this;
+        }
+
+        if ($this->raw->empty()) {
+            return $name;
+        }
+
+        string::view $tail = $name->view();
+        string $out = $this->raw;
+        uint8 $last = $this->raw->byte($this->raw->size() - 1);
+
+        if (!is_separator($last)) {
+            $out->push(separator_to_append($this->raw));
+        }
+
+        $out->append($tail->bytes, $tail->size);
+
+        return path($out);
+    }
+
+    /**
+     * `$tail` glued on, with no separator of its own. `file` then `.eco` is `file.eco`.
+     */
+    const function concat(string::view $tail) : path
+    {
+        if ($tail->empty()) {
+            return $this;
+        }
+
+        string $out = $this->raw;
+        $out->append($tail->bytes, $tail->size);
+
+        return path($out);
+    }
+
+    /**
+     * This spelling as written from inside `$base`, with `/` between segments, when it lies
+     * below `$base`. Anything else is null.
+     */
+    const function relative(const path& $base) : path?
+    {
+        if (root_of($this->raw) != root_of($base->raw)) {
+            return null;
+        }
+
+        array<string> $p = segments_of($this->raw);
+        array<string> $b = segments_of($base->raw);
+
+        if ($p->count() <= $b->count()) {
+            return null;
+        }
+
+        usize $i = 0;
+
+        while ($i < $b->count()) {
+            if ($p[$i] != $b[$i]) {
+                return null;
+            }
+
+            $i = $i + 1;
+        }
+
+        string $out = '';
+        $i = $b->count();
+
+        while ($i < $p->count()) {
+            if (!$out->empty()) {
+                $out->push(SLASH);
+            }
+
+            $out->append($p[$i]);
+            $i = $i + 1;
+        }
+
+        return path($out);
+    }
+
+    /**
+     * This spelling as a `file://` URL. Relative paths are null. Backslashes become slashes.
+     * A drive path gets the third slash. Unreserved bytes, `/`, and `:` stay. Everything
+     * else is `%XX`.
+     */
+    const function file_url() : string?
+    {
+        if (!$this->is_absolute()) {
+            return null;
+        }
+
+        string $hex = HEX_DIGITS;
+        string $out = 'file://';
+        usize $i = 0;
+
+        if (!$this->raw->starts('/')) {
+            $out->push(SLASH);
+        }
+
+        while ($i < $this->raw->size()) {
+            uint8 $b = $this->raw->byte($i);
+
+            if ($b == BACKSLASH) {
+                $out->push(SLASH);
+            }
+            else if ($b == SLASH || $b == COLON || unreserved($b)) {
+                $out->push($b);
+            }
+            else {
+                int32 $wide = $b;
+
+                $out->push(PERCENT);
+                $out->push($hex->byte($wide / 16));
+                $out->push($hex->byte($wide % 16));
+            }
+
+            $i = $i + 1;
+        }
+
+        return $out;
+    }
+
+    const function string() : string
+    {
+        return $this->raw;
+    }
+
+    const function view() : string::view
+    {
+        return $this->raw->view();
+    }
+
+    const function cstr() : ptr<const uint8>
+    {
+        return $this->raw->cstr();
+    }
+}
+
+operator (const path& $a) == (const path& $b) : bool
+{
+    return $a->view() == $b->view();
+}
+
+operator (const path& $a) != (const path& $b) : bool
+{
+    if ($a->view() == $b->view()) {
+        return false;
+    }
+
+    return true;
+}
+
+operator (const path& $a) < (const path& $b) : bool
+{
+    return $a->view() < $b->view();
+}
+
+/**
+ * `$a->join($b)`. Absolute `$b` replaces `$a`. Two strings join because `path` converts from both.
+ */
+operator (const path& $a) / (const path& $b) : path
+{
+    return $a->join($b);
+}
+
+/**
+ * `$dir->join($name)`. The free form of `path::join`.
+ */
+public function join(const path& $dir, const path& $name) : path
+{
+    return $dir->join($name);
+}

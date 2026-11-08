@@ -75,6 +75,10 @@ namespace AST
         // a call and an address-of of one name have to agree
         void check_named_function_visibility(const FunctionDeclNode &decl, const TokenReference &at);
 
+        // `#[deprecated: "replacement"]` on the callee. warning, so the program still compiles.
+        // a call and an address-of of one name have to agree, same split as visibility
+        void check_deprecated_use(const FunctionDeclNode &decl, const TokenReference &at);
+
         // **where the site being walked was written.** off the enclosing declaration rather than off the
         // walk, and that is the whole of why this is a function: the monomorphizer appends an instance to
         // `files().first()` of its template's module, so `_current_file` names a file the instantiated body

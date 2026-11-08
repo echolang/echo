@@ -466,6 +466,16 @@ void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
     check_named_function_visibility(*decl, node.token_function_name);
 }
 
+void TypeChecker::check_deprecated_use(const FunctionDeclNode &decl, const TokenReference &at)
+{
+    if (!decl.deprecated_replacement.has_value()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::DeprecatedUse>(
+        code_ref_for(at), decl.namespaced_func_name(), *decl.deprecated_replacement);
+}
+
 void TypeChecker::check_named_function_visibility(const FunctionDeclNode &decl, const TokenReference &at)
 {
     if (decl.visibility == Visibility::t_public) {
@@ -1950,6 +1960,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         // the declaration, so it is the same answer for a template and for every instance of it - the
         // monomorphizer having copied the flag along with everything else
         check_call_visibility(node);
+        check_deprecated_use(*node.decl, node.token_function_name);
 
         if (node.decl->is_builtin()
             && builtin_kind_for(node.decl->builtin.value()) == BuiltinKind::t_source_caller
@@ -2709,6 +2720,7 @@ void TypeChecker::visit_function_ref_expr(FunctionRefExprNode &node)
         }
         else {
             check_named_function_visibility(*node.decl, node.token_name);
+            check_deprecated_use(*node.decl, node.token_name);
         }
     }
 

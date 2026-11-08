@@ -1,0 +1,12 @@
+echo (std::fs::path('foo') / std::fs::path('bar')) == std::fs::path('foo')->join('bar');
+echo (std::fs::path('foo') / 'bar') == std::fs::path('foo')->join('bar');
+echo ('foo' / std::fs::path('bar')) == std::fs::path('foo')->join('bar');
+echo ('foo' / 'bar') == std::fs::path('foo')->join('bar');
+echo ('a' / 'b' / 'c') == std::fs::path('a')->join('b')->join('c');
+echo ('/a' / '/b') == std::fs::path('/b');
+echo (std::fs::path('foo/') / 'bar') == std::fs::path('foo/')->join('bar');
+echo (std::fs::path('foo') / '') == std::fs::path('foo')->join('');
+
+echo std::fs::path('file')->concat('.eco')->string();
+echo std::fs::path('file')->concat('')->string();
+echo ('dir' / 'file')->concat('.eco') == ('dir' / 'file.eco');

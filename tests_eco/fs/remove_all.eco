@@ -1,0 +1,9 @@
+string $pid = str::from(std::env::pid());
+string $root = std::fs::join(std::env::tmp(), "echo-rm-all-{$pid}")->string();
+string $deep = std::fs::join($root, 'a')->join('b')->string();
+guard std::fs::mkdir($deep, recursive: true);
+string $f = std::fs::join($deep, 'x.txt')->string();
+guard std::fs::writefile($f, 'x');
+guard std::fs::remove_all(std::fs::path($root));
+bool $here = guard std::fs::exists($root);
+echo $here;

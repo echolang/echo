@@ -25,6 +25,7 @@
 #[sources: "std/math/*.eco"]
 #[sources: "std/env/*.eco"]
 #[sources: "std/io/*.eco"]
+#[sources: "std/fs/*.eco"]
 #[if: threads]
 #[sources: "std/thread/*.eco"]
 #[end]

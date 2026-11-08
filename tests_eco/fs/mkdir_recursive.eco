@@ -1,0 +1,13 @@
+string $pid = str::from(std::env::pid());
+string $root = std::fs::join(std::env::tmp(), "echo-mkdir-r-{$pid}")->string();
+string $deep = std::fs::join($root, 'a')->join('b')->string();
+
+bool $m = guard std::fs::mkdir($deep, recursive: true);
+echo $m;
+
+bool $again = guard std::fs::mkdir($deep, recursive: true);
+echo $again;
+
+guard std::fs::remove_all(std::fs::path($root));
+bool $here = guard std::fs::exists($root);
+echo $here;

@@ -273,6 +273,6 @@ function write_files(const array<File>& $tree, const string& $dir) : bool
 
 function write_text(const string& $path, const string& $text) : bool
 {
-    result<usize, io::ioerror> $wrote = io::writefile($path, $text);
+    result<usize, io::ioerror> $wrote = std::fs::writefile($path, $text);
     return !$wrote->failed();
 }

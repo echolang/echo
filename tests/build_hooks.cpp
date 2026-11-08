@@ -38,10 +38,10 @@ void write_generator(const std::filesystem::path &dir)
 
     write_file(dir / "cli/main.eco",
         "array<string> $argv = std::env::argv();\n"
-        "string $spec = std::io::readfile($argv[1])->or('');\n"
+        "string $spec = std::fs::readfile($argv[1])->or('');\n"
         "string $out = $argv[2];\n"
         "string $want = \"public function api_answer() : int32 { return {$spec}; }\\n\";\n"
-        "string $have = std::io::readfile($out)->or('');\n"
+        "string $have = std::fs::readfile($out)->or('');\n"
         "string $state = string::from(std::env::var('ECHO_HOOK_STATE', ''));\n"
         "string $seen = \"cwd-relative-spec={$argv[1]}\\n\";\n"
         "$seen->append(\"module={$state}\\n\");\n"
@@ -52,11 +52,11 @@ void write_generator(const std::filesystem::path &dir)
         "$seen->append(\"\\nmodule_dir=\");\n"
         "$seen->append(string::from(std::env::var('ECHO_MODULE_DIR', '')));\n"
         "$seen->append(\"\\n\");\n"
-        "std::io::writefile(\"{$state}/seen\", $seen);\n"
+        "std::fs::writefile(\"{$state}/seen\", $seen);\n"
         "if ($have == $want) {\n"
         "    echo 'GENERATOR SAYS UP TO DATE';\n"
         "} else {\n"
-        "    std::io::writefile($out, $want);\n"
+        "    std::fs::writefile($out, $want);\n"
         "    echo 'GENERATOR WROTE';\n"
         "}\n");
 }

@@ -28,8 +28,7 @@ internal function find_program(const string& $name, const string& $search) : res
             return .ok($name);
         }
 
-        string $cwd = std::env::cwd();
-        return .ok(std::env::join($cwd->view(), $name->view()));
+        return .ok((std::env::cwd() / $name)->string());
     }
 
     // a file that is there but may not be run is remembered, so the answer is `denied()` when
@@ -50,21 +49,21 @@ internal function find_program(const string& $name, const string& $search) : res
             continue;
         }
 
-        string $candidate = std::env::join($dir, $file->view());
+        std::fs::path $candidate = std::fs::path($dir) / $file;
 
-        std::io::fileinfo $info = guard std::io::info($candidate) else ($e) {
+        std::fs::fileinfo $info = guard std::fs::info($candidate) else ($e) {
             continue;
         }
 
-        if ($info->kind != std::io::filekind::file) {
+        if ($info->kind != std::fs::filekind::file) {
             continue;
         }
 
 #[if: os == windows]
-        return .ok($candidate);
+        return .ok($candidate->string());
 #[else]
         if (std::io::c_access($candidate->cstr(), X_OK) == 0) {
-            return .ok($candidate);
+            return .ok($candidate->string());
         }
 
         $denied = true;
@@ -83,7 +82,7 @@ private function has_separator(const string& $s) : bool
     usize $i = 0;
 
     while ($i < $s->size()) {
-        if (std::env::is_separator($s->byte($i))) {
+        if (std::fs::is_separator($s->byte($i))) {
             return true;
         }
 
@@ -99,13 +98,13 @@ private function is_absolute(const string& $s) : bool
         return false;
     }
 
-    if (std::env::is_separator($s->byte(0))) {
+    if (std::fs::is_separator($s->byte(0))) {
         return true;
     }
 
 #[if: os == windows]
     // `C:\x`. a bare `C:x` is relative to that drive's own directory, which is not absolute either
-    return $s->size() > 2 && $s->byte(1) == 58 && std::env::is_separator($s->byte(2));
+    return $s->size() > 2 && $s->byte(1) == 58 && std::fs::is_separator($s->byte(2));
 #[else]
     return false;
 #[end]
@@ -124,7 +123,7 @@ private function has_extension(const string& $s) : bool
             return true;
         }
 
-        if (std::env::is_separator($b)) {
+        if (std::fs::is_separator($b)) {
             return false;
         }
 

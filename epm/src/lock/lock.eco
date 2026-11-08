@@ -157,7 +157,7 @@ public function load(const string& $path) : result<Lock, string>
         return .ok(Lock());
     }
 
-    string $text = guard io::readfile($path) else ($e) {
+    string $text = guard std::fs::readfile($path) else ($e) {
         return .error("cannot read {$path}: {$e}");
     }
 
@@ -294,7 +294,7 @@ public function save(const string& $path, const Lock& $lock) : result<bool, stri
 
     $root['packages'] = $pkgs;
 
-    result<usize, io::ioerror> $wrote = io::writefile($path, json::pretty($root));
+    result<usize, io::ioerror> $wrote = std::fs::writefile($path, json::pretty($root));
 
     if ($wrote->failed()) {
         return .error("cannot write {$path}");

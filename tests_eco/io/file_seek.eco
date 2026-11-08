@@ -2,17 +2,17 @@
 
 string $path = '';
 $path->append(str::from(std::env::tmp()));
-$path->append(std::env::DS);
+$path->append(std::fs::DS);
 $path->append('echo-io-seek-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
 
-usize $made = guard std::io::writefile($path, '') else ($e) {
+usize $made = guard std::fs::writefile($path, '') else ($e) {
     echo $e->message();
     return 1;
 }
 
-std::io::file $f = guard std::io::open($path, .readwrite) else ($e) {
+std::io::file $f = guard std::fs::open($path, .readwrite) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -47,7 +47,7 @@ echo $sz;
 
 $f->close();
 
-bool $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::fs::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }

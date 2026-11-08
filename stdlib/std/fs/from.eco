@@ -1,0 +1,10 @@
+/**
+ * A path interpolates as its raw spelling.
+ */
+
+namespace str;
+
+public function from(const std::fs::path& $p) : string
+{
+    return $p->string();
+}

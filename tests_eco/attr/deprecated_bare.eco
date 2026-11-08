@@ -1,0 +1,7 @@
+#[deprecated]
+function f() : void
+{
+}
+
+f();
+echo 1;

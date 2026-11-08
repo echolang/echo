@@ -9,17 +9,17 @@ extern {
 
 string $tmp = str::from(std::env::tmp());
 string $pid = str::from(std::env::pid());
-string $dir = std::env::join($tmp, "echo-io-links-{$pid}");
+string $dir = std::fs::join($tmp, "echo-io-links-{$pid}")->string();
 
-bool $made = guard std::io::mkdir($dir) else ($e) {
+bool $made = guard std::fs::mkdir($dir) else ($e) {
     echo $e->message();
     return 1;
 }
 
-string $target = std::env::join($dir, 'target.txt');
-string $link = std::env::join($dir, 'link.txt');
+string $target = std::fs::join($dir, 'target.txt')->string();
+string $link = std::fs::join($dir, 'link.txt')->string();
 
-usize $w = guard std::io::writefile($target, 'twelve bytes') else ($e) {
+usize $w = guard std::fs::writefile($target, 'twelve bytes') else ($e) {
     echo $e->message();
     return 1;
 }
@@ -30,33 +30,33 @@ if (c_symlink($target->cstr(), $link->cstr()) != 0) {
     return 1;
 }
 
-std::io::fileinfo $through = guard std::io::info($link) else ($e) {
+std::fs::fileinfo $through = guard std::fs::info($link) else ($e) {
     echo $e->message();
     return 1;
 }
 
-std::io::fileinfo $itself = guard std::io::linkinfo($link) else ($e) {
+std::fs::fileinfo $itself = guard std::fs::linkinfo($link) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $through->kind == std::io::filekind::file;
+echo $through->kind == std::fs::filekind::file;
 echo $through->size;
-echo $itself->kind == std::io::filekind::symlink;
+echo $itself->kind == std::fs::filekind::symlink;
 
-string $a = guard std::io::realpath($link) else ($e) {
+std::fs::path $a = guard std::fs::realpath($link) else ($e) {
     echo $e->message();
     return 1;
 }
 
-string $b = guard std::io::realpath($target) else ($e) {
+std::fs::path $b = guard std::fs::realpath($target) else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $a == $b;
 
-std::io::dir $d = guard std::io::opendir($dir) else ($e) {
+std::fs::dir $d = guard std::fs::opendir($dir) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -65,7 +65,7 @@ usize $links = 0;
 usize $files = 0;
 
 foreach ($d as $ent) {
-    if ($ent->kind() == std::io::filekind::symlink) {
+    if ($ent->kind() == std::fs::filekind::symlink) {
         $links = $links + 1;
     }
 
@@ -77,30 +77,30 @@ foreach ($d as $ent) {
 echo $links;
 echo $files;
 
-std::io::remove($link);
+std::fs::remove($link);
 #[else]
-std::io::fileinfo $through = guard std::io::info($target) else ($e) {
+std::fs::fileinfo $through = guard std::fs::info($target) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $through->kind == std::io::filekind::file;
+echo $through->kind == std::fs::filekind::file;
 echo $through->size;
 echo 1;
 
-string $a = guard std::io::realpath($target) else ($e) {
+std::fs::path $a = guard std::fs::realpath($target) else ($e) {
     echo $e->message();
     return 1;
 }
 
-string $b = guard std::io::realpath($target) else ($e) {
+std::fs::path $b = guard std::fs::realpath($target) else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $a == $b;
 
-std::io::dir $d = guard std::io::opendir($dir) else ($e) {
+std::fs::dir $d = guard std::fs::opendir($dir) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -117,5 +117,5 @@ echo 1;
 echo $files;
 #[end]
 
-std::io::remove($target);
-std::io::rmdir($dir);
+std::fs::remove($target);
+std::fs::rmdir($dir);

@@ -1,0 +1,13 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] InvalidAttributeValue  deprecated_not_a_string.eco:1:15
+
+  the 'deprecated' attribute wants a name or a string here.
+
+  1 | #[deprecated: true]
+    :               ^^^^
+  2 | function f() : void
+
+1 error, nothing was compiled.

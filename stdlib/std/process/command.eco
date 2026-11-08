@@ -151,9 +151,9 @@ public struct command
     /**
      * The directory the child starts in. The program itself is still found as described above.
      */
-    function dir(string $path) : void
+    function dir(std::fs::path $path) : void
     {
-        $this->cwd = $path;
+        $this->cwd = $path->string();
     }
 
     /**

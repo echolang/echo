@@ -9,6 +9,13 @@
 namespace std::io;
 
 #[if: os != windows]
+use std::fs::fileinfo;
+use std::fs::fileperms;
+use std::fs::kind_of_mode;
+use std::fs::require_regular_file;
+#[end]
+
+#[if: os != windows]
 private function unix_time(int64 $secs, int64 $nanos) : std::time::timestamp
 {
     return std::time::timestamp(std::time::duration($secs, $nanos));

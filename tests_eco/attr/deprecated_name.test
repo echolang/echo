@@ -1,0 +1,23 @@
+stdlib: off
+
+--- OUT --->
+1
+[warning] DeprecatedUse  deprecated_name.eco:11:1
+
+  'f' is deprecated. Write 'g'.
+
+  10 | 
+  11 | f();
+     : ^
+  12 | h();
+
+[warning] DeprecatedUse  deprecated_name.eco:12:1
+
+  'h' is deprecated. Write 'std::fs::readfile'.
+
+  11 | f();
+  12 | h();
+     : ^
+  13 | echo 1;
+
+2 warnings.

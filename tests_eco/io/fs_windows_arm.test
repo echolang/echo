@@ -3,8 +3,8 @@ flags: --target-os windows
 
 --- OUT --->
 --- IR --->
-CHECK: declare i32 @GetFileInformationByHandle(
 CHECK: declare i32 @GetFileInformationByHandleEx(
+CHECK: declare i32 @GetFileInformationByHandle(
 CHECK: declare ptr @CreateFileW(
 CHECK: declare i32 @SetFileInformationByHandle(
 CHECK: declare i32 @GetFinalPathNameByHandleW(

@@ -422,6 +422,11 @@ namespace AST
         // `#[unique]` on a function, `#[export]` on a property
         MAKE_ISSUE_DEF1(MisplacedAttribute, IssueSeverity::Error, const std::string, _message);
 
+        // a call (or `&name`) whose declaration carries `#[deprecated]` or
+        // `#[deprecated: "replacement"]`. warning: the program still compiles. empty replacement
+        // is the bare form. TypeChecker is the only reporter
+        MAKE_ISSUE_DEF2(DeprecatedUse, IssueSeverity::Warning, const std::string, function_name, const std::string, replacement);
+
         // -- M9 manifest -------------------------------------------------------------------------
 
         MAKE_ISSUE_DEF1(UnknownManifestAttribute, IssueSeverity::Error, const std::string, _message);

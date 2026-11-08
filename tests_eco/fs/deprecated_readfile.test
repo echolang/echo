@@ -1,0 +1,13 @@
+--- OUT --->
+ok
+1
+[warning] DeprecatedUse  deprecated_readfile.eco:4:28
+
+  'std::io::readfile' is deprecated. Write 'std::fs::readfile'.
+
+  3 | guard std::fs::writefile($path, 'ok');
+  4 | string $t = guard std::io::readfile($path);
+    :                            ^^^^^^^^
+  5 | echo $t;
+
+1 warning.

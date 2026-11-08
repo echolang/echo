@@ -50,7 +50,7 @@ public function dispatch(const cli::App& $app, const command::Parsed& $cli) : in
 
 function project() : result<manifest::Manifest, string>
 {
-    return project_at(env::cwd());
+    return project_at(env::cwd()->string());
 }
 
 function project_at(const string& $start) : result<manifest::Manifest, string>

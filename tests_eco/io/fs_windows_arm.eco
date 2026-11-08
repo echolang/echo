@@ -2,10 +2,10 @@
 // the suite. pin_fs is never called, so a host that is not windows never has to resolve these symbols
 function pin_fs(std::io::file $f) : void
 {
-    result<std::io::fileinfo, std::io::ioerror> $a = std::io::info('a');
-    result<std::io::fileinfo, std::io::ioerror> $b = std::io::linkinfo('a');
-    result<std::io::fileinfo, std::io::ioerror> $c = $f->info();
-    result<bool, std::io::ioerror> $d = std::io::chmod('a', std::io::fileperms(420));
-    result<string, std::io::ioerror> $e = std::io::realpath('a');
-    result<bool, std::io::ioerror> $g = std::io::copy('a', 'b');
+    result<std::fs::fileinfo, std::io::ioerror> $a = std::fs::info('a');
+    result<std::fs::fileinfo, std::io::ioerror> $b = std::fs::linkinfo('a');
+    result<std::fs::fileinfo, std::io::ioerror> $c = $f->info();
+    result<bool, std::io::ioerror> $d = std::fs::chmod('a', std::fs::fileperms(420));
+    result<std::fs::path, std::io::ioerror> $e = std::fs::realpath('a');
+    result<bool, std::io::ioerror> $g = std::fs::copy('a', 'b');
 }

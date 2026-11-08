@@ -266,7 +266,7 @@ private function hash_tree(const string& $root, int64 $version) : string
         }
 
         if ($version < 2) {
-            string $body = std::io::readfile($here)->or('');
+            string $body = std::fs::readfile($here)->or('');
             epm_sha256_update($h, $rel->cstr(), $rel->size());
             epm_sha256_update($h, str::from('\n')->cstr(), 1);
             epm_sha256_update($h, $body->cstr(), $body->size());
@@ -281,7 +281,7 @@ private function hash_tree(const string& $root, int64 $version) : string
                 epm_sha256_update($h, $target->cstr(), $target->size());
             }
             else {
-                string $body = std::io::readfile($here)->or('');
+                string $body = std::fs::readfile($here)->or('');
                 epm_sha256_update($h, str::from('F')->cstr(), 1);
                 epm_sha256_update($h, $rel->cstr(), $rel->size());
                 epm_sha256_update($h, str::from('\0')->cstr(), 1);
@@ -392,7 +392,7 @@ public function remove_build_dirs(const string& $root) : bool
  */
 private function is_build_dir(const string& $directory) : bool
 {
-    string $tag = std::io::readfile(join($directory, 'CACHEDIR.TAG'))->or('');
+    string $tag = std::fs::readfile(join($directory, 'CACHEDIR.TAG'))->or('');
 
     return $tag->contains('# echoc-build-directory');
 }

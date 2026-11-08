@@ -305,6 +305,14 @@ internal extern {
     function SetFileInformationByHandle as c_SetFileInformationByHandle(
         ptr<uint8> $h, int32 $class, ptr<basic_info> $info, uint32 $size) : int32;
     function CopyFileW as c_CopyFileW(ptr<uint16> $from, ptr<uint16> $to, int32 $fail_if_exists) : int32;
+    function ReplaceFileW as c_ReplaceFileW(
+        ptr<uint16> $replaced,
+        ptr<uint16> $replacement,
+        ptr<uint16> $backup,
+        uint32 $flags,
+        ptr<uint8> $exclude,
+        ptr<uint8> $reserved
+    ) : int32;
 
     // an overlapped pipe end, read and written through `raw_end`. kernel32, so no JIT pin either
     function ReadFile as c_ReadFile(
@@ -630,6 +638,11 @@ internal function last_error() : ioerror
 }
 
 #[if: os == windows]
+internal function invalid_handle(ptr<uint8> $h) : bool
+{
+    return mem::bit_cast<usize, ptr<uint8>>($h) == std::math::MAX_USIZE;
+}
+
 internal function win32_ioerror() : ioerror
 {
     return win32_ioerror_of(c_GetLastError());

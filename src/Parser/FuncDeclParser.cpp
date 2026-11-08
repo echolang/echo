@@ -874,6 +874,39 @@ void Parser::publish_declaration_markers(
             funcdecl->export_name = nametoken.value();
         }
     }
+
+    if (auto *deprecated_attr = funcdecl->attributes.get_first("deprecated")) {
+        if (!deprecated_attr->value.has_value()) {
+            funcdecl->deprecated_replacement = "";
+        }
+        else {
+            std::optional<std::string> replacement = read_attribute_value(
+                payload, deprecated_attr, "deprecated",
+                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                    if (written.is(AST::AttributeValueKind::t_name)) {
+                        return reader.name(written);
+                    }
+
+                    if (written.is(AST::AttributeValueKind::t_string)) {
+                        return reader.string(written);
+                    }
+
+                    reader.refuse(
+                        written.span,
+                        "the 'deprecated' attribute wants a name or a string here.");
+                    return std::optional<std::string>();
+                });
+
+            if (replacement.has_value() && replacement->empty()) {
+                payload.collector.collect_issue<AST::Issue::InvalidAttributeValue>(
+                    payload.context.code_ref(deprecated_attr->attribute_tokens),
+                    "the 'deprecated' attribute wants a replacement spelling.");
+            }
+            else if (replacement.has_value()) {
+                funcdecl->deprecated_replacement = std::move(*replacement);
+            }
+        }
+    }
 }
 
 // publishes a method or static marked `#[implicit]` as one of its owner's implicit conversions, and

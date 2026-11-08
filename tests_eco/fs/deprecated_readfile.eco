@@ -1,0 +1,7 @@
+string $pid = str::from(std::env::pid());
+string $path = std::fs::join(std::env::tmp(), "echo-fs-dep-{$pid}.txt")->string();
+guard std::fs::writefile($path, 'ok');
+string $t = guard std::io::readfile($path);
+echo $t;
+bool $rm = guard std::fs::remove($path);
+echo $rm;

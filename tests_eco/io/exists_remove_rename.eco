@@ -1,6 +1,6 @@
 string $dir = '';
 $dir->append(str::from(std::env::tmp()));
-$dir->append(std::env::DS);
+$dir->append(std::fs::DS);
 
 string $a = $dir;
 $a->append('echo-io-ren-a-');
@@ -14,7 +14,7 @@ $b->append('.txt');
 
 function present(const string& $path) : bool
 {
-    bool $here = guard std::io::exists($path) else ($e) {
+    bool $here = guard std::fs::exists($path) else ($e) {
         echo $e->message();
         return false;
     }
@@ -24,7 +24,7 @@ function present(const string& $path) : bool
 
 echo present($a);
 
-usize $w = guard std::io::writefile($a, 'moved') else ($e) {
+usize $w = guard std::fs::writefile($a, 'moved') else ($e) {
     echo $e->message();
     return 1;
 }
@@ -33,7 +33,7 @@ echo $w;
 echo present($a);
 echo present($b);
 
-bool $ren = guard std::io::rename($a, $b) else ($e) {
+bool $ren = guard std::fs::rename($a, $b) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -41,14 +41,14 @@ bool $ren = guard std::io::rename($a, $b) else ($e) {
 echo present($a);
 echo present($b);
 
-string $body = guard std::io::readfile($b) else ($e) {
+string $body = guard std::fs::readfile($b) else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $body;
 
-bool $rm = guard std::io::remove($b) else ($e) {
+bool $rm = guard std::fs::remove($b) else ($e) {
     echo $e->message();
     return 1;
 }

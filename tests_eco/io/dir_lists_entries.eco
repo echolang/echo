@@ -1,31 +1,31 @@
 string $leaf = 'echo-io-dir-';
 $leaf->append(str::from(std::env::pid()));
-string $root = std::env::join(std::env::tmp(), $leaf);
-string $a = std::env::join($root, 'a.txt');
-string $b = std::env::join($root, 'b.txt');
-string $sub = std::env::join($root, 'sub');
+string $root = std::fs::join(std::env::tmp(), $leaf)->string();
+string $a = std::fs::join($root, 'a.txt')->string();
+string $b = std::fs::join($root, 'b.txt')->string();
+string $sub = std::fs::join($root, 'sub')->string();
 
-bool $made = guard std::io::mkdir($root) else ($e) {
+bool $made = guard std::fs::mkdir($root) else ($e) {
     echo $e->message();
     return 1;
 }
 
-usize $wa = guard std::io::writefile($a, 'A') else ($e) {
+usize $wa = guard std::fs::writefile($a, 'A') else ($e) {
     echo $e->message();
     return 1;
 }
 
-usize $wb = guard std::io::writefile($b, 'B') else ($e) {
+usize $wb = guard std::fs::writefile($b, 'B') else ($e) {
     echo $e->message();
     return 1;
 }
 
-bool $ms = guard std::io::mkdir($sub) else ($e) {
+bool $ms = guard std::fs::mkdir($sub) else ($e) {
     echo $e->message();
     return 1;
 }
 
-std::io::dir $d = guard std::io::opendir($root) else ($e) {
+std::fs::dir $d = guard std::fs::opendir($root) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -79,22 +79,22 @@ echo $d->error() == null;
 
 $d->close();
 
-bool $ra = guard std::io::remove($a) else ($e) {
+bool $ra = guard std::fs::remove($a) else ($e) {
     echo $e->message();
     return 1;
 }
 
-bool $rb = guard std::io::remove($b) else ($e) {
+bool $rb = guard std::fs::remove($b) else ($e) {
     echo $e->message();
     return 1;
 }
 
-bool $rs = guard std::io::rmdir($sub) else ($e) {
+bool $rs = guard std::fs::rmdir($sub) else ($e) {
     echo $e->message();
     return 1;
 }
 
-bool $rr = guard std::io::rmdir($root) else ($e) {
+bool $rr = guard std::fs::rmdir($root) else ($e) {
     echo $e->message();
     return 1;
 }

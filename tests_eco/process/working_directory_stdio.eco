@@ -12,7 +12,7 @@ private struct temp_dir
 
     destructor()
     {
-        result<bool, std::io::ioerror> $b = std::io::rmdir($this->path);
+        result<bool, std::io::ioerror> $b = std::fs::rmdir($this->path);
     }
 }
 
@@ -34,8 +34,8 @@ if (std::env::argc() > 1) {
 }
 
 int32 $pid = std::env::pid();
-temp_dir $hold = temp_dir(std::env::join(std::env::tmp(), "eco_process_cwd_stdio_{$pid}"));
-bool $made = guard std::io::mkdir($hold->path) else ($e) {
+temp_dir $hold = temp_dir(std::fs::join(std::env::tmp(), "eco_process_cwd_stdio_{$pid}")->string());
+bool $made = guard std::fs::mkdir($hold->path) else ($e) {
     die("mkdir: {$e}");
 };
 

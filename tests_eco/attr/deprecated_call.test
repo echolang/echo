@@ -1,0 +1,14 @@
+stdlib: off
+
+--- OUT --->
+1
+[warning] DeprecatedUse  deprecated_call.eco:6:1
+
+  'f' is deprecated. Write 'g'.
+
+  5 | 
+  6 | f();
+    : ^
+  7 | echo 1;
+
+1 warning.

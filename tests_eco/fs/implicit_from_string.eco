@@ -1,0 +1,7 @@
+function show(std::fs::path $p) : void
+{
+    echo $p->string();
+}
+
+show('gate.txt');
+show(std::fs::path('out'));

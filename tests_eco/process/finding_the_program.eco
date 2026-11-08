@@ -24,16 +24,16 @@ function missing(std::process::command $c) : bool
 }
 
 int32 $pid = std::env::pid();
-string $dir = std::env::join(std::env::tmp(), "eco_process_find_{$pid}");
-bool $made = guard std::io::mkdir($dir) else ($e) { die("mkdir: {$e}"); };
+string $dir = std::fs::join(std::env::tmp(), "eco_process_find_{$pid}")->string();
+bool $made = guard std::fs::mkdir($dir) else ($e) { die("mkdir: {$e}"); };
 
 #[if: os == windows]
-string $tool_file = std::env::join($dir->view(), 'tool.exe');
+string $tool_file = std::fs::join($dir->view(), 'tool.exe')->string();
 #[else]
-string $tool_file = std::env::join($dir->view(), 'tool');
+string $tool_file = std::fs::join($dir->view(), 'tool')->string();
 #[end]
 
-bool $copied = guard std::io::copy(std::env::exe(), $tool_file) else ($e) { die("copy: {$e}"); };
+bool $copied = guard std::fs::copy(std::env::exe(), $tool_file) else ($e) { die("copy: {$e}"); };
 
 // found on the child's PATH
 std::process::command $found = std::process::command('tool', ['hello']);
@@ -51,8 +51,8 @@ std::io::print($direct->stdout);
 
 // a file that is there but cannot be run. POSIX finds it and is denied; on Windows a bare name means
 // `plain.exe`, which is not there
-string $plain = std::env::join($dir->view(), 'plain');
-usize $wrote = guard std::io::writefile($plain, 'not a program\n') else ($e) { die("plain: {$e}"); };
+string $plain = std::fs::join($dir->view(), 'plain')->string();
+usize $wrote = guard std::fs::writefile($plain, 'not a program\n') else ($e) { die("plain: {$e}"); };
 std::process::command $not_runnable = std::process::command('plain');
 $not_runnable->env('PATH', $dir);
 
@@ -94,13 +94,13 @@ echo match ($in_and_input->output('x')) {
 };
 
 std::process::command $bad_dir = std::process::command($tool_file, ['hello']);
-$bad_dir->dir(std::env::join($dir->view(), 'not-a-directory'));
+$bad_dir->dir(std::fs::join($dir->view(), 'not-a-directory')->string());
 bool $refused = match ($bad_dir->status()) {
     .ok($s) => false,
     .error($e) => true,
 };
 echo "missing working directory refused: {$refused}";
 
-bool $gone1 = guard std::io::remove($tool_file) else ($e) { die("rm: {$e}"); };
-bool $gone2 = guard std::io::remove($plain) else ($e) { die("rm: {$e}"); };
-bool $gone3 = guard std::io::rmdir($dir) else ($e) { die("rmdir: {$e}"); };
+bool $gone1 = guard std::fs::remove($tool_file) else ($e) { die("rm: {$e}"); };
+bool $gone2 = guard std::fs::remove($plain) else ($e) { die("rm: {$e}"); };
+bool $gone3 = guard std::fs::rmdir($dir) else ($e) { die("rmdir: {$e}"); };

@@ -1,92 +1,18 @@
 /**
- * Path joining and splitting. `/` on POSIX; `/` and `\` on Windows, plus
- * drive prefixes (`C:`). Forward slashes still work on Windows.
+ * Path joining and splitting, over `std::fs::path`. Callers still pass and
+ * receive `string`; the spelling lives in the standard library.
  */
 
 namespace epm::sys;
 
-function is_sep(uint8 $b) : bool
+public function is_absolute(const std::fs::path& $path) : bool
 {
-#[if: os == windows]
-    return $b == 47 || $b == 92;
-#[else]
-    return $b == 47;
-#[end]
+    return $path->is_absolute();
 }
 
-function last_sep(const string& $path) : usize
+public function join(const std::fs::path& $a, const std::fs::path& $b) : string
 {
-    usize $last = $path->size();
-    usize $i = 0;
-
-    while ($i < $path->size()) {
-        if (is_sep($path->byte($i))) {
-            $last = $i;
-        }
-
-        $i = $i + 1;
-    }
-
-    return $last;
-}
-
-public function is_absolute(const string& $path) : bool
-{
-    if ($path->empty()) {
-        return false;
-    }
-
-    if (is_sep($path->byte(0))) {
-        return true;
-    }
-
-#[if: os == windows]
-    if ($path->size() >= 3) {
-        uint8 $drive = $path->byte(0);
-        bool $letter = ($drive >= 65 && $drive <= 90) || ($drive >= 97 && $drive <= 122);
-        if ($letter && $path->byte(1) == 58 && is_sep($path->byte(2))) {
-            return true;
-        }
-    }
-#[end]
-
-    return false;
-}
-
-public function join(const string& $a, const string& $b) : string
-{
-    if ($a->empty()) {
-        return $b;
-    }
-
-    if ($b->empty()) {
-        return $a;
-    }
-
-    if (is_absolute($b)) {
-        return $b;
-    }
-
-    if (is_sep($a->byte($a->size() - 1))) {
-        string $glued = "{$a}{$b}";
-        return $glued->clone();
-    }
-
-#[if: os == windows]
-    // keep the separator the left side already uses, so `/tmp` + `a` stays
-    // `/tmp/a` in tests and `C:\echo` + `bin` becomes `C:\echo\bin`
-    usize $i = 0;
-    while ($i < $a->size()) {
-        if ($a->byte($i) == 92) {
-            string $joined = "{$a}\\{$b}";
-            return $joined->clone();
-        }
-        $i = $i + 1;
-    }
-#[end]
-
-    string $joined = "{$a}/{$b}";
-    return $joined->clone();
+    return ($a / $b)->string();
 }
 
 public function host_exe(const string& $name) : string
@@ -99,39 +25,12 @@ public function host_exe(const string& $name) : string
 #[end]
 }
 
-public function basename(const string& $path) : string
+public function basename(const std::fs::path& $path) : string
 {
-    usize $last = last_sep($path);
-
-    if ($last == $path->size()) {
-        return $path;
-    }
-
-    string $name = $path->sub($last + 1, $path->size() - $last - 1);
-    return $name->clone();
+    return $path->basename();
 }
 
-public function dirname(const string& $path) : string
+public function dirname(const std::fs::path& $path) : string
 {
-    usize $last = last_sep($path);
-
-    if ($last == $path->size()) {
-        return '.';
-    }
-
-    if ($last == 0) {
-        string $root = $path->sub(0, 1);
-        return $root->clone();
-    }
-
-#[if: os == windows]
-    // C:\foo -> C:\, not C:
-    if ($last >= 2 && $path->byte($last - 1) == 58 && is_sep($path->byte($last))) {
-        string $drive = $path->sub(0, $last + 1);
-        return $drive->clone();
-    }
-#[end]
-
-    string $dir = $path->sub(0, $last);
-    return $dir->clone();
+    return $path->dirname()->string();
 }

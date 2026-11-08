@@ -80,7 +80,7 @@ public class GitHub : Source
             return $this->git->fetch_manifest($tag, $rev, $dir);
         }
 
-        result<usize, io::ioerror> $wrote = io::writefile($mod, $body);
+        result<usize, io::ioerror> $wrote = std::fs::writefile($mod, $body);
 
         if ($wrote->failed()) {
             return $this->git->fetch_manifest($tag, $rev, $dir);

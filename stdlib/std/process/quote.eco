@@ -176,7 +176,7 @@ private function system_cmd() : result<string, ioerror>
         return .error(std::io::win32_ioerror());
     }
 
-    return .ok(std::env::join($dir->view(), 'cmd.exe'));
+    return .ok((std::fs::path($dir) / 'cmd.exe')->string());
 }
 
 // the program to start and the line it is handed. a batch file is cmd.exe's, with the script and its

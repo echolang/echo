@@ -1,0 +1,8 @@
+// `#[deprecated:]` belongs on a function
+#[deprecated: "std::fs::readfile"]
+struct Box
+{
+    public int32 $v;
+}
+
+echo 1;

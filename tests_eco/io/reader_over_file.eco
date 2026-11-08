@@ -3,19 +3,19 @@
 
 string $path = '';
 $path->append(str::from(std::env::tmp()));
-$path->append(std::env::DS);
+$path->append(std::fs::DS);
 $path->append('echo-io-reader-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
 
-usize $w = guard std::io::writefile($path, 'red\nblue') else ($e) {
+usize $w = guard std::fs::writefile($path, 'red\nblue') else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $w;
 
-std::io::file $f = guard std::io::open($path, .read) else ($e) {
+std::io::file $f = guard std::fs::open($path, .read) else ($e) {
     echo $e->message();
     return 1;
 }
@@ -45,7 +45,7 @@ echo $rest->size();
 
 $f->close();
 
-bool $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::fs::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }

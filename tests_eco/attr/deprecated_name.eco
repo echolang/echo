@@ -1,0 +1,13 @@
+#[deprecated: g]
+function f() : void
+{
+}
+
+#[deprecated: std::fs::readfile]
+function h() : void
+{
+}
+
+f();
+h();
+echo 1;
