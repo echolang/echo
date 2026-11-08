@@ -103,8 +103,12 @@ test load_keeps_target_requires_apart
     assert($m->scoped->count() == 1);
     assert($m->scoped[0]->req->name == 'mock');
     assert($m->scoped[0]->target == 'tests');
+    assert($m->scoped[0]->kind == manifest::TargetKind::testScope);
     array<manifest::Requirement> $all = manifest::all_requires($m);
     assert($all->count() == 2);
+    array<manifest::Requirement> $lib = manifest::library_requires($m);
+    assert($lib->count() == 1);
+    assert($lib[0]->name == 'lib');
     scratch::gone($dir);
 }
 
@@ -269,8 +273,171 @@ test load_keeps_target_depends_apart
     assert($m->scoped_depends->count() == 1);
     assert($m->scoped_depends[0]->path == $lib);
     assert($m->scoped_depends[0]->target == 'tests');
+    assert($m->scoped_depends[0]->kind == manifest::TargetKind::testScope);
     scratch::gone($lib);
     scratch::gone($dir);
+}
+
+test reachable_requires_skips_a_path_dep_test_require
+{
+    string $lib = scratch::dir('reach-test-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($lib, 'tests/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"visu\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n}\n"
+    );
+    string $app = scratch::dir('reach-test-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 0);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_collects_a_path_dep_lib_require
+{
+    string $lib = scratch::dir('reach-lib-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"kit\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: lib { name: \"kit\" }] {\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n}\n"
+    );
+    string $app = scratch::dir('reach-lib-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 1);
+    assert($need[0]->name == 'leaf');
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_collects_a_direct_path_dep_tool_require
+{
+    string $lib = scratch::dir('reach-tool-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($lib, 'cli/main.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"restgen\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: exe { name: \"gen\", entry: \"cli/main.eco\", public: true }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n}\n"
+    );
+    string $app = scratch::dir('reach-tool-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 1);
+    assert($need[0]->name == 'leaf');
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_skips_a_private_exe_require
+{
+    string $lib = scratch::dir('reach-priv-lib');
+    scratch::file($lib, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($lib, 'cli/main.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"kit\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: exe { name: \"internal\", entry: \"cli/main.eco\" }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n}\n"
+    );
+    string $app = scratch::dir('reach-priv-app');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 0);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_skips_a_path_dep_test_depend
+{
+    string $hidden = scratch::dir('reach-tdep-nested');
+    scratch::path_module(
+        $hidden,
+        'hidden',
+        '0.1.0',
+        "#[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n"
+    );
+    string $lib = scratch::dir('reach-tdep-lib2');
+    scratch::file($lib, 'tests/dummy.eco', "echo 1;\n");
+    scratch::path_module(
+        $lib,
+        'kit',
+        '0.1.0',
+        "#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$hidden}\"]\n}\n"
+    );
+    string $app = scratch::dir('reach-tdep-app2');
+    scratch::path_module(
+        $app,
+        'app',
+        '0.1.0',
+        "#[depends: \"{$lib}\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load(sys::join($app, 'module.eco'));
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 0);
+    scratch::gone($hidden);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test reachable_requires_collects_a_direct_tool_behind_another_path_dep
+{
+    string $tool = scratch::dir('reach-diamond-tool');
+    scratch::file($tool, 'cli/main.eco', "echo 1;\n");
+    scratch::path_module(
+        $tool,
+        'restgen',
+        '0.1.0',
+        "#[target: exe { name: \"gen\", entry: \"cli/main.eco\", public: true }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n}\n"
+    );
+    string $lib = scratch::dir('reach-diamond-lib');
+    scratch::path_module(
+        $lib,
+        'kit',
+        '0.1.0',
+        "#[depends: \"{$tool}\"]\n"
+    );
+    string $app = scratch::dir('reach-diamond-app');
+    scratch::path_module(
+        $app,
+        'app',
+        '0.1.0',
+        "#[depends: \"{$lib}\"]\n#[depends: \"{$tool}\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load(sys::join($app, 'module.eco'));
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 1);
+    assert($need[0]->name == 'leaf');
+    scratch::gone($tool);
+    scratch::gone($lib);
+    scratch::gone($app);
 }
 
 test reachable_requires_collects_a_target_depend

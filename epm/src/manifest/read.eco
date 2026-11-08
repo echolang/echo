@@ -23,14 +23,41 @@ public struct Requirement
     }
 }
 
+/**
+ * What `#[target:]` named. the same closed spellings `echoc -p manifest` emits.
+ */
+public enum TargetKind
+{
+    case exe;
+    // `test` is a keyword, so this is `#[target: test]`
+    case testScope;
+    case lib;
+}
+
+// unknown JSON is not a lib scope, so a nested walk skips it
+function target_kind_of(const string& $spelled) : TargetKind
+{
+    if ($spelled == 'lib') {
+        return .lib;
+    }
+
+    if ($spelled == 'test') {
+        return .testScope;
+    }
+
+    return .exe;
+}
+
 public struct ScopedRequirement
 {
     string $target;
+    TargetKind $kind;
     Requirement $req;
 
-    constructor(string $target, Requirement $req)
+    constructor(string $target, TargetKind $kind, Requirement $req)
     {
         $this->target = $target;
+        $this->kind = $kind;
         $this->req = $req;
     }
 }
@@ -38,11 +65,13 @@ public struct ScopedRequirement
 public struct ScopedDepend
 {
     string $target;
+    TargetKind $kind;
     string $path;
 
-    constructor(string $target, string $path)
+    constructor(string $target, TargetKind $kind, string $path)
     {
         $this->target = $target;
+        $this->kind = $kind;
         $this->path = $path;
     }
 }
@@ -116,7 +145,33 @@ public function tool_requires(const Manifest& $m) : array<Requirement>
     return $out;
 }
 
-// file-scope plus target-scope. a walked path module's hooks are its author's
+/**
+ * File-scope plus `lib` scopes. The compiler's graph follows the same cut.
+ */
+public function library_requires(const Manifest& $m) : array<Requirement>
+{
+    array<Requirement> $out = array<Requirement>();
+    usize $i = 0;
+
+    while ($i < $m->requires->count()) {
+        $out[] = $m->requires[$i];
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < $m->scoped->count()) {
+        if ($m->scoped[$i]->kind == TargetKind::lib) {
+            $out[] = $m->scoped[$i]->req;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+// the root's own: file-scope, every target scope. hooks sit on all_requires
 function program_requires(const Manifest& $m) : array<Requirement>
 {
     array<Requirement> $out = array<Requirement>();
@@ -190,15 +245,24 @@ public function name_seen(const array<string>& $seen, const string& $name) : boo
     return false;
 }
 
-function append_requires(const Manifest& $m, array<Requirement>& $into) : void
+function append_copy(const array<Requirement>& $from, array<Requirement>& $into) : void
 {
-    array<Requirement> $more = program_requires($m);
     usize $i = 0;
 
-    while ($i < $more->count()) {
-        $into[] = $more[$i];
+    while ($i < $from->count()) {
+        $into[] = $from[$i];
         $i = $i + 1;
     }
+}
+
+function append_library(const Manifest& $m, array<Requirement>& $into) : void
+{
+    append_copy(library_requires($m), $into);
+}
+
+function append_tools(const Manifest& $m, array<Requirement>& $into) : void
+{
+    append_copy(tool_requires($m), $into);
 }
 
 function walk_depend_path(
@@ -222,7 +286,7 @@ function walk_depend_path(
     }
 
     $seen[] = $dep->name;
-    append_requires($dep, $into);
+    append_library($dep, $into);
     bool $ok = guard walk_depends($dep, $seen, $into, $depth + 1) else ($e) {
         return .error($e);
     }
@@ -230,6 +294,7 @@ function walk_depend_path(
     return .ok(true);
 }
 
+// nested only: file-scope plus lib-scoped depends. consumer edges are load_directs
 function walk_depends(
     const Manifest& $man,
     array<string>& $seen,
@@ -244,7 +309,9 @@ function walk_depends(
     usize $i = 0;
 
     while ($i < $man->depends->count()) {
-        bool $ok = guard walk_depend_path($man, $man->depends[$i], $seen, $into, $depth) else ($e) {
+        bool $ok = guard walk_depend_path(
+            $man, $man->depends[$i], $seen, $into, $depth
+        ) else ($e) {
             return .error($e);
         }
 
@@ -254,6 +321,11 @@ function walk_depends(
     $i = 0;
 
     while ($i < $man->scoped_depends->count()) {
+        if ($man->scoped_depends[$i]->kind != TargetKind::lib) {
+            $i = $i + 1;
+            continue;
+        }
+
         bool $ok = guard walk_depend_path(
             $man, $man->scoped_depends[$i]->path, $seen, $into, $depth
         ) else ($e) {
@@ -266,24 +338,70 @@ function walk_depends(
     return .ok(true);
 }
 
-function walk_hook_depends(
-    const Manifest& $man,
+function load_direct(
+    const Manifest& $root,
+    const string& $spelled,
     array<string>& $seen,
-    array<Requirement>& $into,
-    int32 $depth
+    array<Manifest>& $directs
 ) : result<bool, string>
 {
+    string $path = guard depend_module($root->path, $spelled) else ($e) {
+        return .error($e);
+    }
+
+    Manifest $dep = guard load($path) else ($e) {
+        return .error($e);
+    }
+
+    if (name_seen($seen, $dep->name)) {
+        return .ok(true);
+    }
+
+    $seen[] = $dep->name;
+    $directs[] = $dep;
+    return .ok(true);
+}
+
+// the root's own edges: file-scope, every target, hooks. names here are the direct set
+function load_directs(
+    const Manifest& $root,
+    array<string>& $seen
+) : result<array<Manifest>, string>
+{
+    array<Manifest> $directs = array<Manifest>();
     usize $i = 0;
 
-    while ($i < $man->hook_depends->count()) {
-        bool $ok = guard walk_depend_path($man, $man->hook_depends[$i], $seen, $into, $depth) else ($e) {
+    while ($i < $root->depends->count()) {
+        bool $ok = guard load_direct($root, $root->depends[$i], $seen, $directs) else ($e) {
             return .error($e);
         }
 
         $i = $i + 1;
     }
 
-    return .ok(true);
+    $i = 0;
+
+    while ($i < $root->scoped_depends->count()) {
+        bool $ok = guard load_direct(
+            $root, $root->scoped_depends[$i]->path, $seen, $directs
+        ) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < $root->hook_depends->count()) {
+        bool $ok = guard load_direct($root, $root->hook_depends[$i], $seen, $directs) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
+    }
+
+    return .ok($directs);
 }
 
 /**
@@ -295,13 +413,20 @@ public function reachable_requires(const Manifest& $root) : result<array<Require
     array<Requirement> $out = all_requires($root);
     array<string> $seen = array<string>();
     $seen[] = $root->name;
-    bool $ok = guard walk_depends($root, $seen, $out, 0) else ($e) {
+    array<Manifest> $directs = guard load_directs($root, $seen) else ($e) {
         return .error($e);
     }
 
-    // the root's hooks only: a path module's hooks never run for this program
-    bool $hooks = guard walk_hook_depends($root, $seen, $out, 0) else ($e) {
-        return .error($e);
+    usize $i = 0;
+
+    while ($i < $directs->count()) {
+        append_library($directs[$i], $out);
+        append_tools($directs[$i], $out);
+        bool $ok = guard walk_depends($directs[$i], $seen, $out, 1) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
     }
 
     return .ok($out);
@@ -405,12 +530,14 @@ public function load(const string& $path) : result<Manifest, string>
         if ($targets[$ti]['public']->asBool() ?? false) {
             $m->public_targets[] = $tname;
         }
+
+        TargetKind $tkind = target_kind_of($targets[$ti]['kind']->asStr() ?? '');
         array<Requirement> $scoped = array<Requirement>();
         take_requires($targets[$ti]['requires'], $scoped);
         usize $si = 0;
 
         while ($si < $scoped->count()) {
-            $m->scoped[] = ScopedRequirement($tname, $scoped[$si]);
+            $m->scoped[] = ScopedRequirement($tname, $tkind, $scoped[$si]);
             $si = $si + 1;
         }
 
@@ -421,7 +548,7 @@ public function load(const string& $path) : result<Manifest, string>
             string $td = $tdeps[$tdi]->asStr() ?? '';
 
             if (!$td->empty()) {
-                $m->scoped_depends[] = ScopedDepend($tname, $td);
+                $m->scoped_depends[] = ScopedDepend($tname, $tkind, $td);
             }
 
             $tdi = $tdi + 1;

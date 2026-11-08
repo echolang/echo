@@ -473,7 +473,7 @@ private function hydrate(
         return false;
     }
 
-    array<Requirement> $reqs = $man->requires;
+    array<Requirement> $reqs = epm::manifest::library_requires($man);
 
     if (!list_all($reqs, $world, $err)) {
         return false;
@@ -558,12 +558,14 @@ private function sub_needs(
         return null;
     }
 
-    if (!list_all($man->requires, $world, $err)) {
+    array<Requirement> $reqs = epm::manifest::library_requires($man);
+
+    if (!list_all($reqs, $world, $err)) {
         return null;
     }
 
-    $world->catalog[$pkg]->releases[$rel_i]->subs[] = Sub($path, $man->requires);
-    return needs_of($man->requires, $who, $world);
+    $world->catalog[$pkg]->releases[$rel_i]->subs[] = Sub($path, $reqs);
+    return needs_of($reqs, $who, $world);
 }
 
 /**

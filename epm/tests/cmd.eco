@@ -225,7 +225,7 @@ test install_refuses_conflicting_path_dep_requires
     scratch::gone($app);
 }
 
-test install_collects_a_path_dep_target_require
+test install_skips_a_path_dep_test_require
 {
     string $pkg = scratch::dir('cmd-scoped-pkg');
     scratch::git_module($pkg, 'leaf', '1.0.0', '');
@@ -246,10 +246,251 @@ test install_collects_a_path_dep_target_require
     );
 
     assert(cmd::install_at($app) == 0);
+    assert(!sys::is_file(sys::join($app, 'epm.lock.json')));
+    assert(!sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+
+    scratch::gone($pkg);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_in_a_root_still_vendors_its_test_require
+{
+    string $pkg = scratch::dir('cmd-root-test-pkg');
+    scratch::git_module($pkg, 'leaf', '1.0.0', '');
+    string $lib = scratch::dir('cmd-root-test-lib');
+    scratch::file($lib, 'src/lib.eco', "namespace libjson;\npublic function ping() : int32 { return 1; }\n");
+    scratch::file($lib, 'tests/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"libjson\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$pkg}\" }]\n}\n"
+    );
+
+    assert(cmd::install_at($lib) == 0);
+    assert(sys::is_file(sys::join($lib, 'vendor/leaf/module.eco')));
+    assert(cmd::verify_at($lib) == 0);
+
+    scratch::gone($pkg);
+    scratch::gone($lib);
+}
+
+test install_of_a_git_library_skips_its_test_require
+{
+    string $leaf = scratch::dir('cmd-git-test-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $lib = scratch::dir('cmd-git-test-lib');
+    scratch::git_module(
+        $lib,
+        'libjson',
+        '0.1.0',
+        "#[target: test] {\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n}\n"
+    );
+    string $app = scratch::dir('cmd-git-test-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"libjson\" { version: \"^0.1\", source: git \"{$lib}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'vendor/libjson/module.eco')));
+    assert(!sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+    assert(cmd::verify_at($app) == 0);
+
+    scratch::gone($leaf);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_vendors_a_direct_public_exe_require
+{
+    string $leaf = scratch::dir('cmd-tool-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $lib = scratch::dir('cmd-tool-lib');
+    scratch::file($lib, 'cli/main.eco', "echo 1;\n");
+    scratch::git_module(
+        $lib,
+        'restgen',
+        '1.0.0',
+        "#[target: exe { name: \"gen\", entry: \"cli/main.eco\", public: true }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n}\n"
+    );
+    string $app = scratch::dir('cmd-tool-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"restgen\" { version: \"^1.0\", source: git \"{$lib}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'vendor/restgen/module.eco')));
     assert(sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
     assert(cmd::verify_at($app) == 0);
 
-    scratch::gone($pkg);
+    scratch::gone($leaf);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_vendors_a_path_dep_public_exe_require
+{
+    string $leaf = scratch::dir('cmd-path-tool-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $lib = scratch::dir('cmd-path-tool-lib');
+    scratch::file($lib, 'src/lib.eco', "namespace restgen;\npublic function ping() : int32 { return 1; }\n");
+    scratch::file($lib, 'cli/main.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"restgen\"]\n#[version: \"1.0.0\"]\n#[sources: \"src/*.eco\"]\n#[target: exe { name: \"gen\", entry: \"cli/main.eco\", public: true }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n}\n"
+    );
+    string $app = scratch::dir('cmd-path-tool-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+    assert(cmd::verify_at($app) == 0);
+
+    scratch::gone($leaf);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_of_a_git_library_vendors_its_lib_require
+{
+    string $leaf = scratch::dir('cmd-git-lib-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $lib = scratch::dir('cmd-git-lib-kit');
+    scratch::git_module(
+        $lib,
+        'kit',
+        '1.0.0',
+        "#[target: lib { name: \"kit\" }] {\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n}\n"
+    );
+    string $app = scratch::dir('cmd-git-lib-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"kit\" { version: \"^1.0\", source: git \"{$lib}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'vendor/kit/module.eco')));
+    assert(sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+    assert(cmd::verify_at($app) == 0);
+
+    scratch::gone($leaf);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_skips_a_path_dep_test_depend
+{
+    string $leaf = scratch::dir('cmd-tdep-nested-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $hidden = scratch::dir('cmd-tdep-nested-hidden');
+    scratch::path_module(
+        $hidden,
+        'hidden',
+        '0.1.0',
+        "#[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n"
+    );
+    string $lib = scratch::dir('cmd-tdep-nested-lib');
+    scratch::file($lib, 'tests/dummy.eco', "echo 1;\n");
+    scratch::path_module(
+        $lib,
+        'kit',
+        '0.1.0',
+        "#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[depends: \"{$hidden}\"]\n}\n"
+    );
+    string $app = scratch::dir('cmd-tdep-nested-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(!sys::is_file(sys::join($app, 'epm.lock.json')));
+    assert(!sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+
+    scratch::gone($leaf);
+    scratch::gone($hidden);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_vendors_a_direct_tool_behind_another_path_dep
+{
+    string $leaf = scratch::dir('cmd-diamond-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $tool = scratch::dir('cmd-diamond-tool');
+    scratch::file($tool, 'cli/main.eco', "echo 1;\n");
+    scratch::path_module(
+        $tool,
+        'restgen',
+        '1.0.0',
+        "#[target: exe { name: \"gen\", entry: \"cli/main.eco\", public: true }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n}\n"
+    );
+    string $lib = scratch::dir('cmd-diamond-lib');
+    scratch::path_module(
+        $lib,
+        'kit',
+        '1.0.0',
+        "#[depends: \"{$tool}\"]\n"
+    );
+    string $app = scratch::dir('cmd-diamond-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[depends: \"{$tool}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+    assert(cmd::verify_at($app) == 0);
+
+    scratch::gone($leaf);
+    scratch::gone($tool);
+    scratch::gone($lib);
+    scratch::gone($app);
+}
+
+test install_skips_a_private_exe_require
+{
+    string $leaf = scratch::dir('cmd-priv-leaf');
+    scratch::git_module($leaf, 'leaf', '1.0.0', '');
+    string $lib = scratch::dir('cmd-priv-lib');
+    scratch::file($lib, 'src/lib.eco', "namespace kit;\npublic function ping() : int32 { return 1; }\n");
+    scratch::file($lib, 'cli/main.eco', "echo 1;\n");
+    scratch::file(
+        $lib,
+        'module.eco',
+        "#[module: \"kit\"]\n#[version: \"1.0.0\"]\n#[sources: \"src/*.eco\"]\n#[target: exe { name: \"internal\", entry: \"cli/main.eco\" }] {\n    #[sources: \"cli/*.eco\"]\n    #[requires: \"leaf\" { version: \"^1.0\", source: git \"{$leaf}\" }]\n}\n"
+    );
+    string $app = scratch::dir('cmd-priv-app');
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"{$lib}\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+
+    assert(cmd::install_at($app) == 0);
+    assert(!sys::is_file(sys::join($app, 'epm.lock.json')));
+    assert(!sys::is_file(sys::join($app, 'vendor/leaf/module.eco')));
+
+    scratch::gone($leaf);
     scratch::gone($lib);
     scratch::gone($app);
 }

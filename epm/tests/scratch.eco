@@ -42,6 +42,21 @@ public function file(const string& $dir, const string& $rel, const string& $text
     return $path;
 }
 
+public function path_module(
+    const string& $dir,
+    const string& $name,
+    const string& $version,
+    const string& $extra
+) : void
+{
+    file($dir, 'src/lib.eco', "namespace {$name};\npublic function ping() : int32 { return 1; }\n");
+    file(
+        $dir,
+        'module.eco',
+        "#[module: \"{$name}\"]\n#[version: \"{$version}\"]\n#[sources: \"src/*.eco\"]\n{$extra}"
+    );
+}
+
 public function version(const string& $text) : util::Version
 {
     util::Version $v = guard util::parse_version($text) else {
