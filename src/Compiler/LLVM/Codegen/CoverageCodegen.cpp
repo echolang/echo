@@ -65,7 +65,19 @@ bool CoverageCodegen::active() const
 
 bool CoverageCodegen::should_instrument(const AST::FunctionDeclNode *decl) const
 {
-    return active() && AST::coverage_instruments(decl, _ctx.options.coverage_stdlib());
+    // **the unit, not only the decl.** a cloned operator can arrive with a null
+    // `declared_in.module`, and incrementing it here plants `__eco_cov_base` in an
+    // object whose key does not fold coverage
+    const bool compiler_supplied = _ctx.current_cmp_unit != nullptr
+        && _ctx.current_cmp_unit->ast_module != nullptr
+        && _ctx.current_cmp_unit->ast_module->compiler_supplied;
+
+    if (!_ctx.options.coverage_instruments_module(compiler_supplied)
+        || !AST::coverage_instruments(decl, _ctx.options.coverage_stdlib())) {
+        return false;
+    }
+
+    return true;
 }
 
 CoverageCodegen::FunctionState *CoverageCodegen::state_for(const AST::FunctionDeclNode *decl)
@@ -400,6 +412,14 @@ void CoverageCodegen::finish_units()
     CmpUnit *saved = _ctx.current_cmp_unit;
     for (auto &unit : _ctx.cmp_units) {
         if (unit == nullptr || unit->llvm_module == nullptr) {
+            continue;
+        }
+
+        // **stdlib's key does not fold coverage** unless `--coverage-stdlib`. a ctor
+        // here would be `__eco_cov_register` in an object the next uncovered compile hits
+        const bool compiler_supplied = unit->ast_module != nullptr
+            && unit->ast_module->compiler_supplied;
+        if (!_ctx.options.coverage_instruments_module(compiler_supplied)) {
             continue;
         }
 

@@ -470,6 +470,9 @@ struct ModulePlan
     // one map rather than one per artifact: the two paths are decided together and are always both present or
     // both absent, so two containers would only offer a way for them to disagree
     std::map<std::string, ModuleArtifact> emit_to;
+
+    // name → stored object, only for modules that grow counters
+    std::map<std::string, std::filesystem::path> objects;
 };
 
 // decides, per manifest module, whether its object can be reused.
@@ -481,7 +484,8 @@ static ModulePlan plan_module_artifacts(
     const Compiler::BuildLayout &layout,
     const std::vector<const Parser::ModuleManifest *> &manifests,
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
-    const std::string &entry_module
+    const std::string &entry_module,
+    const Compiler::CompilerOptions &options
 )
 {
     ModulePlan plan;
@@ -504,11 +508,18 @@ static ModulePlan plan_module_artifacts(
         // therefore unremovable, which is a `clean` that works only after a build that changed something
         const Compiler::BuildDirState state = layout.prepare_module_dir(manifest);
 
+        const bool compiler_supplied = Compiler::is_compiler_supplied_module(manifest);
+        const bool stores_coverage = options.coverage_instruments_module(compiler_supplied);
+
         // deliberately not gated on that: a read-only store still serves what is already in it, and a build
         // that refused to reuse an object it can see would be slower for no reason at all
-        if (Compiler::cached_object_is_hit(object)) {
+        if (Compiler::cached_object_is_hit(object)
+            && Compiler::coverage_allows_reuse(options, compiler_supplied, object)) {
             plan.cached.insert(manifest.name);
             plan.reused.push_back(object);
+            if (stores_coverage) {
+                plan.objects.emplace(manifest.name, object);
+            }
             continue;
         }
 
@@ -521,6 +532,9 @@ static ModulePlan plan_module_artifacts(
 
         plan.emit_to[manifest.name] = ModuleArtifact{
             object, Compiler::module_inputs_path(manifest, layout) };
+        if (stores_coverage) {
+            plan.objects.emplace(manifest.name, object);
+        }
     }
 
     return plan;
@@ -1900,7 +1914,8 @@ static std::optional<int> compile_and_link_program(
     const std::string &entry_module = front.entry_module();
     const ModulePlan plan = whole_program
         ? ModulePlan{}
-        : plan_module_artifacts(front.layout(), front.manifests(), front.cache_keys, entry_module);
+        : plan_module_artifacts(
+            front.layout(), front.manifests(), front.cache_keys, entry_module, front.options);
 
     report_cache_plan(
         driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
@@ -1962,7 +1977,11 @@ static std::optional<int> compile_and_link_program(
         if (front.options.coverage()) {
             std::string map_error;
             if (!Compiler::write_coverage_map(
-                    front.layout(), compiler.coverage_sites(), plan.cached, map_error)) {
+                    front.layout(),
+                    compiler.coverage_sites(),
+                    plan.cached,
+                    plan.objects,
+                    map_error)) {
                 diagnostics.render_untyped("Coverage Map Failed", map_error);
                 return 1;
             }

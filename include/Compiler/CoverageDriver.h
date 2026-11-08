@@ -59,12 +59,28 @@ namespace Compiler
     std::filesystem::path coverage_map_path(const BuildLayout &layout);
     std::filesystem::path coverage_test_path(const BuildLayout &layout, const TestCase &test);
 
-    // writes this pass's module sidecars, keeps cached modules' sidecars, and merges
-    // them into map.json. `cached_modules` are names this frontend did not emit
+    // `{name}-{hex}.covmap.json` beside the cached object, same hex as the `.o`
+    std::filesystem::path coverage_object_map_path(const std::filesystem::path &object);
+
+    // a usable object sidecar: present, readable, and parseable
+    bool coverage_map_present(const std::filesystem::path &object);
+
+    // true when this object may be reused under the current coverage settings:
+    // no counters for this module, or a usable sidecar beside the object
+    bool coverage_allows_reuse(
+        const CompilerOptions &options,
+        bool compiler_supplied,
+        const std::filesystem::path &object
+    );
+
+    // writes this pass's object sidecars and merges them with cached modules' into
+    // map.json. `cached_modules` are names this frontend did not emit.
+    // `objects` is name → stored `.o`: a hit loads the sidecar, a miss writes it
     bool write_coverage_map(
         const BuildLayout &layout,
         const CoverageModuleSites &compiled,
         const std::set<std::string> &cached_modules,
+        const std::map<std::string, std::filesystem::path> &objects,
         std::string &out_error
     );
 

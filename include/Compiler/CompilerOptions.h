@@ -200,6 +200,13 @@ namespace Compiler
             return coverage_stdlib_enabled;
         }
 
+        // **only modules that actually grow counters.** `--coverage` without
+        // `--coverage-stdlib` leaves compiler-supplied objects byte for byte.
+        // the key fold, the reuse gate, and CoverageCodegen's two unit skips ask this
+        bool coverage_instruments_module(bool compiler_supplied) const {
+            return coverage() && (coverage_stdlib() || !compiler_supplied);
+        }
+
         bool no_optimize() const {
             return codegen_opt == CodegenOpt::t_none;
         }

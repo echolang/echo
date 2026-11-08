@@ -281,10 +281,7 @@ bool Compiler::compute_module_keys(
         hash = fnv1a64(
             TargetFacts::for_module(facts, manifest.name, modules_with_tests).cache_signature(), hash);
 
-        // **only modules that actually grow counters.** `--coverage` without `--coverage-stdlib`
-        // leaves compiler-supplied objects byte for byte what they were
-        if (options.coverage()
-            && (options.coverage_stdlib() || !is_compiler_supplied_module(manifest))) {
+        if (options.coverage_instruments_module(is_compiler_supplied_module(manifest))) {
             hash = fnv1a64(std::string("coverage"), hash);
             hash = fnv1a64(
                 options.coverage_stdlib() ? std::string("cstdlib") : std::string("nocstdlib"), hash);

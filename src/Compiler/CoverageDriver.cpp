@@ -14,8 +14,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -83,6 +85,11 @@ std::filesystem::path Compiler::coverage_map_path(const BuildLayout &layout)
     return layout.coverage_dir() / "map.json";
 }
 
+std::filesystem::path Compiler::coverage_object_map_path(const std::filesystem::path &object)
+{
+    return object.parent_path() / (object.stem().string() + ".covmap.json");
+}
+
 std::filesystem::path Compiler::coverage_test_path(const BuildLayout &layout, const TestCase &test)
 {
     std::string id = test_display_name(test);
@@ -101,19 +108,9 @@ std::filesystem::path Compiler::coverage_test_path(const BuildLayout &layout, co
 
 namespace
 {
-    std::filesystem::path maps_dir(const Compiler::BuildLayout &layout)
-    {
-        return layout.coverage_dir() / "maps";
-    }
-
     std::filesystem::path tests_dir(const Compiler::BuildLayout &layout)
     {
         return layout.coverage_dir() / "tests";
-    }
-
-    std::filesystem::path sidecar_path(const Compiler::BuildLayout &layout, const std::string &module)
-    {
-        return maps_dir(layout) / (Compiler::coverage_module_stem(module) + ".json");
     }
 
     Compiler::CoverageSiteKind kind_from_name(const std::string &name)
@@ -227,13 +224,6 @@ namespace
     bool prepare_coverage_dirs(const Compiler::BuildLayout &layout, std::string &out_error)
     {
         std::error_code ec;
-        std::filesystem::create_directories(maps_dir(layout), ec);
-        if (ec) {
-            out_error = fmt::format(
-                "could not create '{}': {}", maps_dir(layout).string(), ec.message());
-            return false;
-        }
-
         const std::filesystem::path tests = tests_dir(layout);
         std::filesystem::create_directories(tests, ec);
         if (ec) {
@@ -303,12 +293,77 @@ namespace
 
         return modules;
     }
+
+    std::string module_json_text(
+        const std::string &name,
+        const std::vector<Compiler::CoverageSite> &sites
+    )
+    {
+        nlohmann::ordered_json module;
+        module["name"] = name;
+        if (!sites.empty() && !sites.front().dir.empty()) {
+            module["dir"] = sites.front().dir;
+        }
+        module["counters"] = counters_json(sites);
+        return module.dump(2) + "\n";
+    }
+
+    bool write_module_json(
+        const std::filesystem::path &dest,
+        const std::string &name,
+        const std::vector<Compiler::CoverageSite> &sites,
+        std::string &out_error
+    )
+    {
+        if (!Compiler::write_artifact_file(dest, module_json_text(name, sites))) {
+            out_error = fmt::format("could not write '{}'", dest.string());
+            return false;
+        }
+
+        return true;
+    }
+
+    std::optional<std::vector<Compiler::CoverageSite>> load_module_json(
+        const std::filesystem::path &path
+    )
+    {
+        const std::optional<std::string> json = Compiler::read_whole_file(path);
+        if (!json.has_value()) {
+            return std::nullopt;
+        }
+
+        nlohmann::json parsed = nlohmann::json::parse(*json, nullptr, false);
+        if (parsed.is_discarded()) {
+            return std::nullopt;
+        }
+
+        return sites_from_json(parsed);
+    }
 };
+
+bool Compiler::coverage_map_present(const std::filesystem::path &object)
+{
+    return load_module_json(coverage_object_map_path(object)).has_value();
+}
+
+bool Compiler::coverage_allows_reuse(
+    const CompilerOptions &options,
+    bool compiler_supplied,
+    const std::filesystem::path &object
+)
+{
+    if (!options.coverage_instruments_module(compiler_supplied)) {
+        return true;
+    }
+
+    return coverage_map_present(object);
+}
 
 bool Compiler::write_coverage_map(
     const BuildLayout &layout,
     const CoverageModuleSites &compiled,
     const std::set<std::string> &cached_modules,
+    const std::map<std::string, std::filesystem::path> &objects,
     std::string &out_error
 )
 {
@@ -316,39 +371,39 @@ bool Compiler::write_coverage_map(
         return false;
     }
 
-    CoverageModuleSites merged = compiled;
+    CoverageModuleSites merged;
 
     for (const auto &[name, sites] : compiled) {
-        nlohmann::ordered_json module;
-        module["name"] = name;
-        if (!sites.empty() && !sites.front().dir.empty()) {
-            module["dir"] = sites.front().dir;
+        // **ODR copies drained into another unit still record sites under this name.**
+        // a cache hit has no CmpUnit, so those few inlines would be the whole map
+        if (cached_modules.count(name) > 0) {
+            continue;
         }
-        module["counters"] = counters_json(sites);
-        if (!write_artifact_file(sidecar_path(layout, name), module.dump(2) + "\n")) {
-            out_error = fmt::format("could not write '{}'", sidecar_path(layout, name).string());
+
+        merged.emplace(name, sites);
+
+        auto stored = objects.find(name);
+        if (stored == objects.end()) {
+            continue;
+        }
+
+        if (!write_module_json(coverage_object_map_path(stored->second), name, sites, out_error)) {
             return false;
         }
     }
 
     for (const std::string &name : cached_modules) {
-        if (merged.count(name) > 0) {
+        // uninstrumented hits (stdlib without `--coverage-stdlib`) have no sidecar
+        auto stored = objects.find(name);
+        if (stored == objects.end()) {
             continue;
         }
 
-        const std::optional<std::string> json = read_whole_file(sidecar_path(layout, name));
-        if (!json.has_value()) {
-            continue;
-        }
-
-        nlohmann::json parsed = nlohmann::json::parse(*json, nullptr, false);
-        if (parsed.is_discarded()) {
-            continue;
-        }
-
-        const std::optional<std::vector<CoverageSite>> sites = sites_from_json(parsed);
+        const std::filesystem::path sidecar = coverage_object_map_path(stored->second);
+        const std::optional<std::vector<CoverageSite>> sites = load_module_json(sidecar);
         if (!sites.has_value()) {
-            continue;
+            out_error = fmt::format("could not read coverage map '{}'", sidecar.string());
+            return false;
         }
 
         merged.emplace(name, *sites);

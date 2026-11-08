@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "Parser/ManifestParser.h"
@@ -89,6 +94,173 @@ void write_library(const fs::path &directory, const std::string &module_name)
         "{\n"
         "    return $n * 2;\n"
         "}\n");
+}
+
+void write_inline_library(const fs::path &directory, const std::string &module_name)
+{
+    write_file(directory / "module.eco",
+        "#[module: \"" + module_name + "\"]\n"
+        "#[version: \"0.1.0\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+
+    write_file(directory / "src" / "lib.eco",
+        "namespace " + module_name + ";\n"
+        "\n"
+        "#[inline]\n"
+        "public function twice(int32 $n) : int32\n"
+        "{\n"
+        "    return $n * 2;\n"
+        "}\n");
+}
+
+void write_coverage_app(const fs::path &directory, const std::string &lib_name)
+{
+    write_file(directory / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(directory / "app.eco",
+        "test doubles\n"
+        "{\n"
+        "    assert(" + lib_name + "::twice(21) == 42);\n"
+        "}\n");
+}
+
+std::optional<size_t> coverage_map_counters(const fs::path &map, const std::string &module)
+{
+    std::ifstream in(map);
+    if (!in) {
+        return std::nullopt;
+    }
+
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const std::string json = buf.str();
+
+    const std::string needle = "\"name\": \"" + module + "\"";
+    const size_t pos = json.find(needle);
+    if (pos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const size_t counters = json.find("\"counters\": [", pos);
+    if (counters == std::string::npos) {
+        return std::nullopt;
+    }
+
+    const size_t next = json.find("\"name\":", pos + needle.size());
+    const size_t end = next == std::string::npos ? json.size() : next;
+
+    size_t n = 0;
+    for (size_t p = counters; p < end; ) {
+        p = json.find("\"local\":", p);
+        if (p == std::string::npos || p >= end) {
+            break;
+        }
+
+        n += 1;
+        p += 8;
+    }
+
+    return n;
+}
+
+std::optional<size_t> ecocov_module_counts(const fs::path &path, const std::string &module)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return std::nullopt;
+    }
+
+    char header[160] {};
+    in.read(header, sizeof(header));
+    if (!in || std::memcmp(header, "ECOCOV", 6) != 0) {
+        return std::nullopt;
+    }
+
+    uint32_t version = 0;
+    uint32_t n_modules = 0;
+    std::memcpy(&version, header + 8, sizeof(version));
+    std::memcpy(&n_modules, header + 12, sizeof(n_modules));
+    if (version != 2) {
+        return std::nullopt;
+    }
+
+    for (uint32_t i = 0; i < n_modules; i++) {
+        uint32_t name_len = 0;
+        uint32_t n = 0;
+        in.read(reinterpret_cast<char *>(&name_len), sizeof(name_len));
+        in.read(reinterpret_cast<char *>(&n), sizeof(n));
+        if (!in) {
+            return std::nullopt;
+        }
+
+        const uint32_t name_bytes = (name_len + 3u) & ~3u;
+        std::string name(name_bytes, '\0');
+        if (name_bytes > 0) {
+            in.read(name.data(), static_cast<std::streamsize>(name_bytes));
+            if (!in) {
+                return std::nullopt;
+            }
+        }
+
+        name.resize(name_len);
+        in.seekg(static_cast<std::streamoff>(n) * static_cast<std::streamoff>(sizeof(uint32_t)), std::ios::cur);
+        if (name == module) {
+            return n;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<size_t> first_ecocov_counts(const fs::path &tests_dir, const std::string &module)
+{
+    std::error_code ec;
+    if (!fs::exists(tests_dir, ec)) {
+        return std::nullopt;
+    }
+
+    for (const auto &entry : fs::directory_iterator(tests_dir, ec)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".ecocov") {
+            continue;
+        }
+
+        if (auto n = ecocov_module_counts(entry.path(), module)) {
+            return n;
+        }
+    }
+
+    return std::nullopt;
+}
+
+fs::path first_module_object(const fs::path &directory, const std::string &module)
+{
+    std::error_code ec;
+    if (!fs::exists(directory, ec)) {
+        return {};
+    }
+
+    for (const auto &entry : fs::directory_iterator(directory, ec)) {
+        const fs::path path = entry.path();
+        if (path.extension() == ".o" && path.stem().string().rfind(module + "-", 0) == 0) {
+            return path;
+        }
+    }
+
+    return {};
+}
+
+bool file_contains(const fs::path &path, std::string_view needle)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return false;
+    }
+
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    return buf.str().find(needle) != std::string::npos;
 }
 
 };
@@ -1041,7 +1213,19 @@ TEST_CASE("coverage without stdlib leaves the stdlib key alone", "[cache][covera
 {
     ScopedProject project("coverage_stdlib_key");
 
-    write_library(project.root() / "lib", "cachelib");
+    write_file(project.root() / "lib" / "module.eco",
+        "#[module: \"cachelib\"]\n"
+        "#[version: \"0.1.0\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "lib" / "src" / "lib.eco",
+        "namespace cachelib;\n"
+        "\n"
+        "public function names() : map<string, string>\n"
+        "{\n"
+        "    map<string, string> $m = [];\n"
+        "    $m->set('a', 'b');\n"
+        "    return $m;\n"
+        "}\n");
     write_file(project.root() / "app" / "module.eco",
         "#[module: \"app\"]\n"
         "#[depends: \"../lib\"]\n"
@@ -1049,7 +1233,7 @@ TEST_CASE("coverage without stdlib leaves the stdlib key alone", "[cache][covera
     write_file(project.root() / "app" / "app.eco",
         "test doubles\n"
         "{\n"
-        "    assert(cachelib::twice(21) == 42);\n"
+        "    assert(cachelib::names()->has('a'));\n"
         "}\n");
 
     const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
@@ -1066,6 +1250,16 @@ TEST_CASE("coverage without stdlib leaves the stdlib key alone", "[cache][covera
     REQUIRE(cache_key(line_starting_with(covered.output, "stdlib")) == cache_key(stdlib_before));
     REQUIRE(cache_key(line_starting_with(covered.output, "cachelib"))
         != cache_key(line_starting_with(plain.output, "cachelib")));
+
+    const fs::path stdlib_object = first_module_object(project.build_dir() / "stdlib", "stdlib");
+    REQUIRE_FALSE(stdlib_object.empty());
+    REQUIRE_FALSE(file_contains(stdlib_object, "__eco_cov_init"));
+
+    const ProcessResult after = project.echoc("test" + cache, app_dir);
+    INFO(after.output);
+    REQUIRE(after.exit_code == 0);
+    REQUIRE(cache_key(line_starting_with(after.output, "stdlib")) == cache_key(stdlib_before));
+    REQUIRE(line_starting_with(after.output, "stdlib").find("hit") != std::string::npos);
 }
 
 TEST_CASE("a second coverage run reuses an instrumented library", "[cache][coverage]")
@@ -1094,6 +1288,10 @@ TEST_CASE("a second coverage run reuses an instrumented library", "[cache][cover
     const std::string lib_before = line_starting_with(first.output, "cachelib");
     REQUIRE_FALSE(lib_before.empty());
 
+    const fs::path map = project.build_dir() / "coverage" / "map.json";
+    const auto first_n = coverage_map_counters(map, "cachelib");
+    REQUIRE(first_n.has_value());
+
     const ProcessResult second = project.echoc("test --coverage" + cache, app_dir);
     REQUIRE(second.exit_code == 0);
     INFO(second.output);
@@ -1101,6 +1299,7 @@ TEST_CASE("a second coverage run reuses an instrumented library", "[cache][cover
     REQUIRE(cache_key(line_starting_with(second.output, "cachelib")) == cache_key(lib_before));
     REQUIRE(line_starting_with(second.output, "cachelib").find("hit") != std::string::npos);
     REQUIRE(second.output.find("coverage") != std::string::npos);
+    REQUIRE(coverage_map_counters(map, "cachelib") == first_n);
 }
 
 TEST_CASE("coverage of an inline library body does not hang", "[cache][coverage]")
@@ -1180,6 +1379,124 @@ TEST_CASE("coverage map files are relative to the module directory", "[cache][co
     REQUIRE(json.find("\"v\": 2") != std::string::npos);
     REQUIRE(json.find("src/util.eco") != std::string::npos);
     REQUIRE(json.find("tests/util.eco") == std::string::npos);
+}
+
+TEST_CASE("coverage of an inline library keeps the map on a hit", "[cache][coverage]")
+{
+    ScopedProject project("coverage_inline_map_hit");
+
+    write_inline_library(project.root() / "lib", "cachelib");
+    write_coverage_app(project.root() / "app", "cachelib");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+    const fs::path map = project.build_dir() / "coverage" / "map.json";
+    const fs::path tests = project.build_dir() / "coverage" / "tests";
+
+    const ProcessResult first = project.echoc("test --coverage" + cache, app_dir);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+
+    const auto first_n = coverage_map_counters(map, "cachelib");
+    REQUIRE(first_n.has_value());
+    REQUIRE(*first_n > 0);
+    REQUIRE(first_ecocov_counts(tests, "cachelib") == first_n);
+
+    const ProcessResult second = project.echoc("test --coverage" + cache, app_dir);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(line_starting_with(second.output, "cachelib").find("hit") != std::string::npos);
+    REQUIRE(coverage_map_counters(map, "cachelib") == first_n);
+    REQUIRE(first_ecocov_counts(tests, "cachelib") == first_n);
+}
+
+TEST_CASE("coverage map survives deleting the consumer coverage dir", "[cache][coverage]")
+{
+    ScopedProject project("coverage_map_beside_object");
+
+    write_inline_library(project.root() / "lib", "cachelib");
+    write_coverage_app(project.root() / "app", "cachelib");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+    const fs::path map = project.build_dir() / "coverage" / "map.json";
+    const fs::path tests = project.build_dir() / "coverage" / "tests";
+
+    const ProcessResult first = project.echoc("test --coverage" + cache, app_dir);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+
+    const auto first_n = coverage_map_counters(map, "cachelib");
+    REQUIRE(first_n.has_value());
+    REQUIRE(*first_n > 0);
+
+    const fs::path lib_object = first_module_object(project.build_dir() / "cachelib", "cachelib");
+    REQUIRE_FALSE(lib_object.empty());
+    REQUIRE(fs::exists(lib_object.parent_path() / (lib_object.stem().string() + ".covmap.json")));
+
+    fs::remove_all(project.build_dir() / "coverage");
+    fs::remove_all(project.build_dir() / "app");
+
+    const ProcessResult second = project.echoc("test --coverage" + cache, app_dir);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(line_starting_with(second.output, "cachelib").find("hit") != std::string::npos);
+    REQUIRE(coverage_map_counters(map, "cachelib") == first_n);
+    REQUIRE(first_ecocov_counts(tests, "cachelib") == first_n);
+}
+
+TEST_CASE("a coverage object without its map is a miss", "[cache][coverage]")
+{
+    ScopedProject project("coverage_missing_sidecar");
+
+    write_inline_library(project.root() / "lib", "cachelib");
+    write_coverage_app(project.root() / "app", "cachelib");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult first = project.echoc("test --coverage" + cache, app_dir);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+    REQUIRE(line_starting_with(first.output, "cachelib").find("miss") != std::string::npos);
+
+    const fs::path lib_object = first_module_object(project.build_dir() / "cachelib", "cachelib");
+    REQUIRE_FALSE(lib_object.empty());
+    fs::remove(lib_object.parent_path() / (lib_object.stem().string() + ".covmap.json"));
+
+    const ProcessResult second = project.echoc("test --coverage" + cache, app_dir);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(line_starting_with(second.output, "cachelib").find("miss") != std::string::npos);
+}
+
+TEST_CASE("a coverage object with a corrupt map is a miss", "[cache][coverage]")
+{
+    ScopedProject project("coverage_corrupt_sidecar");
+
+    write_inline_library(project.root() / "lib", "cachelib");
+    write_coverage_app(project.root() / "app", "cachelib");
+
+    const std::string cache = " --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+    const fs::path map = project.build_dir() / "coverage" / "map.json";
+
+    const ProcessResult first = project.echoc("test --coverage" + cache, app_dir);
+    INFO(first.output);
+    REQUIRE(first.exit_code == 0);
+
+    const auto first_n = coverage_map_counters(map, "cachelib");
+    REQUIRE(first_n.has_value());
+
+    const fs::path lib_object = first_module_object(project.build_dir() / "cachelib", "cachelib");
+    REQUIRE_FALSE(lib_object.empty());
+    write_file(lib_object.parent_path() / (lib_object.stem().string() + ".covmap.json"), "{not json\n");
+
+    const ProcessResult second = project.echoc("test --coverage" + cache, app_dir);
+    INFO(second.output);
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(line_starting_with(second.output, "cachelib").find("miss") != std::string::npos);
+    REQUIRE(coverage_map_counters(map, "cachelib") == first_n);
 }
 
 TEST_CASE("a sibling conversion is in every user module's key", "[cache]")
