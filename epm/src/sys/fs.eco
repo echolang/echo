@@ -306,10 +306,14 @@ private function collect_files(const string& $root, const string& $rel, array<st
             continue;
         }
 
+        // the lock hashes this relative path. `/` on every host, so a macOS lock
+        // matches a Windows checkout. join() would write `\` on Windows.
         string $child = $name;
 
         if (!$rel->empty()) {
-            $child = join($rel, $name);
+            $child = $rel;
+            $child->push(0x2F);
+            $child->append($name);
         }
 
         collect_files($root, $child, $into);

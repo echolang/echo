@@ -6,5 +6,6 @@ echo std::fs::path('C:foo')->is_absolute();
 echo std::fs::path("C:\u{5C}echo\u{5C}bin")->dirname()->string();
 echo std::fs::path("C:\u{5C}echo\u{5C}bin")->basename();
 echo std::fs::path('foo')->join('bar')->string();
+echo std::fs::path('foo')->join('bar/baz')->string();
 string $url = guard std::fs::path("C:\u{5C}Users\u{5C}First Last\u{5C}x")->file_url();
 echo $url;

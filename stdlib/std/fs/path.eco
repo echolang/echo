@@ -345,6 +345,7 @@ public struct path : contract::comparable<path>
     /**
      * `$name` joined on. An absolute `$name` replaces this. Empty `$name` is this spelling.
      * A missing separator copies the last separator already in this spelling, or `DS`.
+     * A slash in `$name` is a separator, rewritten to that same one.
      */
     const function join(const path& $name) : path
     {
@@ -363,12 +364,25 @@ public struct path : contract::comparable<path>
         string::view $tail = $name->view();
         string $out = $this->raw;
         uint8 $last = $this->raw->byte($this->raw->size() - 1);
+        uint8 $sep = $last;
 
         if (!is_separator($last)) {
-            $out->push(separator_to_append($this->raw));
+            $sep = separator_to_append($this->raw);
+            $out->push($sep);
         }
 
-        $out->append($tail->bytes, $tail->size);
+        // a slash in the right-hand side is a separator, rewritten to this spelling's.
+        // `vendor` / `echolang/libcurl` is one nested path, not a mixed `vendor\echolang/libcurl`.
+        usize $i = 0;
+        while ($i < $tail->size) {
+            uint8 $b = $tail->byte($i);
+            if (is_separator($b)) {
+                $out->push($sep);
+            } else {
+                $out->push($b);
+            }
+            $i = $i + 1;
+        }
 
         return path($out);
     }

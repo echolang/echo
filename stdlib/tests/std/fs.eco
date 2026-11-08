@@ -33,6 +33,37 @@ test join_of_an_absolute_name_replaces
 }
 
 #[group: "fs"]
+test slash_joins_like_join
+{
+    assert((std::fs::path('foo') / std::fs::path('bar')) == std::fs::path('foo')->join('bar'));
+    assert((std::fs::path('foo') / 'bar') == std::fs::path('foo')->join('bar'));
+    assert(('foo' / std::fs::path('bar')) == std::fs::path('foo')->join('bar'));
+    assert(('foo' / 'bar') == std::fs::path('foo')->join('bar'));
+    assert(('a' / 'b' / 'c') == std::fs::path('a')->join('b')->join('c'));
+    assert((std::fs::path('foo/') / 'bar') == std::fs::path('foo/')->join('bar'));
+    assert((std::fs::path('foo') / '')->string() == 'foo');
+
+    std::fs::path $path = 'foo' / 'bar';
+    $path = $path / 'test.eco';
+    assert($path == std::fs::path('foo')->join('bar')->join('test.eco'));
+    assert($path->basename() == 'test.eco');
+    assert(('dir' / 'file')->concat('.eco') == ('dir' / 'file.eco'));
+}
+
+#[group: "fs"]
+test slash_of_an_absolute_name_replaces
+{
+#[if: os == windows]
+    std::fs::path $abs = std::fs::path('C:\\abs');
+#[else]
+    std::fs::path $abs = std::fs::path('/abs');
+    assert(('/a' / '/b') == std::fs::path('/b'));
+#[end]
+    assert((std::fs::path('tmp') / $abs) == $abs);
+    assert((std::fs::path('tmp') / $abs)->is_absolute());
+}
+
+#[group: "fs"]
 test write_read_remove_a_temp_file
 {
     std::fs::path $dir = guard std::fs::tempdir();

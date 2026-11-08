@@ -8,4 +8,5 @@ flags: --target-os windows
 C:\echo
 bin
 foo\bar
+foo\bar\baz
 file:///C:/Users/First%20Last/x

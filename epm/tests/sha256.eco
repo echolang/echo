@@ -116,6 +116,18 @@ test tree_hash_v1_is_path_newline_body
     scratch::gone($root);
 }
 
+test tree_hash_uses_slash_in_nested_paths
+{
+    string $root = scratch::dir('tree-nested');
+    scratch::file($root, 'src/a.txt', 'A');
+    assert(sys::tree_sha256_v1($root) == sys::sha256_hex("src/a.txt\nA"));
+    string $v2 = 'Fsrc/a.txt';
+    $v2->push(0);
+    $v2->append("A\n");
+    assert(sys::tree_sha256($root) == sys::sha256_hex($v2));
+    scratch::gone($root);
+}
+
 test tree_hash_v1_concatenates_sorted_entries
 {
     string $root = scratch::dir('tree-v1-two');
