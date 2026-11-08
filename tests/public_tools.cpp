@@ -180,6 +180,26 @@ TEST_CASE("a vendored package's tool is found through the package directory", "[
     REQUIRE(listed.output.find("\"refs\": [\"gen\", \"restgen:gen\"]") != std::string::npos);
 }
 
+TEST_CASE("a test-scoped require still offers the tool", "[public_tools][packages]")
+{
+    ScopedProject project("test_scoped_require");
+
+    write_offering_library(project.root() / "app/vendor/restgen", "restgen");
+    write_file(project.root() / "app/module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[requires: \"restgen\" { version: \"^1\", source: git \"https://example.com/restgen\" }]\n"
+        "}\n");
+    write_file(project.root() / "app/src/main.eco", "echo 'APP RAN';\n");
+
+    const ProcessResult listed = project.echoc("build -p tools", project.root() / "app");
+    INFO(listed.output);
+
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.output.find("\"refs\": [\"gen\", \"restgen:gen\"]") != std::string::npos);
+}
+
 TEST_CASE("-p tools answers for one module", "[public_tools]")
 {
     ScopedProject project("one_module");

@@ -306,10 +306,9 @@ namespace Parser
 
     // just the dependencies of the above, appended to `into` without duplicating what it holds.
     //
-    // **the same rule, without building the four lists a caller was going to throw away.** Two readers ask
-    // only this - the reachability walk that decides which modules a program compiles at all, and the graph
-    // loader, which passes an "everything is active" map because reachability is a fact about the project
-    // rather than about the program
+    // **the same rule, without building the four lists a caller was going to throw away.** the reachability
+    // walk asks this with the program's `active_targets`; the graph loader asks it through
+    // `graph_dependencies`, which picks the map
     void append_active_depends(
         const ModuleManifest &manifest,
         const ActiveTargets &active,
@@ -319,10 +318,20 @@ namespace Parser
     // hook-scope dependencies, appended without duplicating. the graph loads them; no program compiles them
     void append_hook_depends(const ModuleManifest &manifest, std::vector<std::filesystem::path> &into);
 
-    // an `ActiveTargets` opening every scope this manifest declares, for the questions that are about the
-    // project rather than about one program: the graph has to load and order a module a scope names whether
-    // or not this invocation would compile it, or a cycle would be a cycle only on some targets
+    // an `ActiveTargets` opening every scope this manifest declares. a *root's* graph walk, and `-p tools`,
+    // so a cycle through the root's own exe or test scope is still a cycle of this project
     ActiveTargets all_targets_active(const ModuleManifest &manifest);
+
+    // the same, only `lib` scopes. a dependency's programs are its own: the graph follows file-scope plus
+    // these, never its `exe` or `test`
+    ActiveTargets library_targets_active(const ModuleManifest &manifest);
+
+    // every manifest this one names for the graph: file-scope, opened target scopes, and hooks.
+    // `is_root` opens every target scope; a dependency opens only its lib scopes
+    std::vector<std::filesystem::path> graph_dependencies(
+        const ModuleManifest &manifest,
+        bool is_root
+    );
 
     // the throwaway parse of every manifest this invocation reads. the driver owns it so the
     // files and tokens a refusal names still exist when the collector is printed

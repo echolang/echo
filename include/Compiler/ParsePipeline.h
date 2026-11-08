@@ -129,7 +129,8 @@ namespace Compiler
     // file the project can compile. a dependency's scopes stay shut, as `echoc test` leaves
     // them. not one program: the server has no Program, and `--target` is compiling-only.
     // `module_contribution_for` is still the owner of what those scopes contribute.
-    // `all_targets_active` is per-manifest; the graph unions every module, this unions roots
+    // `all_targets_active` is per-manifest; the graph opens every root scope and a dependency's
+    // lib scopes, this unions roots only
     Parser::ActiveTargets workspace_analysis_targets(
         const std::vector<Parser::ModuleManifest> &manifests,
         const std::vector<std::filesystem::path> &roots

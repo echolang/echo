@@ -936,25 +936,6 @@ bool resolve_manifest_targets(
     return true;
 }
 
-// every manifest this one names, at file scope and inside any target's scope.
-//
-// **the graph is target-independent on purpose.** Reachability, the duplicate-name check, the cycle report
-// and the emit order are all facts about the project rather than about the program being built, and a walk
-// that changed shape with `--target` would report a cycle on one target and not on another. Which of these
-// a given program actually *compiles* is a later and separate question, answered by module_contribution_for
-std::vector<std::filesystem::path> every_dependency(const Parser::ModuleManifest &manifest)
-{
-    // **through the one merger, with every scope opened.** A hand-rolled union here would be a third place
-    // that knows what a scope contributes, and the one that a fifth scoped attribute is not added to
-    std::vector<std::filesystem::path> all;
-    Parser::append_active_depends(manifest, Parser::all_targets_active(manifest), all);
-
-    // and every hook's tool's - loaded and ordered like any other module, and compiled into no program
-    Parser::append_hook_depends(manifest, all);
-
-    return all;
-}
-
 // the body of the read, taking the scratch state so a graph walk can reuse it
 void record_written_targets(
     const std::vector<WrittenTarget> &written,
@@ -1329,6 +1310,38 @@ Parser::ActiveTargets Parser::all_targets_active(const Parser::ModuleManifest &m
     return active;
 }
 
+Parser::ActiveTargets Parser::library_targets_active(const Parser::ModuleManifest &manifest)
+{
+    Parser::ActiveTargets active;
+
+    for (const Parser::ModuleTarget &target : manifest.targets) {
+        if (target.has_scope && target.kind == Parser::TargetKind::t_library) {
+            active[manifest.name].insert(target.name);
+        }
+    }
+
+    return active;
+}
+
+std::vector<std::filesystem::path> Parser::graph_dependencies(
+    const Parser::ModuleManifest &manifest,
+    bool is_root
+)
+{
+    // **through the one merger.** a hand-rolled union would be a third place that knows what a scope
+    // contributes, and the one that a fifth scoped attribute is not added to
+    std::vector<std::filesystem::path> all;
+    Parser::append_active_depends(
+        manifest,
+        is_root ? Parser::all_targets_active(manifest) : Parser::library_targets_active(manifest),
+        all);
+
+    // and every hook's tool's: loaded and ordered like any other module, compiled into no program
+    Parser::append_hook_depends(manifest, all);
+
+    return all;
+}
+
 bool Parser::refuse_unresolved_scope_requirements(
     const Parser::ModuleManifest &manifest,
     const Parser::ActiveTargets &active,
@@ -1434,6 +1447,8 @@ bool Parser::resolve_module_graph(
         root_order.push_back(pending.back());
     }
 
+    const std::set<std::filesystem::path> root_set(root_order.begin(), root_order.end());
+
     while (!pending.empty()) {
         const std::filesystem::path next = pending.back();
         pending.pop_back();
@@ -1453,7 +1468,9 @@ bool Parser::resolve_module_graph(
             return false;
         }
 
-        for (const std::filesystem::path &dependency : every_dependency(manifest)) {
+        const bool is_root = root_set.count(next) > 0;
+
+        for (const std::filesystem::path &dependency : Parser::graph_dependencies(manifest, is_root)) {
             pending.push_back(dependency);
         }
 
@@ -1507,7 +1524,10 @@ bool Parser::resolve_module_graph(
 
             in_progress.push_back(path);
 
-            for (const std::filesystem::path &dependency : every_dependency(loaded.at(path))) {
+            const bool is_root = root_set.count(path) > 0;
+
+            for (const std::filesystem::path &dependency : Parser::graph_dependencies(
+                    loaded.at(path), is_root)) {
                 if (!visit(dependency)) {
                     return false;
                 }

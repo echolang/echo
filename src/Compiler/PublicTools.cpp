@@ -109,8 +109,8 @@ bool Compiler::ToolConsumer::resolve_tools(const std::filesystem::path &build_di
         }
     }
 
-    std::vector<std::filesystem::path> direct = root.depends;
-    Parser::append_hook_depends(root, direct);
+    // file-scope, every target scope of this root, and hooks: a test-scoped require still offers
+    const std::vector<std::filesystem::path> direct = Parser::graph_dependencies(root, true);
 
     // host row: a tool runs here, so `--target-os wasi` must not name a `.wasm` to execute
     const Compiler::CodegenTarget host_row;

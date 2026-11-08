@@ -774,8 +774,9 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
                     "tools", accepts::compiling, code_of(PrintKind::t_tools),
                     "dependencies' public tools, as JSON",
                     "List the programs this module's direct dependencies offer - every '#[target: exe]' they "
-                    "marked 'public: true' - as JSON, and stop. Each comes with the names that select it, the "
-                    "manifest a build of it starts from, and the path that build writes the binary to.\n"
+                    "marked 'public: true', including a require inside a target scope - as JSON, and stop. "
+                    "Each comes with the names that select it, the manifest a build of it starts from, and "
+                    "the path that build writes the binary to.\n"
                     "Like 'manifest' this is an answer rather than a dump, and it is what 'epm run' reads: the "
                     "rule for which name means which tool lives here and nowhere else. It reads the edges of "
                     "the graph and no source, so it works before a hook has generated anything."

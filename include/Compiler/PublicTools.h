@@ -62,7 +62,8 @@ namespace Compiler
         // edges only, so a hook can still write the files `#[sources:]` will match
         bool read(const std::filesystem::path &manifest, const std::filesystem::path &package_dir_override);
 
-        // direct dependencies, host facts: a tool runs on this machine
+        // direct dependencies of the root: file-scope, every target scope, and hooks. host facts:
+        // a tool runs on this machine
         bool resolve_tools(const std::filesystem::path &build_dir_flag, PublicToolSet &out);
 
         void print_issues(const AST::DiagnosticRenderer &diagnostics);

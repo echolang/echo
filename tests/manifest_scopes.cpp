@@ -421,6 +421,166 @@ TEST_CASE("a dependency's unvendored test requirement does not stop its consumer
     REQUIRE(ran.output.find("42") != std::string::npos);
 }
 
+TEST_CASE("a library whose tests require a tool that requires the library still tests", "[manifest_scopes][packages][public_tools]")
+{
+    // the shape epm install actually writes: libjson's test scope vendors ecotest, and ecotest's public
+    // exe vendors a second copy of libjson. opening that exe scope on the consumer's graph is
+    // DuplicateModuleName for a copy the test program never compiles
+    ScopedProject project("circular_tool_library");
+    const std::filesystem::path a = project.root() / "libjson";
+
+    write_file(a / "module.eco",
+        "#[module: \"libjson\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[sources: \"tests/*.eco\"]\n"
+        "    #[requires: \"echolang/ecotest\" { version: \"^0.2\", source: git \"https://example.com/ecotest\" }]\n"
+        "}\n");
+
+    write_file(a / "src/json.eco",
+        "namespace libjson;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    write_file(a / "tests/json_test.eco",
+        "test it_answers\n"
+        "{\n"
+        "    assert(libjson::answer() == 42);\n"
+        "}\n");
+
+    write_file(a / "vendor/echolang/ecotest/module.eco",
+        "#[module: \"ecotest\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"ecotest\", entry: \"cli/main.eco\", public: true }] {\n"
+        "    #[sources: \"cli/*.eco\"]\n"
+        "    #[requires: \"echolang/libjson\" { version: \"^0.1\", source: git \"https://example.com/libjson\" }]\n"
+        "}\n");
+
+    write_file(a / "vendor/echolang/ecotest/src/api.eco",
+        "namespace ecotest;\n"
+        "public function runner() : int32 { return 1; }\n");
+
+    write_file(a / "vendor/echolang/ecotest/cli/main.eco", "echo libjson::answer();\n");
+
+    write_file(a / "vendor/echolang/libjson/module.eco",
+        "#[module: \"libjson\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+
+    write_file(a / "vendor/echolang/libjson/src/json.eco",
+        "namespace libjson;\n"
+        "public function answer() : int32 { return 7; }\n");
+
+    const ProcessResult tested = project.echoc("test", a);
+    INFO(tested.output);
+
+    REQUIRE(tested.exit_code == 0);
+    REQUIRE(tested.output.find("it_answers") != std::string::npos);
+    REQUIRE(tested.output.find("DuplicateModuleName") == std::string::npos);
+
+    const ProcessResult listed = project.echoc("build -p tools", a);
+    INFO(listed.output);
+
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.output.find("\"refs\": [\"ecotest\", \"ecotest:ecotest\"]") != std::string::npos);
+
+    const ProcessResult built = project.echoc("build -m vendor/echolang/ecotest --target ecotest", a);
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const std::string marker = "\"binary\": \"";
+    const size_t at = listed.output.find(marker);
+    REQUIRE(at != std::string::npos);
+
+    const size_t start = at + marker.size();
+    const std::string reported = listed.output.substr(start, listed.output.find('"', start) - start);
+
+    REQUIRE(EchoTests::file_exists(reported));
+
+    const ProcessResult ran = EchoTests::run_binary(reported);
+    INFO(ran.output);
+
+    REQUIRE(ran.output.find("7") != std::string::npos);
+    REQUIRE(ran.output.find("42") == std::string::npos);
+}
+
+TEST_CASE("a dependency's broken exe-scope require does not stop its consumer", "[manifest_scopes][packages]")
+{
+    ScopedProject project("dependency_broken_exe_require");
+
+    write_file(project.root() / "app/module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[requires: \"kit\" { version: \"^1.0\", source: git \"https://example.com/kit\" }]\n");
+
+    write_file(project.root() / "app/src/main.eco", "echo kit::answer();\n");
+    write_file(project.root() / "app/src/api.eco",
+        "test kit_answers\n"
+        "{\n"
+        "    assert(kit::answer() == 42);\n"
+        "}\n");
+
+    write_file(project.root() / "app/vendor/kit/module.eco",
+        "#[module: \"kit\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"kit\", entry: \"cli/main.eco\", public: true }] {\n"
+        "    #[sources: \"cli/*.eco\"]\n"
+        "    #[requires: \"broken\" { version: \"^1.0\", source: git \"https://example.com/broken\" }]\n"
+        "}\n");
+
+    write_file(project.root() / "app/vendor/kit/src/kit.eco",
+        "namespace kit;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    write_file(project.root() / "app/vendor/kit/cli/main.eco", "echo 'KIT CLI';\n");
+
+    write_file(project.root() / "app/vendor/broken/module.eco", "this is not a manifest ][ {{{\n");
+
+    const ProcessResult ran = project.echoc("run", project.root() / "app");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("42") != std::string::npos);
+
+    const ProcessResult tested = project.echoc("test", project.root() / "app");
+    INFO(tested.output);
+
+    REQUIRE(tested.exit_code == 0);
+    REQUIRE(tested.output.find("kit_answers") != std::string::npos);
+}
+
+TEST_CASE("a dependency's broken lib-scope require still stops its consumer", "[manifest_scopes][packages]")
+{
+    // the remaining edge of `graph_dependencies`: a dependency's lib scope is still the library.
+    // emptying `library_targets_active` keeps the exe-scope sibling green and drops this
+    ScopedProject project("dependency_broken_lib_require");
+
+    write_file(project.root() / "app/module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[requires: \"kit\" { version: \"^1.0\", source: git \"https://example.com/kit\" }]\n");
+
+    write_file(project.root() / "app/src/main.eco", "echo kit::answer();\n");
+
+    write_file(project.root() / "app/vendor/kit/module.eco",
+        "#[module: \"kit\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: lib { name: \"kit\" }] {\n"
+        "    #[requires: \"broken\" { version: \"^1.0\", source: git \"https://example.com/broken\" }]\n"
+        "}\n");
+
+    write_file(project.root() / "app/vendor/kit/src/kit.eco",
+        "namespace kit;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    write_file(project.root() / "app/vendor/broken/module.eco", "this is not a manifest ][ {{{\n");
+
+    const ProcessResult ran = project.echoc("run", project.root() / "app");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 1);
+    REQUIRE(ran.output.find("MissingModuleAttribute") != std::string::npos);
+    REQUIRE(ran.output.find("this is not a manifest") != std::string::npos);
+}
+
 TEST_CASE("an unvendored scoped requirement is refused when its scope opens", "[manifest_scopes][packages]")
 {
     ScopedProject project("unvendored_scope");
