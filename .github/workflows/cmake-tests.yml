@@ -84,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit, e2e-0, e2e-1]
+        shard: [unit, e2e-0, e2e-1, stdlib]
         os:
           - arch: x86_64
             runner: ubuntu-24.04
@@ -139,10 +139,11 @@ jobs:
       run: |
         chmod +x ./tests ./echoc
         case "${ECO_SHARD}" in
-          unit)  ./tests "~[e2e]" ;;
-          e2e-0) ./tests "[e2e]" --shard 0/2 ;;
-          e2e-1) ./tests "[e2e]" --shard 1/2 ;;
-          *)     echo "unknown shard ${ECO_SHARD}" >&2; exit 1 ;;
+          unit)    ./tests "~[e2e]" ;;
+          e2e-0)   ./tests "[e2e]" --shard 0/2 ;;
+          e2e-1)   ./tests "[e2e]" --shard 1/2 ;;
+          stdlib)  ./echoc test -m ../stdlib --track-allocations ;;
+          *)       echo "unknown shard ${ECO_SHARD}" >&2; exit 1 ;;
         esac
 
   build_windows:
@@ -194,7 +195,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit, e2e-0, e2e-1]
+        shard: [unit, e2e-0, e2e-1, stdlib]
     env:
       ECO_SHARD: ${{ matrix.shard }}
       # the tests binary was compiled on the build job; these override the baked-in absolute paths
@@ -228,10 +229,11 @@ jobs:
       shell: pwsh
       run: |
         switch ($env:ECO_SHARD) {
-          "unit"  { .\tests.exe "~[e2e]"; break }
-          "e2e-0" { .\tests.exe "[e2e]" --shard 0/2; break }
-          "e2e-1" { .\tests.exe "[e2e]" --shard 1/2; break }
-          default { Write-Error "unknown shard $($env:ECO_SHARD)"; exit 1 }
+          "unit"    { .\tests.exe "~[e2e]"; break }
+          "e2e-0"   { .\tests.exe "[e2e]" --shard 0/2; break }
+          "e2e-1"   { .\tests.exe "[e2e]" --shard 1/2; break }
+          "stdlib"  { .\echoc.exe test -m ../stdlib --track-allocations; break }
+          default   { Write-Error "unknown shard $($env:ECO_SHARD)"; exit 1 }
         }
 
   # the version the release binaries are stamped with and the tag the release gets. Resolved once, so

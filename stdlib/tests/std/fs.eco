@@ -1,0 +1,224 @@
+#[group: "fs"]
+test path_join_and_parts
+{
+    std::fs::path $p = std::fs::path('tmp')->join('a.txt');
+    assert($p->basename() == 'a.txt');
+    assert($p->stem() == 'a');
+    assert($p->extension() == 'txt');
+}
+
+#[group: "fs"]
+test dirname_of_a_file
+{
+    std::fs::path $p = std::fs::path('tmp')->join('a.txt');
+    assert($p->dirname()->basename() == 'tmp');
+}
+
+#[group: "fs"]
+test a_relative_path_is_not_absolute
+{
+    assert(!std::fs::path('foo')->is_absolute());
+}
+
+#[group: "fs"]
+test join_of_an_absolute_name_replaces
+{
+#[if: os == windows]
+    std::fs::path $abs = std::fs::path('C:\\abs');
+#[else]
+    std::fs::path $abs = std::fs::path('/abs');
+#[end]
+    std::fs::path $joined = std::fs::path('tmp')->join($abs);
+    assert($joined->is_absolute());
+}
+
+#[group: "fs"]
+test write_read_remove_a_temp_file
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $file = $dir->join('hello.txt');
+    guard std::fs::writefile($file, 'hi');
+    string $text = guard std::fs::readfile($file);
+    assert($text == 'hi');
+    bool $there = guard std::fs::exists($file);
+    assert($there);
+    bool $removed = guard std::fs::remove($file);
+    assert($removed);
+    bool $gone = guard std::fs::exists($file);
+    assert(!$gone);
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test mkdir_and_rmdir
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $child = $dir->join('nested');
+    bool $made = guard std::fs::mkdir($child);
+    assert($made);
+    bool $there = guard std::fs::exists($child);
+    assert($there);
+    bool $removed = guard std::fs::rmdir($child);
+    assert($removed);
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test copy_duplicates_a_file
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $src = $dir->join('a.txt');
+    std::fs::path $dst = $dir->join('b.txt');
+    guard std::fs::writefile($src, 'copied');
+    bool $copied = guard std::fs::copy($src, $dst);
+    assert($copied);
+    string $text = guard std::fs::readfile($dst);
+    assert($text == 'copied');
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test info_of_a_regular_file
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $file = $dir->join('a.txt');
+    guard std::fs::writefile($file, 'abcd');
+    std::fs::fileinfo $info = guard std::fs::info($file);
+    assert($info->size == 4 as int64);
+    assert($info->perms->owner_readable());
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test rename_and_realpath
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $src = $dir->join('a.txt');
+    std::fs::path $dst = $dir->join('b.txt');
+    guard std::fs::writefile($src, 'x');
+    bool $moved = guard std::fs::rename($src, $dst);
+    assert($moved);
+    bool $there = guard std::fs::exists($dst);
+    assert($there);
+    std::fs::path $real = guard std::fs::realpath($dst);
+    assert($real->is_absolute());
+    std::fs::path $abs = guard std::fs::abs($dst);
+    assert($abs->is_absolute());
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test replace_and_truncate
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $file = $dir->join('r.txt');
+    guard std::fs::writefile($file, 'hello');
+    guard std::fs::replace($file, 'yo');
+    string $replaced = guard std::fs::readfile($file);
+    assert($replaced == 'yo');
+    guard std::fs::truncate($file, 1);
+    string $cut = guard std::fs::readfile($file);
+    assert($cut == 'y');
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test tempfile_and_create
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $tmp = guard std::fs::tempfile($dir);
+    std::io::file $f = guard std::fs::create($dir->join('c.txt'));
+    $f->close();
+    std::io::file $a = guard std::fs::append($dir->join('c.txt'));
+    guard $a->write('z');
+    $a->close();
+    std::io::file $n = guard std::fs::create_new($dir->join('n.txt'));
+    $n->close();
+    echo $tmp->string();
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test opendir_lists_a_file
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    guard std::fs::writefile($dir->join('seen.txt'), 'x');
+    std::fs::dir $d = guard std::fs::opendir($dir);
+    bool $found = false;
+    foreach ($d as const &$ent) {
+        if ($ent->name() == 'seen.txt') {
+            $found = true;
+        }
+    }
+    assert($found);
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test mkdir_recursive
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $deep = $dir->join('a')->join('b');
+    bool $made = guard std::fs::mkdir($deep, recursive: true);
+    assert($made);
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test missing_path_is_not_there
+{
+    bool $there = guard std::fs::exists(std::fs::path('no-such-echo-stdlib-path-xyz'));
+    assert(!$there);
+    string $missing = guard std::fs::readfile(std::fs::path('no-such-echo-stdlib-path-xyz')) else ($e) {
+        assert($e->missing());
+        return;
+    };
+    assert(false, 'read of a missing file succeeded');
+    echo $missing;
+}
+
+#[group: "fs"]
+test path_clean_concat_relative
+{
+    std::fs::path $p = std::fs::path('a/./b');
+    assert($p->clean()->string()->contains('b'));
+    std::fs::path $joined = $p->concat('-x');
+    assert($joined->string()->contains('-x'));
+    std::fs::path $rel = std::fs::path('a/b')->relative(std::fs::path('a')) ?? std::fs::path('b');
+    assert($rel->string()->contains('b'));
+    assert(std::fs::join(std::fs::path('a'), std::fs::path('b'))->basename() == 'b');
+    assert(std::fs::path('a.txt')->string() == 'a.txt');
+    assert(str::from(std::fs::path('p')) == 'p');
+    uint64 $h = hash::of(std::fs::path('p'));
+    assert($h == hash::of(std::fs::path('p')));
+}
+
+#[if: os != windows]
+#[group: "fs"]
+test symlink_and_readlink
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $file = $dir->join('t.txt');
+    guard std::fs::writefile($file, 'x');
+    std::fs::path $link = $dir->join('l.txt');
+    guard std::fs::symlink($file, $link);
+    std::fs::path $target = guard std::fs::readlink($link);
+    assert($target->basename() == 't.txt');
+    std::fs::fileinfo $info = guard std::fs::linkinfo($link);
+    echo $info->size;
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "fs"]
+test hard_link
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $file = $dir->join('t.txt');
+    guard std::fs::writefile($file, 'x');
+    std::fs::path $link = $dir->join('h.txt');
+    guard std::fs::hard_link($file, $link);
+    string $linked = guard std::fs::readfile($link);
+    assert($linked == 'x');
+    guard std::fs::remove_all($dir);
+}
+#[end]

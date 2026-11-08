@@ -300,7 +300,7 @@ private function arrange_fork(spawn_scratch& $s, int32 $target, stdio $how) : st
 }
 #[end]
 
-private function finish_spawn(spawn_scratch& $s, int32 $pid) : child
+private function finish_spawn(spawn_scratch& $s, int32 $pid, bool $grouped) : child
 {
     std::io::pipe_writer? $stdin = null;
     std::io::pipe_reader? $stdout = null;
@@ -320,7 +320,7 @@ private function finish_spawn(spawn_scratch& $s, int32 $pid) : child
 
     $s->handed_over = true;
 
-    return child($pid, ptr<uint8>(null), $stdin, $stdout, $stderr);
+    return child($pid, ptr<uint8>(null), ptr<uint8>(null), $grouped, $stdin, $stdout, $stderr);
 }
 
 #[if: family == darwin]
@@ -375,11 +375,19 @@ private function spawn_posix(
     guard spawn_status(c_attr_setsigmask($s->attr(), &$sigmask[0])) else ($e) {
         return .error($e);
     }
-    guard spawn_status(
-        c_attr_setflags($s->attr(), POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT)
-    ) else ($e) {
-        return .error($e);
+
+    int16 $flags = POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT;
+
+    if ($p->group) {
+        $flags = $flags | POSIX_SPAWN_SETPGROUP;
+        guard spawn_status(c_attr_setpgroup($s->attr(), 0)) else ($e) {
+            return .error($e);
+        };
     }
+
+    guard spawn_status(c_attr_setflags($s->attr(), $flags)) else ($e) {
+        return .error($e);
+    };
 
     int32 $pid = 0;
     int32 $rc = c_posix_spawn(&$pid, $p->path->cstr(), $s->actions(), $s->attr(), $s->argv, $s->envp);
@@ -387,7 +395,7 @@ private function spawn_posix(
         return .error(ioerror($rc));
     }
 
-    return .ok(finish_spawn($s, $pid));
+    return .ok(finish_spawn($s, $pid, $p->group));
 }
 #[end]
 
@@ -396,13 +404,19 @@ private function spawn_linux_exec(
     spawn_scratch& $s, const prepared& $p, ptr<const uint8> $chdir) : result<child, ioerror>
 {
     int32 $pid = 0;
+    int32 $new_group = 0;
+
+    if ($p->group) {
+        $new_group = 1;
+    }
+
     int32 $rc = c_spawn_with_chdir(
-        &$pid, $p->path->cstr(), $s->argv, $s->envp, $chdir, &$s->child_fd[0]);
+        &$pid, $p->path->cstr(), $s->argv, $s->envp, $chdir, &$s->child_fd[0], $new_group);
     if ($rc != 0) {
         return .error(ioerror($rc));
     }
 
-    return .ok(finish_spawn($s, $pid));
+    return .ok(finish_spawn($s, $pid, $p->group));
 }
 
 private function spawn_linux(
@@ -477,14 +491,37 @@ internal function sys_wait(int32 $pid, ptr<uint8> $process, bool $block) : resul
 
 internal function sys_kill(int32 $pid, ptr<uint8> $process) : status<ioerror>
 {
-    if (c_kill($pid, SIGKILL) != 0) {
-        return .error(std::io::last_error());
+    return sys_signal($pid, $process, ptr<uint8>(null), false, SIGKILL);
+}
+
+internal function sys_signal(
+    int32 $pid,
+    ptr<uint8> $process,
+    ptr<uint8> $job,
+    bool $grouped,
+    int32 $sig
+) : status<ioerror>
+{
+    int32 $target = $pid;
+
+    if ($grouped) {
+        $target = -$pid;
+    }
+
+    if (c_kill($target, $sig) != 0) {
+        ioerror $e = std::io::last_error();
+
+        if ($e->code == ESRCH) {
+            return .ok;
+        }
+
+        return .error($e);
     }
 
     return .ok;
 }
 
-internal function sys_release(ptr<uint8> $process) : void
+internal function sys_release(ptr<uint8> $process, ptr<uint8> $job) : void
 {
 }
 

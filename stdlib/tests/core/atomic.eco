@@ -1,0 +1,43 @@
+#[group: "core"]
+test load_and_store
+{
+    $a = atomic<int32>(3);
+    assert($a->load() == 3);
+    $a->store(9);
+    assert($a->load() == 9);
+}
+
+#[group: "core"]
+test add_returns_the_previous
+{
+    $a = atomic<int32>(1);
+    assert($a->add(2) == 1);
+    assert($a->load() == 3);
+}
+
+#[group: "core"]
+test sub_returns_the_previous
+{
+    $a = atomic<int32>(5);
+    assert($a->sub(2) == 5);
+    assert($a->load() == 3);
+}
+
+#[group: "core"]
+test exchange_swaps
+{
+    $a = atomic<int32>(1);
+    assert($a->exchange(8) == 1);
+    assert($a->load() == 8);
+}
+
+#[group: "core"]
+test compare_exchange
+{
+    $a = atomic<int32>(3);
+    assert($a->compare_exchange(3, 9));
+    assert($a->load() == 9);
+    assert(!$a->compare_exchange(3, 1));
+    assert($a->load() == 9);
+    mem::atomic::fence();
+}

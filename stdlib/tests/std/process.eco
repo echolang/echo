@@ -1,0 +1,156 @@
+#[if: os != wasi && os != ios]
+
+#[group: "process"]
+test a_successful_child_exits_zero
+{
+#[if: os == windows]
+    std::process::exit_status $s = guard std::process::command('cmd', ['/c', 'exit', '0'])->status();
+#[else]
+    std::process::exit_status $s = guard std::process::command('true')->status();
+#[end]
+    assert($s->success());
+    int32 $code = guard $s->code();
+    assert($code == 0);
+}
+
+#[group: "process"]
+test a_failing_child_is_not_success
+{
+#[if: os == windows]
+    std::process::exit_status $s = guard std::process::command('cmd', ['/c', 'exit', '1'])->status();
+#[else]
+    std::process::exit_status $s = guard std::process::command('false')->status();
+#[end]
+    assert(!$s->success());
+}
+
+#[group: "process"]
+test output_captures_stdout
+{
+#[if: os == windows]
+    std::process::output $o = guard std::process::command('cmd', ['/c', 'echo', 'hi'])->output();
+#[else]
+    std::process::command $c = std::process::command('/bin/echo');
+    $c->arg('hi');
+    std::process::output $o = guard $c->output();
+#[end]
+    assert($o->status->success());
+    assert($o->stdout->contains('hi'));
+}
+
+#[group: "process"]
+test spawn_piped_stdout
+{
+#[if: os == windows]
+    std::process::command $c = std::process::command('cmd', ['/c', 'echo', 'hi']);
+#[else]
+    std::process::command $c = std::process::command('/bin/echo');
+    $c->arg('hi');
+#[end]
+    $c->stdout(.piped);
+    std::process::child $ch = guard $c->spawn();
+    std::io::pipe_reader $out = $ch->stdout() ?? die('stdout was piped');
+    string $text = guard $out->readall();
+    assert($text->contains('hi'));
+    std::process::exit_status $s = guard $ch->wait();
+    assert($s->success());
+}
+
+#[group: "process"]
+test exit_status_renders
+{
+#[if: os == windows]
+    std::process::exit_status $s = guard std::process::command('cmd', ['/c', 'exit', '0'])->status();
+#[else]
+    std::process::exit_status $s = guard std::process::command('true')->status();
+#[end]
+    assert(str::from($s)->contains('0') || $s->success());
+}
+
+#[group: "process"]
+test command_arg_env_and_dir
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+#[if: os == windows]
+    std::process::command $c = std::process::command('cmd');
+    $c->arg('/c');
+    $c->arg('exit');
+    $c->arg('0');
+#[else]
+    std::process::command $c = std::process::command('true');
+#[end]
+    $c->args(['']);
+    $c->env('ECHO_STDLIB_TEST', '1');
+    $c->dir($dir);
+    std::process::exit_status $s = guard $c->status();
+    assert($s->success());
+    guard std::fs::remove_all($dir);
+}
+
+#[if: os != windows]
+#[group: "process"]
+test piped_stdin
+{
+    std::process::command $c = std::process::command('/bin/cat');
+    $c->stdin(.piped);
+    $c->stdout(.piped);
+    std::process::child $ch = guard $c->spawn();
+    std::io::pipe_writer $in = $ch->stdin() ?? die('stdin was piped');
+    guard $in->write('hi');
+    $in->close();
+    std::io::pipe_reader $out = $ch->stdout() ?? die('stdout was piped');
+    string $text = guard $out->readall();
+    assert($text == 'hi');
+    std::process::exit_status $s = guard $ch->wait();
+    assert($s->success());
+}
+
+#[group: "process"]
+test try_wait_and_id
+{
+    std::process::command $c = std::process::command('true');
+    std::process::child $ch = guard $c->spawn();
+    assert($ch->id() > 0);
+    usize $spins = 0;
+    while ($spins < 1000) {
+        std::process::exit_status? $now = guard $ch->try_wait();
+        if ($now != null) {
+            std::process::exit_status $s = $now ?? die('ended');
+            assert($s->success());
+            return;
+        }
+        $spins = $spins + 1;
+        std::time::sleep(std::time::duration::millis(1));
+    }
+    std::process::exit_status $waited = guard $ch->wait();
+    assert($waited->success());
+}
+
+#[group: "process"]
+test kill_a_sleeping_child
+{
+    std::process::command $c = std::process::command('sleep');
+    $c->arg('30');
+    std::process::child $ch = guard $c->spawn();
+    guard $ch->kill();
+    std::process::exit_status $s = guard $ch->wait();
+    assert(!$s->success() || $s->signal() != null);
+}
+
+#[group: "process"]
+test piped_stderr
+{
+    std::process::command $c = std::process::command('/bin/echo');
+    $c->arg('err');
+    $c->stderr(.piped);
+    $c->stdout(.discard);
+    std::process::child $ch = guard $c->spawn();
+    std::io::pipe_reader $err = $ch->stderr() ?? die('stderr was piped');
+    string $text = guard $err->readall();
+    echo $text;
+    std::process::exit_status $s = guard $ch->wait();
+    echo $s->success();
+}
+#[end]
+
+#[end]

@@ -16,7 +16,8 @@
 #if defined(__linux__)
 namespace
 {
-    typedef int (*SpawnFn)(int *, const char *, char *const[], char *const[], const char *, const int[3]);
+    typedef int (*SpawnFn)(
+        int *, const char *, char *const[], char *const[], const char *, const int[3], int);
 
     const SpawnFn k_spawns[] = { __eco_spawn_with_chdir, __eco_spawn_with_chdir_fallback };
 
@@ -40,7 +41,7 @@ namespace
         };
         char *envp[] = { nullptr };
 
-        const int rc = spawn(&pid, "/bin/sh", argv, envp, dir, child_fd);
+        const int rc = spawn(&pid, "/bin/sh", argv, envp, dir, child_fd, 0);
         REQUIRE(rc == 0);
         REQUIRE(pid > 0);
 
@@ -68,7 +69,7 @@ namespace
         };
         char *envp[] = { nullptr };
 
-        const int rc = spawn(&pid, "/bin/sh", argv, envp, "/", child_fd);
+        const int rc = spawn(&pid, "/bin/sh", argv, envp, "/", child_fd, 0);
         close(fds[1]);
         REQUIRE(rc == 0);
         REQUIRE(pid > 0);
@@ -96,8 +97,8 @@ TEST_CASE("spawn with chdir runs the child in that directory", "[spawn]")
 #if !defined(__linux__)
     int pid = 0;
     const int child_fd[3] = { ECO_SPAWN_INHERIT, ECO_SPAWN_INHERIT, ECO_SPAWN_INHERIT };
-    REQUIRE(__eco_spawn_with_chdir(&pid, "", nullptr, nullptr, "", child_fd) == 38);
-    REQUIRE(__eco_spawn_with_chdir_fallback(&pid, "", nullptr, nullptr, "", child_fd) == 38);
+    REQUIRE(__eco_spawn_with_chdir(&pid, "", nullptr, nullptr, "", child_fd, 0) == 38);
+    REQUIRE(__eco_spawn_with_chdir_fallback(&pid, "", nullptr, nullptr, "", child_fd, 0) == 38);
 #else
     const int child_fd[3] = { ECO_SPAWN_INHERIT, ECO_SPAWN_INHERIT, ECO_SPAWN_INHERIT };
     for (SpawnFn spawn : k_spawns) {
@@ -140,7 +141,7 @@ TEST_CASE("spawn with a null cwd keeps this process's directory", "[spawn]")
 
     for (SpawnFn spawn : k_spawns) {
         int pid = 0;
-        const int rc = spawn(&pid, "/bin/true", argv, envp, nullptr, child_fd);
+        const int rc = spawn(&pid, "/bin/true", argv, envp, nullptr, child_fd, 0);
         REQUIRE(rc == 0);
         REQUIRE(pid > 0);
 
@@ -150,7 +151,7 @@ TEST_CASE("spawn with a null cwd keeps this process's directory", "[spawn]")
         REQUIRE(WEXITSTATUS(status) == 0);
 
         pid = 0;
-        const int empty = spawn(&pid, "/bin/true", argv, envp, "", child_fd);
+        const int empty = spawn(&pid, "/bin/true", argv, envp, "", child_fd, 0);
         REQUIRE(empty == 0);
         REQUIRE(pid > 0);
         REQUIRE(waitpid(pid, &status, 0) == pid);
@@ -175,7 +176,7 @@ TEST_CASE("spawn into a missing directory returns errno and reaps the child", "[
 
     for (SpawnFn spawn : k_spawns) {
         int pid = 0;
-        const int rc = spawn(&pid, "/bin/true", argv, envp, dir, child_fd);
+        const int rc = spawn(&pid, "/bin/true", argv, envp, dir, child_fd, 0);
         REQUIRE(rc == ENOENT);
 
         // posix_spawn reaps on a failed addchdir; the fallback waitpids itself
@@ -183,6 +184,30 @@ TEST_CASE("spawn into a missing directory returns errno and reaps the child", "[
             int status = 0;
             REQUIRE(waitpid(pid, &status, WNOHANG) != pid);
         }
+    }
+#endif
+}
+
+TEST_CASE("spawn with new_group starts a process group", "[spawn]")
+{
+#if !defined(__linux__)
+    SKIP("the helper is linux");
+#else
+    const int child_fd[3] = { ECO_SPAWN_INHERIT, ECO_SPAWN_INHERIT, ECO_SPAWN_INHERIT };
+    char *argv[] = { const_cast<char *>("/bin/true"), nullptr };
+    char *envp[] = { nullptr };
+
+    for (SpawnFn spawn : k_spawns) {
+        int pid = 0;
+        const int rc = spawn(&pid, "/bin/true", argv, envp, nullptr, child_fd, 1);
+        REQUIRE(rc == 0);
+        REQUIRE(pid > 0);
+        REQUIRE(getpgid(pid) == pid);
+
+        int status = 0;
+        REQUIRE(waitpid(pid, &status, 0) == pid);
+        REQUIRE(WIFEXITED(status));
+        REQUIRE(WEXITSTATUS(status) == 0);
     }
 #endif
 }

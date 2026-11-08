@@ -1,0 +1,65 @@
+#[group: "core"]
+test ok_has_a_value
+{
+    result<int32, string> $r = .ok(7);
+    assert($r->has_value());
+    assert(!$r->failed());
+    assert($r->or(0) == 7);
+}
+
+#[group: "core"]
+test error_is_a_failure
+{
+    result<int32, string> $r = .error('gone');
+    assert($r->failed());
+    assert(!$r->has_value());
+    assert($r->or(9) == 9);
+    assert($r->failure() == 'gone');
+}
+
+#[group: "core"]
+test guard_binds_the_value
+{
+    result<int32, string> $r = .ok(4);
+    int32 $n = guard $r;
+    assert($n == 4);
+}
+
+#[group: "core"]
+test guard_else_binds_the_failure
+{
+    result<int32, string> $r = .error('nope');
+    int32 $n = guard $r else ($e) {
+        assert($e == 'nope');
+        return;
+    };
+    assert(false, 'ok arm should not run');
+    echo $n;
+}
+
+#[group: "core"]
+test match_reads_the_cases
+{
+    result<int32, string> $r = .ok(3);
+    int32 $n = match ($r) {
+        .ok($v) => $v,
+        .error($e) => 0,
+    };
+    assert($n == 3);
+}
+
+#[tests: expects death]
+#[group: "core"]
+test unwrap_dies_on_a_failure
+{
+    result<int32, string> $r = .error('nope');
+    echo $r->unwrap();
+}
+
+#[tests: expects death]
+#[group: "core"]
+test failure_dies_on_a_value
+{
+    result<int32, string> $r = .ok(1);
+    echo $r->failure();
+}

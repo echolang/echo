@@ -1,0 +1,41 @@
+#[group: "core"]
+test ok_succeeded
+{
+    status<string> $s = .ok;
+    assert($s->has_value());
+    assert(!$s->failed());
+}
+
+#[group: "core"]
+test error_failed
+{
+    status<string> $s = .error('gone');
+    assert($s->failed());
+    assert($s->failure() == 'gone');
+}
+
+#[group: "core"]
+test guard_passes_on_ok
+{
+    status<string> $s = .ok;
+    guard $s;
+}
+
+#[group: "core"]
+test guard_else_binds_the_failure
+{
+    status<string> $s = .error('nope');
+    guard $s else ($e) {
+        assert($e == 'nope');
+        return;
+    };
+    assert(false, 'ok arm should not run');
+}
+
+#[tests: expects death]
+#[group: "core"]
+test failure_dies_on_ok
+{
+    status<string> $s = .ok;
+    echo $s->failure();
+}

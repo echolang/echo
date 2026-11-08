@@ -117,7 +117,8 @@ static int spawn_posix_chdir(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3])
+    const int child_fd[3],
+    int new_group)
 {
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attr;
@@ -151,8 +152,15 @@ static int spawn_posix_chdir(
         rc = posix_spawnattr_setsigmask(&attr, &sigmask);
     }
 
+    short flags = POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
+
+    if (rc == 0 && new_group) {
+        rc = posix_spawnattr_setpgroup(&attr, 0);
+        flags = (short)(flags | POSIX_SPAWN_SETPGROUP);
+    }
+
     if (rc == 0) {
-        rc = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
+        rc = posix_spawnattr_setflags(&attr, flags);
     }
 
     pid_t pid = 0;
@@ -249,7 +257,8 @@ static int spawn_fork_chdir(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3])
+    const int child_fd[3],
+    int new_group)
 {
     int errpipe[2];
     if (pipe2(errpipe, O_CLOEXEC) != 0) {
@@ -281,6 +290,11 @@ static int spawn_fork_chdir(
         int rc = place_child_fds(child_fd);
         if (rc != 0) {
             write_errno(errpipe[1], rc);
+            _exit(127);
+        }
+
+        if (new_group && setpgid(0, 0) != 0) {
+            write_errno(errpipe[1], errno);
             _exit(127);
         }
 
@@ -327,16 +341,17 @@ int __eco_spawn_with_chdir(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3])
+    const int child_fd[3],
+    int new_group)
 {
 #if defined(__GLIBC__)
     if (posix_spawn_file_actions_addchdir_np) {
-        return spawn_posix_chdir(pid_out, path, argv, envp, chdir_to, child_fd);
+        return spawn_posix_chdir(pid_out, path, argv, envp, chdir_to, child_fd, new_group);
     }
 
-    return spawn_fork_chdir(pid_out, path, argv, envp, chdir_to, child_fd);
+    return spawn_fork_chdir(pid_out, path, argv, envp, chdir_to, child_fd, new_group);
 #else
-    return spawn_posix_chdir(pid_out, path, argv, envp, chdir_to, child_fd);
+    return spawn_posix_chdir(pid_out, path, argv, envp, chdir_to, child_fd, new_group);
 #endif
 }
 
@@ -347,9 +362,10 @@ int __eco_spawn_with_chdir_fallback(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3])
+    const int child_fd[3],
+    int new_group)
 {
-    return spawn_fork_chdir(pid_out, path, argv, envp, chdir_to, child_fd);
+    return spawn_fork_chdir(pid_out, path, argv, envp, chdir_to, child_fd, new_group);
 }
 #endif
 
@@ -361,7 +377,8 @@ int __eco_spawn_with_chdir(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3])
+    const int child_fd[3],
+    int new_group)
 {
     (void)pid_out;
     (void)path;
@@ -369,6 +386,7 @@ int __eco_spawn_with_chdir(
     (void)envp;
     (void)chdir_to;
     (void)child_fd;
+    (void)new_group;
     return 38;
 }
 
@@ -379,9 +397,10 @@ int __eco_spawn_with_chdir_fallback(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3])
+    const int child_fd[3],
+    int new_group)
 {
-    return __eco_spawn_with_chdir(pid_out, path, argv, envp, chdir_to, child_fd);
+    return __eco_spawn_with_chdir(pid_out, path, argv, envp, chdir_to, child_fd, new_group);
 }
 #endif
 

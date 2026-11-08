@@ -1,0 +1,20 @@
+#[group: "core"]
+test trailing_zeros
+{
+    assert(bits::trailing_zeros(8 as uint32) == 3);
+    assert(bits::trailing_zeros(8 as uint64) == 3);
+}
+
+#[group: "core"]
+test leading_zeros
+{
+    assert(bits::leading_zeros(1 as uint32) == 31);
+    assert(bits::leading_zeros(1 as uint64) == 63);
+}
+
+#[group: "core"]
+test count_ones
+{
+    assert(bits::count_ones(7 as uint32) == 3);
+    assert(bits::count_ones(7 as uint64) == 3);
+}

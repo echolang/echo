@@ -1,0 +1,120 @@
+#[group: "core"]
+test from_a_c_string
+{
+    string $s = 'hello';
+    assert(str::from($s->cstr()) == 'hello');
+}
+
+#[group: "core"]
+test concat_joins_two_strings
+{
+    assert(str::concat('ab', 'c') == 'abc');
+}
+
+#[group: "core"]
+test trim_drops_ascii_space
+{
+    assert(str::trim('  hi  ') == 'hi');
+    assert(str::ltrim('  hi  ') == 'hi  ');
+    assert(str::rtrim('  hi  ') == '  hi');
+}
+
+#[group: "core"]
+test iequals_ignores_ascii_case
+{
+    assert(str::iequals('Hello', 'HELLO'));
+    assert(!str::iequals('Hello', 'Hallo'));
+}
+
+#[group: "core"]
+test split_cuts_at_the_separator
+{
+    $p = str::split('a,b,c', ',');
+    assert($p->count() == 3);
+    assert($p->at(0) == 'a');
+    assert($p->at(2) == 'c');
+}
+
+#[group: "core"]
+test split_on_empty_is_one_part
+{
+    $p = str::split('', ',');
+    assert($p->count() == 1);
+    assert($p->at(0) == '');
+}
+
+#[group: "core"]
+test join_round_trips_a_split
+{
+    string $t = 'a,b,c';
+    assert(str::join(str::split($t, ','), ',') == $t);
+}
+
+#[group: "core"]
+test join_an_array
+{
+    $parts = ['a', 'b', 'c'];
+    assert(str::join($parts, '-') == 'a-b-c');
+}
+
+#[group: "core"]
+test lines_splits_on_newlines
+{
+    $p = str::lines("a\nb\n");
+    assert($p->count() == 2);
+    assert($p->at(0) == 'a');
+    assert($p->at(1) == 'b');
+}
+
+#[group: "core"]
+test replace_rewrites_every_match
+{
+    assert(str::replace('aa', 'a', 'b') == 'bb');
+    assert(str::replace_first('aa', 'a', 'b') == 'ba');
+}
+
+#[group: "core"]
+test repeat_copies
+{
+    assert(str::repeat('ab', 3) == 'ababab');
+    assert(str::repeat('ab', 0) == '');
+}
+
+#[group: "core"]
+test pad_reaches_the_width
+{
+    assert(str::lpad('x', 3, 46) == '..x');
+    assert(str::rpad('x', 3, 46) == 'x..');
+}
+
+#[group: "core"]
+test int_parses_a_decimal
+{
+    int64 $n = guard str::int('42');
+    assert($n == 42 as int64);
+    int64 $neg = guard str::int('-7');
+    assert($neg == -7 as int64);
+    assert(str::int('nope') == null);
+}
+
+#[group: "core"]
+test uint_parses_an_unsigned
+{
+    uint64 $n = guard str::uint('42');
+    assert($n == 42 as uint64);
+    assert(str::uint('-1') == null);
+}
+
+#[group: "core"]
+test float_parses_a_number
+{
+    float64? $n = str::float('1.5');
+    assert($n != null);
+}
+
+#[group: "core"]
+test from_formats_an_integer
+{
+    assert(str::from(12) == '12');
+    assert(str::from(true) == 'true');
+}

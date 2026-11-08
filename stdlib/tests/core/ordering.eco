@@ -1,0 +1,41 @@
+#[group: "core"]
+test three_cases
+{
+    ordering $a = .less;
+    ordering $b = .equal;
+    ordering $c = .greater;
+    assert($a->less());
+    assert($b->equal());
+    assert($c->greater());
+    assert($a != $b);
+}
+
+#[group: "core"]
+test spaceship_on_integers
+{
+    ordering $a = 1 <=> 2;
+    ordering $b = 2 <=> 2;
+    ordering $c = 3 <=> 2;
+    assert($a->less());
+    assert($b->equal());
+    assert($c->greater());
+}
+
+#[group: "core"]
+test spaceship_on_strings
+{
+    assert(('a' <=> 'b')->less());
+    assert(('b' <=> 'b')->equal());
+    assert(('c' <=> 'b')->greater());
+}
+
+#[group: "core"]
+test reverse_and_then
+{
+    ordering $less = .less;
+    assert($less->reverse()->greater());
+    ordering $eq = .equal;
+    assert($eq->reverse()->equal());
+    assert($eq->then(.greater)->greater());
+    assert($less->then(.greater)->less());
+}

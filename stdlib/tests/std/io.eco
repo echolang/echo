@@ -1,0 +1,152 @@
+#[group: "io"]
+test print_writes_without_dying
+{
+    std::io::print('');
+}
+
+#[group: "io"]
+test a_temp_file_round_trips_through_the_handle
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $path = $dir->join('io.txt');
+    std::io::file $out = guard std::io::file::open($path, .write);
+    guard $out->write('hello');
+    guard $out->flush();
+    $out->close();
+
+    std::io::file $in = guard std::io::file::open($path, .read);
+    string $text = guard $in->readall();
+    assert($text == 'hello');
+    $in->close();
+
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "io"]
+test file_seek_readline_and_size
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $path = $dir->join('lines.txt');
+    guard std::fs::writefile($path, "a\nb\n");
+    std::io::file $f = guard std::io::file::open($path, .read);
+    string? $line = guard $f->readline();
+    string $got = guard $line;
+    assert($got == 'a');
+    int64 $pos = guard $f->position();
+    assert($pos > 0 as int64);
+    guard $f->seek(0, .start);
+    int64 $sz = guard $f->size();
+    assert($sz == 4 as int64);
+    std::fs::fileinfo $info = guard $f->info();
+    assert($info->size == 4 as int64);
+    $f->close();
+
+    std::io::file $w = guard std::io::file::open($path, .readwrite);
+    guard $w->truncate(1);
+    guard $w->sync();
+    $w->close();
+
+    std::io::file $lines = guard std::io::file::open($path, .read);
+    usize $n = 0;
+    foreach ($lines as const &$row) {
+        $n = $n + 1;
+        echo $row;
+    }
+    $lines->close();
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "io"]
+test writer_and_print_variants
+{
+    std::io::writer $out = std::io::writer(std::io::stdout);
+    guard $out->write('');
+    guard $out->flush();
+    std::io::print(' ');
+    std::io::println('');
+    std::io::eprint('');
+    std::io::eprintln('');
+}
+
+#[group: "io"]
+test ioerror_questions
+{
+    std::io::ioerror $missing = std::io::ioerror(std::io::ENOENT);
+    assert($missing->missing());
+    assert(!$missing->denied());
+    assert(!$missing->exists());
+    assert(!$missing->not_a_directory());
+    assert(!$missing->message()->empty());
+    assert(str::from($missing) == $missing->message());
+
+    std::io::ioerror $denied = std::io::ioerror(std::io::EACCES);
+    assert($denied->denied());
+    std::io::ioerror $perm = std::io::ioerror(std::io::EPERM);
+    assert($perm->denied());
+    std::io::ioerror $exists = std::io::ioerror(std::io::EEXIST);
+    assert($exists->exists());
+    std::io::ioerror $notdir = std::io::ioerror(std::io::ENOTDIR);
+    assert($notdir->not_a_directory());
+}
+
+#[group: "io"]
+test deprecated_string_paths
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    string $file = $dir->join('d.txt')->string();
+    guard std::io::writefile($file, 'z');
+    string $text = guard std::io::readfile($file);
+    assert($text == 'z');
+    bool $there = guard std::io::exists($file);
+    assert($there);
+    std::io::file $f = guard std::io::open($file, .read);
+    $f->close();
+    bool $gone = guard std::io::remove($file);
+    assert($gone);
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "io"]
+test fileperms_bits
+{
+    std::fs::fileperms $p = std::fs::fileperms(std::io::S_IRUSR | std::io::S_IWUSR | std::io::S_IXUSR
+        | std::io::S_IRGRP | std::io::S_IWGRP | std::io::S_IXGRP
+        | std::io::S_IROTH | std::io::S_IWOTH | std::io::S_IXOTH);
+    assert($p->owner_readable());
+    assert($p->owner_writable());
+    assert($p->owner_executable());
+    assert($p->group_readable());
+    assert($p->group_writable());
+    assert($p->group_executable());
+    assert($p->other_readable());
+    assert($p->other_writable());
+    assert($p->other_executable());
+    assert(!$p->is_readonly());
+    echo $p->mode();
+}
+
+#[group: "io"]
+test reader_over_a_file_descriptor
+{
+    std::fs::path $dir = guard std::fs::tempdir();
+    std::fs::path $path = $dir->join('r.txt');
+    guard std::fs::writefile($path, "one\n");
+    std::io::file $f = guard std::io::file::open($path, .read);
+    std::io::reader $in = std::io::reader(std::io::stream($f->fd()));
+    string? $line = guard $in->readline();
+    string $got = guard $line;
+    assert($got == 'one');
+    $f->close();
+    guard std::fs::remove_all($dir);
+}
+
+#[group: "io"]
+test stream_write
+{
+    std::io::stdout->write('');
+    std::io::stderr->write('');
+    std::io::stdout->writeline('');
+    echo std::io::stdout->isatty();
+    std::io::stream $out = std::io::stdout;
+    assert($out->fd() >= 0);
+}

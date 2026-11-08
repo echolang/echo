@@ -1,0 +1,15 @@
+#[group: "std"]
+test here_names_this_file
+{
+    std::src::location $at = std::src::here();
+    assert($at->file->contains('src.eco'));
+    assert($at->line > 0);
+    assert($at->module->equals('stdlib'));
+}
+
+#[group: "std"]
+test here_inside_a_test_names_the_function
+{
+    std::src::location $at = std::src::here();
+    assert(!$at->function->empty());
+}

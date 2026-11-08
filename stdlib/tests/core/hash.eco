@@ -1,0 +1,61 @@
+#[group: "core"]
+test of_an_integer_is_stable_in_one_process
+{
+    int32 $n = 42;
+    assert(hash::of($n) == hash::of($n));
+}
+
+#[group: "core"]
+test equal_strings_hash_equal
+{
+    string $a = 'hello';
+    string $b = 'hello';
+    assert(hash::of($a) == hash::of($b));
+}
+
+#[group: "core"]
+test different_integers_usually_differ
+{
+    int32 $a = 1;
+    int32 $b = 2;
+    assert(hash::of($a) != hash::of($b));
+}
+
+#[group: "core"]
+test signed_negative_one_agrees_across_widths
+{
+    int32 $a = -1;
+    int64 $b = -1;
+    assert(hash::of($a) == hash::of($b));
+}
+
+#[group: "core"]
+test bools_differ
+{
+    assert(hash::of(true) != hash::of(false));
+}
+
+#[group: "core"]
+test float_zeroes_hash_equal
+{
+    float64 $p = 0.0;
+    float64 $n = -0.0;
+    assert($p == $n);
+    assert(hash::of($p) == hash::of($n));
+}
+
+#[group: "core"]
+test mix_step_combine_and_bytes
+{
+    uint64 $m = hash::mix(1);
+    assert($m != 0);
+    uint64 $s = hash::step(hash::OFFSET_BASIS, 65);
+    assert($s != hash::OFFSET_BASIS);
+    uint64 $c = hash::combine(1, 2);
+    assert($c != 1);
+    string $t = 'ab';
+    uint64 $b = hash::bytes($t->data(), $t->size(), hash::OFFSET_BASIS);
+    assert($b != 0);
+    int32 $n = 3;
+    assert(hash::bits($n) != 0);
+}

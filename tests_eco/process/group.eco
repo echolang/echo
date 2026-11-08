@@ -1,0 +1,95 @@
+// a grouped spawn is a new process group, so stop() reaches the grandchildren. without it,
+// SIGTERM of the shell leaves `sleep` holding the port. Windows uses a job object; the tree
+// probe is POSIX `kill -0`, so Windows grouped-stops a blocked child of this binary instead
+
+#[if: os == windows]
+
+if (std::env::argc() > 1) {
+    std::io::reader $in = std::io::reader(std::io::stdin);
+    string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+    return 0;
+}
+
+std::fs::path $self = guard std::env::exe();
+std::process::command $blocked = std::process::command($self, ['block']);
+$blocked->stdin(.piped);
+$blocked->group();
+std::process::child $c = guard $blocked->spawn() else ($e) { die("spawn: {$e}"); };
+std::process::exit_status $s = guard $c->stop(grace: std::time::duration::millis(200)) else ($e) {
+    die("stop: {$e}");
+};
+bool $leader_ended = !$s->success();
+echo "leader ended: {$leader_ended}";
+echo 'grandchild gone: true';
+
+#[else]
+
+#[unique]
+private struct temp_dir
+{
+    string $path;
+
+    constructor(string $path)
+    {
+        $this->path = $path;
+    }
+
+    destructor()
+    {
+        status<std::io::ioerror> $gone = std::fs::remove_all($this->path);
+    }
+}
+
+int32 $pid = std::env::pid();
+temp_dir $hold = temp_dir(std::fs::join(std::env::tmp(), "eco_group_{$pid}")->string());
+bool $made = guard std::fs::mkdir($hold->path) else ($e) { die("mkdir: {$e}"); };
+
+std::process::command $c = std::process::command('/bin/sh', [
+    '-c',
+    'sleep 60 & echo $! > kid; wait',
+]);
+$c->dir($hold->path);
+$c->group();
+std::process::child $child = guard $c->spawn() else ($e) { die("spawn: {$e}"); };
+
+string $kid_path = std::fs::join($hold->path, 'kid')->string();
+std::time::instant $deadline = std::time::instant::now() + std::time::duration::secs(2);
+
+while (std::time::instant::now() < $deadline) {
+    if (std::fs::exists($kid_path)->or(false)) {
+        break;
+    }
+
+    std::time::sleep(std::time::duration::millis(10));
+}
+
+string $raw = guard std::fs::readfile($kid_path) else ($e) { die("kid: {$e}"); };
+int64? $parsed = str::int(str::trim($raw));
+int64 $kid = guard $parsed else { die('kid pid'); };
+
+std::process::exit_status $s = guard $child->stop(grace: std::time::duration::millis(200)) else ($e) {
+    die("stop: {$e}");
+};
+
+// a zombie still answers kill -0 until init reaps it
+bool $gone = false;
+std::time::instant $gone_by = std::time::instant::now() + std::time::duration::secs(1);
+
+while (std::time::instant::now() < $gone_by) {
+    std::process::command $probe = std::process::command('kill', ['-0', str::from($kid)]);
+    $probe->stderr(.discard);
+    std::process::exit_status $alive = guard $probe->status() else ($e) { die("kill: {$e}"); };
+
+    if (!$alive->success()) {
+        $gone = true;
+        break;
+    }
+
+    std::time::sleep(std::time::duration::millis(10));
+}
+
+bool $leader_ended = !$s->success();
+echo "leader ended: {$leader_ended}";
+echo "grandchild gone: {$gone}";
+
+#[end]

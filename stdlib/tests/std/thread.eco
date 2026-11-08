@@ -1,0 +1,37 @@
+#[if: threads]
+
+#[group: "thread"]
+test current_id_is_stable
+{
+    std::thread::id $a = std::thread::current();
+    std::thread::id $b = std::thread::current();
+    assert($a == $b);
+}
+
+#[group: "thread"]
+test concurrency_is_at_least_one
+{
+    assert(std::thread::concurrency() >= 1);
+}
+
+#[group: "thread"]
+test spawn_runs_and_joins
+{
+    std::thread::handle $h = guard std::thread::spawn(function() : void {
+    });
+    $h->join();
+}
+
+#[group: "thread"]
+test a_mutex_guards_a_value
+{
+    $lock = std::thread::mutex<int32>(0);
+    {
+        $held = $lock->lock();
+        $held->value = 7;
+    }
+    $held = $lock->lock();
+    assert($held->value == 7);
+}
+
+#[end]

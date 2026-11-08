@@ -52,7 +52,7 @@ std::string as_c_string_literal(const std::string &value)
 bool should_skip_stdlib_directory(const std::filesystem::path &name)
 {
     const std::string leaf = name.filename().string();
-    return leaf == "build" || leaf == "sketches";
+    return leaf == "build" || leaf == "sketches" || leaf == "tests";
 }
 
 void write_byte_array(std::ostream &output, const std::string &varname, const std::string &content)

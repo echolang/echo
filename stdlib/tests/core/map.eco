@@ -1,0 +1,134 @@
+#[group: "core"]
+test an_empty_map_has_no_entries
+{
+    $m = map<int32, int32>();
+    assert($m->empty());
+    assert($m->count() == 0);
+    assert(!$m->has(1));
+}
+
+#[group: "core"]
+test set_and_get_round_trip
+{
+    $m = map<int32, int32>();
+    $m->set(1, 10);
+    $m->set(2, 20);
+    assert($m->count() == 2);
+    assert($m->has(1));
+    assert($m->get(1) == 10);
+    assert($m[2] == 20);
+}
+
+#[group: "core"]
+test a_literal_is_a_map
+{
+    map<string, int32> $m = ['a' => 1, 'b' => 2];
+    assert($m->count() == 2);
+    assert($m['a'] == 1);
+}
+
+#[group: "core"]
+test writing_an_existing_key_replaces_the_value
+{
+    $m = map<int32, int32>();
+    $m[1] = 10;
+    $m[1] = 11;
+    assert($m->count() == 1);
+    assert($m[1] == 11);
+}
+
+#[group: "core"]
+test remove_drops_a_key
+{
+    $m = map<int32, int32>();
+    $m[1] = 10;
+    $m[2] = 20;
+    assert($m->remove(1));
+    assert(!$m->has(1));
+    assert($m->count() == 1);
+    assert(!$m->remove(1));
+}
+
+#[group: "core"]
+test take_hands_the_value_back
+{
+    $m = map<int32, string>();
+    $m[1] = 'one';
+    assert($m->take(1) == 'one');
+    assert($m->empty());
+}
+
+#[group: "core"]
+test keys_and_values_are_the_live_entries
+{
+    $m = map<int32, int32>();
+    $m[1] = 10;
+    $m[2] = 20;
+    assert($m->keys()->count() == 2);
+    assert($m->values()->count() == 2);
+}
+
+#[group: "core"]
+test foreach_walks_the_values
+{
+    $m = map<int32, int32>();
+    $m[1] = 10;
+    $m[2] = 20;
+    int32 $sum = 0;
+    foreach ($m as const &$v) {
+        $sum = $sum + $v;
+    }
+    assert($sum == 30);
+}
+
+#[group: "core"]
+test clone_is_an_independent_copy
+{
+    $m = map<int32, int32>();
+    $m[1] = 10;
+    $n = $m->clone();
+    $n[1] = 11;
+    assert($m[1] == 10);
+    assert($n[1] == 11);
+}
+
+#[group: "core"]
+test extend_copies_entries_across
+{
+    $a = map<int32, int32>();
+    $a[1] = 10;
+    $b = map<int32, int32>();
+    $b[2] = 20;
+    $a->extend($b);
+    assert($a->count() == 2);
+    assert($a[2] == 20);
+}
+
+#[group: "core"]
+test clear_empties
+{
+    $m = map<int32, int32>();
+    $m[1] = 10;
+    $m->clear();
+    assert($m->empty());
+}
+
+#[group: "core"]
+test a_map_frees_its_storage
+{
+    usize $before = mem::live_allocations();
+    {
+        $m = map<int32, int32>();
+        $m[1] = 10;
+        $m[2] = 20;
+    }
+    assert(mem::live_allocations() == $before);
+}
+
+#[tests: expects death]
+#[group: "core"]
+test get_dies_on_a_missing_key
+{
+    $m = map<int32, int32>();
+    echo $m->get(1);
+}

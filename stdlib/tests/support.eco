@@ -1,0 +1,25 @@
+/*
+ * helpers shared by the stdlib test files. the whole directory is a
+ * `#[target: test]` source list, so none of this exists in a normal build.
+ * `#[if: tests]` is the same gate analog_clock uses for its fixtures.
+ */
+
+namespace stdlib_tests;
+
+#[if: tests]
+function close_f64(float64 $a, float64 $b) : bool
+{
+    float64 $delta = std::math::abs($a - $b);
+    float64 $epsilon = 0.000001;
+
+    return $delta < $epsilon;
+}
+
+function close_f32(float $a, float $b) : bool
+{
+    float $delta = std::math::abs($a - $b);
+    float $epsilon = 0.0001f;
+
+    return $delta < $epsilon;
+}
+#[end]

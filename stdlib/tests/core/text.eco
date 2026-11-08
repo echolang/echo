@@ -1,0 +1,38 @@
+#[group: "core"]
+test an_empty_text_takes_to_an_empty_string
+{
+    str::text $t = str::text();
+    assert($t->empty());
+    assert($t->size() == 0);
+    assert($t->take() == '');
+}
+
+#[group: "core"]
+test append_and_take
+{
+    str::text $t = str::text();
+    $t->append('he');
+    $t->append('llo');
+    $t->push(33);
+    assert($t->size() == 6);
+    assert($t->view() == 'hello!');
+    assert($t->take() == 'hello!');
+}
+
+#[group: "core"]
+test reserve_grows_capacity
+{
+    str::text $t = str::text();
+    $t->reserve(64);
+    assert($t->capacity() >= 64);
+    assert($t->empty());
+}
+
+#[group: "core"]
+test a_long_append_leaves_the_inline_store
+{
+    str::text $t = str::text();
+    $t->append('0123456789abcdef0123456789abcdef0123456789abcdef');
+    assert($t->size() > 16);
+    assert($t->take()->starts('0123'));
+}

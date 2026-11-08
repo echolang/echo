@@ -1,0 +1,100 @@
+#[group: "core"]
+test size_and_align_of_words
+{
+    assert(mem::size<int32>() == 4);
+    assert(mem::align<int32>() == 4);
+    assert(mem::size<uint8>() == 1);
+}
+
+#[group: "core"]
+test type_queries
+{
+    assert(mem::is_trivially_copyable<int32>());
+    assert(mem::is_integer<int32>());
+    assert(!mem::needs_destruction<int32>());
+    assert(mem::needs_destruction<string>());
+}
+
+#[group: "core"]
+test alloc_copy_free
+{
+    ptr<int32> $p = mem::alloc<int32>(2);
+    mem::zero<int32>($p, 2);
+    $p:$[0] = 1;
+    $p:$[1] = 2;
+    ptr<int32> $q = mem::alloc<int32>(2);
+    mem::copy<int32>($q, $p, 2);
+    assert($q:$[1] == 2);
+    mem::free<int32>($p);
+    mem::free<int32>($q);
+}
+
+#[group: "core"]
+test realloc_and_move
+{
+    ptr<int32> $p = mem::alloc<int32>(1);
+    $p:$[0] = 4;
+    ptr<int32> $grown = mem::realloc<int32>($p, 2);
+    $grown:$[1] = 5;
+    ptr<int32> $q = mem::alloc<int32>(2);
+    mem::move<int32>($q, $grown, 2);
+    assert($q:$[0] == 4);
+    mem::free<int32>($grown);
+    mem::free<int32>($q);
+}
+
+#[group: "core"]
+test fill_and_compare_bytes
+{
+    ptr<uint8> $p = mem::alloc<uint8>(4);
+    mem::fill_bytes($p, 7, 4);
+    assert($p:$[0] == 7);
+    assert($p:$[3] == 7);
+    ptr<uint8> $q = mem::alloc<uint8>(4);
+    mem::fill_bytes($q, 7, 4);
+    assert(mem::compare_bytes($p, $q, 4) == 0);
+    $q:$[0] = 8;
+    assert(mem::compare_bytes($p, $q, 4) != 0);
+    mem::free<uint8>($p);
+    mem::free<uint8>($q);
+}
+
+#[group: "core"]
+test find_byte
+{
+    ptr<uint8> $p = mem::alloc<uint8>(4);
+    $p:$[0] = 1;
+    $p:$[1] = 2;
+    $p:$[2] = 3;
+    $p:$[3] = 4;
+    assert(mem::find_byte($p, 3, 4) == 2);
+    mem::free<uint8>($p);
+}
+
+#[group: "core"]
+test take_and_init_unaccounted_storage
+{
+    ptr<int32> $p = mem::alloc<int32>(1);
+    mem::init<int32>($p:$[0], 7);
+    assert($p:$[0] == 7);
+    int32 $taken = mem::take<int32>($p:$[0]);
+    assert($taken == 7);
+    mem::free<int32>($p);
+}
+
+#[group: "core"]
+test bit_cast_keeps_the_bits
+{
+    uint32 $bits = mem::bit_cast<uint32, float32>(0.0f);
+    assert($bits == 0);
+}
+
+#[group: "core"]
+test live_allocations_tracks_the_heap
+{
+    usize $before = mem::live_allocations();
+    ptr<int32> $p = mem::alloc<int32>(1);
+    assert(mem::live_allocations() > $before);
+    mem::free<int32>($p);
+    assert(mem::live_allocations() == $before);
+}

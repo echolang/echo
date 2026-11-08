@@ -1,0 +1,110 @@
+#[group: "std"]
+test duration_factories
+{
+    std::time::duration $s = std::time::duration::secs(2);
+    assert($s->secs == 2 as int64);
+    assert($s->nanos == 0 as int64);
+
+    std::time::duration $ms = std::time::duration::millis(1500);
+    assert($ms->secs == 1 as int64);
+}
+
+#[group: "std"]
+test duration_zero
+{
+    std::time::duration $z = std::time::duration::zero();
+    assert($z->secs == 0 as int64);
+    assert($z->nanos == 0 as int64);
+}
+
+#[group: "std"]
+test duration_normalises_nanos
+{
+    std::time::duration $d = std::time::duration(1, 1000000000);
+    assert($d->secs == 2 as int64);
+    assert($d->nanos == 0 as int64);
+}
+
+#[group: "std"]
+test instant_moves_forward
+{
+    std::time::instant $a = std::time::instant::now();
+    std::time::duration $elapsed = $a->elapsed();
+    assert($elapsed->secs >= 0 as int64);
+}
+
+#[group: "std"]
+test subtracting_instants
+{
+    std::time::instant $a = std::time::instant::now();
+    std::time::instant $b = $a + std::time::duration::millis(0);
+    std::time::duration $d = $b - $a;
+    assert($d->secs == 0 as int64);
+}
+
+#[group: "std"]
+test duration_units_and_sign
+{
+    std::time::duration $us = std::time::duration::micros(1500);
+    assert($us->as_micros() == 1500 as int64);
+    std::time::duration $ns = std::time::duration::nanos(7);
+    assert($ns->as_nanos() == 7 as int64);
+    std::time::duration $h = std::time::duration::hours(1);
+    assert($h->as_secs() == 3600 as int64);
+    std::time::duration $m = std::time::duration::mins(2);
+    assert($m->as_secs() == 120 as int64);
+    assert($h->as_millis() == 3600000 as int64);
+    assert(!$h->is_zero());
+    assert(!$h->is_negative());
+    std::time::duration $neg = std::time::duration::secs(-2);
+    assert($neg->is_negative());
+    assert($neg->abs()->as_secs() == 2 as int64);
+    assert($neg->as_float_secs() < 0.0);
+}
+
+#[group: "std"]
+test duration_arithmetic
+{
+    std::time::duration $a = std::time::duration::secs(2);
+    std::time::duration $b = std::time::duration::secs(1);
+    assert(($a + $b)->as_secs() == 3 as int64);
+    assert(($a - $b)->as_secs() == 1 as int64);
+    assert((-$b)->is_negative());
+    assert($a > $b);
+    assert($b < $a);
+    assert($a >= $b);
+    assert($b <= $a);
+    assert($a != $b);
+    assert($a == std::time::duration::secs(2));
+    assert(($a * (2 as int64))->as_secs() == 4 as int64);
+    assert(((2 as int64) * $a)->as_secs() == 4 as int64);
+    assert(($a / (2 as int64))->as_secs() == 1 as int64);
+}
+
+#[group: "std"]
+test duration_renders
+{
+    assert(str::from(std::time::duration::zero()) == '0s');
+    assert(str::from(std::time::duration::secs(1)) == '1s');
+    assert(str::from(std::time::duration::millis(5))->contains('ms'));
+    assert(str::from(std::time::duration::micros(5))->contains('us'));
+    assert(str::from(std::time::duration::nanos(5))->contains('ns'));
+    assert(str::from(std::time::duration::secs(-1))->starts('-'));
+    assert(str::from(std::time::duration::hours(1))->contains('h'));
+}
+
+#[group: "std"]
+test instant_comparisons
+{
+    std::time::instant $a = std::time::instant::now();
+    std::time::instant $b = $a + std::time::duration::millis(0);
+    assert($a == $b);
+    assert(!($a != $b));
+    std::time::instant $later = $a + std::time::duration::secs(1);
+    assert($later > $a);
+    assert($a < $later);
+    assert($later >= $a);
+    assert($a <= $later);
+    assert(($later - std::time::duration::secs(1)) == $a);
+    assert($later->since($a)->as_secs() == 1 as int64);
+}

@@ -1,0 +1,38 @@
+#[if: dynlib]
+
+#[group: "std"]
+test file_name_uses_this_os_suffix
+{
+    string $name = std::dynlib::file_name('foo');
+#[if: os == windows]
+    assert($name == 'foo.dll');
+#[elif: family == darwin]
+    assert($name == 'libfoo.dylib');
+#[else]
+    assert($name == 'libfoo.so');
+#[end]
+}
+
+#[group: "std"]
+test path_of_joins_the_file_name
+{
+    string $p = std::dynlib::path_of('/tmp', 'foo');
+    assert($p->contains('foo'));
+}
+
+#[group: "std"]
+test dynerror_messages
+{
+    std::dynlib::dynerror $n = .not_found('x');
+    assert($n->message()->contains('not found'));
+    std::dynlib::dynerror $l = .load_failed('boom');
+    assert($l->message() == 'boom');
+    std::dynlib::dynerror $i = .missing_interface('I');
+    assert($i->message()->contains('interface'));
+    std::dynlib::dynerror $s = .missing_symbol('f');
+    assert($s->message()->contains('symbol'));
+    std::dynlib::dynerror $a = .abi_mismatch(.version(1, 2));
+    assert($a->message()->contains('version'));
+}
+
+#[end]

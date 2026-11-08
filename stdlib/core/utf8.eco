@@ -5,6 +5,9 @@
  * else that maps a codepoint, has to know which scalar the bytes spell - or that they spell
  * none. Invalid sequences are one raw byte; the same contract `chars()` already has, so a
  * later feature does not invent a stricter one.
+ *
+ * The public half is `boundary`, `is_utf8`, and `str::chars`: a cut that keeps every character
+ * whole, a well-formedness test, and a walk of those characters as windows into the source.
  */
 
 namespace str;
@@ -217,4 +220,85 @@ internal function write_cp(ptr<uint8> $dst, usize $used, uint32 $cp) : usize
     $dst:$[$used + 2] = $u2;
     $dst:$[$used + 3] = $u3;
     return $used + 4;
+}
+
+/**
+ * `$at` moved back to the start of the character it falls in, so a cut there keeps every
+ * character whole.
+ *
+ * Past the end is the end. A stray continuation walks back at most three bytes, UTF-8's longest
+ * sequence. That is the JSON-line problem: emitting a tail that is not a character.
+ */
+public function boundary(const string& $text, usize $at) : usize
+{
+    usize $n = $text->size();
+
+    if ($at >= $n) {
+        return $n;
+    }
+
+    usize $i = $at;
+    usize $steps = 0;
+
+    while ($i > 0 && ($text->byte($i) & 192) == 128) {
+        if ($steps >= 3) {
+            break;
+        }
+
+        $i = $i - 1;
+        $steps = $steps + 1;
+    }
+
+    return $i;
+}
+
+/**
+ * True when every byte is part of a well-formed scalar. Empty is well-formed. A truncated
+ * sequence, an overlong encoding, a surrogate half, or a stray continuation is not.
+ *
+ * `$s->chars()` still counts those; this is the validator that count is not.
+ */
+public function is_utf8(const string& $text) : bool
+{
+    usize $i = 0;
+    usize $n = $text->size();
+
+    while ($i < $n) {
+        utf8_step $s = decode_at($text, $i);
+
+        if ($s->raw) {
+            return false;
+        }
+
+        $i = $i + $s->len;
+    }
+
+    return true;
+}
+
+/**
+ * Each well-formed character as a window into `$text`, and each invalid byte as a window of
+ * one. `foreach` walks them; `$p->owned()` is the list of owning strings.
+ *
+ * `$s->chars()` is the count of the same walk. This is the walk.
+ */
+public function chars(const string& $text) : parts
+{
+    array<part> $spans = array<part>();
+    usize $i = 0;
+    usize $n = $text->size();
+
+    while ($i < $n) {
+        utf8_step $s = decode_at($text, $i);
+        usize $len = $s->len;
+
+        if ($len == 0) {
+            $len = 1;
+        }
+
+        $spans->push(part($i, $len));
+        $i = $i + $len;
+    }
+
+    return parts($text, $spans);
 }

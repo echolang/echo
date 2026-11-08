@@ -1,0 +1,69 @@
+#[group: "core"]
+test ascii_upper_and_lower
+{
+    assert(str::upper('abc') == 'ABC');
+    assert(str::lower('ABC') == 'abc');
+}
+
+#[group: "core"]
+test already_cased_text_is_unchanged
+{
+    string $lower = 'abc';
+    string $again = str::lower($lower);
+    assert($again == 'abc');
+    string $upper = 'ABC';
+    assert(str::upper($upper) == 'ABC');
+}
+
+#[group: "core"]
+test empty_case_is_empty
+{
+    assert(str::upper('') == '');
+    assert(str::lower('') == '');
+    assert(str::ucfirst('') == '');
+    assert(str::lcfirst('') == '');
+}
+
+#[group: "core"]
+test ucfirst_and_lcfirst
+{
+    assert(str::ucfirst('abc') == 'Abc');
+    assert(str::lcfirst('ABC') == 'aBC');
+}
+
+#[group: "core"]
+test sharp_s_maps_to_ss
+{
+    assert(str::upper('ß') == 'SS');
+    assert(str::ucfirst('ß') == 'Ss');
+}
+
+#[group: "core"]
+test latin_small_e_acute
+{
+    assert(str::upper('é') == 'É');
+    assert(str::lower('É') == 'é');
+}
+
+#[group: "core"]
+test greek_final_sigma
+{
+    assert(str::lower('Σ') == 'σ');
+    assert(str::lower('ΟΣ') == 'ος');
+}
+
+#[group: "core"]
+test mixed_ascii_and_unicode
+{
+    assert(str::upper('aβc') == 'AΒC');
+}
+
+#[group: "core"]
+test invalid_utf8_is_copied
+{
+    string $raw = '';
+    $raw->push(128);
+    string $out = str::upper($raw);
+    assert($out->size() == 1);
+    assert($out->byte(0) == 128);
+}

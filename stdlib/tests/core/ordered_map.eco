@@ -1,0 +1,60 @@
+#[group: "core"]
+test an_ordered_map_keeps_insertion_order
+{
+    $m = ordered_map<int32, int32>();
+    $m->set(3, 30);
+    $m->set(1, 10);
+    $m->set(2, 20);
+    $keys = $m->keys();
+    assert($keys->count() == 3);
+    assert($keys[0] == 3);
+    assert($keys[1] == 1);
+    assert($keys[2] == 2);
+}
+
+#[group: "core"]
+test replacing_a_value_does_not_move_the_key
+{
+    $m = ordered_map<int32, int32>();
+    $m[1] = 10;
+    $m[2] = 20;
+    $m[1] = 11;
+    $keys = $m->keys();
+    assert($keys[0] == 1);
+    assert($m[1] == 11);
+}
+
+#[group: "core"]
+test remove_drops_a_key
+{
+    $m = ordered_map<int32, int32>();
+    $m[1] = 10;
+    $m[2] = 20;
+    assert($m->remove(1));
+    assert(!$m->has(1));
+    assert($m->count() == 1);
+}
+
+#[group: "core"]
+test foreach_walks_in_insertion_order
+{
+    $m = ordered_map<int32, int32>();
+    $m[1] = 10;
+    $m[2] = 20;
+    int32 $prev = 0;
+    foreach ($m as const &$v) {
+        assert($v > $prev);
+        $prev = $v;
+    }
+    assert($prev == 20);
+}
+
+#[group: "core"]
+test clone_is_an_independent_copy
+{
+    $m = ordered_map<int32, int32>();
+    $m[1] = 10;
+    $n = $m->clone();
+    $n[1] = 11;
+    assert($m[1] == 10);
+}

@@ -1,0 +1,11 @@
+#[group: "std"]
+test sleep_zero_returns
+{
+    std::time::sleep(std::time::duration::zero());
+}
+
+#[group: "std"]
+test sleep_a_millisecond
+{
+    std::time::sleep(std::time::duration::millis(1));
+}

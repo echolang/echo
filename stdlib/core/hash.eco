@@ -76,6 +76,10 @@ namespace hash;
  * This is an in-memory bucket index and nothing else. Do not write one to a file, and do not expect the
  * integer values to match another implementation of anything - only the `bits`/string side is
  * canonical FNV-1a.
+ *
+ * **`fnv1a` is the stored twin.** It is the same byte walk without the process seed and without
+ * `mix`, so the same text is the same number after a restart. Coverage fingerprints, lock files,
+ * anything you write down and read later: that, never `of`.
  */
 
 /**
@@ -362,4 +366,20 @@ public function of(const string& $value) : uint64
 public function of(const string::view& $value) : uint64
 {
     return mix(bytes($value->bytes, $value->size, OFFSET_BASIS ^ process_seed()));
+}
+
+/**
+ * Canonical FNV-1a 64 of the bytes, no seed, no mix. The same text is the same number in every
+ * process. `of` is the map key; this is the fingerprint you can store.
+ */
+#[inline]
+public function fnv1a(const string& $value) : uint64
+{
+    return bytes($value->data(), $value->size(), OFFSET_BASIS);
+}
+
+#[inline]
+public function fnv1a(const string::view& $value) : uint64
+{
+    return bytes($value->bytes, $value->size, OFFSET_BASIS);
 }

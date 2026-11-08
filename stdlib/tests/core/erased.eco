@@ -1,0 +1,34 @@
+class Held
+{
+    public int32 $n;
+
+    public constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+#[group: "core"]
+test erased_from_and_assume
+{
+    Held $h = Held(9);
+    erased $e = erased::from($h);
+    unsafe {
+        Held $back = assume<Held>($e);
+        assert($back->n == 9);
+    }
+}
+
+#[group: "core"]
+test erased_copy_shares_the_object
+{
+    Held $h = Held(1);
+    erased $a = erased::from($h);
+    erased $b = $a;
+    unsafe {
+        Held $one = assume<Held>($a);
+        Held $two = assume<Held>($b);
+        $one->n = 4;
+        assert($two->n == 4);
+    }
+}

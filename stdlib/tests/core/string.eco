@@ -1,0 +1,130 @@
+#[group: "core"]
+test an_empty_string_has_size_zero
+{
+    string $s = '';
+    assert($s->empty());
+    assert($s->size() == 0);
+}
+
+#[group: "core"]
+test size_is_bytes
+{
+    string $s = 'abc';
+    assert($s->size() == 3);
+    assert($s->byte(0) == 97);
+}
+
+#[group: "core"]
+test starts_ends_contains
+{
+    string $s = 'hello world';
+    assert($s->starts('hello'));
+    assert($s->ends('world'));
+    assert($s->contains('lo w'));
+    assert(!$s->starts('world'));
+}
+
+#[group: "core"]
+test find_returns_the_byte_offset
+{
+    string $s = 'hello';
+    assert($s->find('ll') == 2);
+    assert($s->find('z') == $s->size());
+}
+
+#[group: "core"]
+test sub_is_a_window_copied_out
+{
+    string $s = 'hello';
+    assert($s->sub(1, 3) == 'ell');
+}
+
+#[group: "core"]
+test concat_does_not_mutate
+{
+    string $a = 'ab';
+    string $b = $a->concat('c');
+    assert($a == 'ab');
+    assert($b == 'abc');
+}
+
+#[group: "core"]
+test append_mutates
+{
+    string $s = 'ab';
+    $s->append('c');
+    assert($s == 'abc');
+}
+
+#[group: "core"]
+test push_adds_a_byte
+{
+    string $s = 'ab';
+    $s->push(99);
+    assert($s == 'abc');
+}
+
+#[group: "core"]
+test clear_empties
+{
+    string $s = 'abc';
+    $s->clear();
+    assert($s->empty());
+}
+
+#[group: "core"]
+test clone_is_an_independent_copy
+{
+    string $a = 'ab';
+    string $b = $a->clone();
+    $b->append('c');
+    assert($a == 'ab');
+    assert($b == 'abc');
+}
+
+#[group: "core"]
+test a_copy_shares_until_written
+{
+    string $a = 'hello';
+    string $b = $a;
+    assert($a == $b);
+    $b->append('!');
+    assert($a == 'hello');
+    assert($b == 'hello!');
+}
+
+#[group: "core"]
+test view_sees_the_same_bytes
+{
+    string $s = 'abc';
+    string::view $v = $s->view();
+    assert($v->size == 3);
+    assert($v->starts('ab'));
+    assert($v->find('b') == 1);
+}
+
+#[group: "core"]
+test chars_counts_unicode_scalars
+{
+    string $s = 'é';
+    assert($s->size() == 2);
+    assert($s->chars() == 1);
+}
+
+#[group: "core"]
+test equals_compares_bytes
+{
+    assert('abc'->equals('abc'));
+    assert(!'abc'->equals('ab'));
+}
+
+#[group: "core"]
+test a_string_frees_its_buffer
+{
+    usize $before = mem::live_allocations();
+    {
+        string $s = 'not a short literal that might inline';
+        $s->append(' and more text so it heap-allocates');
+    }
+    assert(mem::live_allocations() == $before);
+}

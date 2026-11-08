@@ -1,0 +1,22 @@
+#[group: "core"]
+test an_rc_shares_the_payload
+{
+    $a = rc<int32>(7);
+    $b = $a;
+    assert($a->value == 7);
+    assert($b->value == 7);
+    $a->value = 9;
+    assert($b->value == 9);
+}
+
+#[group: "core"]
+test an_rc_frees_when_the_last_owner_goes
+{
+    usize $before = mem::live_allocations();
+    {
+        $a = rc<int32>(1);
+        $b = $a;
+        echo $b->value;
+    }
+    assert(mem::live_allocations() == $before);
+}

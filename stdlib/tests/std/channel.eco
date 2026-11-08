@@ -1,0 +1,69 @@
+#[if: threads]
+
+#[group: "thread"]
+test a_channel_sends_and_receives
+{
+    std::thread::channel<int32> $ch = std::thread::channel<int32>();
+    std::thread::sender<int32> $tx = $ch->tx();
+    std::thread::receiver<int32> $rx = $ch->rx();
+    assert($tx->send(7));
+    int32 $v = guard $rx->recv();
+    assert($v == 7);
+    $tx->close();
+    assert($rx->recv() == null);
+}
+
+#[group: "thread"]
+test try_recv_empty_then_closed
+{
+    std::thread::channel<int32> $ch = std::thread::channel<int32>();
+    std::thread::sender<int32> $tx = $ch->tx();
+    std::thread::receiver<int32> $rx = $ch->rx();
+    match ($rx->try_recv()) {
+        .empty => {},
+        .item($v) => die('queue was empty'),
+        .closed => die('still open'),
+    };
+    $tx->close();
+    match ($rx->try_recv()) {
+        .closed => {},
+        .item($v) => die('closed with a value'),
+        .empty => die('closed is not empty'),
+    };
+}
+
+#[group: "thread"]
+test a_bounded_channel_holds_until_full
+{
+    std::thread::channel<int32> $ch = std::thread::channel<int32>(2);
+    std::thread::sender<int32> $tx = $ch->tx();
+    std::thread::receiver<int32> $rx = $ch->rx();
+    assert($tx->send(1));
+    assert($tx->send(2));
+    int32 $a = guard $rx->recv();
+    int32 $b = guard $rx->recv();
+    assert($a == 1);
+    assert($b == 2);
+}
+
+#[group: "thread"]
+test produce_closes_when_the_worker_returns
+{
+    std::thread::receiver<int32> $rx = guard std::thread::produce<int32>(
+        function(std::thread::sender<int32> $tx) : void {
+            $tx->send(4);
+        }
+    );
+    int32 $v = guard $rx->recv();
+    assert($v == 4);
+    assert($rx->recv() == null);
+}
+
+#[tests: expects death]
+#[group: "thread"]
+test a_zero_capacity_channel_dies
+{
+    std::thread::channel<int32> $ch = std::thread::channel<int32>(0);
+}
+
+#[end]

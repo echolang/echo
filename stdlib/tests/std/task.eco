@@ -1,0 +1,71 @@
+#[if: threads]
+
+#[atomic]
+class Hits
+{
+    atomic<int32> $n;
+
+    constructor()
+    {
+        $this->n = atomic<int32>(0);
+    }
+
+    function bump() : void
+    {
+        $this->n->add(1);
+    }
+
+    function get() : int32
+    {
+        return $this->n->load();
+    }
+}
+
+#[group: "thread"]
+test a_task_returns_its_value
+{
+    std::thread::task<int32> $t = guard std::thread::spawn<int32>(function() : int32 {
+        return 11;
+    });
+    assert($t->wait() == 11);
+}
+
+#[group: "thread"]
+test once_runs_work_once
+{
+    Hits $hits = Hits();
+    std::thread::once $o = std::thread::once();
+    $o->run(function() : void {
+        $hits->bump();
+    });
+    $o->run(function() : void {
+        $hits->bump();
+    });
+    assert($hits->get() == 1);
+}
+
+#[group: "thread"]
+test try_lock_fails_while_held
+{
+    std::thread::mutex<int32> $m = std::thread::mutex<int32>(0);
+    std::thread::locked<int32> $g = $m->lock();
+    assert($m->try_lock() == null);
+    $g->value = 1;
+}
+
+#[group: "thread"]
+test yield_and_sleep_return
+{
+    std::thread::yield();
+    std::thread::sleep(0);
+}
+
+#[group: "thread"]
+test thread_error_message
+{
+    std::thread::error $e = std::thread::error(11);
+    assert($e->message()->contains('thread'));
+    assert(!$e->exhausted());
+}
+
+#[end]

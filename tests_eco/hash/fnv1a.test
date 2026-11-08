@@ -1,0 +1,13 @@
+# empty and "hello" are the canonical FNV-1a 64 values. a built string and a view agree with
+# the literal. of() is seeded, so it is not this number. hex of 0 is sixteen zeros; hex of
+# bytes is two digits each
+
+--- OUT --->
+cbf29ce484222325
+a430d84680aabd0b
+a430d84680aabd0b
+a430d84680aabd0b
+0
+0000000000000000
+68656c6c6f
+

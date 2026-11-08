@@ -126,7 +126,7 @@ public function sha256_hex(const string& $data) : string
     epm_sha256_final($h, $out);
     $raw->commit(32);
 
-    return hex_of($raw);
+    return str::hex($raw);
 }
 
 /**
@@ -263,7 +263,7 @@ private function hash_tree(const string& $root, int64 $version) : string
     epm_sha256_final($h, $out);
     $raw->commit(32);
 
-    return hex_of($raw);
+    return str::hex($raw);
 }
 
 private function collect_files(const string& $root, const string& $rel, array<string>& $into) : void
@@ -358,27 +358,6 @@ private function is_build_dir(const string& $directory) : bool
     string $tag = std::fs::readfile(join($directory, 'CACHEDIR.TAG'))->or('');
 
     return $tag->contains('# echoc-build-directory');
-}
-
-private function hex_of(const string& $raw) : string
-{
-    string $digits = '0123456789abcdef';
-    string $out = '';
-    $out->reserve($raw->size() * 2);
-
-    usize $i = 0;
-
-    while ($i < $raw->size()) {
-        uint8 $b = $raw->byte($i);
-        int32 $wide = $b;
-        usize $hi = ($wide >> 4) & 15;
-        usize $lo = $wide & 15;
-        $out->append($digits->sub($hi, 1));
-        $out->append($digits->sub($lo, 1));
-        $i = $i + 1;
-    }
-
-    return $out;
 }
 
 private function sort_strings(array<string>& $items) : void

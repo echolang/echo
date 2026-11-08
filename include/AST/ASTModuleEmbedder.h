@@ -22,9 +22,11 @@ namespace AST
     // `path` is not under STDLIB_SOURCE_DIR
     std::string embedded_relative_path(const std::filesystem::path &path);
 
-    // every `.eco` file under the stdlib root except `build/` and `sketches/`,
-    // plus `module.eco`. relative posix path, then bytes. the set a released
-    // echoc embeds, so `#[if:]` on the manifest can still drop files per target
+    // every `.eco` file under the stdlib root except `build/`, `sketches/`, and
+    // `tests/`, plus `module.eco`. relative posix path, then bytes. the set a
+    // released echoc embeds, so `#[if:]` on the manifest can still drop files
+    // per target. `tests/` is this checkout's `echoc test` suite and is not
+    // part of the library a binary carries
     std::vector<std::pair<std::string, std::string>> collect_stdlib_files(const std::filesystem::path &stdlib_root);
 
     // test-only: emits a `load_<name>_module` that includes AST headers. the
@@ -33,8 +35,9 @@ namespace AST
 
     // walk `stdlib_root` and emit the table `ParsePipeline` loads under
     // `ECO_USE_EMBEDDED_STDLIB`. includes `module.eco` and every source the
-    // manifest might name, gated or not. the generated header includes only
-    // cstddef / filesystem / optional / string / string_view / vector
+    // manifest might name, gated or not, and skips `build/`, `sketches/`,
+    // and `tests/`. the generated header includes only cstddef / filesystem
+    // / optional / string / string_view / vector
     void write_embedded_stdlib(const std::filesystem::path &stdlib_root, const std::string &output_path);
 };
 #endif

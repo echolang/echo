@@ -1,0 +1,78 @@
+#[group: "core"]
+test a_stable_array_appends
+{
+    $a = stable_array<int32>();
+    assert($a->empty());
+    $a->push(1);
+    $a->push(2);
+    assert($a->count() == 2);
+    assert($a[0] == 1);
+    assert($a[1] == 2);
+}
+
+#[group: "core"]
+test pop_hands_the_last_element_back
+{
+    $a = stable_array<int32>();
+    $a->push(1);
+    $a->push(2);
+    assert($a->pop() == 2);
+    assert($a->count() == 1);
+}
+
+#[group: "core"]
+test reserve_does_not_move_live_slots
+{
+    $a = stable_array<int32>();
+    $a->push(7);
+    int32& $first = $a->at(0);
+    $a->reserve(64);
+    $a->push(8);
+    assert($first == 7);
+    assert($a[1] == 8);
+}
+
+#[group: "core"]
+test clone_is_an_independent_copy
+{
+    $a = stable_array<int32>();
+    $a->push(1);
+    $b = $a->clone();
+    $b->push(2);
+    assert($a->count() == 1);
+    assert($b->count() == 2);
+}
+
+#[group: "core"]
+test foreach_walks_the_elements
+{
+    $a = stable_array<int32>();
+    $a->push(1);
+    $a->push(2);
+    int32 $sum = 0;
+    foreach ($a as const &$n) {
+        $sum = $sum + $n;
+    }
+    assert($sum == 3);
+}
+
+#[group: "core"]
+test clear_empties
+{
+    $a = stable_array<int32>();
+    $a->push(1);
+    $a->clear();
+    assert($a->empty());
+}
+
+#[group: "core"]
+test a_stable_array_frees_its_storage
+{
+    usize $before = mem::live_allocations();
+    {
+        $a = stable_array<int32>();
+        $a->push(1);
+        $a->push(2);
+    }
+    assert(mem::live_allocations() == $before);
+}

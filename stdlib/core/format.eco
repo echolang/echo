@@ -521,3 +521,85 @@ public function from(const string::view& $v, const string& $spec) : string
 {
     return from(from($v->bytes, $v->size), $spec);
 }
+
+/**
+ * `$n` as 16 lowercase hex digits, zero-padded. A stored FNV-1a fingerprint is this of
+ * `hash::fnv1a`. `"{$n:x}"` drops the leading zeros; this does not.
+ */
+public function hex(uint64 $n) : string
+{
+    string $out = empty_inline();
+    $out->reserve(16);
+    ptr<uint8> $p = $out->spare();
+    usize $i = 0;
+
+    while ($i < 16) {
+        uint64 $shift = (15 - $i) * 4;
+        uint64 $digit = ($n >> $shift) & 15;
+
+        if ($digit < 10) {
+            uint8 $decimal = $digit + CH_ZERO;
+            $p:$[$i] = $decimal;
+        }
+        else {
+            uint8 $letter = $digit - 10 + CH_LOWER_A;
+            $p:$[$i] = $letter;
+        }
+
+        $i = $i + 1;
+    }
+
+    $out->commit(16);
+
+    return $out;
+}
+
+/**
+ * Each byte as two lowercase hex digits. Empty is empty.
+ */
+public function hex(string::view $raw) : string
+{
+    usize $n = $raw->size;
+    string $out = empty_inline();
+    $out->reserve($n * 2);
+    ptr<uint8> $p = $out->spare();
+    ptr<const uint8> $src = $raw->bytes;
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint8 $b = $src:$[$i];
+        uint8 $hi = $b / 16;
+        uint8 $lo = $b % 16;
+        usize $at = $i * 2;
+
+        if ($hi < 10) {
+            uint8 $decimal = $hi + CH_ZERO;
+            $p:$[$at] = $decimal;
+        }
+        else {
+            uint8 $letter = $hi - 10 + CH_LOWER_A;
+            $p:$[$at] = $letter;
+        }
+
+        if ($lo < 10) {
+            uint8 $decimal = $lo + CH_ZERO;
+            $p:$[$at + 1] = $decimal;
+        }
+        else {
+            uint8 $letter = $lo - 10 + CH_LOWER_A;
+            $p:$[$at + 1] = $letter;
+        }
+
+        $i = $i + 1;
+    }
+
+    $out->commit($n * 2);
+
+    return $out;
+}
+
+#[inline]
+public function hex(const string& $raw) : string
+{
+    return hex($raw->view());
+}

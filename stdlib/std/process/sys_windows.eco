@@ -422,6 +422,10 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
 
     uint32 $flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
 
+    if ($p->group) {
+        $flags = $flags | CREATE_SUSPENDED;
+    }
+
     // always a list, empty included: `bInheritHandles` without one leaks every inheritable handle
     usize $size = 0;
     c_InitializeProcThreadAttributeList(ptr<uint8>(null), 1, 0, &$size);
@@ -468,6 +472,31 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
         return .error(std::io::win32_ioerror());
     }
 
+    ptr<uint8> $job = ptr<uint8>(null);
+
+    if ($p->group) {
+        $job:$ = c_CreateJobObjectW(ptr<uint8>(null), ptr<uint16>(null));
+
+        if ($job:$ == null) {
+            abort_unresumed($info);
+            return .error(std::io::win32_ioerror());
+        }
+
+        if (c_AssignProcessToJobObject($job, $info->process) == 0) {
+            ioerror $e = std::io::win32_ioerror();
+            std::io::c_CloseHandle($job);
+            abort_unresumed($info);
+            return .error($e);
+        }
+
+        if (c_ResumeThread($info->thread) == 4294967295) {
+            ioerror $e = std::io::win32_ioerror();
+            abort_spawned($info->process, $job);
+            std::io::c_CloseHandle($info->thread);
+            return .error($e);
+        }
+    }
+
     std::io::c_CloseHandle($info->thread);
 
     std::io::pipe_writer? $stdin = null;
@@ -478,7 +507,7 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
         ptr<uint8> $h = $s->mine[0];
         $s->mine[0]:$ = null;
         std::io::raw_end $end = guard std::io::overlapped_end($h) else ($e) {
-            abort_spawned($info->process);
+            abort_spawned($info->process, $job);
             return .error($e);
         }
         $stdin = std::io::pipe_writer($end);
@@ -488,7 +517,7 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
         ptr<uint8> $h = $s->mine[1];
         $s->mine[1]:$ = null;
         std::io::raw_end $end = guard std::io::overlapped_end($h) else ($e) {
-            abort_spawned($info->process);
+            abort_spawned($info->process, $job);
             return .error($e);
         }
         $stdout = std::io::pipe_reader($end);
@@ -498,7 +527,7 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
         ptr<uint8> $h = $s->mine[2];
         $s->mine[2]:$ = null;
         std::io::raw_end $end = guard std::io::overlapped_end($h) else ($e) {
-            abort_spawned($info->process);
+            abort_spawned($info->process, $job);
             return .error($e);
         }
         $stderr = std::io::pipe_reader($end);
@@ -506,16 +535,35 @@ internal function sys_spawn(const prepared& $p, stdio $in, stdio $out, stdio $er
 
     $s->handed_over = true;
 
-    return .ok(child($info->pid as int32, $info->process, $stdin, $stdout, $stderr));
+    return .ok(child($info->pid as int32, $info->process, $job, $p->group, $stdin, $stdout, $stderr));
+}
+
+// CreateProcess succeeded and the thread is still suspended: terminate, wait, drop both handles
+private function abort_unresumed(process_information& $info) : void
+{
+    c_TerminateProcess($info->process, 1);
+    std::thread::c_WaitForSingleObject($info->process, std::thread::WIN_INFINITE);
+    std::io::c_CloseHandle($info->thread);
+    std::io::c_CloseHandle($info->process);
 }
 
 // CreateProcess already succeeded: stop the child and drop the process handle so a failed event does
 // not leave a running process and a leaked HANDLE
-private function abort_spawned(ptr<uint8> $process) : void
+private function abort_spawned(ptr<uint8> $process, ptr<uint8> $job) : void
 {
-    c_TerminateProcess($process, 1);
+    if ($job:$ != null) {
+        c_TerminateJobObject($job, 1);
+    }
+    else {
+        c_TerminateProcess($process, 1);
+    }
+
     std::thread::c_WaitForSingleObject($process, std::thread::WIN_INFINITE);
     std::io::c_CloseHandle($process);
+
+    if ($job:$ != null) {
+        std::io::c_CloseHandle($job);
+    }
 }
 
 // `$p`'s working directory into `$wide`, which stays unloaded when there is none
@@ -557,6 +605,36 @@ internal function sys_wait(int32 $pid, ptr<uint8> $process, bool $block) : resul
 
 internal function sys_kill(int32 $pid, ptr<uint8> $process) : status<ioerror>
 {
+    return terminate_handle($process);
+}
+
+internal function sys_signal(
+    int32 $pid,
+    ptr<uint8> $process,
+    ptr<uint8> $job,
+    bool $grouped,
+    int32 $sig
+) : status<ioerror>
+{
+    if ($job:$ != null) {
+        if (c_TerminateJobObject($job, 1) != 0) {
+            return .ok;
+        }
+
+        ioerror $e = std::io::win32_ioerror();
+
+        if (std::thread::c_WaitForSingleObject($process, 0) == WAIT_OBJECT_0) {
+            return .ok;
+        }
+
+        return .error($e);
+    }
+
+    return terminate_handle($process);
+}
+
+private function terminate_handle(ptr<uint8> $process) : status<ioerror>
+{
     if (c_TerminateProcess($process, 1) != 0) {
         return .ok;
     }
@@ -571,10 +649,14 @@ internal function sys_kill(int32 $pid, ptr<uint8> $process) : status<ioerror>
     return .error($e);
 }
 
-internal function sys_release(ptr<uint8> $process) : void
+internal function sys_release(ptr<uint8> $process, ptr<uint8> $job) : void
 {
     if ($process:$ != null) {
         std::io::c_CloseHandle($process);
+    }
+
+    if ($job:$ != null) {
+        std::io::c_CloseHandle($job);
     }
 }
 

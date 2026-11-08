@@ -1,0 +1,26 @@
+#[tests: expects death]
+#[group: "core"]
+test die_stops_the_process
+{
+    die('stopped');
+}
+
+#[tests: expects death]
+#[group: "core"]
+test assert_false_dies
+{
+    assert(false, 'nope');
+}
+
+#[group: "core"]
+test assert_true_returns
+{
+    assert(true);
+}
+
+#[group: "core"]
+test dprint_writes_a_value
+{
+    int32 $n = 3;
+    dprint($n);
+}

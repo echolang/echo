@@ -1,0 +1,16 @@
+// unseeded FNV-1a: the same bytes are the same number in every process, and a stored fingerprint
+// is str::hex of that number. hash::of is seeded and mixed; these two disagree on purpose
+
+echo str::hex(hash::fnv1a(''));
+echo str::hex(hash::fnv1a('hello'));
+
+string $built = '';
+$built->append('hello');
+echo str::hex(hash::fnv1a($built));
+echo str::hex(hash::fnv1a($built->view()));
+
+echo hash::fnv1a('hello') == hash::of('hello');
+
+echo str::hex(0);
+echo str::hex('hello');
+echo str::hex('');

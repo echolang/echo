@@ -1,0 +1,28 @@
+// stop() asks the child to leave (SIGTERM), then SIGKILL. a blocked reader takes SIGTERM.
+// Windows has no analogue, so the job or the process is terminated at once
+
+if (std::env::argc() > 1) {
+    std::io::reader $in = std::io::reader(std::io::stdin);
+    string $all = guard $in->readall() else ($e) { die("stdin: {$e}"); };
+    return 0;
+}
+
+#[if: os == windows]
+string $stopped_as = 'exit 1';
+#[else]
+string $stopped_as = 'signal 15';
+#[end]
+
+std::fs::path $self = guard std::env::exe();
+std::process::command $blocked = std::process::command($self, ['block']);
+$blocked->stdin(.piped);
+std::process::child $c = guard $blocked->spawn() else ($e) { die("spawn: {$e}"); };
+
+std::process::exit_status $s = guard $c->stop(grace: std::time::duration::millis(500)) else ($e) {
+    die("stop: {$e}");
+};
+string $shown = str::from($s);
+echo "stopped: {$shown == $stopped_as} success={$s->success()}";
+
+std::process::exit_status $again = guard $c->stop() else ($e) { die("stop again: {$e}"); };
+echo 'stop after the end: ok';

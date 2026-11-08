@@ -1,0 +1,57 @@
+#[group: "core"]
+test splat_fills_every_lane
+{
+    simd<int32, 4> $v = simd::splat<int32, 4>(3);
+    simd<int32, 4> $w = simd::splat<int32, 4>(3);
+    assert(simd::all($v == $w));
+}
+
+#[group: "core"]
+test any_and_all
+{
+    simd<int32, 4> $a = simd::splat<int32, 4>(1);
+    simd<int32, 4> $b = simd::splat<int32, 4>(1);
+    simd<int32, 4> $c = simd::splat<int32, 4>(2);
+    assert(simd::all($a == $b));
+    assert(simd::any($a == $b));
+    assert(!simd::any($a == $c));
+}
+
+#[group: "core"]
+test from_array_and_back
+{
+    int32[4] $zero;
+    simd<int32, 4> $v = simd::from_array($zero);
+    int32[4] $back = simd::to_array($v);
+    assert($back[0] == 0);
+    assert($back[3] == 0);
+}
+
+#[group: "core"]
+test load_and_store
+{
+    ptr<int32> $p = mem::alloc<int32>(4);
+    simd<int32, 4> $v = simd::splat<int32, 4>(9);
+    simd::store<int32, 4>($p, $v);
+    simd<int32, 4> $loaded = simd::load<int32, 4>($p);
+    assert(simd::all($loaded == $v));
+    mem::free<int32>($p);
+}
+
+#[group: "core"]
+test select_picks_by_mask
+{
+    simd<int32, 4> $a = simd::splat<int32, 4>(1);
+    simd<int32, 4> $b = simd::splat<int32, 4>(2);
+    simd<bool, 4> $m = $a == $a;
+    simd<int32, 4> $picked = simd::select($m, $a, $b);
+    assert(simd::all($picked == $a));
+}
+
+#[group: "core"]
+test bitmask_of_all_true
+{
+    simd<uint8, 16> $v = simd::splat<uint8, 16>(1 as uint8);
+    uint64 $hits = simd::bitmask($v == $v);
+    assert($hits == 65535);
+}

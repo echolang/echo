@@ -22,7 +22,8 @@ int __eco_spawn_with_chdir(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3]);
+    const int child_fd[3],
+    int new_group);
 
 #ifdef ECO_SPAWN_TESTING
 /* always the fork path. Catch2 hits a libc that has addchdir_np, so the public helper would not. */
@@ -32,7 +33,8 @@ int __eco_spawn_with_chdir_fallback(
     char *const argv[],
     char *const envp[],
     const char *chdir_to,
-    const int child_fd[3]);
+    const int child_fd[3],
+    int new_group);
 #endif
 
 #ifdef __cplusplus

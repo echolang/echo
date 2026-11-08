@@ -1,0 +1,44 @@
+#[group: "core"]
+test a_fixed_array_knows_its_length
+{
+    fixed_array<int32, 3> $a = [1, 2, 3];
+    assert($a->count() == 3);
+    assert(!$a->empty());
+    assert($a[0] == 1);
+    assert($a->get(2) == 3);
+}
+
+#[group: "core"]
+test writing_an_index_updates_the_slot
+{
+    fixed_array<int32, 2> $a = [1, 2];
+    $a[0] = 9;
+    assert($a[0] == 9);
+}
+
+#[group: "core"]
+test clone_is_an_independent_copy
+{
+    fixed_array<int32, 2> $a = [1, 2];
+    $b = $a->clone();
+    $b[0] = 8;
+    assert($a[0] == 1);
+}
+
+#[group: "core"]
+test sub_is_a_slice_of_the_inline_storage
+{
+    fixed_array<int32, 4> $a = [1, 2, 3, 4];
+    slice<int32> $s = $a->sub(1, 2);
+    assert($s->count() == 2);
+    assert($s[0] == 2);
+}
+
+#[group: "core"]
+test sort_orders_the_slots
+{
+    fixed_array<int32, 3> $a = [3, 1, 2];
+    $a->sort();
+    assert($a[0] == 1);
+    assert($a[2] == 3);
+}

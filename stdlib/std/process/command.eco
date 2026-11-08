@@ -90,6 +90,7 @@ public struct command
     internal array<env_edit> $edits = array<env_edit>();
     internal bool $cleared = false;
     internal string? $cwd = null;
+    internal bool $grouped = false;
 
     // null until set, so a terminal can tell "the caller chose this" from its own default
     internal stdin? $in = null;
@@ -154,6 +155,18 @@ public struct command
     function dir(std::fs::path $path) : void
     {
         $this->cwd = $path->string();
+    }
+
+    /**
+     * The child starts a new process group (a job object on Windows).
+     *
+     * Default spawn stays in this process's group, so Ctrl-C still reaches a `make` you started.
+     * Call this when you will `stop()` the tree: a shell that launched grandchildren, an `npm`
+     * that is holding a port.
+     */
+    function group() : void
+    {
+        $this->grouped = true;
     }
 
     /**

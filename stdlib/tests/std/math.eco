@@ -1,0 +1,69 @@
+#[group: "std"]
+test constants
+{
+    assert(stdlib_tests::close_f64(std::math::TAU, 2.0 * std::math::PI));
+    assert(stdlib_tests::close_f64(std::math::HALF_PI, std::math::PI / 2.0));
+}
+
+#[group: "std"]
+test abs_on_integers
+{
+    assert(std::math::abs(-3) == 3);
+    assert(std::math::abs(3) == 3);
+}
+
+#[group: "std"]
+test abs_on_floats
+{
+    assert(stdlib_tests::close_f64(std::math::abs(-3.5), 3.5));
+    assert(stdlib_tests::close_f32(std::math::abs(-3.5f), 3.5f));
+}
+
+#[group: "std"]
+test min_and_max
+{
+    assert(std::math::min(2, 5) == 2);
+    assert(std::math::max(2, 5) == 5);
+    assert(stdlib_tests::close_f64(std::math::min(2.0, 5.0), 2.0));
+}
+
+#[group: "std"]
+test clamp
+{
+    assert(stdlib_tests::close_f64(std::math::clamp(5.0, 0.0, 1.0), 1.0));
+    assert(stdlib_tests::close_f64(std::math::clamp(-1.0, 0.0, 1.0), 0.0));
+    assert(stdlib_tests::close_f64(std::math::clamp(0.5, 0.0, 1.0), 0.5));
+}
+
+#[group: "std"]
+test sqrt_and_pow
+{
+    assert(stdlib_tests::close_f64(std::math::sqrt(9.0), 3.0));
+    assert(stdlib_tests::close_f64(std::math::pow(2.0, 3.0), 8.0));
+}
+
+#[group: "std"]
+test floor_ceil_trunc_round
+{
+    assert(stdlib_tests::close_f64(std::math::floor(1.9), 1.0));
+    assert(stdlib_tests::close_f64(std::math::ceil(1.1), 2.0));
+    assert(stdlib_tests::close_f64(std::math::trunc(-1.9), -1.0));
+    assert(stdlib_tests::close_f64(std::math::round(1.5), 2.0));
+}
+
+#[group: "std"]
+test trig_at_zero
+{
+    assert(stdlib_tests::close_f64(std::math::sin(0.0), 0.0));
+    assert(stdlib_tests::close_f64(std::math::cos(0.0), 1.0));
+    assert(stdlib_tests::close_f64(std::math::tan(0.0), 0.0));
+}
+
+#[group: "std"]
+test exp_and_log
+{
+    assert(stdlib_tests::close_f64(std::math::log(std::math::E), 1.0));
+    assert(stdlib_tests::close_f64(std::math::exp(0.0), 1.0));
+    assert(stdlib_tests::close_f64(std::math::log2(8.0), 3.0));
+    assert(stdlib_tests::close_f64(std::math::log10(1000.0), 3.0));
+}

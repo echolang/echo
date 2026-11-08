@@ -1,0 +1,36 @@
+#[group: "core"]
+test a_box_holds_the_payload
+{
+    $b = box<int32>(7);
+    assert($b->get() == 7);
+    int32& $n = $b->get();
+    $n = 9;
+    assert($b->get() == 9);
+}
+
+#[group: "core"]
+test take_hands_the_payload_back
+{
+    $b = box<int32>(7);
+    assert($b->take() == 7);
+}
+
+#[group: "core"]
+test a_box_frees_its_allocation
+{
+    usize $before = mem::live_allocations();
+    {
+        $b = box<int32>(1);
+        echo $b->get();
+    }
+    assert(mem::live_allocations() == $before);
+}
+
+#[tests: expects death]
+#[group: "core"]
+test get_dies_after_take
+{
+    $b = box<int32>(1);
+    echo $b->take();
+    echo $b->get();
+}

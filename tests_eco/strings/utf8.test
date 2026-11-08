@@ -1,0 +1,19 @@
+# str::boundary snaps a cut back to a character start. is_utf8 is the validator
+# chars() on the string is the count; str::chars is the walk of those characters
+
+--- OUT --->
+6
+2
+2
+4
+6
+1
+1
+0
+0
+ä|€|😀
+3
+0
+255
+0:a
+1:b

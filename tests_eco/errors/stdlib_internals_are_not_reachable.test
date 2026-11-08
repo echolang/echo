@@ -30,10 +30,10 @@ expect: fail
      :            ^^^^^
   16 | 
 
-  109 |  */
-  110 | private const uint64 MIX_A = 13787848793156543929;
+  113 |  */
+  114 | private const uint64 MIX_A = 13787848793156543929;
       :                      ----- declared here
-  111 | private const uint64 MIX_B = 10723151780598845931;
+  115 | private const uint64 MIX_B = 10723151780598845931;
 
 [error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:11:24
 

@@ -35,6 +35,7 @@ internal extern {
     function posix_spawnattr_setflags as c_attr_setflags(ptr<uint8> $attr, int16 $flags) : int32;
     function posix_spawnattr_setsigdefault as c_attr_setsigdefault(ptr<uint8> $attr, ptr<uint8> $set) : int32;
     function posix_spawnattr_setsigmask as c_attr_setsigmask(ptr<uint8> $attr, ptr<uint8> $set) : int32;
+    function posix_spawnattr_setpgroup as c_attr_setpgroup(ptr<uint8> $attr, int32 $pgroup) : int32;
 
     function sigemptyset as c_sigemptyset(ptr<uint8> $set) : int32;
     function sigaddset as c_sigaddset(ptr<uint8> $set, int32 $signal) : int32;
@@ -71,7 +72,8 @@ internal extern {
         ptr<ptr<const uint8>> $argv,
         ptr<ptr<const uint8>> $envp,
         ptr<const uint8> $chdir,
-        ptr<int32> $child_fd
+        ptr<int32> $child_fd,
+        int32 $new_group
     ) : int32;
 }
 #[end]
@@ -91,10 +93,12 @@ internal struct pollfd
 }
 
 internal const int32 SIGKILL = 9;
+internal const int32 SIGTERM = 15;
 internal const int32 SIGPIPE = 13;
 internal const int32 WNOHANG = 1;
 internal const int32 X_OK = 1;
 internal const int32 EINTR = 4;
+internal const int32 ESRCH = 3;
 
 internal const int16 POLLIN = 1;
 internal const int16 POLLOUT = 4;
@@ -104,6 +108,7 @@ internal const int32 F_GETFL = 3;
 internal const int32 F_SETFL = 4;
 internal const int32 FD_CLOEXEC = 1;
 
+internal const int16 POSIX_SPAWN_SETPGROUP = 2;
 internal const int16 POSIX_SPAWN_SETSIGDEF = 4;
 internal const int16 POSIX_SPAWN_SETSIGMASK = 8;
 
@@ -183,6 +188,11 @@ internal extern {
     function GetExitCodeProcess as c_GetExitCodeProcess(ptr<uint8> $process, ptr<uint32> $code) : int32;
     function TerminateProcess as c_TerminateProcess(ptr<uint8> $process, uint32 $code) : int32;
     function CancelIoEx as c_CancelIoEx(ptr<uint8> $handle, ptr<std::io::overlapped> $ov) : int32;
+
+    function CreateJobObjectW as c_CreateJobObjectW(ptr<uint8> $attr, ptr<uint16> $name) : ptr<uint8>;
+    function AssignProcessToJobObject as c_AssignProcessToJobObject(ptr<uint8> $job, ptr<uint8> $process) : int32;
+    function TerminateJobObject as c_TerminateJobObject(ptr<uint8> $job, uint32 $code) : int32;
+    function ResumeThread as c_ResumeThread(ptr<uint8> $thread) : uint32;
 }
 
 // STARTUPINFOEXW on a 64-bit target: STARTUPINFOW's 104 bytes, then the attribute list. 112 bytes
@@ -254,6 +264,7 @@ internal struct security_attributes
 }
 
 internal const uint32 STARTF_USESTDHANDLES = 256;
+internal const uint32 CREATE_SUSPENDED = 4;
 internal const uint32 CREATE_UNICODE_ENVIRONMENT = 1024;
 internal const uint32 EXTENDED_STARTUPINFO_PRESENT = 524288;
 internal const usize PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 131074;

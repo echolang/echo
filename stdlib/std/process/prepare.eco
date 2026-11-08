@@ -20,6 +20,7 @@ internal struct prepared
     array<string> $envp;
 
     string? $cwd;
+    bool $group;
 }
 
 internal function prepare(const command& $c) : result<prepared, ioerror>
@@ -43,7 +44,7 @@ internal function prepare(const command& $c) : result<prepared, ioerror>
     }
 
     // built in the return, so every local is handed over
-    return .ok(prepared(terminated($path), $argv, $envp, terminated_cwd($c)));
+    return .ok(prepared(terminated($path), $argv, $envp, terminated_cwd($c), $c->grouped));
 }
 
 private function terminated_cwd(const command& $c) : string?

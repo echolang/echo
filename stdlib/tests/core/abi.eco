@@ -1,0 +1,18 @@
+#[group: "core"]
+test mismatch_messages
+{
+    abi::mismatch $v = .version(1, 2);
+    assert($v->message()->contains('version'));
+
+    abi::mismatch $f = .fingerprint(3, 4);
+    assert($f->message()->contains('fingerprint'));
+
+    abi::mismatch $s = .slot_count(5, 6);
+    assert($s->message()->contains('slot'));
+}
+
+#[group: "core"]
+test abi_version_is_at_least_one
+{
+    assert(abi::version() >= 1);
+}

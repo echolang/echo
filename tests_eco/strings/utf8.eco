@@ -1,0 +1,28 @@
+// ï is C3 AF at bytes 2..3. a cut at 3 would emit a stray continuation; boundary walks back to 2
+string $naive = "naïve";
+echo $naive->size();
+echo str::boundary($naive, 3);
+echo str::boundary($naive, 2);
+echo str::boundary($naive, 4);
+echo str::boundary($naive, 99);
+
+echo str::is_utf8($naive);
+echo str::is_utf8('');
+
+string $bad = '';
+$bad->push(255);
+echo str::is_utf8($bad);
+
+// truncated two-byte sequence
+string $cut = '';
+$cut->push(195);
+echo str::is_utf8($cut);
+
+echo str::join(str::chars('ä€😀'), '|');
+echo str::chars('ä€😀')->count();
+echo str::chars('')->count();
+echo str::join(str::chars($bad), '|')->byte(0);
+
+foreach (str::chars('ab') as $i => $ch) {
+    echo "{$i}:{$ch}";
+}

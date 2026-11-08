@@ -1,0 +1,5 @@
+mode: build
+
+--- OUT --->
+stopped: true success=false
+stop after the end: ok

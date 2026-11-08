@@ -601,7 +601,8 @@ bool expand_manifest_patterns(
     const std::filesystem::path &exclude,
     std::vector<std::filesystem::path> &out_files,
     const ManifestReport &into,
-    const std::vector<std::string> *virtual_rel = nullptr
+    const std::vector<std::string> *virtual_rel = nullptr,
+    bool allow_empty = false
 )
 {
     Compiler::ScopedPhase glob_phase("sources glob");
@@ -647,6 +648,10 @@ bool expand_manifest_patterns(
         }
 
         if (kept == 0) {
+            if (allow_empty) {
+                continue;
+            }
+
             report_at<AST::Issue::EmptySourcePattern>(into, 1, fmt::format(
                 "the {} pattern '{}' matched no files.", noun, pattern));
             return false;
@@ -854,14 +859,16 @@ bool resolve_manifest_targets(
 )
 {
     // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
-    // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way.
-    // **edges and scoped link/cc are already on `settled`**: record_written_targets copied them, and
-    // settle_manifest_edges is the one walk, shared with a `t_dependencies` read
+    // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
+    // **except a test target**: its sources are this checkout's suite, and a released echoc's virtual
+    // pool does not carry `tests/`, so matching nothing there is "no extra files" rather than a broken
+    // module. **edges and scoped link/cc are already on `settled`**: record_written_targets copied them,
+    // and settle_manifest_edges is the one walk, shared with a `t_dependencies` read
     const auto expand_scope = [&out, &into, virtual_rel](Parser::ModuleTarget &settled) {
         if (!settled.sources_as_written.empty()
             && !expand_manifest_patterns(
                 settled.sources_as_written, out, "sources", out.path, settled.sources, into,
-                virtual_rel)) {
+                virtual_rel, settled.kind == Parser::TargetKind::t_test)) {
             return false;
         }
 

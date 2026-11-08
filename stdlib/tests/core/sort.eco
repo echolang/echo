@@ -1,0 +1,151 @@
+#[group: "core"]
+test is_sorted_on_ordered_storage
+{
+    $a = [1, 2, 3];
+    assert(sort::is_sorted($a->data(), $a->count()));
+}
+
+#[group: "core"]
+test is_sorted_rejects_a_dip
+{
+    $a = [1, 3, 2];
+    assert(!sort::is_sorted($a->data(), $a->count()));
+}
+
+#[group: "core"]
+test array_sort_leaves_it_sorted
+{
+    $a = [5, 1, 4, 2, 3];
+    $a->sort();
+    assert(sort::is_sorted($a->data(), $a->count()));
+}
+
+#[group: "core"]
+test empty_and_single_are_sorted
+{
+    $empty = array<int32>();
+    assert(sort::is_sorted($empty->data(), $empty->count()));
+    $one = [1];
+    assert(sort::is_sorted($one->data(), $one->count()));
+}
+
+#[group: "core"]
+test sort_unstable_and_by
+{
+    $a = [3, 1, 2, 1];
+    $a->sort_unstable();
+    assert($a[0] == 1);
+    $b = [3, 1, 2];
+    $b->sort(by: function(const int32& $x, const int32& $y) : ordering {
+        return $x <=> $y;
+    });
+    assert($b[0] == 1);
+    $c = [3, 1, 2];
+    $c->sort(key: function(const int32& $x) : int32 {
+        return -$x;
+    });
+    assert($c[0] == 3);
+}
+
+#[group: "core"]
+test is_sorted_by_and_key
+{
+    $a = [1, 2, 3];
+    assert(sort::is_sorted($a->data(), $a->count(), by: function(const int32& $x, const int32& $y) : ordering {
+        return $x <=> $y;
+    }));
+    assert(sort::is_sorted($a->data(), $a->count(), key: function(const int32& $x) : int32 {
+        return $x;
+    }));
+}
+
+#[group: "core"]
+test sort_a_longer_run
+{
+    $a = array<int32>();
+    int32 $i = 32;
+    while ($i > 0) {
+        $a[] = $i;
+        $i = $i - 1;
+    }
+    $a->sort();
+    assert($a[0] == 1);
+    assert($a[31] == 32);
+    $a->sort_unstable();
+    assert(sort::is_sorted($a->data(), $a->count()));
+}
+
+#[group: "core"]
+test sort_strings
+{
+    $a = ['c', 'a', 'b'];
+    $a->sort();
+    assert($a[0] == 'a');
+}
+
+#[group: "core"]
+test sort_a_reversed_integer_run
+{
+    $a = array<int32>();
+    int32 $i = 80;
+    while ($i > 0) {
+        $a[] = $i;
+        $i = $i - 1;
+    }
+    $a->sort();
+    assert($a[0] == 1);
+    assert($a[79] == 80);
+    $a->sort_unstable();
+    assert($a[0] == 1);
+}
+
+#[group: "core"]
+test sort_equal_integers
+{
+    $a = array<int32>();
+    int32 $i = 0;
+    while ($i < 70) {
+        $a[] = 3;
+        $i = $i + 1;
+    }
+    $a->sort();
+    assert($a[0] == 3);
+    assert($a[69] == 3);
+}
+
+#[group: "core"]
+test stable_sort_of_many_strings
+{
+    $a = array<string>();
+    int32 $i = 0;
+    while ($i < 40) {
+        $a[] = str::from(40 - $i);
+        $i = $i + 1;
+    }
+    $a->sort();
+    assert($a[0] <= $a[1]);
+    $a->sort_unstable();
+    assert(sort::is_sorted($a->data(), $a->count()));
+}
+
+#[group: "core"]
+test sort_a_shuffled_integer_run
+{
+    $a = array<int32>();
+    int32 $i = 0;
+    while ($i < 100) {
+        $a[] = ($i * 17) % 100;
+        $i = $i + 1;
+    }
+    $a->sort();
+    assert($a[0] <= $a[1]);
+    assert($a[99] >= $a[98]);
+    $b = array<int32>();
+    $i = 0;
+    while ($i < 100) {
+        $b[] = ($i * 17) % 100;
+        $i = $i + 1;
+    }
+    $b->sort_unstable();
+    assert(sort::is_sorted($b->data(), $b->count()));
+}

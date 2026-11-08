@@ -1,0 +1,87 @@
+#[group: "core"]
+test from_integers_and_bools
+{
+    assert(str::from(0 as int8) == '0');
+    assert(str::from(-1 as int16) == '-1');
+    assert(str::from(7 as int64) == '7');
+    assert(str::from(8 as uint8) == '8');
+    assert(str::from(9 as uint16) == '9');
+    assert(str::from(10 as uint32) == '10');
+    assert(str::from(11 as uint64) == '11');
+    assert(str::from(12 as isize) == '12');
+    assert(str::from(13 as usize) == '13');
+    assert(str::from(false) == 'false');
+}
+
+#[group: "core"]
+test from_floats
+{
+    assert(str::from(1.5)->contains('1.5'));
+    assert(str::from(1.5 as float)->contains('1.5'));
+}
+
+#[group: "core"]
+test integer_specs
+{
+    assert(str::from(255, 'x') == 'ff');
+    assert(str::from(255, 'X') == 'FF');
+    assert(str::from(10, 'b') == '1010');
+    assert(str::from(8, 'o') == '10');
+    assert(str::from(3, 'd') == '3');
+    assert(str::from(7, '>4') == '   7');
+    assert(str::from(7, '<4') == '7   ');
+    assert(str::from(7, '^5') == '  7  ');
+}
+
+#[group: "core"]
+test float_specs
+{
+    assert(str::from(1.5, '.2f') == '1.50');
+    assert(str::from(100.0, '.2e')->contains('e'));
+    assert(str::from(1.5, 'g')->contains('1.5'));
+}
+
+#[group: "core"]
+test string_specs
+{
+    assert(str::from('ab', '>4') == '  ab');
+    assert(str::from('abcd', '.2s') == 'ab');
+    string::view $v = 'hi';
+    assert(str::from($v) == 'hi');
+    assert(str::from($v, '>4') == '  hi');
+}
+
+#[group: "core"]
+test bool_and_empty_spec
+{
+    assert(str::from(true, 's') == 'true');
+    assert(str::from(3, '') == '3');
+}
+
+#[group: "core"]
+test hex_of_a_word_and_of_bytes
+{
+    assert(str::hex(255 as uint64)->ends('ff'));
+    assert(str::hex(255 as uint64)->size() == 16);
+    assert(str::hex('AB') == '4142');
+    string::view $v = 'A';
+    assert(str::hex($v) == '41');
+}
+
+#[group: "core"]
+test interpolation_uses_from
+{
+    int32 $n = 7;
+    assert("{$n:>3}" == '  7');
+}
+
+#[group: "core"]
+test spec_of_reads_align_width_precision
+{
+    str::spec $s = str::spec_of('>8.2f');
+    assert($s->align == 62);
+    assert($s->width == 8);
+    assert($s->precision == 2);
+    assert($s->kind == 102);
+    assert($s->fill() == 32);
+}

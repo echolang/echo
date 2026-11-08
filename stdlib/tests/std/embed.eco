@@ -1,0 +1,13 @@
+#[group: "std"]
+test text_embeds_a_utf8_file
+{
+    string $t = std::embed::text('embed_hello.txt');
+    assert($t->contains('hello embed'));
+}
+
+#[group: "std"]
+test bytes_embeds_the_same_file
+{
+    string::view $b = std::embed::bytes('embed_hello.txt');
+    assert($b->contains('hello embed'));
+}

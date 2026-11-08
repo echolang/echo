@@ -120,6 +120,7 @@ TEST_CASE("collect_stdlib_files includes module.eco and gated sources", "[embedd
         }
         REQUIRE(path.find("build/") != 0);
         REQUIRE(path.find("sketches/") != 0);
+        REQUIRE(path.find("tests/") != 0);
         (void)content;
     }
 
