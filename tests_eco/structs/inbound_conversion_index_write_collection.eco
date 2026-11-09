@@ -1,0 +1,21 @@
+// `$doc['k'] = ['a', 'b']` dest-types the array at from(array<string>), then converts.
+// keyed []= on V used to claim the dest as a map fill and refuse the array shape
+enum V
+{
+    case a(int64 $n);
+
+    #[implicit]
+    static function from(array<string> $xs) : V
+    {
+        return V::a($xs->count() as int64);
+    }
+}
+
+operator (V& $o)[const string& $key] = (V $value) : void
+{
+    $o = $value;
+}
+
+V $doc = V::a(0);
+$doc['tags'] = ['a', 'b'];
+echo match ($doc) { V::a($n) => $n };

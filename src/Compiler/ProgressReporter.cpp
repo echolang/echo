@@ -24,7 +24,6 @@ namespace
     constexpr size_t PHASE_WIDTH = 15;
     constexpr size_t SUBJECT_WIDTH = 12;
     constexpr size_t DETAIL_WIDTH = 12;
-    constexpr size_t MILLISECONDS_WIDTH = 6;
 
     // how far the file lines under a committed row are indented - past the mark and into the phase column
     constexpr size_t DETAIL_LINE_INDENT = 7;
@@ -39,7 +38,7 @@ namespace
     constexpr const char *ERASE_ROW = "\r\x1b[K";
     constexpr size_t ERASE_ROW_SIZE = 4;
 
-    // how often the clock overwrites the glyph and the elapsed digits. Short enough to read as motion,
+    // how often the clock overwrites the glyph and the elapsed field. Short enough to read as motion,
     // long enough that a redraw is not the thing the compile is waiting on
     constexpr auto CLOCK_INTERVAL = std::chrono::milliseconds(80);
 
@@ -47,9 +46,9 @@ namespace
     // line plus SGR around the mark; 4 KiB is far past that
     constexpr size_t CLOCK_SCRATCH = 4096;
 
-    // `{:>6} ms` as render_row spells it - six digits, a space, `ms`. The clock overwrites only the
-    // digits, so this width is load-bearing
-    constexpr unsigned int ELAPSED_CAP = 999999;
+    // what the live slot can show: `999m 59s`. `format_elapsed` itself is uncapped; only the in-place
+    // paint has a width
+    constexpr unsigned int ELAPSED_CAP_MS = (999u * 60u + 59u) * 1000u;
 
 #ifndef STDERR_FILENO
 #define STDERR_FILENO 2
@@ -65,34 +64,86 @@ namespace
 #endif
     }
 
-    // right-aligned decimal into six ASCII bytes, spaces on the left. The clock's paint, so no
-    // `fmt` and no temporaries
-    void write_digits6(char *at, unsigned int value)
+    // decimal into `out`, least digits first then reversed. the clock's paint, so no `fmt`
+    size_t write_uint_at(char *out, unsigned int value)
     {
-        if (value > ELAPSED_CAP) {
-            value = ELAPSED_CAP;
+        char digits[10];
+        size_t n = 0;
+        do {
+            digits[n++] = static_cast<char>('0' + (value % 10));
+            value /= 10;
+        } while (value != 0);
+
+        for (size_t i = 0; i < n; i++) {
+            out[i] = digits[n - 1 - i];
         }
 
-        char digits[MILLISECONDS_WIDTH];
-        size_t n = 0;
-        unsigned int rest = value;
-        do {
-            digits[n++] = static_cast<char>('0' + (rest % 10));
-            rest /= 10;
-        } while (rest != 0 && n < MILLISECONDS_WIDTH);
+        return n;
+    }
 
-        const size_t spaces = MILLISECONDS_WIDTH - n;
+    // unpadded spelling `format_elapsed` publishes. one body so the clock cannot drift from a row
+    size_t spell_elapsed(char *out, unsigned int ms)
+    {
+        if (ms < 1000) {
+            size_t n = write_uint_at(out, ms);
+            out[n++] = ' ';
+            out[n++] = 'm';
+            out[n++] = 's';
+            return n;
+        }
+
+        unsigned int tenths = ms / 100;
+        if (ms % 100 >= 50) {
+            tenths += 1;
+        }
+
+        if (tenths < 600) {
+            size_t n = write_uint_at(out, tenths / 10);
+            out[n++] = '.';
+            out[n++] = static_cast<char>('0' + (tenths % 10));
+            out[n++] = 's';
+            return n;
+        }
+
+        // rounding 59950..59999 would print 60.0s; promote rather than overlap the bands
+        unsigned int total_seconds = ms / 1000;
+        if (ms < 60000) {
+            total_seconds = 60;
+        }
+
+        size_t n = write_uint_at(out, total_seconds / 60);
+        out[n++] = 'm';
+        out[n++] = ' ';
+        n += write_uint_at(out + n, total_seconds % 60);
+        out[n++] = 's';
+        return n;
+    }
+
+    // right-aligned into ELAPSED_COLUMN_WIDTH ASCII bytes. the clock's paint, so no temporaries
+    void write_elapsed(char *at, unsigned int ms)
+    {
+        if (ms > ELAPSED_CAP_MS) {
+            ms = ELAPSED_CAP_MS;
+        }
+
+        char spelling[16];
+        const size_t n = spell_elapsed(spelling, ms);
+        const size_t width = Compiler::ELAPSED_COLUMN_WIDTH;
+        const size_t used = n > width ? width : n;
+        const size_t spaces = width - used;
         for (size_t i = 0; i < spaces; i++) {
             at[i] = ' ';
         }
-        for (size_t i = 0; i < n; i++) {
-            at[spaces + i] = digits[n - 1 - i];
+
+        const size_t skip = n > width ? n - width : 0;
+        for (size_t i = 0; i < used; i++) {
+            at[spaces + i] = spelling[skip + i];
         }
     }
 
     // how many columns a string occupies, counting a UTF-8 sequence once. Every glyph either theme draws
     // is single-column, so leading bytes are the whole of the arithmetic - and doing it in bytes instead
-    // is what would put the milliseconds of a unicode row two columns left of an ascii one
+    // is what would put the elapsed field of a unicode row two columns left of an ascii one
     size_t display_width(const std::string &text)
     {
         size_t width = 0;
@@ -316,8 +367,8 @@ void Compiler::ProgressReporter::Clock::pulse()
         }
     }
 
-    if (ms_offset != 0 && ms_offset + MILLISECONDS_WIDTH <= length) {
-        write_digits6(scratch.data() + ms_offset, progress_elapsed_ms(started));
+    if (ms_offset != 0 && ms_offset + Compiler::ELAPSED_COLUMN_WIDTH <= length) {
+        write_elapsed(scratch.data() + ms_offset, progress_elapsed_ms(started));
     }
 
     write_fd(fd, scratch.data(), length);
@@ -401,7 +452,7 @@ Compiler::ProgressReporter::RenderedRow Compiler::ProgressReporter::render_row(
     const char *ellipsis = _capabilities.unicode ? "…" : "...";
 
     const std::string elapsed = milliseconds.has_value()
-        ? fmt::format("{:>{}} ms", milliseconds.value(), MILLISECONDS_WIDTH)
+        ? fmt::format("{:>{}}", format_elapsed(milliseconds.value()), ELAPSED_COLUMN_WIDTH)
         : std::string();
 
     // everything except the detail field, measured before it is filled - so the budget below is what is
@@ -519,8 +570,8 @@ void Compiler::ProgressReporter::write_live_row()
     std::optional<unsigned int> elapsed;
     if (_animate) {
         unsigned int ms = progress_elapsed_ms(_live_started);
-        if (ms > ELAPSED_CAP) {
-            ms = ELAPSED_CAP;
+        if (ms > ELAPSED_CAP_MS) {
+            ms = ELAPSED_CAP_MS;
         }
         elapsed = ms;
     }
@@ -714,7 +765,7 @@ void Compiler::ProgressReporter::close(
 
     *_out << "\n  "
           << styled(ok ? _theme.done : _theme.failed, ok ? sgr::success : sgr::error, _capabilities.color)
-          << "  " << fmt::format("{} in {} ms", what, milliseconds) << "\n\n"
+          << "  " << fmt::format("{} in {}", what, format_elapsed(milliseconds)) << "\n\n"
           << std::flush;
 }
 
@@ -779,4 +830,11 @@ unsigned int Compiler::progress_elapsed_ms(std::chrono::steady_clock::time_point
     const auto elapsed = std::chrono::steady_clock::now() - start;
     return static_cast<unsigned int>(
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+}
+
+std::string Compiler::format_elapsed(unsigned int milliseconds)
+{
+    char spelling[16];
+    const size_t n = spell_elapsed(spelling, milliseconds);
+    return std::string(spelling, n);
 }

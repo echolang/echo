@@ -84,6 +84,28 @@ namespace AST
         Collector &collector,
         const CollectionLiteralExprNode &shape);
 
+    // dest if it fills this shape, else one conversion source that dest-types this literal.
+    // fill travels with the type so bind and ranking do not re-ask collection_fill_of
+    struct CollectionBind
+    {
+        ValueType type;
+        CollectionFill fill;
+    };
+
+    // **the type this literal binds at**, without writing the tree. dest if it fills this shape,
+    // else one inbound source that dest-types. several that still fit after dest-typing are none
+    std::optional<CollectionBind> collection_bind_type(
+        const ValueType &destination,
+        Collector &collector,
+        CollectionLiteralExprNode &literal);
+
+    // **do this fill's entries reject this literal.** dest-types untyped entries at the fill's
+    // element / key / value without writing bound_type. pending stays possible
+    bool collection_fill_rejects(
+        const CollectionFill &fill,
+        Collector &collector,
+        CollectionLiteralExprNode &literal);
+
     // **the dest-typed bind, array first.** answers whether this call wrote a bound_type.
     // a pack at `variadic_args` is bind_array_literal_to's and this answers false.
     // recurses into nested collection literals from collection_fill_of

@@ -8,6 +8,7 @@
 #include "AST/ExprNode.h"
 
 #include <fmt/core.h>
+#include <optional>
 
 namespace
 {
@@ -41,17 +42,13 @@ bool AST::bind_map_literal_to(
         return false;
     }
 
-    const AST::ValueType wanted = AST::implicit_conversion_target(destination);
-
-    if (is_undetermined_type(wanted)) {
+    std::optional<AST::CollectionBind> bound = collection_bind_type(destination, collector, *literal);
+    if (!bound.has_value()) {
         return false;
     }
 
-    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
-
-    if (fill.kind != CollectionFill::Kind::t_keyed) {
-        return false;
-    }
+    const AST::ValueType wanted = bound->type;
+    const CollectionFill &fill = bound->fill;
 
     bool changed = false;
     if (!literal->bound_type.has_value()

@@ -1,0 +1,11 @@
+// a generic inbound conversion on a plain owner would publish and then never fire:
+// find_inbound_implicit_conversion compares parameter types exactly
+enum V
+{
+    case a(int64 $n);
+
+    #[implicit]
+    static function from<T>(T $x) : V { return V::a(0); }
+}
+
+echo 1;

@@ -1,0 +1,1 @@
+operator (W $a) == (W $b) : bool { return false; }

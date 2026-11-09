@@ -1,0 +1,9 @@
+/*
+ * Operator file listed before the enum. Pass 2 used to refuse == as a builtin
+ * because the case table was still empty when the operator was parsed.
+ */
+
+#[module: "eqorder"]
+#[version: "0.1.0"]
+
+#[sources: ["a_op.eco", "b_enum.eco"]]

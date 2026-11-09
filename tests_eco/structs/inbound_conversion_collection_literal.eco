@@ -1,0 +1,93 @@
+// a collection literal at an inbound conversion dest dest-types at the conversion source.
+// a named array already converted; the literal used to SIGSEGV (empty indices in gen_lvalue)
+// or ICE on a neighbouring const& operator as argument_fit / OwnershipPass disagreeing
+enum V
+{
+    case a(int64 $n);
+
+    #[implicit]
+    static function from(array<string> $xs) : V
+    {
+        return V::a($xs->count() as int64);
+    }
+
+    #[implicit]
+    static function from(int32 $n) : V
+    {
+        return V::a($n);
+    }
+}
+
+operator (const V& $x) == (const V& $y) : bool
+{
+    return match ($x) {
+        V::a($a) => match ($y) { V::a($b) => $a == $b }
+    };
+}
+
+function take(V $v) : int64
+{
+    return match ($v) { V::a($n) => $n };
+}
+
+enum W
+{
+    case n(int64 $n);
+
+    #[implicit]
+    static function from(array<string> $xs) : W
+    {
+        return W::n($xs->count() as int64);
+    }
+
+    #[implicit]
+    static function from(array<int32> $xs) : W
+    {
+        return W::n($xs->count() as int64 + 100);
+    }
+}
+
+function take_w(W $v) : int64
+{
+    return match ($v) { W::n($n) => $n };
+}
+
+enum U
+{
+    case n(int64 $n);
+
+    #[implicit]
+    static function from(array<int64> $xs) : U
+    {
+        return U::n($xs->count() as int64 + 200);
+    }
+
+    #[implicit]
+    static function from(array<string> $xs) : U
+    {
+        return U::n($xs->count() as int64);
+    }
+}
+
+function take_u(U $v) : int64
+{
+    return match ($v) { U::n($n) => $n };
+}
+
+echo take(['x', 'y']);
+
+V $x = ['a', 'b'];
+echo take($x);
+
+$x = ['c'];
+echo take($x);
+
+V $empty = [];
+echo take($empty);
+
+V $v = V::a(5);
+echo $v == 5;
+
+echo take_w(['a']);
+echo take_w([7, 8]);
+echo take_u([1, 2]);

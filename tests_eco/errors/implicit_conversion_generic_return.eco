@@ -1,0 +1,10 @@
+// from<T>() : T used to report that the *owner* is generic. the method names the parameter
+enum V
+{
+    case a(int64 $n);
+
+    #[implicit]
+    static function from<T>() : T { return 0 as T; }
+}
+
+echo 1;

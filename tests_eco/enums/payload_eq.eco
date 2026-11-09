@@ -1,0 +1,11 @@
+// a payload enum has no built-in ==, so a custom one is the equality the author wrote.
+// operator-before-enum used to be refused as stealing a builtin because pass 2 asked
+// has_payload_case() before the case table existed
+operator (W $a) == (W $b) : bool { return false; }
+enum W { case x(int32 $n); case y; }
+
+enum Z { case x(int32 $n); case y; }
+operator (Z $a) == (Z $b) : bool { return false; }
+
+echo W::y == W::y;
+echo Z::y == Z::y;

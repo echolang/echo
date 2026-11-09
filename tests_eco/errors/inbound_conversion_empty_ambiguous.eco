@@ -1,0 +1,20 @@
+// several fillable conversion sources: empty `[]` cannot infer, so it waits rather than
+// picking one. unique empty is inbound_conversion_collection_literal
+enum W
+{
+    case n(int64 $n);
+
+    #[implicit]
+    static function from(array<string> $xs) : W
+    {
+        return W::n($xs->count() as int64);
+    }
+
+    #[implicit]
+    static function from(array<int32> $xs) : W
+    {
+        return W::n($xs->count() as int64);
+    }
+}
+
+W $x = [];

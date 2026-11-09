@@ -238,6 +238,26 @@ TEST_CASE("a declaration that could never be reached is refused", "[operator_dec
         REQUIRE(has_issue_containing(*bundle, "would never be used"));
     }
 
+    SECTION("a payload enum may declare == even when the operator is written first")
+    {
+        // pass 2 used to ask has_payload_case() before the enum body was collected, so this
+        // looked payload-free and was refused. the body pass sees the payload
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "operator (W $a) == (W $b): bool { return false; }\n"
+            "enum W { case x(int32 $n); case y; }\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("a payload-free enum still cannot declare ==, including when the operator is first")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "operator (W $a) == (W $b): bool { return false; }\n"
+            "enum W { case x; case y; }\n");
+
+        REQUIRE(has_issue_containing(*bundle, "would never be used"));
+    }
+
     SECTION("...but a custom symbol over primitives is exactly the point")
     {
         auto bundle = EchoTests::tests_make_parsed_bundle(

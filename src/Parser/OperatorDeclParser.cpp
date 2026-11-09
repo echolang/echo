@@ -783,7 +783,9 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
             ? AST::binary_has_builtin_meaning(op, operands[0], operands[1])
             : AST::unary_has_builtin_meaning(op, operands[0]));
 
-        if (builtin_wins) {
+        // **the body pass: an enum's case table is empty until every file's declaration pass has
+        // finished.** returning here would leave a registered operator with no implementation
+        if (builtin_wins && !symbol_only) {
             // **a bare type parameter is the same refusal with a different reason.** the predicate
             // admits an undeterminable operand deliberately - it says nothing either way - so
             // `operator<T> (T $a) + (T $b)` lands here, and "built in for these operand types" is
@@ -838,7 +840,8 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
                 }
 
                 if (!constrained) {
-                    return refuse(*header.symbol_token,
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(*header.symbol_token),
                         fmt::format(
                             "operator '{}' cannot be declared over a bare type parameter - the language "
                             "already spells a meaning for '{}' over the primitives a parameter may be "
@@ -847,7 +850,8 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
                             header.spelling, header.spelling, header.spelling));
                 }
             } else if (!named_generic) {
-                return refuse(*header.symbol_token,
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(*header.symbol_token),
                     fmt::format(
                         "operator '{}' is built in for these operand types, so this declaration would "
                         "never be used - where the language spells a meaning, the built-in one wins.",

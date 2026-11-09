@@ -1,0 +1,5 @@
+// payload-free == is built in, including when the operator is written first
+operator (W $a) == (W $b) : bool { return false; }
+enum W { case x; case y; }
+
+echo 1;

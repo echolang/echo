@@ -23,6 +23,7 @@
 #include <fmt/core.h>
 
 #include <cassert>
+#include <optional>
 #include <unordered_map>
 
 namespace
@@ -54,84 +55,6 @@ namespace
         }
 
         return spelling;
-    }
-
-    bool ranking_rejects_fill(
-        const AST::CollectionFill &fill,
-        AST::Collector &collector,
-        AST::CollectionLiteralExprNode &literal
-    );
-
-    // a settled entry that cannot sit in `wanted`. untyped literals and pending types stay possible
-    bool ranking_rejects_entry(
-        AST::ExprNode *entry,
-        const AST::ValueType &wanted,
-        AST::Collector &collector
-    )
-    {
-        entry = AST::peel_move(entry);
-        if (entry == nullptr || AST::is_untyped_literal(entry)) {
-            return false;
-        }
-
-        AST::CollectionLiteralExprNode *inner = AST::collection_literal_of(entry);
-        if (inner != nullptr && !inner->expansion_decided) {
-            if (AST::contains_type_param(wanted) || AST::is_undetermined_type(wanted)) {
-                return false;
-            }
-
-            const AST::CollectionFill inner_fill =
-                AST::collection_fill_of(wanted, collector, *inner);
-            if (inner_fill.kind == AST::CollectionFill::Kind::t_none) {
-                return AST::type_is_determined_for_fit(AST::implicit_conversion_target(wanted));
-            }
-
-            return ranking_rejects_fill(inner_fill, collector, *inner);
-        }
-
-        const AST::ValueType from = entry->result_type();
-        if (!AST::type_is_determined_for_fit(from) || !AST::type_is_determined_for_fit(wanted)) {
-            return false;
-        }
-
-        return AST::argument_fit(from, entry, wanted) == AST::ArgumentFit::t_none;
-    }
-
-    bool ranking_rejects_fill(
-        const AST::CollectionFill &fill,
-        AST::Collector &collector,
-        AST::CollectionLiteralExprNode &literal
-    )
-    {
-        if (AST::ArrayLiteralExprNode *array = AST::array_literal_of(&literal)) {
-            if (fill.kind != AST::CollectionFill::Kind::t_inline
-                && fill.kind != AST::CollectionFill::Kind::t_append
-                && fill.kind != AST::CollectionFill::Kind::t_index) {
-                return false;
-            }
-
-            for (AST::ExprNode *element : array->elements) {
-                if (ranking_rejects_entry(element, fill.element, collector)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        AST::MapLiteralExprNode *map = AST::map_literal_of(&literal);
-        if (map == nullptr || fill.kind != AST::CollectionFill::Kind::t_keyed) {
-            return false;
-        }
-
-        for (const AST::MapLiteralExprNode::Entry &entry : map->entries) {
-            if (ranking_rejects_entry(entry.key, fill.key, collector)
-                || ranking_rejects_entry(entry.value, fill.value, collector)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     AST::FunctionCallExprNode *as_call(AST::ExprNode *expr)
@@ -521,15 +444,15 @@ AST::BoundSlots AST::bound_slots(
                     const ValueType dest = implicit_conversion_target(param->type());
 
                     if (!contains_type_param(dest)) {
-                        const CollectionFill fill =
-                            collection_fill_of(param->type(), collector, *literal);
-                        if (fill.kind != CollectionFill::Kind::t_none) {
-                            if (ranking_rejects_fill(fill, collector, *literal)) {
+                        if (std::optional<CollectionBind> bound =
+                                collection_bind_type(param->type(), collector, *literal)) {
+                            if (collection_fill_rejects(bound->fill, collector, *literal)) {
                                 rejected = true;
                             } else {
-                                // ranking-only: the hoist will be a place of this type. do not write
-                                // bound_type here, or two candidates would fight over one literal
-                                type = dest;
+                                // ranking-only: do not write bound_type, or two candidates fight
+                                // over one literal. conversion dest scores the source so
+                                // argument_fit ranks t_declared_conversion, not exact-at-V
+                                type = bound->type;
                             }
                         }
                         else if (type_is_determined_for_fit(dest)) {

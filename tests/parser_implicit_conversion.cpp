@@ -123,6 +123,39 @@ TEST_CASE("a marked method that cannot be a conversion is refused", "[implicit_c
         REQUIRE(has_issue_containing(*bundle, "not supported yet"));
     }
 
+    SECTION("on a generic inbound method of a plain owner")
+    {
+        // the owner is not generic, so the owner-case refusal stays silent; the conversion
+        // itself still names T and would publish then never fire
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Quantity {\n"
+            "    int64 $n;\n"
+            "    #[implicit]\n"
+            "    static function from<T>(T $x) : Quantity { return Quantity(0); }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "still names a type parameter"));
+        REQUIRE_FALSE(has_issue_containing(*bundle, "'Quantity' is generic"));
+        auto &m = bundle->modules.find_module("test");
+        REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().empty());
+    }
+
+    SECTION("generic method whose return names a parameter")
+    {
+        // contains_type_param(return) used to fire the owner sentence while Quantity is not generic
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Quantity {\n"
+            "    int64 $n;\n"
+            "    #[implicit]\n"
+            "    static function from<T>() : T { return 0 as T; }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "still names a type parameter"));
+        REQUIRE_FALSE(has_issue_containing(*bundle, "'Quantity' is generic"));
+        auto &m = bundle->modules.find_module("test");
+        REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().empty());
+    }
+
     SECTION("inbound with no parameter")
     {
         auto bundle = EchoTests::tests_make_parsed_bundle(

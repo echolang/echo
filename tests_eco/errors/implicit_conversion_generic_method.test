@@ -1,0 +1,16 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] InvalidImplicitConversion  implicit_conversion_generic_method.eco:7:7
+
+  'from' is generic, and an implicit conversion that still names a type parameter is not supported yet - the other type would have to be substituted per use.
+
+  6 | 
+  7 |     #[implicit]
+    :       ^^^^^^^^^
+  8 |     static function from<T>(T $x) : V { return V::a(0); }
+    : ^^^^^^^^^^
+  9 | }
+
+1 error, nothing was compiled.

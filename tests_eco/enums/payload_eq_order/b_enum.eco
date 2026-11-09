@@ -1,0 +1,6 @@
+public enum W { case x(int32 $n); case y; }
+
+public function probe() : bool
+{
+    return W::y == W::y;
+}

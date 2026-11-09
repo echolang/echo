@@ -1,0 +1,14 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] enum_eq_is_builtin.eco:2:17
+
+  operator '==' is built in for these operand types, so this declaration would never be used - where the language spells a meaning, the built-in one wins.
+
+  1 | // payload-free == is built in, including when the operator is written first
+  2 | operator (W $a) == (W $b) : bool { return false; }
+    :                 ^^
+  3 | enum W { case x; case y; }
+
+1 error, nothing was compiled.

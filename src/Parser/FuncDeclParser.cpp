@@ -970,20 +970,20 @@ void Parser::publish_implicit_conversion(
         return;
     }
 
-    // the whole conversion rule compares the declared return type with the parameter type, exactly.
-    // on a generic owner the walk reaches the *template*, whose return type still mentions the
-    // owner's `T`, and that never equals a concrete `slice<int32>` - so the declaration would be
-    // accepted and then silently never fire. the walk reaches the template because an instantiation
-    // holds no `_methods` of its own and reaches the template's through the template_or_self redirect -
-    // the same reason AST::find_member_functions redirects an instantiation through `template_ref` - so
-    // an instantiation's conversions hold declarations whose return type still mentions `T`, wherever
-    // the comparison is made. answering the concrete target means substituting that return type per
-    // instantiation. refuse the case rather than ship a marker that does nothing
-    if (owner_struct->is_generic() || AST::contains_type_param(target)) {
-        report(fmt::format(
-            "'{}' is generic, and an implicit conversion on a generic type is not supported yet - "
-            "the target type would have to be substituted per instantiation.",
-            owner_struct->type_name()));
+    // compares types exactly, so a generic owner, a generic method, or a return that still names
+    // a parameter would publish and never fire. owner vs method is which name the sentence carries
+    if (owner_struct->is_generic() || funcdecl->is_generic() || AST::contains_type_param(target)) {
+        if (owner_struct->is_generic()) {
+            report(fmt::format(
+                "'{}' is generic, and an implicit conversion on a generic type is not supported yet - "
+                "the target type would have to be substituted per instantiation.",
+                owner_struct->type_name()));
+        } else {
+            report(fmt::format(
+                "'{}' is generic, and an implicit conversion that still names a type parameter is not "
+                "supported yet - the other type would have to be substituted per use.",
+                nametoken.value()));
+        }
         return;
     }
 
@@ -1038,6 +1038,16 @@ void Parser::publish_implicit_conversion(
         }
 
         const AST::ValueType source = funcdecl->parameter_type(0);
+
+        // a non-generic from(array<T>) still names a parameter on the source, which lookup
+        // compares exactly and would never fire
+        if (AST::contains_type_param(source)) {
+            report(fmt::format(
+                "'{}' is generic, and an implicit conversion that still names a type parameter is not "
+                "supported yet - the other type would have to be substituted per use.",
+                nametoken.value()));
+            return;
+        }
 
         // by value, so find_inbound_implicit_conversion stays `parameter_type(0) == from`. a
         // borrow would force the lookup to re-rank, and implicit_conversion_source already

@@ -195,6 +195,27 @@ TEST_CASE("a failure is on its own line and still under the summary", "[testrepo
         "    assertion failed: nope\n");
 }
 
+TEST_CASE("a listing uses the checklist's elapsed spelling", "[testreporter]")
+{
+    std::ostringstream out;
+    ProgressReporter progress;
+    TestReporter reporter(out, progress, a_terminal(), TestDetail::t_listing);
+
+    reporter.begin(2);
+    reporter.result(a_result("src/math.eco", "adds_up", 1100));
+    reporter.result(a_result("src/math.eco", "subtracts", 171000));
+
+    REQUIRE(reporter.finish());
+
+    REQUIRE(out.str() ==
+        "mylib/math.eco\n"
+        "  ✓ adds_up                                             1.1s\n"
+        "  ✓ subtracts                                         2m 51s\n"
+        "  2 tests, 2m 52s\n"
+        "\n"
+        "2 tests passed\n");
+}
+
 TEST_CASE("a listing names a test's group where it has one", "[testreporter]")
 {
     std::ostringstream out;

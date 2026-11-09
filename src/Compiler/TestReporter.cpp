@@ -52,14 +52,10 @@ namespace
         return "ended";
     }
 
-    // how wide a listing's name column is. A name longer than this pushes the milliseconds right rather
+    // how wide a listing's name column is. A name longer than this pushes the elapsed field right rather
     // than being cut: a listing is a transcript, and a truncated name is one a `--filter` cannot be typed
     // from
     constexpr size_t LISTING_NAME_WIDTH = 46;
-
-    // the same column width Compiler::ProgressReporter gives a row's elapsed field, so a listing's times
-    // line up under a checklist's
-    constexpr size_t LISTING_MILLISECONDS_WIDTH = 6;
 
     // `1 test` / `4 tests`, which three lines here need and none of them should spell
     std::string test_count(size_t count)
@@ -192,11 +188,11 @@ void Compiler::TestReporter::write_listing_line(const TestResult &result)
          << styled(failed ? _theme.failed : _theme.done, failed ? sgr::error : sgr::success, _capabilities.color);
 
     _out << fmt::format(
-        " {:<{}} {:>{}} ms",
+        " {:<{}} {:>{}}",
         result.test.name,
         LISTING_NAME_WIDTH,
-        result.milliseconds,
-        LISTING_MILLISECONDS_WIDTH
+        format_elapsed(result.milliseconds),
+        ELAPSED_COLUMN_WIDTH
     );
 
     if (!result.test.group.empty()) {
@@ -224,7 +220,7 @@ void Compiler::TestReporter::close_listing_file()
         return;
     }
 
-    _out << fmt::format("  {}, {} ms\n\n", test_count(_file_tests), _file_milliseconds);
+    _out << fmt::format("  {}, {}\n\n", test_count(_file_tests), format_elapsed(_file_milliseconds));
 
     _file.clear();
     _file_tests = 0;

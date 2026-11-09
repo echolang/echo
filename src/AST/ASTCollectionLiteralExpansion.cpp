@@ -527,7 +527,7 @@ bool CollectionLiteralExpansion::expand_statement(
     }
 
     // **mutable variable storage is filled in place.** everything else hoists: a const name cannot
-    // be the append / write target, and a non-variable target would have to be cloned per element
+    // be the append / write target, a non-variable target would have to be cloned per element
     if (destination.decl != nullptr) {
         ValueType destination_type;
 
@@ -535,7 +535,13 @@ bool CollectionLiteralExpansion::expand_statement(
             return false;
         }
 
-        if (!destination_type.is_const()) {
+        bind_collection_literal_to(*destination.slot, destination_type, _collector);
+
+        const bool in_place = !destination_type.is_const()
+            && destination.literal->bound_type.has_value()
+            && *destination.literal->bound_type == implicit_conversion_target(destination_type);
+
+        if (in_place) {
             std::vector<NodeReference> appends;
             destination.literal->expansion_decided = true;
 
@@ -552,7 +558,9 @@ bool CollectionLiteralExpansion::expand_statement(
             return true;
         }
 
-        destination.literal->bound_type = ValueType::make_mutable(destination_type);
+        if (!destination.literal->bound_type.has_value()) {
+            destination.literal->bound_type = ValueType::make_mutable(destination_type);
+        }
     } else {
         if (destination.slot == nullptr) {
             report_unplaced(*destination.literal);

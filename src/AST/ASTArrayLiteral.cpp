@@ -9,6 +9,7 @@
 #include "AST/ExprNode.h"
 
 #include <fmt/core.h>
+#include <optional>
 
 namespace
 {
@@ -53,20 +54,13 @@ bool AST::bind_array_literal_to(
         return false;
     }
 
-    const AST::ValueType wanted = AST::implicit_conversion_target(destination);
-
-    if (is_undetermined_type(wanted)) {
+    std::optional<AST::CollectionBind> bound = collection_bind_type(destination, collector, *literal);
+    if (!bound.has_value()) {
         return false;
     }
 
-    const CollectionFill fill = collection_fill_of(wanted, collector, *literal);
-
-    // a dest that cannot fill this shape (a one-field class, a struct with no `[]=`) must not
-    // claim bound_type: it is idempotent, so a first bind against the constructed type would
-    // poison the memberwise constructor's array parameter. empty `[]` at a map is t_keyed
-    if (fill.kind == CollectionFill::Kind::t_none) {
-        return false;
-    }
+    const AST::ValueType wanted = bound->type;
+    const CollectionFill &fill = bound->fill;
 
     // a later destination (a field, an element) may be more specific than the first element's
     // default. rebind until expansion has decided, so `$s->f = [7, 8]` at `array<int64>` wins

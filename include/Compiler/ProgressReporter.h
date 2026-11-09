@@ -289,6 +289,14 @@ namespace Compiler
     // milliseconds since `start`, rounded, which is what a row and the closing line both report. Whole
     // milliseconds and no total: precision and the breakdown are `--timings`' question and stay there
     unsigned int progress_elapsed_ms(std::chrono::steady_clock::time_point start);
+
+    // how a duration is spelled on the checklist and a listing. milliseconds below a second, one-decimal
+    // seconds below a minute, then minutes and whole seconds
+    std::string format_elapsed(unsigned int milliseconds);
+
+    // columns a row and a listing give that spelling. `format_elapsed` is unpadded; the column
+    // right-aligns it. The clock overwrites this many bytes, so the width is load-bearing
+    constexpr size_t ELAPSED_COLUMN_WIDTH = 9;
 };
 
 #endif

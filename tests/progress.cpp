@@ -26,6 +26,7 @@
 // milliseconds, so a row is byte-comparable. The test constructor does not animate, which is what
 // keeps the frame index a function of the tick sequence
 
+using Compiler::format_elapsed;
 using Compiler::ProgressPhase;
 using Compiler::ProgressReporter;
 using Compiler::ProgressState;
@@ -195,6 +196,24 @@ TEST_CASE("the live row is rewritten in place, one frame per redraw", "[progress
     REQUIRE(out.str().find('\n') == std::string::npos);
 }
 
+TEST_CASE("elapsed spelling changes unit at a second and at a minute", "[progress]")
+{
+    REQUIRE(format_elapsed(0) == "0 ms");
+    REQUIRE(format_elapsed(4) == "4 ms");
+    REQUIRE(format_elapsed(999) == "999 ms");
+    REQUIRE(format_elapsed(1000) == "1.0s");
+    REQUIRE(format_elapsed(1049) == "1.0s");
+    REQUIRE(format_elapsed(1050) == "1.1s");
+    REQUIRE(format_elapsed(1100) == "1.1s");
+    REQUIRE(format_elapsed(59949) == "59.9s");
+    REQUIRE(format_elapsed(59950) == "1m 0s");
+    REQUIRE(format_elapsed(60000) == "1m 0s");
+    REQUIRE(format_elapsed(61000) == "1m 1s");
+    REQUIRE(format_elapsed(123456) == "2m 3s");
+    REQUIRE(format_elapsed(171000) == "2m 51s");
+    REQUIRE(format_elapsed(171499) == "2m 51s");
+}
+
 TEST_CASE("a committed row ends the line and lists its files under it", "[progress]")
 {
     std::ostringstream out;
@@ -209,6 +228,31 @@ TEST_CASE("a committed row ends the line and lists its files under it", "[progre
         + ERASE + "  ✓  parse            main          2 files          4 ms\n"
         + "       src/main.eco\n"
         + "       src/scene.eco\n");
+}
+
+TEST_CASE("a committed row pads seconds and minutes into the elapsed column", "[progress]")
+{
+    std::ostringstream seconds;
+    ProgressReporter second_row(seconds, a_terminal());
+    second_row.open(ProgressPhase::t_parse, "main");
+    second_row.set_detail("1 file");
+    second_row.commit(ProgressState::t_done, 1100);
+
+    REQUIRE(seconds.str().find("  ✓  parse            main          1 file           1.1s\n")
+        != std::string::npos);
+
+    std::ostringstream minutes;
+    ProgressReporter minute_row(minutes, a_terminal());
+    minute_row.open(ProgressPhase::t_parse, "main");
+    minute_row.set_detail("1 file");
+    minute_row.commit(ProgressState::t_done, 171000);
+
+    REQUIRE(minutes.str().find("  ✓  parse            main          1 file         2m 51s\n")
+        != std::string::npos);
+
+    std::ostringstream closing;
+    ProgressReporter(closing, a_terminal()).close("built 'app'", 1100);
+    REQUIRE(closing.str() == "\n  ✓  built 'app' in 1.1s\n\n");
 }
 
 TEST_CASE("a failed row draws the failure mark and keeps its files to itself", "[progress]")

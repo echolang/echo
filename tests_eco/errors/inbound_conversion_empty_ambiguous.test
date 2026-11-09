@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] inbound_conversion_empty_ambiguous.eco:20:8
+
+  'W' cannot be built from an array literal - a literal fills a collection, through its constructor and its append operator.
+
+  19 | 
+  20 | W $x = [];
+     :        ^
+  21 | 
+
+1 error, nothing was compiled.
