@@ -1,0 +1,11 @@
+// `$x as int32&` on a `int32&` parameter is identity of the place: writes through `$y`
+// update `$a`. identity used to load the int32 and store the bits into a borrow slot
+function f(int32& $x) : void
+{
+    int32& $y = $x as int32&;
+    $y = 9;
+}
+
+int32 $a = 1;
+f($a);
+echo $a;

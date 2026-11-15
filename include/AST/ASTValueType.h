@@ -1892,6 +1892,11 @@ namespace AST
         // exists to remove, so the split is asserted at both ends
         ValueType get_or_create_optional(const ValueType &payload);
 
+        // after every file's declaration surface exists. derive every interned instance so
+        // an alias interned `Records<int64>` before `: Store<K>` was parsed picks up the
+        // layout a later lookup would never re-enter get_or_create for
+        void refresh_stale_instantiations();
+
         // the interned concrete instantiations (Box<int>, ...), excluding the bare templates that
         // register_template maps to themselves. used by the --print-instances dump
         std::vector<ComplexType*> instantiations() const {

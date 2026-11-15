@@ -2,6 +2,7 @@
 
 #include "Parser/AttributeValueParser.h"
 #include "Parser/FuncDeclParser.h"
+#include "Token.h"
 
 #include "AST/ASTAttributes.h"
 #include "AST/ASTIssue.h"
@@ -70,8 +71,8 @@ AST::AttributeNode *Parser::parse_attribute(
 
     payload.cursor.skip(); // skip the opening square bracket
 
-    // now we expect an identifier
-    if (!payload.cursor.is_type(Token::Type::t_identifier)) {
+    // a reserved word is a name here: `#[rest::case: x]` has nothing for `case` to collide with
+    if (payload.cursor.is_done() || !token_spells_a_word(payload.cursor.current().value())) {
         payload.collect_unexpected_token(Token::Type::t_identifier);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
@@ -90,7 +91,7 @@ AST::AttributeNode *Parser::parse_attribute(
     while (payload.cursor.is_type(Token::Type::t_namespace_sep)) {
         payload.cursor.skip(); // `::`
 
-        if (!payload.cursor.is_type(Token::Type::t_identifier)) {
+        if (payload.cursor.is_done() || !token_spells_a_word(payload.cursor.current().value())) {
             payload.collect_unexpected_token(Token::Type::t_identifier);
             return step_over_the_bracket();
         }

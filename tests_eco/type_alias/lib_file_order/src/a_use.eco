@@ -1,0 +1,11 @@
+namespace order;
+
+public function look(IntRecords& $r) : int64
+{
+    return $r->find(2);
+}
+
+public function cap(int32 $n = Cfg::$limit) : int32
+{
+    return $n;
+}

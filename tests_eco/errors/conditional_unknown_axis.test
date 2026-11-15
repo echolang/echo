@@ -1,6 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] Conditional Compilation Failed
+[error] conditional_unknown_axis.eco:4:7
 
-  line 4: unknown condition axis 'cpu', expected one of: os, arch, family
+  unknown condition axis 'cpu', expected one of: os, arch, family
+
+  3 | // the operator instead of the mistake.
+  4 | #[if: cpu == arm64]
+    :       ^^^
+  5 | echo 1;
+
+1 error, nothing was compiled.

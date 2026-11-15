@@ -11,6 +11,7 @@
 
 namespace AST
 {
+    class ComplexType;
     class FunctionDeclNode;
     class Namespace;
     class Symbol;
@@ -23,6 +24,10 @@ namespace Parser
     // an unqualified type name, after a file-local `use`. the type grammar and the static-owner
     // speculation share this so `use geometry::Point` then `Point::origin()` and `Point $p` agree
     AST::Symbol *find_unqualified_type(Payload &payload, const std::string &name, const AST::Namespace &from);
+
+    // the type whose body, method, constructor, or closure is being parsed. self_struct_ptr
+    // in the type body; enclosing_type_of once FunctionBodyScope nulls it
+    AST::ComplexType *enclosing_type_at(Payload &payload);
 
     // does the callable type `function<R(P...)>` start at `offset`? the third of the three things the
     // `function` keyword introduces, and the only one that is a type - the sibling of
@@ -85,7 +90,9 @@ namespace Parser
     // false when the tokens are not a list
     bool skip_type_arguments(Cursor &cursor);
 
-    AST::TypeNode *parse_type(Payload &payload);
+    // `report` false keeps a missing nested type silent, so speculative type-args can
+    // decline `BASE < Lim::MAX` without "'Lim' has no nested type 'MAX'"
+    AST::TypeNode *parse_type(Payload &payload, bool report = true);
 
     // silent: a name the type grammar would read as a primitive (`usize`, `int32`, …).
     // parse_static_owner needs this before it calls parse_type, which reports an unknown

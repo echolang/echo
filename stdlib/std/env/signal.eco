@@ -2,18 +2,18 @@
  * Trapping a process signal, and reading it later from ordinary code.
  *
  * The handler records and does nothing else: it sets the signal's bit in a word and remembers it as
- * the last one. Any thread asks afterwards - a server polls `caught()` from its loop, or blocks in
- * `wait()` - and stops cleanly in its own time. Nothing in the language can hold an arbitrary body
- * to what a signal handler may do (no allocation, no lock, no drop), so there is no callback to
- * register: the one body that runs inside a signal is `on_signal` below, and it touches atomics and
- * calls `signal` again on Windows, nothing more.
+ * the last one. Any thread asks afterwards - a server polls `signal::caught()` from its loop, or
+ * blocks in `signal::wait()` - and stops cleanly in its own time. Nothing in the language can hold
+ * an arbitrary body to what a signal handler may do (no allocation, no lock, no drop), so there is
+ * no callback to register: the one body that runs inside a signal is `on_signal` below, and it
+ * touches atomics and calls `signal` again on Windows, nothing more.
  *
- * Its storage is three statics. A static initializes on first use, so `trap()` seats all three
- * before it installs the handler, and the handler never runs an initializer. The set of installed
- * kinds is a struct whose teardown puts each one back to the default, so a handler is never left
- * pointing at code that is about to go away - a JIT run's, or an unloaded library's.
+ * Its storage is three statics. A static initializes on first use, so `signal::trap()` seats all
+ * three before it installs the handler, and the handler never runs an initializer. The set of
+ * installed kinds is a struct whose teardown puts each one back to the default, so a handler is
+ * never left pointing at code that is about to go away - a JIT run's, or an unloaded library's.
  *
- * WASI has no signals. This file is absent there, so a program that names `trap` fails to compile
+ * WASI has no signals. This file is absent there, so a program that names `signal` fails to compile
  * instead of failing when it tries to install a handler.
  */
 
@@ -67,7 +67,7 @@ public enum signal : int32
     }
 
     /**
-     * The case whose backing value is `$code`, or null.
+     * The case whose table index is `$code`, or null. This is the backing 0..4, not a platform number.
      */
     // skip the synthesized LUT: a five-case table does not need one in every program's IR
     static function from(int32 $code) : signal?
@@ -89,6 +89,146 @@ public enum signal : int32
         }
 
         return null;
+    }
+
+    /**
+     * Installs the recording handler for every signal in `$which`. The default action - for all five,
+     * ending the process - no longer happens for them. A kind this platform does not have, or an
+     * install that `signal()` refuses, fails and leaves every disposition as it was.
+     */
+    public static function trap(const array<signal>& $which) : status<signal_error>
+    {
+        seat();
+
+        foreach ($which as $k) {
+            if (number_of($k) == null) {
+                return .error(.unsupported($k));
+            }
+        }
+
+        int32 $was = trapped::$handlers->mask->load();
+        int32 $added = 0;
+
+        foreach ($which as $k) {
+            int32 $number = guard number_of($k) else {
+                restore_to_default($added);
+                return .error(.unsupported($k));
+            };
+
+            if (is_sig_err(c_signal($number, &on_signal))) {
+                restore_to_default($added);
+                return .error(.install($k));
+            }
+
+            $added = $added | (bit_of($k) & ~$was);
+        }
+
+        set_bits(trapped::$handlers->mask, $added);
+
+        return .ok;
+    }
+
+    /**
+     * `interrupt` and `terminate`, the pair a server stops on.
+     */
+    public static function trap() : status<signal_error>
+    {
+        array<signal> $pair = [signal::interrupt, signal::terminate];
+        return signal::trap($pair);
+    }
+
+    /**
+     * Whether any trapped signal arrived and was not taken yet.
+     */
+    public static function caught() : bool
+    {
+        return trapped::$pending->load() != 0;
+    }
+
+    /**
+     * Whether `$k` arrived and was not taken yet.
+     */
+    public static function caught(signal $k) : bool
+    {
+        return (trapped::$pending->load() & bit_of($k)) != 0;
+    }
+
+    /**
+     * The most recent signal that arrived, or null when none did since the last `reset()`. Taking a
+     * signal does not forget it here.
+     */
+    public static function last() : signal?
+    {
+        return signal::from(trapped::$last->load());
+    }
+
+    /**
+     * Takes one pending signal, in `signal`'s order, and clears it. Null when nothing is pending. Two
+     * threads taking at once never both get the same arrival.
+     */
+    public static function take() : signal?
+    {
+        int32 $was = trapped::$pending->load();
+
+        while ($was != 0) {
+            int32 $code = bits::trailing_zeros($was as uint32) as int32;
+            if (trapped::$pending->compare_exchange($was, $was & ~(1 << $code))) {
+                return signal::from($code);
+            }
+
+            $was = trapped::$pending->load();
+        }
+
+        return null;
+    }
+
+    /**
+     * Blocks until a trapped signal arrives, looking every `$poll`, and takes it.
+     *
+     * A non-positive `$poll` makes `sleep` return immediately, so the loop spins. Pass a few
+     * milliseconds: 50 to 250 is plenty for a shutdown.
+     */
+    public static function wait(poll: std::time::duration $poll) : signal
+    {
+        while (true) {
+            signal? $hit = signal::take();
+            if ($hit != null) {
+                signal $k = guard $hit;
+                return $k;
+            }
+
+            std::time::sleep($poll);
+        }
+    }
+
+    /**
+     * Forgets every pending signal and the last one. The handlers stay installed.
+     */
+    public static function reset() : void
+    {
+        seat();
+        trapped::$pending->store(0);
+        trapped::$last->store(-1);
+    }
+
+    /**
+     * Sends `$k` to this thread, and returns once its handler has run. With a trap installed that is a
+     * recorded arrival, which is how a test exercises a clean stop. Without one it is the default
+     * action, which for all five ends the process.
+     */
+    public static function raise(signal $k) : status<signal_error>
+    {
+        int32 $number = guard number_of($k) else {
+            return .error(.unsupported($k));
+        };
+
+        seat();
+
+        if (c_raise($number) != 0) {
+            return .error(.raise($k));
+        }
+
+        return .ok;
     }
 }
 
@@ -114,146 +254,6 @@ public enum signal_error
             signal_error::raise($signal) => str::concat('could not raise ', $signal->name()),
         };
     }
-}
-
-/**
- * Installs the recording handler for every signal in `$which`. The default action - for all five,
- * ending the process - no longer happens for them. A kind this platform does not have, or an
- * install that `signal()` refuses, fails and leaves every disposition as it was.
- */
-public function trap(const array<signal>& $which) : status<signal_error>
-{
-    seat();
-
-    foreach ($which as $k) {
-        if (number_of($k) == null) {
-            return .error(.unsupported($k));
-        }
-    }
-
-    int32 $was = trapped::$handlers->mask->load();
-    int32 $added = 0;
-
-    foreach ($which as $k) {
-        int32 $number = guard number_of($k) else {
-            restore_to_default($added);
-            return .error(.unsupported($k));
-        };
-
-        if (is_sig_err(c_signal($number, &on_signal))) {
-            restore_to_default($added);
-            return .error(.install($k));
-        }
-
-        $added = $added | (bit_of($k) & ~$was);
-    }
-
-    set_bits(trapped::$handlers->mask, $added);
-
-    return .ok;
-}
-
-/**
- * `interrupt` and `terminate`, the pair a server stops on.
- */
-public function trap() : status<signal_error>
-{
-    array<signal> $pair = [signal::interrupt, signal::terminate];
-    return trap($pair);
-}
-
-/**
- * Whether any trapped signal arrived and was not taken yet.
- */
-public function caught() : bool
-{
-    return trapped::$pending->load() != 0;
-}
-
-/**
- * Whether `$k` arrived and was not taken yet.
- */
-public function caught(signal $k) : bool
-{
-    return (trapped::$pending->load() & bit_of($k)) != 0;
-}
-
-/**
- * The most recent signal that arrived, or null when none did since the last `reset()`. Taking a
- * signal does not forget it here.
- */
-public function last() : signal?
-{
-    return signal::from(trapped::$last->load());
-}
-
-/**
- * Takes one pending signal, in `signal`'s order, and clears it. Null when nothing is pending. Two
- * threads taking at once never both get the same arrival.
- */
-public function take() : signal?
-{
-    int32 $was = trapped::$pending->load();
-
-    while ($was != 0) {
-        int32 $code = bits::trailing_zeros($was as uint32) as int32;
-        if (trapped::$pending->compare_exchange($was, $was & ~(1 << $code))) {
-            return signal::from($code);
-        }
-
-        $was = trapped::$pending->load();
-    }
-
-    return null;
-}
-
-/**
- * Blocks until a trapped signal arrives, looking every `$poll`, and takes it.
- *
- * A non-positive `$poll` makes `sleep` return immediately, so the loop spins. Pass a few
- * milliseconds: 50 to 250 is plenty for a shutdown.
- */
-public function wait(std::time::duration $poll) : signal
-{
-    while (true) {
-        signal? $hit = take();
-        if ($hit != null) {
-            signal $k = guard $hit;
-            return $k;
-        }
-
-        std::time::sleep($poll);
-    }
-}
-
-/**
- * Forgets every pending signal and the last one. The handlers stay installed.
- */
-public function reset() : void
-{
-    seat();
-    trapped::$pending->store(0);
-    trapped::$last->store(-1);
-}
-
-/**
- * Sends `$k` to this thread, and returns once its handler has run. With a trap installed that is a
- * recorded arrival, which is how a test exercises a clean stop. Without one it is the default
- * action, which for all five ends the process.
- */
-public function raise(signal $k) : status<signal_error>
-{
-    int32 $number = guard number_of($k) else {
-        return .error(.unsupported($k));
-    };
-
-    seat();
-
-    if (c_raise($number) != 0) {
-        return .error(.raise($k));
-    }
-
-    return .ok;
 }
 
 private struct trapped

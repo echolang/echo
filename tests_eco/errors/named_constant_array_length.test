@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] named_constant_array_length.eco:2:8
+
+  Named constants are not supported as an array length yet - write a literal, or a value parameter
+
+  1 | const int32 N = 4;
+  2 | uint32[N] $s;
+    :        ^
+  3 | echo 1;
+
+1 error, nothing was compiled.

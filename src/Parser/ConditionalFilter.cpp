@@ -12,9 +12,25 @@ namespace
 {
     using Compiler::TargetFacts;
 
-    std::string locate(uint32_t line, const std::string &message)
+    void locate(
+        const TokenCollection &tokens,
+        size_t index,
+        const std::string &message,
+        AST::TokenFilterRefusal &out)
     {
-        return fmt::format("line {}: {}", line, message);
+        out.message = message;
+        if (index >= tokens.size()) {
+            return;
+        }
+
+        out.line = tokens.tokens[index].line;
+        out.column = tokens.tokens[index].char_offset;
+        if (out.column == 0) {
+            out.column = 1;
+        }
+
+        const std::string &text = tokens.token_values[index];
+        out.width = text.empty() ? 1u : static_cast<uint32_t>(text.size());
     }
 
     // a doc names the token after it. a dropped token takes its doc. see `step_over` for directives
@@ -80,6 +96,7 @@ namespace
         size_t condition_end = 0;
         size_t after = 0;          // the first index past the closing `]`
         uint32_t line = 0;
+        size_t at = 0;
     };
 
     // the *name* of a `#[...]` at `index`, or "" when there is no attribute there at all.
@@ -166,7 +183,10 @@ namespace
     // the only thing that says where the block ends. A malformed *body* is invisible, which is the same
     // price every excluded region pays
     TestBlockScan locate_test_block(
-        const TokenCollection &tokens, size_t index, size_t &out_after, std::string &out_error)
+        const TokenCollection &tokens,
+        size_t index,
+        size_t &out_after,
+        AST::TokenFilterRefusal &out)
     {
         size_t cursor = index;
 
@@ -192,18 +212,24 @@ namespace
             return TestBlockScan::t_absent;
         }
 
-        const uint32_t line = tokens.tokens[cursor].line;
+        const size_t test_at = cursor;
         cursor++;
 
+        // `$m->test` and `function test()` are a member / a method, not a test block. only a
+        // missing name in front of `{` is a malformed header
         if (cursor >= tokens.size() || !tokens.tokens[cursor].is_a(Token::Type::t_identifier)) {
-            out_error = locate(line, "'test' must be followed by the test's name");
-            return TestBlockScan::t_malformed;
+            if (cursor < tokens.size() && tokens.tokens[cursor].is_a(Token::Type::t_open_brace)) {
+                locate(tokens, test_at, "'test' must be followed by the test's name", out);
+                return TestBlockScan::t_malformed;
+            }
+
+            return TestBlockScan::t_absent;
         }
 
         cursor++;
 
         if (cursor >= tokens.size() || !tokens.tokens[cursor].is_a(Token::Type::t_open_brace)) {
-            out_error = locate(line, "a test's name must be followed by its body, '{'");
+            locate(tokens, test_at, "a test's name must be followed by its body, '{'", out);
             return TestBlockScan::t_malformed;
         }
 
@@ -213,7 +239,7 @@ namespace
             tokens, cursor, Token::Type::t_open_brace, Token::Type::t_close_brace);
 
         if (after == std::string::npos) {
-            out_error = locate(line, "this test's body is never closed - add '}'");
+            locate(tokens, test_at, "this test's body is never closed - add '}'", out);
             return TestBlockScan::t_malformed;
         }
 
@@ -226,10 +252,14 @@ namespace
     // the condition runs to the first `]`, which is safe because a condition cannot contain one: the
     // grammar is identifiers, comparisons, `&&`, `||`, `!` and parentheses
     bool read_directive(
-        const TokenCollection &tokens, size_t index, Directive &out, std::string &out_error)
+        const TokenCollection &tokens,
+        size_t index,
+        Directive &out,
+        AST::TokenFilterRefusal &refusal)
     {
         out.name = attribute_name_at(tokens, index);
         out.line = tokens.tokens[index].line;
+        out.at = index;
 
         size_t cursor = index + 3;
 
@@ -246,7 +276,11 @@ namespace
         }
 
         if (cursor >= tokens.size()) {
-            out_error = locate(out.line, fmt::format("'#[{}' is missing its closing ']'", out.name));
+            locate(
+                tokens,
+                out.at,
+                fmt::format("'#[{}' is missing its closing ']'", out.name),
+                refusal);
             return false;
         }
 
@@ -270,8 +304,8 @@ namespace
         const TargetFacts &facts;
         size_t cursor;
         size_t end;
-        uint32_t line;
         std::string error;
+        AST::TokenFilterRefusal &out;
 
         bool at_end() const {
             return cursor >= end;
@@ -282,8 +316,18 @@ namespace
         }
 
         bool fail(const std::string &message) {
+            size_t at = cursor;
+            if (at >= tokens.size() && at > 0) {
+                at--;
+            }
+
+            return fail_at(at, message);
+        }
+
+        bool fail_at(size_t at, const std::string &message) {
             if (error.empty()) {
-                error = locate(line, message);
+                locate(tokens, at, message, out);
+                error = message;
             }
             return false;
         }
@@ -376,6 +420,7 @@ namespace
                     "'{}' is not a name a condition can test", tokens.token_values[cursor]));
             }
 
+            const size_t name_at = cursor;
             const std::string name = tokens.token_values[cursor];
             cursor++;
 
@@ -385,7 +430,7 @@ namespace
                 // grammar accepts `cpu` as a define, finds a stray `==`, and blames the operator - which
                 // tells the author nothing about the mistake they actually made
                 if (is(Token::Type::t_logical_eq) || is(Token::Type::t_logical_neq)) {
-                    return fail(fmt::format(
+                    return fail_at(name_at, fmt::format(
                         "unknown condition axis '{}', expected one of: {}",
                         name, TargetFacts::axis_names()));
                 }
@@ -421,7 +466,7 @@ namespace
             std::string reason;
 
             if (!facts.axis_equals(name, value, matched, reason)) {
-                return fail(reason);
+                return fail_at(cursor - 1, reason);
             }
 
             out = negated ? !matched : matched;
@@ -434,18 +479,21 @@ namespace
         const Directive &directive,
         const TargetFacts &facts,
         bool &out_value,
-        std::string &out_error)
+        AST::TokenFilterRefusal &out)
     {
         if (directive.condition_start >= directive.condition_end) {
-            out_error = locate(directive.line, fmt::format("'#[{}: ...]' needs a condition", directive.name));
+            locate(
+                tokens,
+                directive.at,
+                fmt::format("'#[{}: ...]' needs a condition", directive.name),
+                out);
             return false;
         }
 
         ConditionEvaluator evaluator{
-            tokens, facts, directive.condition_start, directive.condition_end, directive.line, "" };
+            tokens, facts, directive.condition_start, directive.condition_end, "", out };
 
         if (!evaluator.parse_or(out_value)) {
-            out_error = evaluator.error;
             return false;
         }
 
@@ -453,8 +501,11 @@ namespace
         // `os == darwin || os == linux`. reported, because a condition read halfway is a condition whose
         // answer is not the one written
         if (!evaluator.at_end()) {
-            out_error = locate(directive.line, fmt::format(
-                "unexpected '{}' after the condition", tokens.token_values[evaluator.cursor]));
+            locate(
+                tokens,
+                evaluator.cursor,
+                fmt::format("unexpected '{}' after the condition", tokens.token_values[evaluator.cursor]),
+                out);
             return false;
         }
 
@@ -469,6 +520,8 @@ namespace
         bool emitting = false;
         bool seen_else = false;
         uint32_t line = 0;
+        uint32_t column = 1;
+        uint32_t width = 1;
     };
 };
 
@@ -481,7 +534,7 @@ bool Parser::filter_conditional_tokens(
     TokenCollection &tokens,
     size_t from,
     const Compiler::TargetFacts &facts,
-    std::string &out_error
+    AST::TokenFilterRefusal &out
 )
 {
     std::vector<Frame> frames;
@@ -522,7 +575,7 @@ bool Parser::filter_conditional_tokens(
             if (!facts.tests && starts_a_test_block(tokens.tokens[index]) && emitting()) {
                 size_t after = 0;
 
-                switch (locate_test_block(tokens, index, after, out_error)) {
+                switch (locate_test_block(tokens, index, after, out)) {
                 case TestBlockScan::t_malformed:
                     return false;
 
@@ -570,7 +623,7 @@ bool Parser::filter_conditional_tokens(
         }
 
         Directive directive;
-        if (!read_directive(tokens, index, directive, out_error)) {
+        if (!read_directive(tokens, index, directive, out)) {
             return false;
         }
 
@@ -579,12 +632,21 @@ bool Parser::filter_conditional_tokens(
         if (name == ConditionalDirective::k_if) {
             Frame frame;
             frame.line = directive.line;
+            if (directive.at < tokens.size()) {
+                frame.column = tokens.tokens[directive.at].char_offset;
+                if (frame.column == 0) {
+                    frame.column = 1;
+                }
+
+                const std::string &text = tokens.token_values[directive.at];
+                frame.width = text.empty() ? 1u : static_cast<uint32_t>(text.size());
+            }
 
             // **the condition is evaluated even inside a region being skipped.** That is what makes a
             // typo in a nested condition reportable on a platform whose outer arm was not taken - and it
             // is safe, because evaluating one is a lookup over TargetFacts with no side effects
             bool value = false;
-            if (!evaluate_condition(tokens, directive, facts, value, out_error)) {
+            if (!evaluate_condition(tokens, directive, facts, value, out)) {
                 return false;
             }
 
@@ -597,7 +659,11 @@ bool Parser::filter_conditional_tokens(
         }
 
         if (frames.empty()) {
-            out_error = locate(directive.line, fmt::format("'#[{}]' has no open '#[if: ...]'", name));
+            locate(
+                tokens,
+                directive.at,
+                fmt::format("'#[{}]' has no open '#[if: ...]'", name),
+                out);
             return false;
         }
 
@@ -610,9 +676,14 @@ bool Parser::filter_conditional_tokens(
         }
 
         if (frame.seen_else) {
-            out_error = locate(directive.line, fmt::format(
-                "'#[{}]' comes after the '#[else]' of the '#[if: ...]' on line {}",
-                name, frame.line));
+            locate(
+                tokens,
+                directive.at,
+                fmt::format(
+                    "'#[{}]' comes after the '#[else]' of the '#[if: ...]' on line {}",
+                    name,
+                    frame.line),
+                out);
             return false;
         }
 
@@ -628,7 +699,7 @@ bool Parser::filter_conditional_tokens(
         // `#[elif: ...]` - evaluated whether or not an earlier arm was taken, so that an unknown value in
         // it is still caught, and then kept only if none was
         bool value = false;
-        if (!evaluate_condition(tokens, directive, facts, value, out_error)) {
+        if (!evaluate_condition(tokens, directive, facts, value, out)) {
             return false;
         }
 
@@ -639,7 +710,10 @@ bool Parser::filter_conditional_tokens(
     }
 
     if (!frames.empty()) {
-        out_error = locate(frames.back().line, "'#[if: ...]' is never closed - add '#[end]'");
+        out.message = "'#[if: ...]' is never closed - add '#[end]'";
+        out.line = frames.back().line;
+        out.column = frames.back().column;
+        out.width = frames.back().width;
         return false;
     }
 

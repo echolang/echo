@@ -1,0 +1,6 @@
+// `const(1 / 0)` already refused. a plain `echo 1 / 0` used to compile and
+// trap only in a debug run. TypeChecker asks the same fold of a literal divisor
+
+echo 1 / 0;
+echo 5 % 0;
+int32 $computed = 4 / (2 - 2);

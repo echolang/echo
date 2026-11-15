@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] UnexpectedToken  type_arg_comma.eco:1:17
+
+  Unexpected token 'identifier' found. Expected 'comma (,)'
+
+  1 | $m = map<string int32>();
+    :                 ^^^^^ expected comma (,)
+  2 | echo $m->count();
+
+1 error, nothing was compiled.

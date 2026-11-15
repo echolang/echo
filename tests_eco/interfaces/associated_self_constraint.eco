@@ -1,0 +1,19 @@
+// an associated type whose constraint names itself, bound to a type parameter that
+// already states the same constraint. `Key` would be `K`, and K : comparable<K>
+public interface Query
+{
+    type Key : contract::comparable<Key>;
+    function key() : Key;
+}
+
+public struct Rows<K : contract::comparable<K>> : Query
+{
+    public K $k;
+
+    public function key() : K
+    {
+        return $this->k;
+    }
+}
+
+echo Rows<int64>(7)->key();

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] PrivateMember  private_static_from_outside.eco:7:12
+
+  '$count' is private to 'Zone' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'Zone' instead.
+
+  6 | 
+  7 | echo Zone::$count;
+    :            ^^^^^^
+  8 | 
+
+1 error, nothing was compiled.

@@ -63,6 +63,13 @@ namespace AST
     // the sentence TypeParamDecl::allows' reporters use, matching AST::type_literal_at's overflow wording
     std::string const_generic_overflow_sentence(const ValueType &dest, uint64_t bits);
 
+    // UnsatisfiedTypeConstraint: parser, TypeChecker, and the monomorphizer all report this
+    std::string unsatisfied_constraint_sentence(
+        const std::string &param,
+        const std::string &display,
+        const std::string &constraint,
+        const ValueType &given);
+
     // a parameter is a type, or a compile-time value. the split is a kind rather than a flag so
     // a site that meant `T` cannot silently accept `10`, and so `fixed_array<int32, 10>` and
     // `fixed_array<int32, 11>` intern as two types because their second argument's bits differ

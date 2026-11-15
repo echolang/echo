@@ -1,0 +1,12 @@
+// `$o = [3, 4]` through `array<int32>&` used to leave the literal in the tree:
+// in-place expansion asked mint_constructor of the borrow, which has no layout
+function clear(array<int32>& $o) : void
+{
+    $o = [3, 4];
+}
+
+array<int32> $a = [1];
+clear($a);
+echo $a->count();
+echo $a[0];
+echo $a[1];

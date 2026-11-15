@@ -32,8 +32,8 @@ AST::ValueType AST::UnaryExprNode::result_type() const
         return AST::ValueType::make_unknown();
     }
 
-    // negation preserves the operand type
-    return expr->result_type();
+    // peel T& so `-$x / 8.0` over a foreach `const float64&` is float arithmetic
+    return value_result_type(*expr);
 }
 
 AST::ValueType AST::BinaryExprNode::result_type() const
@@ -87,6 +87,21 @@ AST::ValueType AST::BinaryExprNode::result_type() const
         && (raw_left.is_class() || raw_right.is_class()
             || raw_left.is_nullable() || raw_right.is_nullable()
             || raw_left.is_weak() || raw_right.is_weak())) {
+        // class identity is both handles, matching binary_has_builtin_meaning.
+        // `StatusColumn() == Status::open` is a declared operator returning Term<bool>;
+        // answering bool here made `where(...)` refuse before OperatorRewriter rewrote
+        if (raw_left.is_class() || raw_right.is_class()) {
+            if (raw_left.is_class() && raw_right.is_class()) {
+                return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+            }
+
+            if (is_written_null(lhs) || is_written_null(rhs)) {
+                return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+            }
+
+            return AST::ValueType::make_unknown();
+        }
+
         return AST::ValueType(AST::ValueTypePrimitive::t_bool);
     }
 
@@ -166,6 +181,12 @@ AST::ValueType AST::FunctionCallExprNode::result_type() const
             return AST::ValueType::make_void();
         }
 
+        return AST::ValueType::make_unknown();
+    }
+
+    // a stamped operator whose operand did not fit: echo would otherwise print the
+    // return type. the conversion refusal is the diagnostic
+    if (settlement == CallSettlement::t_failed && decl->is_operator()) {
         return AST::ValueType::make_unknown();
     }
 
@@ -290,9 +311,9 @@ AST::ValueType AST::AddrOfExprNode::result_type() const
     // rule is what makes both `int32& $r = &$var;` and `ptr<int32> $p = &$var;` legal without a
     // cast
     //
-    // built over the operand's own result type, with no peeling: taking the address of a
-    // pointer variable must yield a pointer to that variable's slot
-    return ValueType::make_pointer(operand_type, false);
+    // a T& operand peels: `&$data` on `const S&` is the struct, not the reference slot.
+    // `ptr<T>` stays a slot, so `&$buf` on `ptr<uint8>` is still the address of `$buf`
+    return ValueType::make_pointer(borrow_target_of(operand_type), false);
 }
 
 const std::string AST::AddrOfExprNode::node_description()

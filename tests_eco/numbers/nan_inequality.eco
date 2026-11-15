@@ -1,0 +1,12 @@
+// `!=` on floats was ordered (`fcmp one`), so `$n != $n` was false for NaN.
+// unordered (`une`) matches IEEE: a NaN is never equal to itself
+
+float64 $z = 0.0;
+float64 $n = $z / $z;
+echo $n != $n;
+echo !($n == $n);
+
+float32 $z32 = 0.0f;
+float32 $n32 = $z32 / $z32;
+echo $n32 != $n32;
+echo !($n32 == $n32);

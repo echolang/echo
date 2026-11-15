@@ -528,3 +528,11 @@ TEST_CASE("a shift count at or above the operand's width has no answer", "[AST][
     // float or a bool beside a shift into a located diagnostic, and answering here would be a second one
     REQUIRE_FALSE(shift_count_refusal(s.f64, 999).has_value());
 }
+
+TEST_CASE("a divisor that folded to 0 has no answer", "[AST][operators]")
+{
+    REQUIRE(division_by_zero_refusal(0).has_value());
+    REQUIRE_FALSE(division_by_zero_refusal(1).has_value());
+    REQUIRE(*division_by_zero_refusal(0) ==
+        "this divides by zero. at runtime that is undefined; here it is simply refused.");
+}

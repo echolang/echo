@@ -1,0 +1,26 @@
+// T : Store<S> with two Store<> conformances must not bind S from matches.front()
+public interface Store<S>
+{
+    function put(S $s) : string;
+}
+
+public class Both : Store<string>, Store<int32>
+{
+    public function put(string $s) : string
+    {
+        return $s;
+    }
+
+    public function put(int32 $n) : string
+    {
+        return 'n';
+    }
+}
+
+public function save<T : Store<S>, S>(T& $store, S? $x) : string
+{
+    S $s = guard $x else { return 'none'; };
+    return $store->put($s);
+}
+
+echo save(Both(), null);

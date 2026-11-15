@@ -1,0 +1,24 @@
+// from `namespace demo`, `cols::A` names `demo::cols`, not a root `cols`
+namespace demo;
+
+namespace demo::cols;
+
+public struct A
+{
+    public int32 $v = 9;
+}
+
+public function X() : int32
+{
+    return 8;
+}
+
+namespace demo;
+
+echo cols::X();
+
+cols::A $a = cols::A();
+echo $a->v;
+
+cols::A $b = cols::A(7);
+echo $b->v;

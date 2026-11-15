@@ -238,7 +238,11 @@ private function bytes_for<T>(usize $count) : usize
 #[inline]
 private function overflows<T>(usize $count) : bool
 {
-    return size<T>() != 0 && $count > ~(0 as usize) / size<T>();
+    const if (size<T>() == 0) {
+        return false;
+    } else {
+        return $count > ~(0 as usize) / size<T>();
+    }
 }
 
 /**
@@ -454,7 +458,7 @@ public function weaks<T>(T& $handle) : usize;
  * `array<T>`'s storage are all allocations, so the number covers the whole program rather than the
  * part written against this namespace.
  *
- * Needs `--track-allocations` (or `--explain-memory`, which implies it). Without it there is no
+ * Needs `--track-allocations` (or `--explain memory`, which implies it). Without it there is no
  * counter, and rather than answer zero - the one wrong answer you could not tell from the right one -
  * the compiler refuses the call where you wrote it.
  *

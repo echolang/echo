@@ -1,0 +1,5 @@
+flags: --check-refcounts
+
+--- OUT --->
+key=hello-a-long-string-not-sso-42
+key=hello-a-long-string-not-sso-42

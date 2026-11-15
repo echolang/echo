@@ -264,23 +264,57 @@ AST::FunctionCallExprNode *AST::unbound_shorthand_call_of(AST::ExprNode *expr)
 
 bool AST::bind_shorthand_to(AST::ExprNode *expr, const AST::ValueType &destination)
 {
-    auto *call = unbound_shorthand_call_of(expr);
+    bool changed = false;
+    auto *shorthand = unbound_shorthand_call_of(expr);
 
-    if (call == nullptr) {
-        return false;
+    if (shorthand != nullptr) {
+        const ValueType owner = static_owner_of_destination(destination);
+
+        if (owner.has_complex_type()) {
+            shorthand->static_owner = owner;
+
+            // back to unresolved so the next round looks the name up against the owner it now has. the earlier
+            // rounds answered t_unknown_name, which settle() deliberately leaves non-terminal for exactly this
+            shorthand->settlement = CallSettlement::t_unresolved;
+            changed = true;
+        }
     }
 
-    const ValueType owner = static_owner_of_destination(destination);
-
-    if (!owner.has_complex_type()) {
-        return false;
+    // dest names the instance a written template owner could not: `Queue::into` at `Queue<int32>`.
+    // walk the same spine shorthand does, so `.of()->into(...)` seeds too
+    FunctionCallExprNode *call = shorthand;
+    if (call == nullptr && expr != nullptr && expr->get_node_type() == NodeType::n_expr_call) {
+        call = static_cast<FunctionCallExprNode *>(expr);
     }
 
-    call->static_owner = owner;
+    if (call == nullptr
+        || call->static_owner.is_unknown()
+        || !call->static_owner.has_complex_type()) {
+        return changed;
+    }
 
-    // back to unresolved so the next round looks the name up against the owner it now has. the earlier
-    // rounds answered t_unknown_name, which settle() deliberately leaves non-terminal for exactly this
-    call->settlement = CallSettlement::t_unresolved;
+    const ValueType dest_owner = static_owner_of_destination(destination);
+
+    if (!dest_owner.has_complex_type()) {
+        return changed;
+    }
+
+    ComplexType *written = call->static_owner.get_complex_type();
+    ComplexType *wanted = dest_owner.get_complex_type();
+
+    if (written == nullptr || wanted == nullptr
+        || wanted->template_or_self() != written->template_or_self()
+        || !wanted->is_instantiated()
+        || written->is_instantiated()) {
+        return changed;
+    }
+
+    call->static_owner = dest_owner;
+    // a generic decl already chosen is waiting on instantiate. flipping back to
+    // unresolved re-chooses the template next round and `_processed` then skips rewire
+    if (call->decl == nullptr || !call->decl->is_generic()) {
+        call->settlement = CallSettlement::t_unresolved;
+    }
 
     return true;
 }

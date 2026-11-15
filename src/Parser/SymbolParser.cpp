@@ -74,6 +74,14 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // it was written on
         if (const std::optional<AST::Visibility> written =
                 AST::visibility_of_token(cursor.current().type())) {
+            // `take(public: 10)` and `$m->public` are names, not modifiers
+            if (cursor.peek_is_type(1, Token::Type::t_colon)
+                || cursor.peek_is_type(1, Token::Type::t_open_paren)
+                || cursor.peek_is_type(1, Token::Type::t_semicolon)) {
+                cursor.skip();
+                continue;
+            }
+
             pending.visibility = written;
             cursor.skip();
             continue;
@@ -88,6 +96,11 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // following it here would move every *later* declaration in the file into a namespace the two
         // passes that come after keep at the file's, and the refusal stays theirs to report
         if (cursor.is_type(Token::Type::t_namespace)) {
+            if (!starts_namespacedecl(cursor)) {
+                cursor.skip();
+                continue;
+            }
+
             // cleared on both paths: `namespace a::b;` is a statement and not a declaration, so a modifier
             // written ahead of one belongs to nothing - and left pending it would attach itself to the next
             // declaration in the file
@@ -442,7 +455,7 @@ void Parser::parse_declaration_surface(
                 parse_declaration_surface(payload, cursor.current(), attribute);
             }
         }
-        else if (cursor.is_type(Token::Type::t_namespace)) {
+        else if (starts_namespacedecl(cursor)) {
             parse_namespacedecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_use)) {

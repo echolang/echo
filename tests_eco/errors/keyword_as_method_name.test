@@ -19,13 +19,4 @@ expect: fail
      :                            ^^^^
   14 |     {
 
-[error] keyword_as_method_name.eco:18:21
-
-  'class' is reserved and cannot be a method name
-
-  17 | 
-  18 |     public function class() : uint32
-     :                     ^^^^^
-  19 |     {
-
-3 errors, nothing was compiled.
+2 errors, nothing was compiled.

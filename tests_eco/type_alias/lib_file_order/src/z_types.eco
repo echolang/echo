@@ -1,0 +1,20 @@
+namespace order;
+
+public interface Store<K>
+{
+    function find(K $k) : K
+    {
+        return $k;
+    }
+}
+
+public class Records<K, V> : Store<K>
+{
+}
+
+public type IntRecords = Records<int64, int64>;
+
+public struct Cfg
+{
+    public static int32 $limit = 5;
+}

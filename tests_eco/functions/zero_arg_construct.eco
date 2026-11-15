@@ -1,0 +1,14 @@
+// zero-argument construction when a field default mentions a type parameter.
+// the lone constructor still has to substitute R? from the constructed type
+public struct Link<R>
+{
+    public R? $head = null;
+
+    public function fresh() : Link<R>
+    {
+        return Link<R>();
+    }
+}
+
+echo Link<string>()->head ?? 'none';
+echo Link<string>(null)->fresh()->head ?? 'none';

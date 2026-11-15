@@ -262,10 +262,13 @@ namespace AST
             return result;
         }
 
-        const bool exact_one = only != nullptr
-            && argument_fit(only->result_type(), only, target) == ArgumentFit::t_exact;
-        if (exact_one) {
-            return result;
+        if (only != nullptr) {
+            const ArgumentFit fit = argument_fit(only->result_type(), only, target);
+            if (fit == ArgumentFit::t_exact
+                || fit == ArgumentFit::t_widening
+                || fit == ArgumentFit::t_read_through) {
+                return result;
+            }
         }
 
         std::vector<ExprNode *> inner_args(

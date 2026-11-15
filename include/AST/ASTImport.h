@@ -73,14 +73,16 @@ namespace AST
         std::string_view name
     );
 
-    // a written `a::b::c` prefix, first segment applied as a `use`. parse_namespace mints
-    // missing children so a later lookup is exact; parse_static_owner does not, so a name
-    // that is a type stays silent for the type path to try. empty parts answers null
+    // a written `a::b::c` prefix, first segment applied as a `use`, then as a child of `from`
+    // walking outward (so `cols::A` from `namespace demo` names `demo::cols`). parse_namespace
+    // mints missing children so a later lookup is exact; parse_static_owner does not, so a
+    // name that is a type stays silent for the type path to try. empty parts answers null
     Namespace *namespace_from_written_path(
         const File &file,
         Collector &collector,
         const std::vector<std::string> &parts,
-        bool mint
+        bool mint,
+        const Namespace *from = nullptr
     );
 
     // retarget an unqualified name this file imported as an item. true when it did: `ns` is

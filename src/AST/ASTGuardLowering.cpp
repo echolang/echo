@@ -254,7 +254,11 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
             return;
         }
 
-        if (guard->decl == nullptr && !place_outlives_statement(subject)) {
+        // statement form hoists any rvalue. initializer form hoists only a *place* that dies
+        // with the statement (`mk()->head`). hoisting a call returning `ptr<T>?` turns it into
+        // a pointer local that value_result_type peels, and TypeChecker then sees a present `T`
+        if (!place_outlives_statement(subject)
+            && (guard->decl == nullptr || is_place_expression(*subject))) {
             VarDeclNode &subject_decl = hoist_subject(scope, index, *guard, subject);
             guard->set_tested(&local_place(*_current_module, subject_decl));
         }

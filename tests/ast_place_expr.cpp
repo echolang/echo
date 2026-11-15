@@ -131,6 +131,30 @@ TEST_CASE("An address, a literal and a call result are not places", "[AST][point
     REQUIRE_FALSE(is_place_expression(*call));
 }
 
+TEST_CASE("& of a T& is the pointee, & of a ptr is the slot", "[AST][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct S { int32 $a; int32 $b; }\n"
+        "function via(const S& $data) : void { const S& $r = &$data; }\n"
+        "function slot(ptr<int32> $buf) : void { ptr<int32>& $p = &$buf; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    bool saw_struct_peel = false;
+    bool saw_ptr_slot = false;
+    auto &module = bundle->modules.find_module("test");
+    for (auto *node : module.nodes.of_type<AddrOfExprNode>()) {
+        const ValueType t = node->result_type();
+        if (t.is_pointer() && !t.is_nullable() && t.pointee().is_struct()) {
+            saw_struct_peel = true;
+        }
+        if (t.is_pointer() && !t.is_nullable() && t.pointee().is_pointer() && t.pointee().is_nullable()) {
+            saw_ptr_slot = true;
+        }
+    }
+    REQUIRE(saw_struct_peel);
+    REQUIRE(saw_ptr_slot);
+}
+
 TEST_CASE("can_bind_temporary admits a value with no home, and only that", "[AST][pointer]")
 {
     // the expression half of the temporary-borrow rank: a non-place may answer a borrow parameter, because a slot can be

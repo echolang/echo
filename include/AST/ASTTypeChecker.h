@@ -16,6 +16,7 @@ namespace AST
     class File;
     class BinaryExprNode;
     class ExprNode;
+    class FunctionCallExprNode;
     class TypeNode;
     class VarRefNode;
 
@@ -175,6 +176,10 @@ namespace AST
         // program has every operator's overload set whether it uses the type or not
         const FunctionDeclNode *_context_callee = nullptr;
 
+        // the call `_context_callee` belongs to, so a refused operator conversion can leave
+        // that call with no usable type. echo then skips it as undetermined
+        FunctionCallExprNode *_context_call = nullptr;
+
         // **and whether AST::binary_operand_refusal already had something to say about that call's
         // operands**, decided once where the callee is and read wherever a refusal is about to be written.
         // its sentence is the better one in every case where it answers at all - "cannot compare 'P'
@@ -247,6 +252,11 @@ namespace AST
         // AST::unresolved_type_name_refusal. asked from visitType, which RecursiveVisitor
         // reaches through type_edge. the parser is silent; this is the sentence
         void check_unresolved_type_name(const TypeNode *node);
+
+        // an interned application whose arguments the declaration pass could not yet
+        // judge (`Hasher` above `Sha256State : Compressor`). parse deferred; this is
+        // the sentence, the same wording type_arguments_fit uses
+        void check_instantiation_constraints(const TypeNode &node);
 
         // every declaration that carries a `simd<T, N>` - AST::simd_shape_refusal.
         // pending (unbound N or T) is silence; refused is a sentence

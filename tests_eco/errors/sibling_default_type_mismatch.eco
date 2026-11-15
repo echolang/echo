@@ -1,0 +1,17 @@
+// a sibling default of the same name still has to match the requirement's types
+public interface Needs
+{
+    function with() : int32;
+}
+
+public interface Gives
+{
+    function with() : string
+    {
+        return 'default';
+    }
+}
+
+public class Both : Needs, Gives
+{
+}

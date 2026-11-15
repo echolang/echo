@@ -1,0 +1,19 @@
+// an array literal at `array<X>?` used to segfault, ICE, or refuse. dest-type at
+// the payload, then wrap. a call, a local, and a field-wise constructor
+function f(array<int32>? $v) : int32
+{
+    return ($v?->count() ?? 0) as int32;
+}
+
+echo f([1, 2]);
+
+array<int32>? $a = [3, 4, 5];
+echo ($a?->count() ?? 0) as int32;
+
+struct Hold
+{
+    array<int32>? $xs;
+}
+
+Hold $h = Hold([7]);
+echo ($h->xs?->count() ?? 0) as int32;

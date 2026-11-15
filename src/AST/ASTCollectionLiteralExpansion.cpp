@@ -521,9 +521,11 @@ bool CollectionLiteralExpansion::expand_statement(
 
     if (destination.assign_target != nullptr) {
         const ValueType dest = value_result_type(*destination.assign_target);
-        if (!is_undetermined_type(dest)) {
-            bind_collection_literal_to(*destination.slot, dest, _collector);
+        if (is_undetermined_type(dest)) {
+            return false;
         }
+
+        bind_collection_literal_to(*destination.slot, dest, _collector);
     }
 
     // **mutable variable storage is filled in place.** everything else hoists: a const name cannot
@@ -537,7 +539,11 @@ bool CollectionLiteralExpansion::expand_statement(
 
         bind_collection_literal_to(*destination.slot, destination_type, _collector);
 
+        // a `T&` parameter is storage, but mint_constructor asks has_property_layout of
+        // the dest type and a borrow has none - `$o = [3, 4]` then left the literal in
+        // the tree with expansion_decided set. hoist fills an array and assigns through
         const bool in_place = !destination_type.is_const()
+            && !parameter_auto_borrows(destination_type)
             && destination.literal->bound_type.has_value()
             && *destination.literal->bound_type == implicit_conversion_target(destination_type);
 

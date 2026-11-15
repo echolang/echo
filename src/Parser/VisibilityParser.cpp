@@ -50,6 +50,14 @@ Parser::VisibilityPrefix Parser::parse_visibility_prefix(
         return prefix;
     }
 
+    // `public:` is a parameter label, `->public` a member, `public()` a call. a modifier
+    // always precedes a declaration keyword or a type
+    if (cursor.peek_is_type(1, Token::Type::t_colon)
+        || cursor.peek_is_type(1, Token::Type::t_open_paren)
+        || cursor.peek_is_type(1, Token::Type::t_semicolon)) {
+        return prefix;
+    }
+
     // a `/** ... */` ahead of `public function f()` points at this token, not at `function`
     Parser::take_leading_doc(payload);
 

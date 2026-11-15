@@ -1,0 +1,19 @@
+// type parameters are part of the signature. `add(Kind)` and `add<J>(Kind)` used to collide
+enum Kind
+{
+    case a;
+    case b;
+}
+
+function add(Kind $k) : int32
+{
+    return 1;
+}
+
+function add<J>(Kind $k) : int32
+{
+    return 2;
+}
+
+echo add(.a);
+echo add<int32>(.b);

@@ -1,0 +1,16 @@
+// a generic method answers a generic interface requirement. U is bound at the call,
+// so Door::U and Gate::U are unified rather than compared by declaration identity
+interface Gate
+{
+    function tap<U>(U $x) : void;
+}
+
+struct Door : Gate
+{
+    function tap<U>(U $x) : void
+    {
+        echo $x;
+    }
+}
+
+Door()->tap(1);

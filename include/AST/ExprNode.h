@@ -356,8 +356,8 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `&E`: the address of E's storage, no peeling, so `&$buf` on a `ptr<uint8>` is `ptr<ptr<uint8>>`.
-    // a `weak<T>` destination turns it into a weak; the destination decides, because a generic `T`
+    // `&E`: the address of E's storage. a T& peels to the pointee; `&$buf` on a `ptr<uint8>` is
+    // the slot. a `weak<T>` destination turns it into a weak; the destination decides, because a generic `T`
     // body that takes `&` of a place must mean the slot even when T is a class. compiler-inserted
     // borrows use the same node (one bit, not a second kind)
     class AddrOfExprNode : public ExprNode

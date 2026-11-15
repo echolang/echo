@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnresolvedTypeParameter  static_owner_needs_destination.eco:17:13
+
+  Cannot infer type parameter 'L' of generic 'into' from the call arguments; specify it explicitly, e.g. into<...>(...)
+
+  16 | 
+  17 | echo Queue::into("j");
+     :             ^^^^
+  18 | 
+
+1 error, nothing was compiled.

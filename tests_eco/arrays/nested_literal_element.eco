@@ -1,0 +1,5 @@
+// `$nest[0] = [5, 6]` into `array<array<int64>>` used to infer int32 from the literals
+array<array<int64>> $nest = [[1 as int64]];
+$nest[0] = [5, 6];
+echo $nest[0][0];
+echo $nest[0][1];

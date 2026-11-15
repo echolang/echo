@@ -506,12 +506,14 @@ public function from(const string& $v, const string& $spec) : string
 {
     spec $s = spec_of($spec);
 
-    // a precision truncates text, which is the one place it is not about decimals
+    // a precision truncates text, which is the one place it is not about decimals.
+    // `boundary` walks back to a lead byte so `{$s:.2}` over `aäö` never emits a
+    // torn sequence
     if ($s->precision >= 0) {
         usize $limit = $s->precision;
 
         if ($limit < $v->size()) {
-            return align_to($v->sub(0, $limit), $s, CH_LT);
+            return align_to($v->sub(0, boundary($v, $limit)), $s, CH_LT);
         }
     }
 

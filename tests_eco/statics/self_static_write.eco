@@ -1,0 +1,12 @@
+// `self::$n = 5` used to parse as a refused constant and drop the write.
+// `self::$n` is the type's static, same as `Reg::$n`
+
+struct Reg {
+    public static int32 $n = 0;
+    public static function bump() : void { self::$n = 5; }
+    public static function read() : int32 { return self::$n; }
+}
+
+Reg::bump();
+echo Reg::$n;
+echo Reg::read();

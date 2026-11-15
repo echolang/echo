@@ -1,10 +1,19 @@
 #include "Parser/NamespaceParser.h"
 
 #include "AST/ASTImport.h"
+#include "AST/ASTIssue.h"
 
 bool is_part_of_namespace_token(Token::Type type)
 {
     return type == Token::Type::t_identifier || type == Token::Type::t_namespace_sep;
+}
+
+bool Parser::starts_namespacedecl(const Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_namespace)
+        && !(cursor.is_valid_offset(1)
+            && (cursor.peek_is_type(1, Token::Type::t_colon)
+                || cursor.peek_is_type(1, Token::Type::t_open_paren)));
 }
 
 size_t Parser::peek_past_namespace_prefix(Payload &payload, size_t offset)
@@ -39,7 +48,8 @@ AST::NamespaceNode *Parser::parse_namespace(Payload &payload)
         AST::file_of(payload.context),
         payload.collector,
         ns_parts,
-        /*mint=*/true);
+        /*mint=*/true,
+        payload.context.current_namespace);
 
     auto &ns_node = payload.context.emplace_node<AST::NamespaceNode>(slice, ns);
 
@@ -68,6 +78,8 @@ AST::NamespaceDeclNode *Parser::parse_namespacedecl(Parser::Payload &payload)
         return nullptr;
     }
 
+    const TokenReference at_namespace = payload.cursor.current();
+
     // skip the namespace keyword
     payload.cursor.skip();
 
@@ -80,6 +92,30 @@ AST::NamespaceDeclNode *Parser::parse_namespacedecl(Parser::Payload &payload)
 
     // collect a slice
     auto ns_tokens = payload.cursor.slice(start, payload.cursor.snapshot());
+
+    // ident (:: ident)*. `namespace;` is the root (empty path). `namespace a::;` ends on a separator
+    bool expect_ident = true;
+    bool well_formed = true;
+
+    for (auto token : ns_tokens) {
+        const bool ident = token.type() == Token::Type::t_identifier;
+        const bool sep = token.type() == Token::Type::t_namespace_sep;
+
+        if (expect_ident ? !ident : !sep) {
+            well_formed = false;
+            break;
+        }
+
+        expect_ident = !expect_ident;
+    }
+
+    if (!well_formed || (expect_ident && !ns_tokens.is_empty())) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at_namespace),
+            "A 'namespace' declaration needs a name - write 'namespace a;' or 'namespace a::b;'.");
+        payload.cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
 
     // we expect a semicolon
     if (!payload.cursor.is_type(Token::Type::t_semicolon)) {

@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] namespace_trailing_sep.eco:1:1
+
+  A 'namespace' declaration needs a name - write 'namespace a;' or 'namespace a::b;'.
+
+  1 | namespace a::;
+    : ^^^^^^^^^
+  2 | echo 1;
+
+1 error, nothing was compiled.

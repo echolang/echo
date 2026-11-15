@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnmetInterfaceRequirement  sibling_default_type_mismatch.eco:15:14
+
+  'Both' says it conforms to 'Needs' but does not satisfy 'with() : int32' - it declares no 'with'.
+
+  14 | 
+  15 | public class Both : Needs, Gives
+     :              ^^^^
+  16 | {
+
+1 error, nothing was compiled.

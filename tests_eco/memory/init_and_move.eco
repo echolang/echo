@@ -35,8 +35,10 @@
     assert(mem::live_allocations() == 5, "init moved an owner in rather than allocating one");
     assert(mem::refs($a->owner) == 2, "the local and the slot");
 
-    echo $buf:$[0];
-    echo $buf:$[1];
+    unsafe {
+        echo $buf:$[0];
+        echo $buf:$[1];
+    }
 
     // and back out. take hands the slot's owner over, so the count is unchanged - the slot stops being
     // an owner at the same moment `$out` starts being one. that is what leaves the slots dead, so the

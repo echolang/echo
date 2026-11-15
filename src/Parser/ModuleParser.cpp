@@ -50,6 +50,8 @@ Parser::Payload Parser::ModuleParser::make_parser_payload(
         collector,
         pass,
         false,
+        {},
+        false,
         {}
     };
 }
@@ -96,9 +98,12 @@ AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module
     // that something may shorten the range before the slice is taken - see AST::Module::TokenFilter
     const Compiler::TargetFacts facts = facts_for(module);
 
-    return module.tokenize(*_lexer.get(), file, [&facts](TokenCollection &tokens, size_t from, std::string &out_error) {
-        return Parser::filter_conditional_tokens(tokens, from, facts, out_error);
-    });
+    return module.tokenize(
+        *_lexer.get(),
+        file,
+        [&facts](TokenCollection &tokens, size_t from, AST::TokenFilterRefusal &out) {
+            return Parser::filter_conditional_tokens(tokens, from, facts, out);
+        });
 }
 
 void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &collector) const
@@ -170,6 +175,10 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
         parse_symbols(parser_payload);
     }
     }
+
+    // an alias interned `Records<int64>` before this file's `: Store<K>` was parsed.
+    // look() holds that pointer; refresh fills the conformance the default lives on
+    collector.type_registry.refresh_stale_instantiations();
 
     // lookups classify a `use` on demand. this sweep is only the refuse: after pass 2 every
     // function and constant of this module exists, so a path that is still unknown is an error

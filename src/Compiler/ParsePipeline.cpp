@@ -3,6 +3,7 @@
 #include "eco.h"
 #include "AST/ASTAccessPass.h"
 #include "AST/ASTConstantExpander.h"
+#include "AST/ASTDiagnostic.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTFileRoot.h"
 #include "AST/ASTIssue.h"
@@ -76,16 +77,50 @@ namespace
             parser.parse_input(input);
         }
         catch (AST::Module::TokenFilterException &e) {
-            return Compiler::FrontEndFailure{
+            Compiler::FrontEndFailure failure{
                 "Conditional Compilation Failed", e.what(), std::nullopt };
-        }
-        catch (Parser::ModuleParser::TokenizationException &e) {
-            std::optional<std::filesystem::path> path;
             if (e.file != nullptr) {
-                path = e.file->get_path();
+                failure.path = e.file->get_path();
             }
 
-            return Compiler::FrontEndFailure{ "Tokenization Failed", e.what(), std::move(path) };
+            if (e.refusal.line != 0) {
+                AST::Diagnostic diagnostic;
+                diagnostic.severity = AST::IssueSeverity::Error;
+                diagnostic.message = e.refusal.message;
+                diagnostic.primary.file = e.file;
+                diagnostic.primary.start = { e.refusal.line, e.refusal.column };
+                diagnostic.primary.end = {
+                    e.refusal.line,
+                    e.refusal.column + (e.refusal.width == 0 ? 1 : e.refusal.width)
+                };
+                failure.diagnostic = std::move(diagnostic);
+            }
+
+            return failure;
+        }
+        catch (Parser::ModuleParser::TokenizationException &e) {
+            Compiler::FrontEndFailure failure{ "Tokenization Failed", e.what(), std::nullopt };
+            const uint32_t line = static_cast<uint32_t>(e.exception.get_line());
+            uint32_t column = static_cast<uint32_t>(e.exception.get_char_offset());
+            if (column == 0) {
+                column = 1;
+            }
+
+            if (e.file != nullptr) {
+                failure.path = e.file->get_path();
+            }
+
+            if (line != 0) {
+                AST::Diagnostic diagnostic;
+                diagnostic.severity = AST::IssueSeverity::Error;
+                diagnostic.message = e.what();
+                diagnostic.primary.file = e.file;
+                diagnostic.primary.start = { line, column };
+                diagnostic.primary.end = { line, column + 1 };
+                failure.diagnostic = std::move(diagnostic);
+            }
+
+            return failure;
         }
 
         return std::nullopt;

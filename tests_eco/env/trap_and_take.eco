@@ -2,28 +2,28 @@
 // terminate are the two every platform has, so this case runs on all three hosts
 use std::env;
 
-echo env::caught();
+echo env::signal::caught();
 
-guard env::trap() else ($e) {
+guard env::signal::trap() else ($e) {
     die($e->message());
 }
 
-guard env::raise(.terminate) else ($e) {
+guard env::signal::raise(.terminate) else ($e) {
     die($e->message());
 }
-guard env::raise(.interrupt) else ($e) {
+guard env::signal::raise(.interrupt) else ($e) {
     die($e->message());
 }
 
-echo env::caught();
-echo env::caught(.terminate);
+echo env::signal::caught();
+echo env::signal::caught(.terminate);
 
-env::signal $last = guard env::last();
+env::signal $last = guard env::signal::last();
 echo $last->name();
 
-while (env::caught()) {
-    env::signal $k = guard env::take();
+while (env::signal::caught()) {
+    env::signal $k = guard env::signal::take();
     echo $k->name();
 }
 
-echo env::caught();
+echo env::signal::caught();

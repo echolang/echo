@@ -1,0 +1,23 @@
+// a generic body calling an overloaded method by its type parameter. written
+// `transaction<T>` selects the generic overload; a concrete `transaction<int32>`
+// already worked
+public class Conn
+{
+    public function transaction(function<bool(Conn)> $work) : bool
+    {
+        return $work($this);
+    }
+
+    public function transaction<T>(function<T?(Conn)> $work) : T?
+    {
+        return $work($this);
+    }
+}
+
+public function run<T>(Conn $c, function<T?(Conn)> $work) : T?
+{
+    return $c->transaction<T>($work);
+}
+
+function<int32?(Conn)> $w = (Conn $x) => 7;
+echo run<int32>(Conn(), $w) ?? -1;

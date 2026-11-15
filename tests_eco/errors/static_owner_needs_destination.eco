@@ -1,0 +1,17 @@
+// without a dest, L is unreachable. a located "cannot infer", not an ICE
+class Queue<L>
+{
+    public string $name;
+
+    public constructor(const string& $name)
+    {
+        $this->name = $name;
+    }
+
+    public static function into(const string& $name) : Queue<L>
+    {
+        return Queue<L>($name);
+    }
+}
+
+echo Queue::into("j");

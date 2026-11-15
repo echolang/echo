@@ -17,6 +17,9 @@ namespace Parser
 
     AST::NamespaceNode *parse_namespace(Payload &payload);
     AST::NamespaceDeclNode *parse_namespacedecl(Payload &payload);
+
+    // `namespace name;` / `namespace a::b;`. `namespace:` is a label and `namespace()` a method
+    bool starts_namespacedecl(const Cursor &cursor);
 };
 
 

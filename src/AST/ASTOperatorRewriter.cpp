@@ -36,7 +36,6 @@
 #include "AST/WhileStatementNode.h"
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
-#include "AST/ForeachNode.h"
 #include "AST/MatchExprNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
@@ -531,7 +530,7 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
         return expr;
     }
 
-    if (collection_literal_of(expr)) {
+    if (collection_literal_of(expr) != nullptr) {
         CollectionLiteralExpansion expansion(
             *_current_module, _collector, _current_file, _finalizing, _hoist_count, _detached);
 
@@ -838,6 +837,22 @@ ExprNode *OperatorRewriter::bind_expression_hoists(ExprNode *expr, const TokenRe
     return &bind;
 }
 
+bool OperatorRewriter::waiting_on_dest(ExprNode *expr) const
+{
+    CollectionLiteralExprNode *literal = collection_literal_of(expr);
+    return literal != nullptr && !literal->bound_type.has_value() && !_finalizing;
+}
+
+void OperatorRewriter::visitReturn(ReturnNode &node)
+{
+    if (waiting_on_dest(node.expr)) {
+        statement_edges(node.unwind);
+        return;
+    }
+
+    RecursiveVisitor::visitReturn(node);
+}
+
 void OperatorRewriter::visit_match(MatchExprNode &node)
 {
     statement_edge(node.subject);
@@ -845,7 +860,7 @@ void OperatorRewriter::visit_match(MatchExprNode &node)
     for (MatchExprNode::Arm &arm : node.arms) {
         statement_edge(arm.scope);
 
-        if (arm.value == nullptr) {
+        if (arm.value == nullptr || waiting_on_dest(arm.value)) {
             continue;
         }
 
@@ -939,10 +954,7 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
 void OperatorRewriter::value_edges_except_untyped_collections(std::vector<ExprNode *> &arguments)
 {
     for (ExprNode *&arg : arguments) {
-        CollectionLiteralExprNode *literal = collection_literal_of(arg);
-
-        // bound_type is idempotent; CallResolver types call arguments after this pass
-        if (literal != nullptr && !literal->bound_type.has_value() && !_finalizing) {
+        if (waiting_on_dest(arg)) {
             continue;
         }
 
@@ -963,9 +975,7 @@ void OperatorRewriter::bind_call_arguments(
     }
 
     for (ExprNode *&arg : arguments) {
-        CollectionLiteralExprNode *literal = collection_literal_of(arg);
-
-        if (literal != nullptr && !literal->bound_type.has_value() && !_finalizing) {
+        if (waiting_on_dest(arg)) {
             continue;
         }
 

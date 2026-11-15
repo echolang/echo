@@ -1,0 +1,31 @@
+// initializer `guard` over a field of a call result used to skip the hoist (statement
+// form already hoisted). `$t = guard mk()->head` then ICEd on `$__temp1`
+public struct Box
+{
+    public string? $head = null;
+}
+
+public function mk() : Box
+{
+    return Box();
+}
+
+public function filled() : Box
+{
+    return Box('yes');
+}
+
+function absent() : string
+{
+    $t = guard mk()->head else { return '-'; };
+    return $t;
+}
+
+function present() : string
+{
+    $t = guard filled()->head else { return '-'; };
+    return $t;
+}
+
+echo absent();
+echo present();

@@ -106,9 +106,11 @@ namespace AST
             {
                 _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(
                     code_ref_for(mod, call->token_function_name),
-                    "Type parameter '" + inst.param->name + "' of '" + tmpl->func_name() +
-                    "' is constrained to '" + inst.constraint_label() +
-                    "' but was given '" + inst.bound.get_type_desciption() + "'");
+                    unsatisfied_constraint_sentence(
+                        inst.param->name,
+                        tmpl->func_name(),
+                        inst.constraint_label(),
+                        inst.bound));
             }
             is_error = true;
             return std::nullopt;
@@ -656,12 +658,25 @@ namespace AST
 
             // a call still naming a template is one inside a template nobody instantiated. silent,
             // exactly as determine_type_args is about it: the body is never emitted, and reporting it
-            // would blame a declaration for going unused
+            // would blame a declaration for going unused. finalize makes an inherited param of a
+            // written template owner unbound, so Queue::into at file scope is t_unbound_parameter
             if (call->decl != nullptr && call->decl->is_generic()) {
+                const Instantiation inst = can_instantiate(
+                    call->decl, *call, _collector, /*finalizing=*/true);
+                if (inst.blame == InstantiationBlame::t_unbound_parameter && inst.param != nullptr
+                    && !call_mentions_a_type_param(*call)) {
+                    _collector.collect_issue<Issue::UnresolvedTypeParameter>(
+                        at,
+                        "Cannot infer type parameter '" + inst.param->name + "' of generic '"
+                            + call->decl->func_name()
+                            + "' from the call arguments; specify it explicitly, e.g. "
+                            + call->decl->func_name() + "<...>(...)");
+                    call->settlement = CallSettlement::t_failed;
+                }
                 continue;
             }
 
-            if (arguments_mention_a_type_param(call->arguments)) {
+            if (call_mentions_a_type_param(*call)) {
                 continue;
             }
 

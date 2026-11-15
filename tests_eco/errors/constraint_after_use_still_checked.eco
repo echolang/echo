@@ -1,0 +1,21 @@
+// a named type used as a constrained argument above its declaration, that never
+// conforms. the declaration pass defers; TypeChecker still refuses
+public interface Compressor
+{
+    function step(int32 $x) : int32;
+}
+
+public struct Blocks<T : Compressor>
+{
+    public T $c;
+}
+
+public struct Holder
+{
+    public Blocks<Rock> $b;
+}
+
+public struct Rock
+{
+    public int32 $mass;
+}

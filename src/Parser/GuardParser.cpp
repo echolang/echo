@@ -58,6 +58,12 @@ AST::GuardNode *Parser::parse_guard(
     // `plan_decided` staying false until then is what stops AST::OwnershipPass walking the body early
     const bool decide_now = init_type.is_nullable();
 
+    // a field of a call (`mk()->head`) still needs the hoist: the place dies with the statement.
+    // a *call* returning `ptr<T>?` is not a place - hoisting it into `$__guardN` makes a pointer
+    // local, `value_result_type` peels it to `T`, and TypeChecker refuses a present `uint8`
+    const bool needs_subject_hoist =
+        AST::is_place_expression(*init) && !AST::place_outlives_statement(init);
+
     // the statement form has no binding to type. the subject lives on the node, not on a declaration
     if (binding != nullptr) {
         if (decide_now) {
@@ -113,9 +119,9 @@ AST::GuardNode *Parser::parse_guard(
         auto &node = payload.context.emplace_node<AST::GuardNode>(binding, &else_scope, guard_token);
         node.set_tested(init);
         node.implicit_abort = true;
-        // initializer T? is decided here. statement T? still needs GuardLowering to hoist an
-        // rvalue subject so the frame owns it
-        node.plan_decided = decide_now && binding != nullptr;
+        // initializer T? of a living place is decided here. a field of a call still needs
+        // GuardLowering to hoist so `$t = guard mk()->head` does not ICE on `$__temp1`
+        node.plan_decided = decide_now && binding != nullptr && !needs_subject_hoist;
 
         // a written else ends at the block. an omitted one ends like any other declaration
         if (!cursor.is_type(Token::Type::t_semicolon)) {
@@ -215,7 +221,8 @@ AST::GuardNode *Parser::parse_guard(
     // AST::GuardLowering, beside the failable-but-not-declared refusal it belongs with - and it costs
     // nothing, no program written before this existing one. statement T? is also not decided: an
     // rvalue subject still has to be hoisted so the frame owns it
-    node.plan_decided = decide_now && failure == nullptr && binding != nullptr;
+    node.plan_decided = decide_now && failure == nullptr && binding != nullptr
+        && !needs_subject_hoist;
 
     // a written else ends at this `}`. a trailing `;` is the declaration's or the
     // statement's, accepted rather than required - the omitted-else form already

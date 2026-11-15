@@ -21,7 +21,7 @@ expect: fail
 
 [error] ConstViolation  read_access_cannot_be_rebound.eco:25:50
 
-  Const violation: cannot write through 'const int32&' - its pointee is const
+  Const violation: cannot assign to '$x' - it is declared const
 
   24 | {
   25 |     function<void()> $f = function() : void { $x = 99; };

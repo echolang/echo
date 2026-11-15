@@ -30,6 +30,12 @@ bool AST::signatures_match(const AST::FunctionDeclNode *a, const AST::FunctionDe
         return false;
     }
 
+    // own type parameters are part of the signature: `add(Kind)` and `add<J>(Kind)`
+    // are overloads. inherited owner params are the same type, so they do not count
+    if (a->own_type_param_count() != b->own_type_param_count()) {
+        return false;
+    }
+
     for (size_t i = 0; i < a->args.size(); i++) {
         if (!(a->parameter_type(i) == b->parameter_type(i))) {
             return false;

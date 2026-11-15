@@ -1,0 +1,4 @@
+// `namespace;` (and `namespace ;`) names the root, so a later file-scope declaration is not
+// left inside the last namespace this file opened
+namespace ;
+echo 1;

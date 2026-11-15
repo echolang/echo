@@ -1,0 +1,8 @@
+// a parameter typed with an alias declared in a later file still reaches the
+// interface default; a static default from a later file still fills
+use order::IntRecords;
+use order::look;
+use order::cap;
+
+echo look(IntRecords());
+echo cap();

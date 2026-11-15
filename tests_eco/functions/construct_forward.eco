@@ -218,3 +218,10 @@ struct Parcel
 Parcel $parcel = Parcel(Pair(10, 11));
 echo make<Pair>($parcel->pair)->a;
 echo make<Pair>($parcel->pair)->b;
+
+function through_borrow(const Pair& $e) : int32
+{
+    return make<Pair>($e)->a;
+}
+
+echo through_borrow($parcel->pair);

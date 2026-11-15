@@ -12,5 +12,5 @@ CHECK: guard vardecl<type<int32>>($o)
 CHECK: vardecl<type<map<string,string>>>($__lit3)
 CHECK: guard vardecl<type<usize>>($n)
 # owning `$s` outlives the hoist: its drop is the frame's, after the echo
-CHECK: call echo(varref<string>(var($s)))
+CHECK: call echo(varref<string>(var($__temp4)))
 CHECK: call $deinit(addrof<string&>(varref<string>(var($s))))

@@ -1,0 +1,11 @@
+// copying array<Name?> used to synthesize the interned optional's copy into
+// stdlib, so Name was InaccessibleDeclaration at array.eco. the payload's home
+// is where that copy is written
+internal struct Name
+{
+    public string $first;
+}
+
+array<Name?> $xs = [Name('ann')];
+array<Name?> $c = $xs;
+echo ($c[0] ?? Name('x'))->first;

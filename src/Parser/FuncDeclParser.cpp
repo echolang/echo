@@ -107,6 +107,15 @@ bool Parser::parse_function_body(
             payload.context.push_scope(body);
 
             AST::ExprNode *expr = parse_expr(payload, decl.return_type);
+
+            // `() => echo 1`: the body is not an expression. recovery already consumed through
+            // `;`, so returning a closure would let the outer parse keep reading `$g();`
+            if (expr == nullptr) {
+                payload.context.pop_scope();
+                payload.context.pop_scope();
+                return false;
+            }
+
             auto &ret = payload.context.emplace_node<AST::ReturnNode>(expr, arrow.value());
             body.children.push_back(AST::make_ref(ret));
             decl.body = &body;
@@ -137,8 +146,10 @@ bool Parser::starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &eff
         return false;
     }
 
-    // an identifier followed by `$name` is that parameter's type, whatever it spells
-    if (cursor.peek_is_type(1, Token::Type::t_varname)) {
+    // an identifier followed by `$name` is that parameter's type, whatever it spells.
+    // `read:` is a label, not an access effect
+    if (cursor.peek_is_type(1, Token::Type::t_varname)
+        || cursor.peek_is_type(1, Token::Type::t_colon)) {
         return false;
     }
 
@@ -1168,24 +1179,28 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // skip the function keyword
     cursor.skip();
 
-    // next token should be an identifier aka the function name. a reserved word here is the one
-    // starts_funcdecl now admits so this arm can name it: `'null' is reserved and cannot be a method
-    // name`. skip_refused_function, not try_skip_to_next_statement - a body is full of `;` and `}`
-    if (!cursor.is_type(Token::Type::t_identifier)) {
-        if (!cursor.is_done() && token_spells_a_word(cursor.current().value())) {
+    // the name: an identifier, or a reserved word. `function namespace()` is unambiguous after
+    // `function`. `null` / `true` / `false` stay literals and cannot be names. skip_refused_function,
+    // not try_skip_to_next_statement - a body is full of `;` and `}`
+    const bool name_is_word = !cursor.is_done() && token_spells_a_word(cursor.current().value());
+    if (!cursor.is_type(Token::Type::t_identifier) && !name_is_word) {
+        payload.collect_unexpected_token(Token::Type::t_identifier);
+        Parser::skip_refused_function(payload);
+        return nullptr;
+    }
+
+    if (name_is_word) {
+        const std::string &spelling = cursor.current().value();
+        if (spelling == "null" || spelling == "true" || spelling == "false") {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(cursor.current()),
                 fmt::format(
                     "'{}' is reserved and cannot be a {} name",
-                    cursor.current().value(),
+                    spelling,
                     payload.context.self_struct_ptr != nullptr ? "method" : "function"));
+            Parser::skip_refused_function(payload);
+            return nullptr;
         }
-        else {
-            payload.collect_unexpected_token(Token::Type::t_identifier);
-        }
-
-        Parser::skip_refused_function(payload);
-        return nullptr;
     }
 
     // inside an extern block the first identifier is the C symbol, and an optional `as` renames

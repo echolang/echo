@@ -1,6 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] Conditional Compilation Failed
+[error] test_header_is_malformed.eco:4:1
 
-  line 4: 'test' must be followed by the test's name
+  'test' must be followed by the test's name
+
+  3 | // every test - and a malformed *body* is invisible, which is the price every excluded region pays
+  4 | test {
+    : ^^^^
+  5 |     assert(true);
+
+1 error, nothing was compiled.

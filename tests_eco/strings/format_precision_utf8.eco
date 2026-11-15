@@ -1,0 +1,8 @@
+// `{$s:.N}` used to cut mid-sequence. precision is a byte budget; `boundary`
+// walks back to a lead byte so the prefix is whole characters
+
+string $s = 'aäö';
+echo "[{$s:.1}]";
+echo "[{$s:.2}]";
+echo "[{$s:.3}]";
+echo "[{$s:.5}]";

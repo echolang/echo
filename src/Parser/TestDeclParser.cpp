@@ -115,7 +115,9 @@ namespace
 
 bool Parser::starts_testdecl(Parser::Cursor &cursor)
 {
-    return cursor.is_type(Token::Type::t_test);
+    // `test name { ... }`. `test:` is a label and `->test` a member
+    return cursor.is_type(Token::Type::t_test)
+        && cursor.peek_is_type(1, Token::Type::t_identifier);
 }
 
 void Parser::parse_testdecl(Parser::Payload &payload, bool symbol_only)

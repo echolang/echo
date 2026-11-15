@@ -472,8 +472,12 @@ void Parser::parse_enum_case(
 
             cursor.skip();
 
+            // argument scope, not the body: parameters in the emitted body were locals whose
+            // default init overwrote the incoming argument, so `.unique('k')` with
+            // `case unique(string $key = '')` seated `''`
+            auto &arg_scope = payload.context.emplace_node<AST::ScopeNode>();
             std::vector<AST::VarDeclNode *> rebuilt;
-            if (!Parser::parse_parameter_list(payload, rebuilt, *constructor->body, name_token)) {
+            if (!Parser::parse_parameter_list(payload, rebuilt, arg_scope, name_token)) {
                 constructor->replace_args(std::move(rebuilt));
                 return;
             }

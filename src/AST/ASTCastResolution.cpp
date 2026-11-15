@@ -83,6 +83,16 @@ namespace AST
                 _current_module->nodes, operand, lookup.plan.decl, destination, at);
         }
 
+        // identity of a place is the place. keeping the TypeCastNode loaded `$x as int32&`
+        // as a value and stored the bits into a borrow slot
+        if (lookup.plan.kind == CastKind::t_identity) {
+            ExprNode *operand = node.expr;
+            node.expr = nullptr;
+            forget_subtree(_bundle, node);
+            _changed = true;
+            return operand;
+        }
+
         node.plan_decided = true;
         return &node;
     }

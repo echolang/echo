@@ -246,7 +246,7 @@ namespace
             case Token::Type::t_op_mod: {
                 if (rhs == 0) {
                     return ConstFoldResult::refused(
-                        "this divides by zero. at runtime that is undefined; here it is simply refused.");
+                        *AST::division_by_zero_refusal(0));
                 }
 
                 if (size.is_signed) {
@@ -811,6 +811,12 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
                 return ConstFoldResult::refused(fmt::format(
                     "'{}' folds over whole numbers, and these are '{}'.",
                     spelling, folded_at.get_type_desciption()));
+            }
+
+            if ((op == Token::Type::t_op_div || op == Token::Type::t_op_mod) && rhs.bits == 0) {
+                if (auto refusal = division_by_zero_refusal(rhs.bits)) {
+                    return ConstFoldResult::refused(*refusal);
+                }
             }
 
             return fold_arithmetic(op, spelling, folded_at, lhs.bits, rhs.bits);

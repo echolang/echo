@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnresolvedTypeParameter  constraint_ambiguous_conformance.eco:26:6
+
+  Cannot infer type parameter 'S' of generic 'save' from the call arguments; specify it explicitly, e.g. save<...>(...)
+
+  25 | 
+  26 | echo save(Both(), null);
+     :      ^^^^
+  27 | 
+
+1 error, nothing was compiled.

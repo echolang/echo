@@ -169,6 +169,12 @@ static bool add_capture(
             return false;
         }
     }
+    else if (captured_type.is_pointer() && !captured_type.is_nullable()) {
+        // a captured `const T&` kept the borrow: the environment property was `const string&`
+        // and the closure read freed memory after `make` returned. peel to T so the copy
+        // (or retain) is of the value. `ptr<T>` stays an address
+        captured_type = AST::borrow_target_of(captured_type);
+    }
 
     const AST::ValueType env_type = env_param->type();
     AST::ComplexType *environment = env_type.get_complex_type();
@@ -201,12 +207,11 @@ static bool add_capture(
             auto &outer_ref = payload.context.emplace_node<AST::VarRefNode>(&outer_var);
             captured_place = &outer_ref;
 
-            // `$this` is a borrow; deref so the capture copies the class handle (a retain)
-            // rather than the address. rederive_stale_capture_types reads the place's type
-            if (vardecl->token_varname.value() == "$this"
-                && vardecl->has_type()
+            // a T& parameter (and `$this`) is a borrow; deref so the capture copies the
+            // value rather than the address. rederive_stale_capture_types reads the place's type
+            if (vardecl->has_type()
                 && vardecl->type().is_pointer()
-                && AST::value_type_of(vardecl->type()).is_class()) {
+                && !vardecl->type().is_nullable()) {
                 captured_place = &payload.context.emplace_node<AST::DerefExprNode>(captured_place);
             }
         }

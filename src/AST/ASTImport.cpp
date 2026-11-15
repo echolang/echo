@@ -287,11 +287,36 @@ Namespace *imported_namespace_start(
     return imp->target_namespace;
 }
 
+// a child of `from` walking outward through user namespaces, root last so a relative
+// `cols::A` from `namespace demo` names `demo::cols` and a full `std::math` still finds root `std`
+static Namespace *relative_child(
+    NamespaceManager &namespaces,
+    const Namespace *from,
+    const std::string &name
+)
+{
+    const Namespace *scope = from == nullptr ? nullptr : from->declaring_namespace();
+
+    while (scope != nullptr && !scope->is_root()) {
+        if (const Namespace *child = namespaces.get(*scope, name)) {
+            return const_cast<Namespace *>(child);
+        }
+
+        scope = scope->parent();
+        if (scope != nullptr) {
+            scope = scope->declaring_namespace();
+        }
+    }
+
+    return nullptr;
+}
+
 Namespace *namespace_from_written_path(
     const File &file,
     Collector &collector,
     const std::vector<std::string> &parts,
-    bool mint
+    bool mint,
+    const Namespace *from
 )
 {
     if (parts.empty()) {
@@ -302,6 +327,10 @@ Namespace *namespace_from_written_path(
     size_t index = 0;
 
     if (current != nullptr) {
+        index = 1;
+    }
+    else if (Namespace *relative = relative_child(collector.namespaces, from, parts[0])) {
+        current = relative;
         index = 1;
     }
     else if (mint) {

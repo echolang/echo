@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] hex_needs_a_digit.eco:1:6
+
+  The literal '0x' needs a digit after the prefix.
+
+  1 | echo 0x;
+    :      ^^
+  2 | 
+
+1 error, nothing was compiled.

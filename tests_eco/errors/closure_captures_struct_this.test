@@ -10,13 +10,4 @@ expect: fail
     :                                            ^^^^^
   8 |     }
 
-[error] UnexpectedToken  closure_captures_struct_this.eco:7:49
-
-  Unexpected token 'accessorlr (->)' found
-
-  6 |     {
-  7 |         return function() : int32 { return $this->hits; };
-    :                                                 ^^ unexpected here
-  8 |     }
-
-2 errors, nothing was compiled.
+1 error, nothing was compiled.

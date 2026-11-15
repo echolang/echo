@@ -105,9 +105,6 @@ namespace AST
             NodeCollection &nodes);
     };
 
-    // true when any argument still names a type parameter, so finalize stays silent: the call
-    // sits in an un-instantiated template, and the clone reports with concrete types
-    bool arguments_mention_a_type_param(const std::vector<ExprNode *> &arguments);
 };
 
 #endif

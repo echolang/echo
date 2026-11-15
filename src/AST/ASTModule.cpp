@@ -3,6 +3,7 @@
 #include "Lexer.h"
 
 #include <stdexcept>
+#include <string>
 
 std::string AST::Module::debug_description() const
 {
@@ -74,10 +75,10 @@ AST::TokenizedFile AST::Module::tokenize(
     // than something a caller does afterwards: a slice measured first and filtered second would name
     // tokens that are no longer at those indices
     if (filter) {
-        std::string error;
+        AST::TokenFilterRefusal refusal;
 
-        if (!filter(tokens, startindex, error)) {
-            throw TokenFilterException(error);
+        if (!filter(tokens, startindex, refusal)) {
+            throw TokenFilterException(std::move(refusal), &file);
         }
     }
 

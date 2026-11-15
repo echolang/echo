@@ -1,0 +1,8 @@
+// a constructor's owner_type is null; enclosing_type_of answers the type
+struct Reg {
+    public static int32 $n = 0;
+    public constructor() { self::$n = 5; }
+}
+
+Reg();
+echo Reg::$n;

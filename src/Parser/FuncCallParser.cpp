@@ -119,7 +119,7 @@ static bool parse_explicit_type_args(
 
             return false;
         } else {
-            auto *type_node = Parser::parse_type(payload);
+            auto *type_node = Parser::parse_type(payload, /*report=*/!speculative);
             if (type_node == nullptr) {
                 // parse_type has already reported whatever it could not read
                 return false;
@@ -151,6 +151,20 @@ static bool parse_explicit_type_args(
 
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
+        } else if (!cursor.is_generic_close()) {
+            // a comparison never sits a second type here: `LIMIT < $n` fails can_parse_type
+            // on the first argument. `map<string int32>()` is a type-arg list missing a comma
+            if (speculative && !Parser::can_parse_type(payload)) {
+                return false;
+            }
+
+            payload.collect_unexpected_token(Token::Type::t_comma);
+
+            if (!Parser::can_parse_type(payload)) {
+                return false;
+            }
+
+            continue;
         }
     }
 
@@ -399,20 +413,22 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     AST::ValueType constructed = lookup.constructed_type;
     bool consumed_type = false;
 
-    // an unqualified alias: `Page<int32>(...)`. skip_type_arguments is the silent peek so
-    // `LIMIT < $n` and a generic alias used as a comparison stay comparisons
-    const bool free_call = requested_namespace == nullptr
-        && !lookup.shorthand_dot.has_value()
+    // an alias has no constructor of its own name, so the type grammar has to apply it.
+    // `Page<int32>(...)` and `app::T2(5)` are the same production; skip_type_arguments is
+    // the silent peek so `LIMIT < $n` and a generic alias used as a comparison stay comparisons.
+    // a type already answers through the constructor overload set; taking that path here
+    // would steal `type_id<int32>()` from the generic function of the same name
+    const bool may_be_alias = !lookup.shorthand_dot.has_value()
         && lookup.static_owner.is_unknown()
         && constructed.is_unknown();
 
-    if (free_call) {
-        AST::Symbol *symbol = Parser::find_unqualified_type(
-            payload, funcname_token.value(), *payload.context.current_namespace);
+    if (may_be_alias) {
+        AST::Symbol *symbol = requested_namespace == nullptr
+            ? Parser::find_unqualified_type(
+                payload, funcname_token.value(), *payload.context.current_namespace)
+            : payload.collector.namespaces.find_symbol(
+                funcname_token.value(), *requested_namespace);
 
-        // an alias has no constructor of its own name, so the type grammar has to apply it.
-        // a type already answers through the constructor overload set; taking that path here
-        // would steal `type_id<int32>()` from the generic function of the same name
         if (symbol != nullptr && symbol->type() == AST::SymbolType::t_alias) {
             const auto at_name = payload.cursor.snapshot();
             payload.cursor.skip();
@@ -421,7 +437,15 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
             payload.cursor.restore(at_name);
 
             if (constructing) {
+                AST::Namespace *saved = payload.context.current_namespace;
+                if (requested_namespace != nullptr) {
+                    payload.context.current_namespace =
+                        const_cast<AST::Namespace *>(requested_namespace);
+                }
+
                 AST::TypeNode *parsed = Parser::parse_type(payload);
+                payload.context.current_namespace = saved;
+
                 if (parsed != nullptr) {
                     constructed = parsed->type;
                 }
@@ -432,7 +456,11 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
 
     const AST::Namespace *imported_ns = nullptr;
     std::string imported_name;
-    const bool may_import = free_call && !consumed_type;
+    const bool may_import = requested_namespace == nullptr
+        && !lookup.shorthand_dot.has_value()
+        && lookup.static_owner.is_unknown()
+        && constructed.is_unknown()
+        && !consumed_type;
     const bool imported = may_import && AST::apply_item_import(
         AST::file_of(payload.context),
         payload.collector,

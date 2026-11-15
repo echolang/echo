@@ -32,7 +32,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <ranges>
 
 namespace AST
 {
@@ -252,6 +251,21 @@ namespace AST
             }
 
             return !waiting_on_a_literal;
+        }
+
+        void seed_bound_static_owners(FunctionDeclNode *decl, const ArgumentBinding &binding)
+        {
+            if (decl == nullptr) {
+                return;
+            }
+
+            for (size_t i = 0; i < binding.filled.size() && i < decl->args.size(); i++) {
+                if (binding.filled[i].value == nullptr || decl->args[i] == nullptr) {
+                    continue;
+                }
+
+                bind_shorthand_to(binding.filled[i].value, decl->args[i]->type());
+            }
         }
 
         // the first argument that is a shorthand nothing has named an owner for, or null. what a tie
@@ -519,11 +533,9 @@ namespace AST
 
         const std::vector<ValueType> argument_types = argument_types_of(call);
 
-        // a non-operator lone bind survivor is a unique name even when other overloads were in
-        // the set; an operator set is still filtered because it is the whole program
-        const bool operator_set = candidates.size() > 1 && candidates.front()->is_operator();
+        // a unique non-operator `t_no` stays in the set so TypeChecker numbers the argument.
+        // operators, and every other generic, are filtered when they cannot instantiate
         const bool lone_bind_survivor = bound.size() == 1;
-        const bool filter_instantiation = operator_set || !lone_bind_survivor;
 
         std::vector<FunctionCandidate> match_candidates;
         match_candidates.reserve(bound.size());
@@ -544,7 +556,18 @@ namespace AST
                 }
             }
 
-            if (filter_instantiation && candidate->is_generic()) {
+            // written `<...>` on a non-constructor names a generic. constructors read `<...>`
+            // as the type (`array<uint32>()`). a concrete `add(Kind)` is not `add<int32>(...)`.
+            // a generic with too many arguments stays in the set so the monomorphizer reports
+            // `t_type_argument_count` rather than `NoMatchingOverload` for a unique name
+            if (!call.explicit_type_args.empty()
+                && !candidate->is_constructor()
+                && !candidate->is_generic()
+                && candidate->own_type_param_count() < call.explicit_type_args.size()) {
+                continue;
+            }
+
+            if (candidate->is_generic()) {
                 // score a template against the parameters it would actually be instantiated with,
                 // not against the bare `T`. an unsubstituted parameter is undetermined, which the
                 // matcher treats as neutral - so `pick<T>(T)` would tie with `pick(int32)` for a
@@ -570,9 +593,12 @@ namespace AST
                     slots.defers);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
-                // candidate. this is also how a type constraint filters an overload set
+                // candidate. this is also how a type constraint filters an overload set. a unique
+                // non-operator stays so TypeChecker still numbers the argument
                 if (inst.fit == InstantiationFit::t_no) {
-                    continue;
+                    if (!lone_bind_survivor || candidate->is_operator()) {
+                        continue;
+                    }
                 }
 
                 // t_maybe leaves the parameters as written, still mentioning `T`, which the matcher
@@ -581,6 +607,10 @@ namespace AST
                 if (inst.fit == InstantiationFit::t_yes) {
                     for (auto &parameter_type : parameter_types) {
                         parameter_type = substitute_type(parameter_type, inst.bindings, _collector.type_registry);
+                    }
+
+                    for (auto &slot_type : slots.types) {
+                        slot_type = substitute_type(slot_type, inst.bindings, _collector.type_registry);
                     }
                 }
             }
@@ -619,6 +649,18 @@ namespace AST
             // result_type() answers as unknown and is_undetermined_type reads as "no information", so
             // a caller waiting on *this* call is undecidable in turn rather than wrongly decided
             if (!report) {
+                if (lone_bind_survivor) {
+                    BoundCandidate &entry = bound.front();
+                    const ArgumentBinding &binding = entry.wrap.kind == ConstructWrap::Kind::t_wrap
+                        ? entry.wrap.binding : entry.binding;
+                    seed_bound_static_owners(entry.decl, binding);
+                }
+                return Result::t_pending;
+            }
+
+            // `return Link<R>()` inside a template: the type argument still names a
+            // parameter, so nothing here can stamp. the body is never emitted
+            if (call_mentions_a_type_param(call)) {
                 return Result::t_pending;
             }
 
@@ -890,6 +932,13 @@ namespace AST
         // instance and rewires `decl` to it, and only then are there concrete parameters to fit
         // anything to. so this half of the state machine runs again after that one
         if (call.decl->is_generic()) {
+            // `.make(5)` at `take<A>(Dep<A>)` has to name Dep<A> as owner before we wait
+            // for the instance. names stay on the call so can_instantiate can still bind
+            const ArgumentBinding binding = bind_arguments(
+                *call.decl, call.arguments, call.argument_names);
+            if (binding.kind == ArgumentBindKind::t_ok) {
+                seed_bound_static_owners(call.decl, binding);
+            }
             return Result::t_pending;
         }
 
@@ -942,23 +991,5 @@ namespace AST
             at,
             [&] { coerce_arguments(call, nodes); }
         );
-    }
-
-    bool arguments_mention_a_type_param(const std::vector<ExprNode *> &arguments)
-    {
-        // **an argument that still mentions a type parameter is a template's, not a program's.**
-        //
-        // this call sits in an un-instantiated body, the clones the fixpoint made are what carry
-        // concrete argument types, and reporting the template's would blame the one body that is
-        // never emitted. if nobody instantiated it there is nothing to report. if somebody did,
-        // the clone reports for itself, with the types the author can actually see.
-        //
-        // load-bearing for an overload set over a type parameter. `hash::of($key)` inside
-        // `map<K, V>` is undecidable in the template - every concrete overload scores neutrally
-        // against a bare `K`, so match_function answers t_undecidable - and it becomes decidable
-        // in `map<string, int32>`'s clone
-        return std::ranges::any_of(arguments, [](const ExprNode *argument) {
-            return argument != nullptr && contains_type_param(argument->result_type());
-        });
     }
 };

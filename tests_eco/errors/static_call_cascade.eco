@@ -1,0 +1,2 @@
+struct S {}
+echo S::nope(1) + 2;

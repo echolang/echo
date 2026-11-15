@@ -576,7 +576,8 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                 _ctx.push_scalar(_ctx.builder->CreateFCmpOEQ(left, right));
                 break;
             case Token::Type::t_logical_neq:
-                _ctx.push_scalar(_ctx.builder->CreateFCmpONE(left, right));
+                // unordered: a NaN is never equal to itself, so `$n != $n` is true
+                _ctx.push_scalar(_ctx.builder->CreateFCmpUNE(left, right));
                 break;
             case Token::Type::t_close_angle:
                 _ctx.push_scalar(_ctx.builder->CreateFCmpOGT(left, right));
@@ -1713,8 +1714,15 @@ void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
         return;
     }
 
-    // `&E` is the address of E's slot, with no transparency peeling - gen_lvalue, not
-    // gen_place. so `&$buf` on a `ptr<uint8>` yields the address of $buf itself
+    // `&E` of a T& is the pointee's slot (gen_place peels one borrow). `&$buf` on a
+    // `ptr<uint8>` is gen_lvalue: the address of `$buf` itself
+    const AST::ValueType operand_type = node.operand->result_type();
+
+    if (operand_type.is_pointer() && !operand_type.is_nullable()) {
+        _ctx.push_scalar(_ctx.lvalues->gen_place(*node.operand).address);
+        return;
+    }
+
     _ctx.push_scalar(_ctx.lvalues->gen_lvalue(*node.operand).address);
 }
 

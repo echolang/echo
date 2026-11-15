@@ -356,9 +356,9 @@ namespace
         facts.operating_system = "linux";
         facts.tests = false;
 
-        std::string error;
-        REQUIRE(Parser::filter_conditional_tokens(tokens, 0, facts, error));
-        REQUIRE(error.empty());
+        AST::TokenFilterRefusal refusal;
+        REQUIRE(Parser::filter_conditional_tokens(tokens, 0, facts, refusal));
+        REQUIRE(refusal.message.empty());
         return tokens;
     }
 }

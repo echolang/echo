@@ -66,6 +66,10 @@ void Parser::finish_place_statement(Parser::Payload &payload, AST::ScopeNode &sc
     }
 
     // otherwise the chain named storage, and a statement may only be writing to it
+    if (refuse_compound_assignment(payload)) {
+        return;
+    }
+
     const TokenReference assign_token = cursor.current();
 
     if (!cursor.is_type(Token::Type::t_assign)) {
@@ -189,7 +193,7 @@ AST::ScopeNode & Parser::parse_scope(
             payload.collect_unexpected_token(Token::Type::t_unknown);
             cursor.skip();
         }
-        else if (cursor.is_type(Token::Type::t_namespace)) {
+        else if (starts_namespacedecl(cursor)) {
             parse_namespacedecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_use)) {
@@ -355,7 +359,8 @@ AST::ScopeNode & Parser::parse_scope(
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_ptr_of }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_open_bracket }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_inc }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec })
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec }) ||
+            starts_compound_assignment(cursor)
         ) {
             // **the one walk that permits a `= guard` initializer.** the four other callers of
             // parse_varexpr read a declaration where no block may follow - a parameter list, a struct

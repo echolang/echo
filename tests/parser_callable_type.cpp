@@ -474,6 +474,29 @@ TEST_CASE("a closure that captures nothing has no environment", "[callable]")
     REQUIRE(closure->captured_values.empty());
 }
 
+TEST_CASE("capturing a const T& copies the value, not the borrow", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function make(const int32& $n) : function<int32()> {\n"
+        "    return function[$n]() : int32 { return $n; };\n"
+        "}\n"
+        "function<int32()> $f = make(5);\n"
+        "echo $f();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    ClosureExprNode *closure = first_closure(m);
+    REQUIRE(closure != nullptr);
+    REQUIRE(closure->environment_type != nullptr);
+    REQUIRE(closure->environment_type->has_property("$n"));
+    const ValueType captured = closure->environment_type->get_property_type("$n");
+    REQUIRE(captured.is_primitive());
+    REQUIRE_FALSE(captured.is_pointer());
+    REQUIRE(closure->captured_values.size() == 1);
+    REQUIRE(closure->captured_values[0]->get_node_type() == NodeType::n_expr_deref);
+}
+
 TEST_CASE("capturing a class is a retain", "[callable]")
 {
     // capture is a copy: a class handle is one more reference, torn down with the environment

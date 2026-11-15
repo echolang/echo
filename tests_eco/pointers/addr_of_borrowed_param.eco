@@ -1,0 +1,21 @@
+// `&$p` on a `const T&` used to be the address of the reference slot (`const S&&`),
+// so a `ptr<const uint8>` cast uploaded the wrong bytes. `&` peels a T& to the
+// pointee. `&$buf` on a `ptr<T>` stays the slot
+
+struct S { public int32 $a; public int32 $b; }
+
+function sum(ptr<const uint8> $p) : int32 {
+    int32 $t = 0;
+    int32 $i = 0;
+    while ($i < 8) {
+        $t = $t + ($p:$[$i] as int32);
+        $i++;
+    }
+    return $t;
+}
+
+function viaParam(const S& $data) : int32 {
+    return sum(ptr<const uint8>(&$data));
+}
+
+echo viaParam(S(1, 2));

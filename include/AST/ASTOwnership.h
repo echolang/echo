@@ -349,10 +349,11 @@ namespace AST
         // `$__elemN` without a second counter. the default is what every other mint already prints
         VarDeclNode &make_temporary(ExprNode *init, const TokenReference &site, const char *prefix = "temp");
 
-        // binds the target's address to a local when the place reaches through a container element
-        // or a `T[N]` index, so the teardown below and the store in gen_assign address it once
-        // between them. a no-op for every other place shape - a member path is a route the teardown
-        // can simply rebuild. the target has already been walked; this must not walk the bind
+        // binds the target's address to a local when the place reaches through a container element,
+        // a `T[N]` index, or a T&-returning call, so the teardown below and the store in gen_assign
+        // address it once between them. a no-op for every other place shape - a member path is a
+        // route the teardown can simply rebuild. the target has already been walked; this must not
+        // walk the bind
         void bind_indexed_target(AssignNode &assign);
 
         // **answers the expression to use in place of `expr`**, which is `expr` itself for everything

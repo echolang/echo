@@ -726,4 +726,13 @@ namespace AST
             "this shifts a '{}' by {} or more bits, which at runtime is undefined; here it is simply "
             "refused.", shifted.get_type_desciption(), bits);
     }
+
+    std::optional<std::string> division_by_zero_refusal(uint64_t bits)
+    {
+        if (bits != 0) {
+            return std::nullopt;
+        }
+
+        return "this divides by zero. at runtime that is undefined; here it is simply refused.";
+    }
 };

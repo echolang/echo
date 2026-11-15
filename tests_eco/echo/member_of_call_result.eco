@@ -1,0 +1,12 @@
+// echo of a member of a call result used to print freed bytes: the struct
+// dropped before the string handle was retained. binding first, passing to a
+// function, or calling `->size()` all worked. echo has no parameter type, so
+// arrive_value classified the copy as t_bytes
+
+public struct Cond { public string $sql; }
+public function mk(const string& $a) : Cond { return Cond("{$a} AND bbbbbbbb"); }
+
+echo mk('aaaaaaaa')->sql;
+
+Cond $bound = mk('cccccccc');
+echo $bound->sql;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnsatisfiedTypeConstraint  constraint_after_use_still_checked.eco:15:12
+
+  Type parameter 'T' of 'Blocks' is constrained to 'Compressor' but was given 'Rock'
+
+  14 | {
+  15 |     public Blocks<Rock> $b;
+     :            ^^^^^^
+  16 | }
+
+1 error, nothing was compiled.

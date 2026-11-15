@@ -1,0 +1,22 @@
+// `null` cannot bind S from `S?`. T : Store<S> with T = Posts binds S = string
+public interface Store<S>
+{
+    function put(S $s) : string;
+}
+
+public class Posts : Store<string>
+{
+    public function put(string $s) : string
+    {
+        return $s;
+    }
+}
+
+public function save<T : Store<S>, S>(T& $store, S? $x) : string
+{
+    S $s = guard $x else { return 'none'; };
+    return $store->put($s);
+}
+
+echo save(Posts(), null);
+echo save(Posts(), 'ok');

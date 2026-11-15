@@ -25,6 +25,19 @@ bool AST::constraint_admits(const std::vector<ValueType> &constraint, const Valu
             return true;
         }
 
+        // a type parameter that already states this atom: `K : comparable<K>` answering
+        // `type Key : comparable<Key>` once Key is bound to K. without this, the associated
+        // type's constraint is judged against K as if K were a concrete miss
+        if (bare.is_type_param()) {
+            const TypeParamDecl *param = bare.get_type_param();
+
+            for (const auto &atom : param->constraint) {
+                if (ValueType::make_mutable(atom) == ValueType::make_mutable(allowed)) {
+                    return true;
+                }
+            }
+        }
+
         // **the one arm interfaces needed.** an interface atom is satisfied by conformance rather than
         // by identity - it names a capability, and the set of types answering it is open, which is
         // exactly what a concrete-set constraint could never express
@@ -158,6 +171,17 @@ std::string AST::const_generic_overflow_sentence(const ValueType &dest, uint64_t
         bits,
         get_primitive_name(dest.get_primitive_type()),
         size.get_max_positive_value());
+}
+
+std::string AST::unsatisfied_constraint_sentence(
+    const std::string &param,
+    const std::string &display,
+    const std::string &constraint,
+    const ValueType &given)
+{
+    return "Type parameter '" + param + "' of '" + display +
+        "' is constrained to '" + constraint +
+        "' but was given '" + given.get_type_desciption() + "'";
 }
 
 bool AST::TypeParamDecl::allows(const ValueType &type) const

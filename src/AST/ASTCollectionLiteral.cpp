@@ -304,7 +304,12 @@ std::optional<AST::CollectionBind> AST::collection_bind_type(
     CollectionLiteralExprNode &literal
 )
 {
-    const ValueType wanted = implicit_conversion_target(destination);
+    ValueType wanted = implicit_conversion_target(destination);
+
+    // a wrapped optional is a layout, so fill looks at the payload
+    if (wanted.is_wrapped_optional()) {
+        wanted = wanted.optional_payload();
+    }
 
     if (is_undetermined_type(wanted)) {
         return std::nullopt;

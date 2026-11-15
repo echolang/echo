@@ -348,14 +348,8 @@ namespace
             return false;
         }
 
-        // a generic requirement of its own (`function map<U>(...)`) is not something a conformance
-        // check can compare: U is bound at the call, not by the conformance. refused at the
-        // declaration would be better, and until then this simply never matches
-        //
-        // an operator is a free function, so it cannot inherit the implementor's type parameters.
-        // `operator<E> (const Box<E>&, const Box<E>&)` is the only spelling of `<` for a generic
-        // struct, and the own-parameter counts then differ on purpose: the requirement's T belongs
-        // to the interface, the candidate's E to the operator. candidate_answers unifies them
+        // a generic requirement (`function tap<U>(...)`) is answered by the same own-parameter
+        // count. operators instantiate later, so their E vs the requirement's T may differ
         if (!candidate->is_operator()
             && candidate->own_type_param_count() != wanted.requirement->own_type_param_count()) {
             return false;
@@ -406,17 +400,8 @@ namespace
 
         AST::TypeSubstitution subst = impl_subst;
 
-        if (candidate->is_operator() && candidate->own_type_param_count() > 0) {
-            // the requirement has no own parameters (T is the interface's). an operator
-            // redeclares the implementor's, so unify its written operands against the
-            // already-substituted wanted ones: Box<E_op> against Box<E_struct> binds E_op
-            // onto E_struct. can_instantiate would skip this because Box<E> is still
-            // undetermined, which is the right answer for a call and the wrong one for a
-            // template check. the exact compare below is still the contract: unify may
-            // succeed with no opinion
-            //
-            // allow_decay off: a conformance is not a call boundary, same as
-            // conformance_bindings' trial
+        if (candidate->own_type_param_count() > 0) {
+            // Door::U vs Gate::U, or an operator's E: unify so the exact compare sees one binding
             for (size_t i = 0; i < wanted.parameters.size(); i++) {
                 if (!AST::unify_type(
                         candidate->parameter_type(wanted.parameter_offset + i),
@@ -425,6 +410,14 @@ namespace
                         /*allow_decay=*/false)) {
                     return false;
                 }
+            }
+
+            if (!AST::unify_type(
+                    candidate->get_return_type(),
+                    wanted.return_type,
+                    subst,
+                    /*allow_decay=*/false)) {
+                return false;
             }
         }
 
@@ -494,7 +487,19 @@ namespace
             ? wanted.requirement->template_ref
             : wanted.requirement;
 
-        return requirement->default_decl;
+        if (requirement->default_decl != nullptr) {
+            return requirement->default_decl;
+        }
+
+        // a sibling interface's default of the same name, when this requirement has none
+        for (AST::FunctionDeclNode *offered :
+             AST::conformance_defaults(ct, wanted.requirement->func_name())) {
+            if (candidate_answers(offered, wanted, impl_subst, types)) {
+                return offered;
+            }
+        }
+
+        return nullptr;
     }
 
     // does this signature still mention an associated type nothing has bound yet?

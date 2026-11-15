@@ -1,0 +1,24 @@
+// a method of Zone used to get PrivateMember on Zone::$count, and the sentence
+// doubled the sigil. enclosing_type of a static method is the owner
+public class Zone
+{
+    private static int32 $count = 0;
+
+    public constructor() {}
+
+    public static function bump() : int32
+    {
+        Zone::$count = Zone::$count + 1;
+        return Zone::$count;
+    }
+
+    public function bump_again() : int32
+    {
+        Zone::$count = Zone::$count + 1;
+        return Zone::$count;
+    }
+}
+
+echo Zone::bump();
+echo Zone()->bump_again();
+echo Zone::bump();

@@ -1,0 +1,24 @@
+// L is not in the arguments. dest `Queue<int32>` used to leave the static uninstantiated
+class Queue<L>
+{
+    public string $name;
+
+    public constructor(const string& $name)
+    {
+        $this->name = $name;
+    }
+
+    public static function into(const string& $name, const string& $tag) : Queue<L>
+    {
+        return Queue<L>("{$name}/{$tag}");
+    }
+}
+
+function take(Queue<int32> $q) : string
+{
+    return $q->name;
+}
+
+Queue<int32> $q = Queue::into("j{1}", str::trim(' x '));
+echo $q->name;
+echo take(Queue::into("k{2}", str::trim(' y ')));

@@ -1,0 +1,16 @@
+// a constructor used to get PrivateMember on Zone::$count: owner_type is null
+public class Zone
+{
+    private static int32 $count = 0;
+
+    public constructor()
+    {
+        Zone::$count = Zone::$count + 1;
+        self::$count = self::$count + 1;
+    }
+
+    public static function read() : int32 { return Zone::$count; }
+}
+
+Zone();
+echo Zone::read();

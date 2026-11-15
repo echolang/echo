@@ -1,0 +1,11 @@
+// `BASE < Lim::MAX` is a comparison. the `<` is not a generic opener
+public struct Lim
+{
+    public const int32 MAX = 10;
+}
+
+const int32 BASE = 1;
+
+if (BASE < Lim::MAX) {
+    echo 'x';
+}

@@ -14,6 +14,7 @@
 namespace AST
 {
     class Collector;
+    class ExprNode;
     class FunctionCallExprNode;
 
     // how a template answers a call. declaration order is best to worst
@@ -161,16 +162,26 @@ namespace AST
         TypeRegistry &registry,
         const std::vector<ValueType> &explicit_type_args = {},
         const ValueType &static_owner = ValueType::make_unknown(),
-        const std::vector<bool> &argument_defers = {});
+        const std::vector<bool> &argument_defers = {},
+        bool finalizing = false);
 
     // the same question asked of a call node: argument types are read off the arguments, type
     // arguments off `explicit_type_args`. for a caller that has not already got the argument types
     // in hand - AST::CallResolver has, since the matcher needs them too. `collector` is what
-    // bound_slots asks for collection fill, the same object ranking uses
+    // bound_slots asks for collection fill, the same object ranking uses. `finalizing` makes an
+    // inherited param of a written template owner unbound: dest-seeding has had its chance
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const FunctionCallExprNode &call,
-        Collector &collector);
+        Collector &collector,
+        bool finalizing = false);
+
+    // true when any argument still names a type parameter, so finalize stays silent: the call
+    // sits in an un-instantiated template, and the clone reports with concrete types
+    bool arguments_mention_a_type_param(const std::vector<ExprNode *> &arguments);
+
+    // arguments, constructed_type, static_owner, or an explicit `<R>` on `Link<R>()`
+    bool call_mentions_a_type_param(const FunctionCallExprNode &call);
 
     // how a call's types are read, in one place: an argument slot or type node left null by a failed
     // parse counts as unknown rather than as absent, so the vectors stay positional and every reader

@@ -1,0 +1,21 @@
+// a positional skips a labelled default rather than demanding the label
+public function task(
+    string $name,
+    description: string $d = '',
+    function<int32()> $body
+) : int32
+{
+    echo $name;
+    echo $d;
+    return $body();
+}
+
+echo task('build', () => 42);
+
+function pair(int32 $a, lbl: int32 $b = 0, int32 $c) : int32
+{
+    return $a * 100 + $b * 10 + $c;
+}
+
+echo pair(1, 3);
+echo pair(1, lbl: 2, 3);

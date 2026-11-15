@@ -1,0 +1,20 @@
+// `??` of a field of a call result used to ICE: present_value copied from `$__temp1`
+// after TemporaryBind of the member base had ended. a living place still copies;
+// a place that does not outlive the statement unwraps the bound value
+public struct Box
+{
+    public string? $head = null;
+}
+
+public function mk() : Box
+{
+    return Box();
+}
+
+public function filled() : Box
+{
+    return Box('yes');
+}
+
+echo mk()->head ?? 'none';
+echo filled()->head ?? 'none';

@@ -30,6 +30,7 @@
 #include "AST/ASTConstness.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTVisibility.h"
+#include "AST/ASTIssue.h"
 
 #include "External/infint.h"
 
@@ -207,6 +208,13 @@ AST::LiteralIntExprNode *make_radix_literal(
 {
     const std::string spelling = token.value();
     const size_t digits = spelling.length() - 2;  // the `0x` / `0b` prefix
+
+    if (digits == 0) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(token),
+            fmt::format("The literal '{}' needs a digit after the prefix.", spelling));
+        return nullptr;
+    }
 
     // the width the *spelling* asks for, which is a default and not a choice: a destination still
     // decides, and only where there is none does this stand
@@ -856,6 +864,24 @@ namespace
             const auto &parts = shape.namespace_parts;
             const std::string owner_name = cursor.tokens[shape.name_offset].value();
 
+            // `self::$n` / `self::f()`: the enclosing type, not a type named self. statement
+            // `self::$n = 5` goes through try_parse_static_property, which used to skip the
+            // whole statement because `self` is not a type name
+            if (parts.empty() && owner_name == "self") {
+                AST::ComplexType *enclosing = Parser::enclosing_type_at(payload);
+
+                if (enclosing == nullptr) {
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(cursor.current()),
+                        "'self' names the enclosing type.");
+                    return nullptr;
+                }
+
+                cursor.skip(2);
+                return &payload.context.emplace_node<AST::TypeNode>(
+                    AST::ValueType::make_complex(enclosing));
+            }
+
             AST::Symbol *symbol = nullptr;
 
             if (parts.empty()) {
@@ -883,7 +909,8 @@ namespace
                     AST::file_of(payload.context),
                     payload.collector,
                     parts,
-                    /*mint=*/false);
+                    /*mint=*/false,
+                    payload.context.current_namespace);
 
                 if (in == nullptr) {
                     return nullptr;
@@ -1063,20 +1090,15 @@ AST::ExprNode *Parser::try_parse_static_call(Parser::Payload &payload)
     return nullptr;
 }
 
-AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &payload)
+// cursor on `$name`. plants the access against `owner`, which is already a type
+static AST::StaticPropertyExprNode *finish_static_property(
+    Parser::Payload &payload,
+    const AST::ValueType &owner
+)
 {
     auto &cursor = payload.cursor;
-
-    const AST::TypeNode *owner_node = Parser::try_parse_static_owner(payload, /*want_property=*/true);
-
-    if (owner_node == nullptr) {
-        return nullptr;
-    }
-
-    const AST::ValueType owner = owner_node->type;
     const auto name_token = cursor.current();
-
-    cursor.skip(); // the `$name`
+    cursor.skip();
 
     // a type-parameter owner has no static-property table to search. `T::$x` is not a not-yet the
     // way `T::f(...)` is: a static property has no call-settlement chassis, so a pending one would
@@ -1092,22 +1114,40 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
     // **committed from here**, exactly as the call form is, and for the same reason: `Type::$x` where
     // `Type` is a type has no second reading to fall back to. a namespace has no `$` names in it
     const AST::ComplexType *owner_type = owner.get_complex_type()->template_or_self();
-    const auto found = owner_type->find_static_property(name_token.value());
+    auto found = owner_type->find_static_property(name_token.value());
+
+    // `static int32 $x = A::$x + 1`: pass 3 has already added `$x`, so the lookup would find
+    // the one being declared. only statics strictly before it are named
+    if (found.has_value() && !payload.hiding_static_property.empty()) {
+        const auto &props = owner_type->static_properties();
+        size_t cutoff = props.size();
+
+        for (size_t i = 0; i < props.size(); i++) {
+            if (props[i] != nullptr && props[i]->name_full() == payload.hiding_static_property) {
+                cutoff = i;
+                break;
+            }
+        }
+
+        if (found->first >= cutoff) {
+            found.reset();
+        }
+    }
 
     if (!found.has_value()) {
-        payload.collector.collect_issue<AST::Issue::UnknownStaticProperty>(
-            payload.context.code_ref(name_token),
-            name_token.value(),
-            owner.get_type_desciption()
-        );
+        // the declaration pass has not reached every file yet. `Cfg::$limit` in a default
+        // parsed before `Cfg` itself is a not-yet; pass 3 re-parses the parameter list
+        if (payload.pass != Parser::Pass::t_declarations) {
+            payload.collector.collect_issue<AST::Issue::UnknownStaticProperty>(
+                payload.context.code_ref(name_token),
+                name_token.value(),
+                owner.get_type_desciption()
+            );
+        }
 
-        // **reported, and then a node with no declaration is handed back anyway.** the alternatives
-        // both cost a second, unrelated diagnostic: recovering to the next statement leaves
-        // parse_varexpr mid-declaration, and returning null sends these tokens to the namespace walk,
-        // which mints a namespace and then meets a `$name` no operand arm accepts
-        //
-        // a null `decl` is a legitimate hole - result_type() answers `unknown` for it, ensure_static_init
-        // declines it, and codegen never sees it because has_critical_issues() already stopped
+        // **a node with no declaration is handed back anyway.** the alternatives both cost a
+        // second, unrelated diagnostic: recovering to the next statement leaves parse_varexpr
+        // mid-declaration, and returning null sends these tokens to the namespace walk
         return &payload.context.emplace_node<AST::StaticPropertyExprNode>(
             name_token, owner, nullptr, 0);
     }
@@ -1115,15 +1155,13 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
     // **a `private` static is reachable only from inside its own type**, which is the same rule and the
     // same question an instance property answers - AST::can_reach_private_member, off the enclosing
     // declaration rather than off the file. `internal` is the module axis, AST::refuse_invisible_property
+    AST::ComplexType *enclosing = Parser::enclosing_type_at(payload);
+
     if (found->second->is_private()
-        && !AST::can_reach_private_member(
-            payload.context.self_struct_ptr != nullptr
-                ? &payload.context.self_struct_ptr->complex_type()
-                : nullptr,
-            owner_type)) {
+        && !AST::can_reach_private_member(enclosing, owner_type)) {
         payload.collector.collect_issue<AST::Issue::PrivateMember>(
             payload.context.code_ref(name_token),
-            name_token.value(),
+            found->second->name(),
             owner.get_type_desciption()
         );
     }
@@ -1144,6 +1182,17 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
         owner, found->second, payload.collector.type_registry);
 
     return &node;
+}
+
+AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &payload)
+{
+    const AST::TypeNode *owner_node = Parser::try_parse_static_owner(payload, /*want_property=*/true);
+
+    if (owner_node == nullptr) {
+        return nullptr;
+    }
+
+    return finish_static_property(payload, owner_node->type);
 }
 
 // **postfix on a node that has not already been through the chain.** grouping and prefix
@@ -1873,8 +1922,11 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
                 Parser::capture_variable(payload, found.decl, var_token, found.boundaries_crossed);
 
             if (captured_read == nullptr) {
+                // still consume `$this->hits` so the capture refusal is the only diagnostic
                 cursor.skip();
-                return AST::make_void_ref();
+                auto &varnode = payload.context.emplace_node<AST::VarNode>(found.decl, var_token);
+                return Parser::parse_postfix_chain(
+                    payload, AST::make_ref(payload.context.emplace_node<AST::VarRefNode>(&varnode)));
             }
         }
 
@@ -2036,6 +2088,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     }
 
     // `self::MAX` - a constant of the type this expression is written inside.
+    // `self::$n` is a static property: peek `$` and leave it for try_parse_static_property.
     //
     // a soft keyword, the precedent being `constructor` and `type` in a struct body: `self` is an ordinary
     // identifier to the lexer, and it is recognised here by value. It has to be claimed *before* the
@@ -2046,7 +2099,8 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // a method body has no way back to its owner at parse time. The expander answers it from the enclosing
     // declaration instead
     if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "self"
-        && cursor.peek_is_type(1, Token::Type::t_namespace_sep)) {
+        && cursor.peek_is_type(1, Token::Type::t_namespace_sep)
+        && !cursor.peek_is_type(2, Token::Type::t_varname)) {
         const auto self_token = cursor.current();
         cursor.skip(2); // `self` and the `::`
 
@@ -2070,8 +2124,15 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // before the namespace walk below: parse_namespace mints what it does not find, so by the time
     // it has consumed `Point::` there is a namespace called `Point` and the type is out of reach.
     // a `$name` after the `::` matches no arm in parse_operand
+    const auto before_static = cursor.snapshot();
     if (auto *static_call = Parser::try_parse_static_call(payload)) {
         return Parser::parse_postfix_chain(payload, AST::make_ref(static_call));
+    }
+
+    // committed (`S::nope(1)`), already reported. leftover `+ 2` is not a new statement
+    if (cursor.snapshot().index != before_static.index) {
+        cursor.try_skip_to_next_statement();
+        return AST::make_void_ref();
     }
 
     if (auto *static_property = Parser::try_parse_static_property(payload)) {
@@ -2283,13 +2344,14 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
     }
 
     // a grouped subexpression. postfix (`as`, `instanceof`, `->`) is applied after the
-    // close paren, so `((STEPS - 1) as float32)` is a cast of a group, not a second
-    // operand the yard never collected. grouping is an operand, not a shunting-yard
-    // operator: putting `(` on the operator stack stopped the collection loop at `as`
-    // (which is deliberately not an `is_expr_token`) while the outer `(` was still open
+    // close paren. dest does not enter: `($h / 2) as float64` used to dest-type `2`
+    // as float64. a lone `(2)` is dest-typed by parse_expr_ref after postfix.
+    // grouping is an operand, not a shunting-yard operator: putting `(` on the
+    // operator stack stopped the collection loop at `as` while the outer `(` was
+    // still open. `const(...)` still forwards dest, through parse_parenthesized_operand
     if (cursor.is_type(Token::Type::t_open_paren)) {
         cursor.skip();
-        auto inner = Parser::parse_expr_ref(payload, expected_type);
+        auto inner = Parser::parse_expr_ref(payload, nullptr);
         if (!cursor.is_type(Token::Type::t_close_paren)) {
             payload.collect_unexpected_token(Token::Type::t_close_paren);
             return inner.has() ? with_postfix(payload, inner) : AST::make_void_ref();
@@ -2435,12 +2497,11 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         bool expects_operand = expr_parts.empty() || expr_parts.back().opnode != nullptr;
 
         // dest is the expression's result, not every operand's. a shift's count is
-        // AST::binary_reconciles_operands; its left operand is the same hole when
-        // grouping forwards dest: `(8 >> $n) as float32` at a float32 declaration.
-        // a first plain operand is dest-typed when a reconciling infix is collected,
-        // or by parse_expr_ref if the expression is just that literal. grouping and
-        // prefix still take dest. `*` still wants the hint so `float $b = $a * 3.14`
-        // dest-types the literal
+        // AST::binary_reconciles_operands. a first plain operand is dest-typed when a
+        // reconciling infix is collected, or by parse_expr_ref if the expression is
+        // just that literal. grouping does not take dest: `as` is postfix on the
+        // group. prefix still takes dest. `*` still wants the hint so
+        // `float $b = $a * 3.14` dest-types the literal
         AST::TypeNode *operand_hint = expected_type;
         if (!expr_parts.empty()
             && expr_parts.back().opnode != nullptr
@@ -2515,9 +2576,9 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         }
 
         // a first numeric/bool literal is dest-typed after a reconciling infix, or
-        // by parse_expr_ref when the expression is just that literal. handing dest
-        // here would type the `8` of `(8 >> $n) as float32`. shorthand and `null`
-        // still take dest: `.ok(...)` reads its owner from it
+        // by parse_expr_ref when the expression is just that literal. grouping does
+        // not take dest, so the `8` of `(8 >> $n) as float32` stays untyped.
+        // shorthand and `null` still take dest: `.ok(...)` reads its owner from it
         if (expr_parts.empty()
             && (AST::token_is_integer_literal(cursor.current().type())
                 || cursor.is_type(Token::Type::t_floating_literal)
@@ -2626,8 +2687,8 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     // `bool $a = 1;` is typed here, as `true`; `3` is refused. a shift is the other hole: neither
     // operand is a value of the result type, so parse_expr_parts dest-types a collected literal
     // only after a reconciling infix (AST::binary_reconciles_operands) and drops the hint after
-    // `<<` / `>>`. grouping still forwards dest, which is why the first operand of
-    // `(8 >> $n) as float32` used to take it.
+    // `<<` / `>>`. grouping does not take dest, so `(8 >> $n) as float32` and
+    // `($h / 2) as float64` type their operands from the operands, then cast.
     //
     // costs nothing for the destinations the operands *were* given: those literals already carry a
     // chosen type, so AST::is_untyped_literal answers false and this does not fire

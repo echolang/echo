@@ -1,0 +1,10 @@
+/*
+ * Two files of one module, the use file sorts before the file that
+ * declares the alias and the static. a_use.eco names IntRecords and
+ * Cfg::$limit; z_types.eco declares them.
+ */
+
+#[module: "order"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

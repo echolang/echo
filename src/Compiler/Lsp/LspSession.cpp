@@ -357,6 +357,11 @@ Compiler::Lsp::Session::RebuildProduct Compiler::Lsp::Session::produce_snapshot(
 
         if (failure.has_value()) {
             product.failure = failure;
+            // the bundle is dropped on this path; a File* in the diagnostic would dangle
+            if (product.failure->diagnostic.has_value()) {
+                product.failure->diagnostic->primary.file = nullptr;
+            }
+
             product.report.failed = true;
             product.report.total_ms = elapsed_ms(started);
             return product;

@@ -1,6 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] Conditional Compilation Failed
+[error] conditional_unterminated.eco:2:1
 
-  line 2: '#[if: ...]' is never closed - add '#[end]'
+  '#[if: ...]' is never closed - add '#[end]'
+
+  1 | // an `#[if]` with no `#[end]`. Being out of file is the proof nothing was going to close it.
+  2 | #[if: os == darwin]
+    : ^
+  3 | echo 1;
+
+1 error, nothing was compiled.

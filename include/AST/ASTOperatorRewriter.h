@@ -21,6 +21,7 @@ namespace AST
     class FunctionDeclNode;
     class ExprNode;
     class FunctionCallExprNode;
+    class ReturnNode;
     class IndirectCallExprNode;
     class IndexExprNode;
     class MatchExprNode;
@@ -60,6 +61,7 @@ namespace AST
         void visit_index_expr(IndexExprNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;
+        void visitReturn(ReturnNode &node) override;
 
         // rule 5's three sites - see upgrade_optional_operand below
         void visit_guard(GuardNode &node) override;
@@ -148,6 +150,11 @@ namespace AST
         // be null on a compiler-made `while`; a token is then taken from the hoist itself
         void bind_value_if_hoisted(ExprNode *&expr, const TokenReference &at);
         void bind_value_if_hoisted(ExprNode *&expr, const TokenReference *at);
+
+        // a return / match arm has a dest that retype writes next in the round. expanding
+        // first infers from the first element, so `return [A(), B()]` into `array<Named>`
+        // typed as A. call args use the same skip. a foreach source has no dest and expands
+        bool waiting_on_dest(ExprNode *expr) const;
 
         // bound_type is idempotent; CallResolver types call arguments after this pass
         void value_edges_except_untyped_collections(std::vector<ExprNode *> &arguments);

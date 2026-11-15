@@ -1,6 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] Tokenization Failed
+[error] unknown_token.eco:3:14
 
   unexpected '@' at line 3 column 14
+
+  2 | 
+  3 | int32 $n = 1 @ 2;
+    :              ^
+  4 | echo $n;
+
+1 error, nothing was compiled.

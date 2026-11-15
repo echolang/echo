@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTModule.h"
 #include "Compiler/TargetFacts.h"
 #include "Token.h"
 
@@ -41,7 +42,7 @@ namespace Parser
         TokenCollection &tokens,
         size_t from,
         const Compiler::TargetFacts &facts,
-        std::string &out_error);
+        AST::TokenFilterRefusal &out);
 };
 
 #endif

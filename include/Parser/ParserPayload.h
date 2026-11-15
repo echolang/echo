@@ -67,6 +67,11 @@ namespace Parser
         // between the first two passes can see one, and it defers the alias that asked
         bool alias_pending = false;
 
+        // while parsing `static T $x = ...`, `$x` and later statics of that type are not yet named.
+        // pass 2 has not added `$x` yet; pass 3 has, so the lookup has to hide it or `A::$x = A::$x + 1`
+        // resolves and codegen ICEs on the unknown inner access from the first parse
+        std::string hiding_static_property;
+
         // reports the token the cursor is sitting on as unexpected where `expected` was wanted
         // every parser needs this and all three of the pieces it takes - the cursor for the token,
         // the context to locate it, the collector to record it - already live here

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] compound_assign.eco:2:4
+
+  There is no '+=' - write `$i = $i + 5` instead of `$i += 5`.
+
+  1 | int32 $i = 0;
+  2 | $i += 5;
+    :    ^
+  3 | echo $i;
+
+1 error, nothing was compiled.

@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] literal_div_by_zero.eco:4:8
+
+  this divides by zero. at runtime that is undefined; here it is simply refused.
+
+  3 | 
+  4 | echo 1 / 0;
+    :        ^
+  5 | echo 5 % 0;
+
+[error] literal_div_by_zero.eco:5:8
+
+  this divides by zero. at runtime that is undefined; here it is simply refused.
+
+  4 | echo 1 / 0;
+  5 | echo 5 % 0;
+    :        ^
+  6 | int32 $computed = 4 / (2 - 2);
+
+[error] literal_div_by_zero.eco:6:21
+
+  this divides by zero. at runtime that is undefined; here it is simply refused.
+
+  5 | echo 5 % 0;
+  6 | int32 $computed = 4 / (2 - 2);
+    :                     ^
+  7 | 
+
+3 errors, nothing was compiled.

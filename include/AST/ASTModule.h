@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 class Lexer;
@@ -24,6 +25,16 @@ namespace AST
     typedef size_t module_handle_t;
 
     class FunctionDeclNode;
+
+    // a `#[if:]` / malformed `test` header refusal. one result, so the filter callback does not
+    // grow a fourth out-param. the File is known at the throw; Diagnostic is minted there
+    struct TokenFilterRefusal
+    {
+        std::string message;
+        uint32_t line = 0;
+        uint32_t column = 1;
+        uint32_t width = 1;
+    };
 
     // interned bytes for one `std::embed` path. lives on the module that wrote the path, so
     // TypeChecker and codegen share one copy and the cache sidecar has one list
@@ -105,12 +116,15 @@ namespace AST
         // conditional structure is broken has no meaningful parse to continue into
         struct TokenFilterException : public std::exception
         {
-            std::string message;
+            TokenFilterRefusal refusal;
+            File *file = nullptr;
 
-            TokenFilterException(std::string message) : message(std::move(message)) {};
+            TokenFilterException(TokenFilterRefusal refusal, File *file = nullptr)
+                : refusal(std::move(refusal)), file(file)
+            {}
 
             const char *what() const noexcept override {
-                return message.c_str();
+                return refusal.message.c_str();
             }
         };
 
@@ -118,12 +132,13 @@ namespace AST
         // the file started at, so the range is always the tail of the collection - which is what makes
         // dropping tokens inside it safe: no earlier file's slice can move.
         //
-        // false with a `line N: ...` sentence stops the tokenization. See
+        // false with a refusal stops the tokenization. See
         // Parser::filter_conditional_tokens, the only implementation
         //
         // a **callback** rather than a call, because *what* may be dropped is a Parser question and this is
         // AST. The one thing owned here is the ordering: the slice is taken after the filter, never before
-        typedef std::function<bool(TokenCollection &tokens, size_t from, std::string &out_error)>
+        typedef std::function<bool(
+            TokenCollection &tokens, size_t from, TokenFilterRefusal &out)>
             TokenFilter;
 
         TokenizedFile tokenize(Lexer &lexer, File &file, const TokenFilter &filter = nullptr);

@@ -1,6 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] Conditional Compilation Failed
+[error] conditional_unknown_value.eco:4:13
 
-  line 4: unknown os 'darwn', expected one of: darwin, linux, windows, ios, android, wasi
+  unknown os 'darwn', expected one of: darwin, linux, windows, ios, android, wasi
+
+  3 | // vanished silently and taken a platform's implementation with it.
+  4 | #[if: os == darwn]
+    :             ^^^^^
+  5 | echo 1;
+
+1 error, nothing was compiled.

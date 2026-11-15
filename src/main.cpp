@@ -82,7 +82,8 @@
 // a wildcard matching nothing is deliberately not counted: an empty glob is a pattern with no
 // matches, not a file somebody expected to exist
 std::vector<std::filesystem::path> get_file_list_from_args(
-    const std::vector<std::string> &path_strings, size_t &missing)
+    const std::vector<std::string> &path_strings,
+    std::vector<std::string> &missing)
 {
     std::vector<std::filesystem::path> files;
 
@@ -108,8 +109,7 @@ std::vector<std::filesystem::path> get_file_list_from_args(
                 // files provided" for a path that was very much provided - so one typo in a filename
                 // answered with a complaint about something else entirely, and a *second* file on the
                 // same command line made the typo vanish without a word
-                std::cerr << "Cannot open '" << path_string << "': no such file." << std::endl;
-                missing++;
+                missing.push_back(path_string);
             }
         }
     }
@@ -294,7 +294,14 @@ static int build_bundle(
 
     if (const std::optional<Compiler::FrontEndFailure> failure =
             Compiler::parse_front_end_bundle(parse_request, bundle, parser)) {
-        diagnostics.render_untyped(failure->title, failure->message);
+        if (failure->diagnostic.has_value()) {
+            diagnostics.render(*failure->diagnostic);
+            diagnostics.render_summary(1, 0, false);
+        }
+        else {
+            diagnostics.render_untyped(failure->title, failure->message);
+        }
+
         return 1;
     }
 
@@ -1410,13 +1417,19 @@ static bool resolve_invocation(
         }
     }
 
-    size_t missing_files = 0;
+    std::vector<std::string> missing_files;
     out.sources = get_file_list_from_args(driver.sources, missing_files);
 
     // a named file that is not there fails the build, even when others compiled. it is an input the
-    // user asked for, so carrying on would produce a binary missing whatever was in it - reported by
-    // name above, so nothing more is owed here
-    if (missing_files > 0) {
+    // user asked for, so carrying on would produce a binary missing whatever was in it. through the
+    // renderer so `--diagnostics=json` is a diagnostic, the same shape a missing manifest already has
+    if (!missing_files.empty()) {
+        for (const std::string &path_string : missing_files) {
+            diagnostics.render_untyped(
+                "No Such File",
+                fmt::format("Cannot open '{}': no such file.", path_string));
+        }
+
         return false;
     }
 

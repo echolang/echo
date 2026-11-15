@@ -203,12 +203,27 @@ AST::ArgumentBinding AST::bind_arguments(
         const CallArgumentName &name = name_at(argument_names, w);
 
         if (name.kind == ArgumentNameKind::t_none) {
-            while (next_positional < arity && used[next_positional]) {
-                next_positional++;
-            }
+            // a labelled slot never takes a positional. skip one whose default will fill it
+            // so `task('build', () => 42)` lands on `$body` past `description: $d = ''`
+            while (next_positional < arity) {
+                if (used[next_positional]) {
+                    next_positional++;
+                    continue;
+                }
 
-            if (next_positional >= arity) {
-                result.kind = ArgumentBindKind::t_too_many_positional;
+                AST::VarDeclNode *labelled = decl.args[next_positional];
+                if (labelled == nullptr || !labelled->has_label()) {
+                    break;
+                }
+
+                if (labelled->init_expr != nullptr) {
+                    next_positional++;
+                    continue;
+                }
+
+                result.kind = ArgumentBindKind::t_missing_label;
+                result.blame_name = labelled->label();
+                result.missing_param = next_positional;
                 if (arguments[w] != nullptr) {
                     if (const TokenReference *tok = AST::source_token_of(*arguments[w])) {
                         result.blame_token.emplace(*tok);
@@ -217,11 +232,8 @@ AST::ArgumentBinding AST::bind_arguments(
                 return result;
             }
 
-            AST::VarDeclNode *param = decl.args[next_positional];
-            if (param != nullptr && param->has_label()) {
-                result.kind = ArgumentBindKind::t_missing_label;
-                result.blame_name = param->label();
-                result.missing_param = next_positional;
+            if (next_positional >= arity) {
+                result.kind = ArgumentBindKind::t_too_many_positional;
                 if (arguments[w] != nullptr) {
                     if (const TokenReference *tok = AST::source_token_of(*arguments[w])) {
                         result.blame_token.emplace(*tok);

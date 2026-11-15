@@ -10,4 +10,13 @@ expect: fail
     :           ^
   9 | 
 
-1 error, nothing was compiled.
+[error] UnresolvedTypeParameter  array_literal_empty_generic_argument.eco:8:6
+
+  Cannot infer type parameter 'T' of generic 'size' from the call arguments; specify it explicitly, e.g. size<...>(...)
+
+  7 | 
+  8 | echo size([]);
+    :      ^^^^
+  9 | 
+
+2 errors, nothing was compiled.

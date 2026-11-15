@@ -1,5 +1,13 @@
 expect: fail
---- OUT --->
-[error] Conditional Compilation Failed
 
-  line 2: unknown family 'darwn', expected one of: darwin, linux, windows, wasi
+--- OUT --->
+[error] conditional_unknown_family.eco:2:17
+
+  unknown family 'darwn', expected one of: darwin, linux, windows, wasi
+
+  1 | // family is a closed axis, so a typo is an error rather than a silently false comparison.
+  2 | #[if: family == darwn]
+    :                 ^^^^^
+  3 | echo 1;
+
+1 error, nothing was compiled.

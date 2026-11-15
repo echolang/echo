@@ -1,0 +1,30 @@
+// assigning an owning value through a borrow-returning call. the place is a field
+// of a T& the call returned, so member_path_of has no local; the storage is still
+// there and the old value is torn down
+public struct Link
+{
+    public string $original = '';
+}
+
+public class Table
+{
+    public array<Link> $links;
+    public int32 $hits = 0;
+
+    public constructor()
+    {
+        $this->links = [Link()];
+    }
+
+    public function link(int32 $m) : Link&
+    {
+        $this->hits = $this->hits + 1;
+        return $this->links[$m];
+    }
+}
+
+$t = Table();
+string $x = 'hello';
+$t->link(0)->original = mv $x;
+echo $t->hits;
+echo $t->links[0]->original;

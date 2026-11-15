@@ -812,4 +812,68 @@ TEST_CASE("an associated constraint is substituted through every associated bind
 
         REQUIRE(has_issue_containing(*bundle, "'Table' would be 'Wide', which does not satisfy 'Index<int32>'"));
     }
+
+    SECTION("a type parameter that states the same constraint satisfies it") {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "interface Ordered<T> {\n"
+            "    operator (const T& $a) < (const T& $b) : bool;\n"
+            "}\n"
+            "interface Query {\n"
+            "    type Key : Ordered<Key>;\n"
+            "    function key() : Key;\n"
+            "}\n"
+            "struct Rows<K : Ordered<K>> : Query {\n"
+            "    K $k;\n"
+            "    function key() : K { return $this->k; }\n"
+            "}\n"
+            "echo Rows<int32>(7)->key();\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+}
+
+TEST_CASE("a generic method answers a generic interface requirement", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Gate { function tap<U>(U $x) : void; }\n"
+        "struct Door : Gate { function tap<U>(U $x) : void { echo 1; } }\n"
+        "Door()->tap(0);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("a sibling interface default answers a requirement of the same name", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Needs { function with() : int32; }\n"
+        "interface Gives { function with() : int32 { return 7; } }\n"
+        "class Both : Needs, Gives { }\n"
+        "echo Both()->with();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("a type parameter admits a constraint atom it itself states", "[conformance]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Cmp<T> { function id() : T; }\n"
+        "function wrap<K: Cmp<K>>(K $v) : K { return $v; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    const FunctionDeclNode *tmpl = nullptr;
+
+    for (auto *decl : EchoTests::decls_named(m, "wrap")) {
+        if (decl->is_generic()) {
+            tmpl = decl;
+        }
+    }
+
+    REQUIRE(tmpl != nullptr);
+    REQUIRE(tmpl->type_parameters.size() == 1);
+
+    const TypeParamDecl *k = tmpl->type_parameters[0];
+    REQUIRE(k->is_constrained());
+    REQUIRE(AST::constraint_admits(k->constraint, ValueType::make_type_param(k)));
 }

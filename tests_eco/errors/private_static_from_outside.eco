@@ -1,0 +1,7 @@
+public class Zone
+{
+    private static int32 $count = 0;
+    public constructor() {}
+}
+
+echo Zone::$count;

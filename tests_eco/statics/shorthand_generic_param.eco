@@ -1,0 +1,18 @@
+// a leading-dot static against a generic parameter. take<A>(Dep<A>) names Dep<A>
+// as the owner of `.make` before the instance is stamped
+struct Dep<A>
+{
+    public A $v;
+
+    public static function make(A $v) : Dep<A>
+    {
+        return Dep<A>($v);
+    }
+}
+
+function take<A>(Dep<A> $d) : A
+{
+    return $d->v;
+}
+
+echo take(.make(5));

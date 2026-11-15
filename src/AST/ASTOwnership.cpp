@@ -995,6 +995,9 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                     auto &place = _current_module->nodes.emplace_back<StaticPropertyExprNode>(
                         source.token_name, source.owner, source.decl, source.index);
 
+                    // the declaration lives on the template, so without `resolved` the drop
+                    // is `$deinit` of `T` and codegen ICEs at the assignment
+                    place.resolved = source.resolved;
                     place.init = source.init;
                     place.deinit = source.deinit;
 
@@ -1487,6 +1490,7 @@ void OwnershipPass::bind_indexed_target(AssignNode &assign)
     // the target has already been walked as a place. wrapping it and reseating assign.target is
     // the whole of this function - walking the bind would walk `$rows[$at]` a second time
     ExprNode *place = assign.target;
+    bool bind = false;
 
     while (place != nullptr) {
         switch (place->get_node_type()) {
@@ -1529,19 +1533,37 @@ void OwnershipPass::bind_indexed_target(AssignNode &assign)
                     return;
                 }
 
-                auto &addr = _current_module->nodes.emplace_back<AddrOfExprNode>(assign.target);
-                VarDeclNode &decl = make_temporary(
-                    &addr, location_of_expression(assign.target), "elem");
-
-                assign.target_bind = &decl;
-                assign.target = &local_place(*_current_module, decl);
-                return;
+                bind = true;
+                place = nullptr;
+                break;
             }
+
+            case NodeType::n_expr_call:
+                // `$t->link(0)->original = …`: a T& the call returned. bind the address once
+                // so teardown and the store do not evaluate `link(0)` twice
+                if (!read_reaches_storage(*place)) {
+                    return;
+                }
+
+                bind = true;
+                place = nullptr;
+                break;
 
             default:
                 return;
         }
     }
+
+    if (!bind) {
+        return;
+    }
+
+    auto &addr = _current_module->nodes.emplace_back<AddrOfExprNode>(assign.target);
+    VarDeclNode &decl = make_temporary(
+        &addr, location_of_expression(assign.target), "elem");
+
+    assign.target_bind = &decl;
+    assign.target = &local_place(*_current_module, decl);
 }
 
 VarDeclNode &OwnershipPass::bind_discarded_temporary(ExprNode *expr)
@@ -2038,6 +2060,14 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                     }
                 }
 
+                // echo has no parameter type, so unknown dest classified the copy as t_bytes:
+                // `echo mk()->sql` memcpy'd the string handle, dropped the struct, then printed
+                // freed bytes. dest-type the argument as what it prints so arrive_value retains
+                // while the member base is still a place
+                if (is_print_call(*call) && call->arguments[i] != nullptr) {
+                    wanted = echo_printed_type_of(call->arguments[i]->result_type());
+                }
+
                 call->arguments[i] = resolve_value_arrival(call->arguments[i], wanted, param, ValueDestination::t_argument);
             }
 
@@ -2341,7 +2371,10 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
 
             ExprNode *lhs = coalesce->lhs;
 
-            if (lhs != nullptr && is_place_expression(*lhs)) {
+            // a living place copies so extractvalue does not alias storage the local still
+            // owns. a member of a temporary is a place that dies with the statement: the
+            // copy's source was `$__temp1` after TemporaryBind of the base had ended
+            if (lhs != nullptr && is_place_expression(*lhs) && place_outlives_statement(lhs)) {
                 const ValueType payload = unwrapped_type_of(lhs->result_type());
 
                 if (copy_needs_constructor(payload)) {
@@ -3769,7 +3802,19 @@ FunctionDeclNode *OwnershipPass::ensure_deinit(const ValueType &type, std::optio
 OwnershipPass::TypeHomeScope::TypeHomeScope(OwnershipPass &pass, const ComplexType *ct)
     : _pass(pass), _previous_module(pass._current_module), _previous_file(pass._current_file)
 {
-    const auto found = pass._type_module.find(ct->template_or_self());
+    const ComplexType *home_ct = ct->template_or_self();
+
+    // an interned T? has no declaration of its own. the payload's home is where a
+    // copy of it has to be written, or `array<Name?>` synthesizes into stdlib
+    if (ct->is_optional && ct->property_count() > k_optional_value_index) {
+        const ValueType &payload = ct->get_property_type(k_optional_value_index);
+
+        if (payload.has_complex_type()) {
+            home_ct = payload.get_complex_type()->template_or_self();
+        }
+    }
+
+    const auto found = pass._type_module.find(home_ct);
 
     // **a home is only a home if it can position a body**, which is the declaration and its name token
     // together. absent for a compiler-minted anonymous layout - a closure environment, and therefore a

@@ -197,6 +197,9 @@ namespace AST
 
     // a shift count at or above the width is poison. const_fold and visitBinaryExpr both ask
     std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count);
+
+    // a divisor that folded to 0. const_fold and visitBinaryExpr both ask
+    std::optional<std::string> division_by_zero_refusal(uint64_t bits);
 };
 
 #endif

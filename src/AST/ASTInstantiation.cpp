@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <optional>
+#include <ranges>
 
 namespace AST
 {
@@ -51,6 +53,22 @@ namespace AST
             return find_implicit_conversion(
                 implicit_conversion_source(argument, nullptr),
                 implicit_conversion_target(expected)) != nullptr;
+        }
+
+        bool substitutions_agree(const TypeSubstitution &a, const TypeSubstitution &b)
+        {
+            if (a.size() != b.size()) {
+                return false;
+            }
+
+            for (const auto &binding : a.bindings) {
+                const ValueType *other = b.lookup(binding.first);
+                if (other == nullptr || *other != binding.second) {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         bool binding_conflict(
@@ -379,7 +397,8 @@ namespace AST
         TypeRegistry &registry,
         const std::vector<ValueType> &explicit_type_args,
         const ValueType &static_owner,
-        const std::vector<bool> &argument_defers)
+        const std::vector<bool> &argument_defers,
+        bool finalizing)
     {
         Instantiation result;
 
@@ -614,6 +633,73 @@ namespace AST
             }
         }
 
+        // T : Store<S> binds S from T's matching conformances. several matches must agree
+        {
+            const auto bind_from_constraint = [&](
+                const TypeParamDecl *param,
+                const std::vector<ValueType> &atoms
+            ) {
+                const ValueType *bound = result.bindings.lookup(param);
+                if (bound == nullptr || is_undetermined_type(*bound) || !bound->has_complex_type()) {
+                    return;
+                }
+
+                for (const ValueType &atom : atoms) {
+                    if (!atom.is_interface() || !contains_type_param(atom)) {
+                        continue;
+                    }
+
+                    ComplexType *atom_ct = atom.get_complex_type();
+                    if (atom_ct == nullptr) {
+                        continue;
+                    }
+
+                    const std::vector<ValueType> matches = conformances_matching_template(
+                        bound->get_complex_type(), atom_ct);
+                    if (matches.empty()) {
+                        continue;
+                    }
+
+                    std::optional<TypeSubstitution> agreed;
+                    bool conflict = false;
+                    for (const ValueType &match : matches) {
+                        TypeSubstitution attempt = result.bindings;
+                        if (!unify_type(atom, match, attempt)) {
+                            continue;
+                        }
+
+                        if (!agreed.has_value()) {
+                            agreed = std::move(attempt);
+                            continue;
+                        }
+
+                        if (!substitutions_agree(*agreed, attempt)) {
+                            conflict = true;
+                            break;
+                        }
+                    }
+
+                    if (!conflict && agreed.has_value()) {
+                        result.bindings = std::move(*agreed);
+                    }
+                }
+            };
+
+            bool progressed = true;
+            while (progressed) {
+                const size_t before = result.bindings.size();
+                for (const TypeParamDecl *param : tmpl->type_parameters) {
+                    bind_from_constraint(param, param->constraint);
+                }
+
+                for (const FunctionDeclNode::WhereClause &clause : tmpl->where_clauses) {
+                    bind_from_constraint(clause.param, clause.atoms);
+                }
+
+                progressed = result.bindings.size() > before;
+            }
+        }
+
         // unification binds in *argument* order; a type-argument list has to come back out in
         // *declaration* order, because that order is what identifies the instantiation
         std::vector<ValueType> bound_types;
@@ -640,11 +726,18 @@ namespace AST
 
             // a parameter nothing *can* bind is a "cannot infer". one that an untyped argument would
             // have bound, or that is bound to something still mentioning a type parameter, is a
-            // not-yet. an *owner's* parameter is always the second kind: it comes from the receiver,
-            // and no call site can name it explicitly, so there is nothing to tell the user to write
+            // not-yet. an owner's parameter is retryable during the fixpoint: dest-seeding may
+            // still name an instance. finalize: a written template owner that never became one
+            // leaves that param unbound
+            const bool owner_template_uninstantiated = static_owner.has_complex_type()
+                && !static_owner.get_complex_type()->is_instantiated()
+                && !contains_type_param(static_owner);
+            const bool inherited_retryable = i < tmpl->inherited_type_param_count
+                && !(finalizing && owner_template_uninstantiated);
+
             const bool retryable = bound != nullptr
-                || saw_untyped_argument
-                || i < tmpl->inherited_type_param_count;
+                || (saw_untyped_argument && !finalizing)
+                || inherited_retryable;
 
             if (retryable) {
                 if (undecided == nullptr) {
@@ -755,7 +848,8 @@ namespace AST
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const FunctionCallExprNode &call,
-        Collector &collector
+        Collector &collector,
+        bool finalizing
     )
     {
         // a static names its owner; a constructor names the type it builds. they are mutually
@@ -779,6 +873,43 @@ namespace AST
             collector.type_registry,
             explicit_type_args_of(call),
             owner,
-            slots.defers);
+            slots.defers,
+            finalizing);
     }
+
+    bool arguments_mention_a_type_param(const std::vector<ExprNode *> &arguments)
+    {
+        // **an argument that still mentions a type parameter is a template's, not a program's.**
+        //
+        // this call sits in an un-instantiated body, the clones the fixpoint made are what carry
+        // concrete argument types, and reporting the template's would blame the one body that is
+        // never emitted. if nobody instantiated it there is nothing to report. if somebody did,
+        // the clone reports for itself, with the types the author can actually see.
+        //
+        // load-bearing for an overload set over a type parameter. `hash::of($key)` inside
+        // `map<K, V>` is undecidable in the template - every concrete overload scores neutrally
+        // against a bare `K`, so match_function answers t_undecidable - and it becomes decidable
+        // in `map<string, int32>`'s clone
+        return std::ranges::any_of(arguments, [](const ExprNode *argument) {
+            return argument != nullptr && contains_type_param(argument->result_type());
+        });
+    }
+
+    bool call_mentions_a_type_param(const FunctionCallExprNode &call)
+    {
+        if (arguments_mention_a_type_param(call.arguments)) {
+            return true;
+        }
+
+        if (contains_type_param(call.constructed_type)
+            || contains_type_param(call.static_owner)) {
+            return true;
+        }
+
+        // `Link<R>()` stores R on explicit_type_args; constructed_type stays unknown
+        return std::ranges::any_of(call.explicit_type_args, [](const TypeNode *node) {
+            return node != nullptr && contains_type_param(node->type);
+        });
+    }
+
 };

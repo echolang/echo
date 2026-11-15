@@ -1,0 +1,15 @@
+// `as C?` on a borrowed class handle used to refuse. peel const C& like value_result_type
+class C
+{
+    int32 $n;
+}
+
+function wrap(const C& $h) : C?
+{
+    return $h as C?;
+}
+
+C $o = C(4);
+C? $w = wrap($o);
+echo $w == null;
+echo ($w ?? C(0))->n;

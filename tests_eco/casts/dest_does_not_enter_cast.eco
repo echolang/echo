@@ -1,0 +1,18 @@
+// a typed destination used to leak through grouping into the operands of a
+// postfix `as`. `($h / 2) as float64` dest-typed `2` as float64, so `/` became
+// float division and printed `.5`. `&` showed the same leak as a refusal.
+// dest is the finished expression's; grouping does not take it. ungrouped
+// `2 * 3.14` still dest-types the literal
+
+uint32 $h = 74565 as uint32;
+float64 $d = ($h / 2) as float64;
+echo $d;
+
+$e = ($h / 2) as float64;
+echo $e;
+
+float64 $a = ($h & 3) as float64;
+echo $a;
+
+float64 $prod = 2 * 3.14;
+echo $prod;

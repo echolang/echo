@@ -129,7 +129,7 @@ namespace Compiler::LLVM
                 return;
             case Token::Type::t_logical_neq:
                 _ctx.push_scalar(is_float
-                    ? _ctx.builder->CreateFCmpONE(left, right)
+                    ? _ctx.builder->CreateFCmpUNE(left, right)
                     : _ctx.builder->CreateICmpNE(left, right));
                 return;
             case Token::Type::t_close_angle:

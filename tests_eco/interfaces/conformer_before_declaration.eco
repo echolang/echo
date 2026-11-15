@@ -1,0 +1,27 @@
+// a conforming struct used as a constrained argument above its own declaration.
+// the declaration pass used to refuse before `: Compressor` was registered
+public interface Compressor
+{
+    function step(int32 $x) : int32;
+}
+
+public struct Blocks<T : Compressor>
+{
+    public T $c;
+}
+
+public struct Hasher
+{
+    public Blocks<Sha256State> $blocks;
+}
+
+public struct Sha256State : Compressor
+{
+    public function step(int32 $x) : int32
+    {
+        return $x * 2;
+    }
+}
+
+Hasher $h = Hasher(Blocks<Sha256State>(Sha256State()));
+echo $h->blocks->c->step(3);

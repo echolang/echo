@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownStaticFunction  static_call_cascade.eco:2:9
+
+  The type 'S' has no static function named 'nope'
+
+  1 | struct S {}
+  2 | echo S::nope(1) + 2;
+    :         ^^^^
+  3 | 
+
+  help: a static function is declared 'static function' in the type's body and called on the type itself. an ordinary method is reached through a value instead, with '->'
+
+1 error, nothing was compiled.

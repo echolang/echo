@@ -1,0 +1,2 @@
+// a statement owes a semicolon even when the next token is a keyword or a brace
+$a = 1 echo $a;

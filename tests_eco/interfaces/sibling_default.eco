@@ -1,0 +1,20 @@
+// a requirement of one interface met by another interface's default. Both() already
+// got `with` from Gives at a call; the conformance to Needs has to agree
+public interface Needs
+{
+    function with() : string;
+}
+
+public interface Gives
+{
+    function with() : string
+    {
+        return 'default';
+    }
+}
+
+public class Both : Needs, Gives
+{
+}
+
+echo Both()->with();

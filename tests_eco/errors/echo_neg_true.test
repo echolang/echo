@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  echo_neg_true.eco:1:6
+
+  Invalid type conversion: no overload of operator '-' accepts a 'bool' here - declare one for it, or convert the operand first.
+
+  1 | echo -true;
+    :      ^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

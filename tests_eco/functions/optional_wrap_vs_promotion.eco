@@ -1,0 +1,12 @@
+// wrap-of-exact beats a wider integer. an untyped 5 is int32, so f(int32?) wins
+function f(int32? $x) : int32
+{
+    return 1;
+}
+
+function f(int64 $x) : int32
+{
+    return 2;
+}
+
+echo f(5);

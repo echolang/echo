@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnexpectedToken  missing_semicolon.eco:2:8
+
+  Unexpected token 'echo' found. Expected 'semicolon (;)'
+
+  1 | // a statement owes a semicolon even when the next token is a keyword or a brace
+  2 | $a = 1 echo $a;
+    :        ^^^^ expected semicolon (;)
+  3 | 
+
+1 error, nothing was compiled.

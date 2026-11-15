@@ -1,0 +1,18 @@
+// a captured `const T&` kept the borrow: after `make` returned, the closure
+// read freed memory. capture copies the value. a long string so the payload
+// is not inline
+
+function make(const string& $key) : function<string()> {
+    return function[$key]() : string { return "key={$key}"; };
+}
+
+function make_implicit(const string& $key) : function<string()> {
+    return function() : string { return "key={$key}"; };
+}
+
+int32 $x = 42;
+function<string()> $a = make("hello-a-long-string-not-sso-{$x}");
+echo $a();
+
+function<string()> $b = make_implicit("hello-a-long-string-not-sso-{$x}");
+echo $b();

@@ -1,0 +1,11 @@
+// `static T?` used to ICE lowering the template's T. `static T` and `static array<T>`
+// already worked; the nullable form is the same substitution through the owner
+public struct Pool<T>
+{
+    public static T? $last = null;
+}
+
+echo Pool<string>::$last ?? '-';
+Pool<string>::$last = 'b';
+echo Pool<string>::$last ?? '-';
+echo Pool<int32>::$last ?? 0;

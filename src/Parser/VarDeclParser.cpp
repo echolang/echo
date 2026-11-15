@@ -18,6 +18,7 @@
 #include "Parser/GuardParser.h"
 #include "Parser/ScopeParser.h"
 
+#include <cstring>
 #include <fmt/core.h>
 
 // a closing bracket is here for the same reason a closing parenthesis is: an index operator's
@@ -36,6 +37,115 @@ bool is_vardecl_end_token(const Parser::Cursor &cursor)
 bool should_skip_vardecl_end_token(const Parser::Cursor &cursor)
 {
     return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma);
+}
+
+// `$a = 1 echo $a` and `{ $x = 1 }` used to continue with no terminator. a parameter
+// list still ends at `)` / `]`; a body still owes `;`
+static void finish_vardecl_terminator(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    if (is_vardecl_end_token(cursor)) {
+        if (should_skip_vardecl_end_token(cursor)) {
+            cursor.skip();
+        }
+
+        return;
+    }
+
+    payload.collect_unexpected_token(Token::Type::t_semicolon);
+}
+
+// recovery of a failed initializer may already have consumed `;`. a leftover operator
+// still sits on this statement; a keyword or `$name` is the next one
+static bool cursor_starts_statement(const Parser::Cursor &cursor)
+{
+    if (cursor.is_done() || cursor.is_type(Token::Type::t_close_brace)
+        || cursor.is_type(Token::Type::t_semicolon)) {
+        return true;
+    }
+
+    switch (cursor.current().type()) {
+    case Token::Type::t_identifier:
+    case Token::Type::t_varname:
+    case Token::Type::t_echo:
+    case Token::Type::t_function:
+    case Token::Type::t_struct:
+    case Token::Type::t_class:
+    case Token::Type::t_enum:
+    case Token::Type::t_interface:
+    case Token::Type::t_if:
+    case Token::Type::t_while:
+    case Token::Type::t_for:
+    case Token::Type::t_foreach:
+    case Token::Type::t_return:
+    case Token::Type::t_guard:
+    case Token::Type::t_try:
+    case Token::Type::t_match:
+    case Token::Type::t_test:
+    case Token::Type::t_break:
+    case Token::Type::t_continue:
+    case Token::Type::t_namespace:
+    case Token::Type::t_use:
+    case Token::Type::t_public:
+    case Token::Type::t_private:
+    case Token::Type::t_internal:
+    case Token::Type::t_const:
+    case Token::Type::t_static:
+    case Token::Type::t_hash:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static const char *compound_assign_spelling(Token::Type op)
+{
+    switch (op) {
+    case Token::Type::t_op_add: return "+=";
+    case Token::Type::t_op_sub: return "-=";
+    case Token::Type::t_op_mul: return "*=";
+    case Token::Type::t_op_div: return "/=";
+    case Token::Type::t_op_mod: return "%=";
+    case Token::Type::t_op_shl: return "<<=";
+    case Token::Type::t_op_shr: return ">>=";
+    case Token::Type::t_and: return "&=";
+    case Token::Type::t_or: return "|=";
+    case Token::Type::t_xor: return "^=";
+    default: return nullptr;
+    }
+}
+
+bool Parser::starts_compound_assignment(const Parser::Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_varname)
+        && cursor.peek_is_type(2, Token::Type::t_assign)
+        && compound_assign_spelling(cursor.peek_type(1)) != nullptr;
+}
+
+// `$i += 5` is `+` then `=`. there is no compound assignment
+bool Parser::refuse_compound_assignment(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    if (!cursor.peek_is_type(1, Token::Type::t_assign)) {
+        return false;
+    }
+
+    const char *spelling = compound_assign_spelling(cursor.current().type());
+    if (spelling == nullptr) {
+        return false;
+    }
+
+    payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.context.code_ref(cursor.current()),
+        fmt::format(
+            "There is no '{}' - write `$i = $i {} 5` instead of `$i {} 5`.",
+            spelling,
+            std::string(spelling, std::strlen(spelling) - 1),
+            spelling));
+    cursor.try_skip_to_next_statement();
+    return true;
 }
 
 // the left hand side of an assignment statement: `base`, or any `->member`, `[n]` or `:$`
@@ -429,6 +539,10 @@ AST::VarDeclNode *Parser::parse_varexpr(
         }
 
         else {
+            if (refuse_compound_assignment(payload)) {
+                return nullptr;
+            }
+
             if (!payload.cursor.is_type(Token::Type::t_assign)) {
                 payload.collect_unexpected_token(Token::Type::t_assign);
                 cursor.try_skip_to_next_statement();
@@ -476,12 +590,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
             assign->is_initialization = true;
         }
 
-        // skip the end of the statement
-        if (is_vardecl_end_token(cursor)) {
-            if (should_skip_vardecl_end_token(cursor)) {
-                cursor.skip();
-            }
-        }
+        finish_vardecl_terminator(payload);
 
         payload.context.scope().children.push_back(AST::make_ref(assign));
 
@@ -534,9 +643,8 @@ AST::VarDeclNode *Parser::parse_varexpr(
     }
 
     if (!payload.cursor.is_type(Token::Type::t_assign)) {
-        payload.collect_unexpected_token(Token::Type::t_assign);
-        cursor.try_skip_to_next_statement();
-        return nullptr;
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
+        return vardecl;
     }
 
     cursor.skip();
@@ -566,7 +674,14 @@ AST::VarDeclNode *Parser::parse_varexpr(
     }
 
     // parse the expression
+    const std::string previous_hiding = payload.hiding_static_property;
+
+    if (static_token.has_value()) {
+        payload.hiding_static_property = nametoken.value();
+    }
+
     auto expr = parse_expr(payload, vardecl->optional_type_node());
+    payload.hiding_static_property = previous_hiding;
     vardecl->init_expr = expr;
 
     if (!vardecl->has_type()) {
@@ -588,11 +703,12 @@ AST::VarDeclNode *Parser::parse_varexpr(
         }
     }
 
-    // skip the end of the statement
-    if (is_vardecl_end_token(cursor)) {
-        if (should_skip_vardecl_end_token(cursor)) {
-            cursor.skip();
-        }
+    if (expr != nullptr) {
+        finish_vardecl_terminator(payload);
+    } else if (cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma)) {
+        cursor.skip();
+    } else if (!cursor_starts_statement(cursor)) {
+        cursor.try_skip_to_next_statement();
     }
 
     return vardecl;

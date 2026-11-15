@@ -1,0 +1,37 @@
+// reserved words are names after `->`, in a label slot, as a method, and after `::` in an attribute
+public struct M
+{
+    public int32 $public = 3;
+    public int32 $test = 4;
+
+    public function namespace() : int32
+    {
+        return 5;
+    }
+
+    public function test() : int32
+    {
+        return 6;
+    }
+}
+
+function take(read: int32 $n, public: int32 $p = 1, test: int32 $t = 2, namespace: int32 $ns = 3) : int32
+{
+    return $n + $p + $t + $ns;
+}
+
+#[rest::case: x]
+#[rest::match: y]
+#[rest::public: z]
+#[rest::test: w]
+function tagged() : int32
+{
+    return 7;
+}
+
+echo M()->public;
+echo M()->test;
+echo M()->namespace();
+echo M()->test();
+echo take(read: 10);
+echo tagged();

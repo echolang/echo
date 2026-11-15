@@ -108,14 +108,15 @@ namespace AST
         }
 
         // tagged T? and flag-nullable C? are one wrap. arrival_wraps_optional stays the
-        // tagged-pair question argument_fit / coerce_value ask; a class handle has no pair
-        if (to.is_nullable() && !from.is_nullable()) {
+        // tagged-pair question argument_fit / coerce_value ask; a class handle has no pair.
+        // from_value, so `const C& as C?` is the wrap `C as C?` is
+        if (to.is_nullable() && !from_value.is_nullable()) {
             if (to.is_wrapped_optional()) {
                 return CastLookup::ok(CastKind::t_optional_wrap);
             }
 
             const ValueType inner = ValueType::make_non_nullable(to);
-            if (from == inner || is_implicitly_convertible(from, inner)) {
+            if (from_value == inner || is_implicitly_convertible(from_value, inner)) {
                 return CastLookup::ok(CastKind::t_optional_wrap);
             }
         }

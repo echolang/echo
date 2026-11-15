@@ -12,6 +12,7 @@
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTLiteralTyping.h"
+#include "AST/ASTConstantExpander.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeAliasDeclNode.h"
 #include "AST/TypeDeclNode.h"
@@ -37,26 +38,32 @@ namespace
         {}
     };
 
-    // the type whose body, method, or constructor is being parsed. self_struct_ptr is live
-    // in the type body; FunctionBodyScope nulls it, and enclosing_type_of is the owner then
     AST::TypeDeclNode *nested_type_in_enclosing(Parser::Payload &payload, const std::string &name)
     {
-        const AST::ComplexType *owner = nullptr;
-        if (payload.context.self_struct_ptr != nullptr) {
-            owner = &payload.context.self_struct_ptr->complex_type();
-        } else if (payload.context.current_function_ptr != nullptr) {
-            owner = AST::enclosing_type_of(*payload.context.current_function_ptr);
-        }
-
+        const AST::ComplexType *owner = Parser::enclosing_type_at(payload);
         return owner != nullptr ? owner->find_member_type_decl(name) : nullptr;
     }
 };
+
+AST::ComplexType *Parser::enclosing_type_at(Parser::Payload &payload)
+{
+    if (payload.context.self_struct_ptr != nullptr) {
+        return &payload.context.self_struct_ptr->complex_type();
+    }
+
+    if (payload.context.current_function_ptr != nullptr) {
+        return AST::enclosing_type_of(*payload.context.current_function_ptr);
+    }
+
+    return nullptr;
+}
 
 // the type grammar is mutually recursive: a generic argument is a type, and a type may be a
 // generic application. both work on bare ValueTypes, only the public entry point makes a node
 static std::optional<AST::ValueType> parse_value_type(
     Parser::Payload &payload,
-    std::vector<TypeNameSite> *names
+    std::vector<TypeNameSite> *names,
+    bool report = true
 );
 static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type);
 static AST::ValueType parse_generic_application(
@@ -559,7 +566,8 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
 static AST::TypeDeclNode *try_parse_member_type_chain(
     Parser::Payload &payload,
     std::optional<TokenReference> &out_name,
-    std::vector<TypeNameSite> *names
+    std::vector<TypeNameSite> *names,
+    bool report
 )
 {
     auto &cursor = payload.cursor;
@@ -678,9 +686,11 @@ static AST::TypeDeclNode *try_parse_member_type_chain(
         AST::TypeDeclNode *nested = owner_ct->find_member_type_decl(name_token.value());
 
         if (nested == nullptr) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(
-                payload.context.code_ref(name_token),
-                fmt::format("'{}' has no nested type '{}'.", owner_display, name_token.value()));
+            if (report) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(name_token),
+                    fmt::format("'{}' has no nested type '{}'.", owner_display, name_token.value()));
+            }
 
             cursor.restore(start);
             return nullptr;
@@ -923,11 +933,19 @@ static AST::ValueType parse_array_suffix(Parser::Payload &payload, AST::ValueTyp
             if (const AST::TypeParamDecl *named = take_value_param(payload)) {
                 length = AST::ValueType::make_type_param(named);
             } else if (cursor.is_type(Token::Type::t_identifier)) {
+                const bool named_constant = AST::find_constant(
+                    payload.collector.namespaces,
+                    cursor.current().value(),
+                    payload.context.current_namespace,
+                    /*qualified=*/false) != nullptr;
+
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(cursor.current()),
-                    "An inline array's length must be a compile-time integer or a value parameter");
+                    named_constant
+                        ? "Named constants are not supported as an array length yet - write a literal, or a value parameter"
+                        : "An inline array's length must be a compile-time integer or a value parameter");
                 cursor.skip();
-                return AST::ValueType::make_unknown();
+                // length stays unknown; still consume `]` so `$s` is the declaration, not a cascade
             } else {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(at),
@@ -1079,11 +1097,16 @@ static bool type_arguments_fit(
             }
         }
 
+        // a named type in the declaration pass may not have registered `: Interface`
+        // yet (`Hasher` above `Sha256State`). TypeChecker re-asks once every file is in
+        if (payload.pass == Parser::Pass::t_declarations && args[violation].has_complex_type()) {
+            return true;
+        }
+
         payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
             payload.context.code_ref(name_token),
-            "Type parameter '" + param->name + "' of '" + display +
-            "' is constrained to '" + param->constraint_spelling +
-            "' but was given '" + args[violation].get_type_desciption() + "'"
+            AST::unsatisfied_constraint_sentence(
+                param->name, display, param->constraint_spelling, args[violation])
         );
         return false;
     }
@@ -1512,7 +1535,8 @@ static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType 
 // `names` collects each identifier this spelling resolved, so an editor walk does not re-parse
 static std::optional<AST::ValueType> parse_value_type(
     Parser::Payload &payload,
-    std::vector<TypeNameSite> *names
+    std::vector<TypeNameSite> *names,
+    bool report
 )
 {
     bool is_const = false;
@@ -1534,7 +1558,7 @@ static std::optional<AST::ValueType> parse_value_type(
     if (Parser::starts_callable_type(payload.cursor)) {
         payload.cursor.skip(2);
 
-        auto return_type = parse_value_type(payload, names);
+        auto return_type = parse_value_type(payload, names, report);
         if (!return_type.has_value()) {
             return std::nullopt;
         }
@@ -1553,7 +1577,7 @@ static std::optional<AST::ValueType> parse_value_type(
                 return std::nullopt;
             }
 
-            auto param = parse_value_type(payload, names);
+            auto param = parse_value_type(payload, names, report);
             if (!param.has_value()) {
                 return std::nullopt;
             }
@@ -1597,7 +1621,7 @@ static std::optional<AST::ValueType> parse_value_type(
 
         payload.cursor.skip();
 
-        auto pointee = parse_value_type(payload, names);
+        auto pointee = parse_value_type(payload, names, report);
         if (!pointee.has_value()) {
             return std::nullopt;
         }
@@ -1642,7 +1666,7 @@ static std::optional<AST::ValueType> parse_value_type(
 
         payload.cursor.skip();
 
-        auto target = parse_value_type(payload, names);
+        auto target = parse_value_type(payload, names, report);
         if (!target.has_value()) {
             return std::nullopt;
         }
@@ -1695,7 +1719,7 @@ static std::optional<AST::ValueType> parse_value_type(
     // `Owner::Nested` before `a::b::Foo`: the two spellings are indistinguishable until the leading
     // identifier is looked up, and only one of them can be resolved by descending namespaces
     std::optional<TokenReference> member_type_name;
-    if (AST::TypeDeclNode *member_type = try_parse_member_type_chain(payload, member_type_name, names)) {
+    if (AST::TypeDeclNode *member_type = try_parse_member_type_chain(payload, member_type_name, names, report)) {
         AST::ValueType nested_type = member_type->value_type();
 
         // a nested type may itself be generic, and the application reads the same as any other.
@@ -1817,12 +1841,12 @@ static std::optional<AST::ValueType> parse_value_type(
     return parse_ref_suffix(payload, primitive_type);
 }
 
-AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
+AST::TypeNode *Parser::parse_type(Parser::Payload &payload, bool report)
 {
     auto token = payload.cursor.current();
     std::vector<TypeNameSite> names;
 
-    auto type = parse_value_type(payload, &names);
+    auto type = parse_value_type(payload, &names, report);
     if (!type.has_value()) {
         return nullptr;
     }

@@ -1,0 +1,3 @@
+const int32 N = 4;
+uint32[N] $s;
+echo 1;

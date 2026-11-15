@@ -1,0 +1,5 @@
+// unary `-` used to keep `const float64&`, so `-$x / 8.0` refused
+array<float64> $xs = [16.0];
+foreach ($xs as const &$x) {
+    echo (-$x / 8.0);
+}

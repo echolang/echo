@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -322,10 +323,37 @@ namespace
     // the OUT golden plus the exit status, for whichever process the case says owns its output.
     // `actor` is the only thing that differs between the two modes, so the contract - what counts as
     // matching, and what a failure shows - is spelled once
+    // Darwin ld warns when a C object was built against a newer SDK than the link.
+    // e2e OUT is stdout+stderr merged, so that line is not program output
+    std::string strip_host_linker_noise(std::string text)
+    {
+        std::string out;
+        out.reserve(text.size());
+        size_t i = 0;
+
+        while (i < text.size()) {
+            const size_t line_end = text.find('\n', i);
+            const size_t count = line_end == std::string::npos ? text.size() - i : line_end - i + 1;
+            const std::string_view line(text.data() + i, count);
+            const bool ld_sdk =
+                line.find("ld: warning: object file") != std::string_view::npos
+                && line.find("was built for newer") != std::string_view::npos;
+
+            if (!ld_sdk) {
+                out.append(line);
+            }
+
+            i += count;
+        }
+
+        return out;
+    }
+
     void check_program_output(
         const EchoTests::EcoTestFile &test, const ProcessResult &result, const char *actor)
     {
-        const std::string actual = EchoTests::strip_trailing_newline(result.output);
+        const std::string actual = EchoTests::strip_trailing_newline(
+            strip_host_linker_noise(result.output));
 
         INFO("expected:\n" << test.expected_output);
         INFO("actual:\n" << actual);

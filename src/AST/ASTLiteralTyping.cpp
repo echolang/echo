@@ -416,7 +416,7 @@ namespace AST
                 // 1.0 is still 1.0 in 32 bits
                 if (as_double != (double) as_float) {
                     out.warning = fmt::format(
-                        "The literal '{}' is stored in 32bit float which will result in the effctive value {}",
+                        "The literal '{}' is stored in 32bit float which will result in the effective value {}",
                         node.get_fvalue_string(),
                         as_float);
 
@@ -901,7 +901,8 @@ namespace AST
                 return;
             }
 
-            // a shorthand chain has no type of its own; the destination names `.of()`'s owner
+            // a shorthand chain has no type of its own; the destination names `.of()`'s owner.
+            // `Queue::into(...)` names the template; dest `Queue<int32>` is L
             if (bind_shorthand_to(slot, destination)) {
                 changed = true;
             }

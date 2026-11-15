@@ -5,6 +5,7 @@
 
 #include "AST/ASTBundle.h"
 #include "Compiler/CompilerOptions.h"
+#include "AST/ASTDiagnostic.h"
 #include "Parser/ManifestParser.h"
 #include "Parser/ModuleParser.h"
 
@@ -23,12 +24,14 @@ namespace Compiler
 {
     // a tokenization or `#[if:]` filter refusal, with the **exact** title and message
     // `handle_parse` used to render. the path is extra for a language server that wants a
-    // whole-file diagnostic at 0:0; the driver ignores it and calls `render_untyped`
+    // whole-file diagnostic at 0:0. `diagnostic` is the located form, minted while the
+    // bundle still owns the File
     struct FrontEndFailure
     {
         std::string title;
         std::string message;
         std::optional<std::filesystem::path> path;
+        std::optional<AST::Diagnostic> diagnostic;
     };
 
     // in-memory document overlay. a hit uses the `(path, content)` InputFile constructor;

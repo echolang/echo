@@ -1,0 +1,26 @@
+// a return used to dest-type the literal from its first element. Named is the dest
+struct Named
+{
+    public string $n;
+}
+
+struct Other
+{
+    public int32 $k = 0;
+}
+
+function pair() : array<Named>
+{
+    return [Named('a'), Named('b')];
+}
+
+function empty() : array<Named>
+{
+    return [];
+}
+
+array<Named> $xs = pair();
+echo $xs->count();
+echo $xs[0]->n;
+echo $xs[1]->n;
+echo empty()->count();

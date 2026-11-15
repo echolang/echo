@@ -22,6 +22,13 @@ namespace Parser
         bool allows_guard = false
     );
 
+    // `$i += 5` is `+` then `=`. the statement head that starts_vardecl misses: it only
+    // claims `$i =`
+    bool starts_compound_assignment(const Cursor &cursor);
+
+    // reports and recovers when that pair is at the cursor
+    bool refuse_compound_assignment(Payload &payload);
+
     // **the value an assignment writes into `target`.** called with the `=` seen but not consumed, and
     // answers null when either question below refuses - having already left the cursor at the next
     // statement, so a caller only has to stop

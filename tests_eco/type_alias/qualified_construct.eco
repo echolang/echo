@@ -1,0 +1,14 @@
+// a qualified alias constructs as its target: `app::T2(5)` is Tag(5)
+namespace app;
+
+public struct Tag
+{
+    public int32 $id = 0;
+}
+
+public type T2 = Tag;
+
+namespace main;
+
+$r = app::T2(5);
+echo $r->id;

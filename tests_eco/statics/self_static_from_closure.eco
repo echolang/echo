@@ -1,0 +1,16 @@
+// a closure walks enclosing_function; owner_type on the closure is null
+public class Box
+{
+    public static int32 $n = 0;
+    public constructor() {}
+
+    public function maker() : function<void()>
+    {
+        return function() : void { self::$n = 7; };
+    }
+}
+
+Box $b = Box();
+function<void()> $f = $b->maker();
+$f();
+echo Box::$n;

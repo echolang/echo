@@ -1,0 +1,33 @@
+// a user operator's result into an overloaded call. class == enum is not
+// handle identity, so the comparison stays untyped until the operator rewrites
+public enum Status
+{
+    case open;
+    case closed;
+}
+
+public struct Term<T>
+{
+    public string $sql;
+}
+
+public class StatusColumn
+{
+}
+
+operator (StatusColumn $c) == (Status $s) : Term<bool>
+{
+    return Term<bool>('status = ?');
+}
+
+public function where(Term<bool> $t) : string
+{
+    return "bool {$t->sql}";
+}
+
+public function where(Term<bool?> $t) : string
+{
+    return "nbool {$t->sql}";
+}
+
+echo where(StatusColumn() == Status::open);

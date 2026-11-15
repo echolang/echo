@@ -47,6 +47,7 @@
 #include "AST/ASTAttrCollect.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTInstantiation.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTFunctionEmission.h"
@@ -60,6 +61,7 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <optional>
 #include <span>
 #include <unordered_set>
@@ -76,6 +78,11 @@ namespace AST
 // produced a value that faults when called.
 //
 // Answers with the reason rather than a bool, so each site can frame it for the destination it is
+static const char *unbound_null_sentence()
+{
+    return "'null' needs a destination that can be absent - a typed variable, a parameter, or a comparison";
+}
+
 static const char *null_rejection_reason(const ValueType &to)
 {
     // **one question: does this destination admit absence at all?** a list of the kinds that happen
@@ -628,6 +635,41 @@ void TypeChecker::check_unresolved_type_name(const TypeNode *node)
     }
 }
 
+void TypeChecker::check_instantiation_constraints(const TypeNode &node)
+{
+    if (!node.type.has_complex_type() || !node.type_token.has_value()) {
+        return;
+    }
+
+    const ComplexType *ct = node.type.get_complex_type();
+
+    if (ct == nullptr || !ct->is_instantiated() || ct->template_ref == nullptr) {
+        return;
+    }
+
+    const ComplexType *tmpl = ct->template_ref;
+
+    if (tmpl->type_parameters.empty()) {
+        return;
+    }
+
+    const ConstraintJudgement judged = first_constraint_violation(
+        tmpl->type_parameters, ct->instantiation_args, _collector.type_registry);
+
+    if (!judged.violation.has_value()) {
+        return;
+    }
+
+    const size_t i = *judged.violation;
+    const TypeParamDecl *param = tmpl->type_parameters[i];
+    const std::string display = tmpl->name.value_or(node.type_token->value());
+
+    _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(
+        code_ref_for(node.type_token.value()),
+        unsatisfied_constraint_sentence(
+            param->name, display, param->constraint_spelling, ct->instantiation_args[i]));
+}
+
 void TypeChecker::check_simd_shape(const ValueType &type, const TokenReference &at)
 {
     const SimdShape shape = simd_shape_refusal(type);
@@ -946,6 +988,7 @@ void TypeChecker::visit_type_decl(TypeDeclNode &node)
 void TypeChecker::visitType(TypeNode &node)
 {
     check_unresolved_type_name(&node);
+    check_instantiation_constraints(node);
     RecursiveVisitor::visitType(node);
 }
 
@@ -1282,6 +1325,11 @@ void TypeChecker::visit_guard(GuardNode &node)
 
 void TypeChecker::visit_null_coalesce(NullCoalesceExprNode &node)
 {
+    if (is_written_null(node.lhs)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token), unbound_null_sentence());
+    }
+
     check_optional_operand(OptionalForm::t_null_coalesce, node.lhs, node.token);
 
     if (node.lhs != nullptr && node.rhs != nullptr && !expression_never_returns(*node.rhs)) {
@@ -1704,7 +1752,7 @@ void TypeChecker::check_allocation_tracking(FunctionCallExprNode &node)
     _collector.collect_issue<Issue::GenericError>(
         code_ref_for(node.token_function_name),
         "'live_allocations' has nothing to read without allocation tracking - compile with "
-        "'--track-allocations' (or '--explain-memory', which implies it)");
+        "'--track-allocations' (or '--explain memory', which implies it)");
 }
 
 void TypeChecker::check_abort_message(FunctionCallExprNode &node)
@@ -2026,6 +2074,23 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         check_variadic_argument(node);
     }
 
+    // walk arguments with this call's name token as the location context, so an illegal implicit
+    // cast inserted around an argument is reported at the call site. echo runs after that walk:
+    // a refused operator conversion marks the call failed, and result_type is then unknown
+    const TokenReference *prev = _context_token;
+    const FunctionDeclNode *prev_callee = _context_callee;
+    FunctionCallExprNode *prev_call = _context_call;
+
+    _context_token = &node.token_function_name;
+
+    // the callee travels with the token, so visitTypeCast can tell an operator's argument from an
+    // ordinary one - see _context_callee. null is legitimate: an unresolved call is a normal
+    // intermediate state, and there is nothing to name in the operator's words if nothing was chosen
+    _context_callee = node.decl;
+    _context_call = &node;
+
+    RecursiveVisitor::visitFunctionCallExpr(node);
+
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and
     // nothing else. reported here so each gap is a located diagnostic instead of the uncaught codegen
     // throw it would otherwise be. AST::is_print_call owns the recognition, including the "has a declaration,
@@ -2044,7 +2109,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
             if (is_written_null(arg)) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(location_of_expression(arg)),
-                    "'null' needs a destination that can be absent - a typed variable, a parameter, or a comparison");
+                    unbound_null_sentence());
                 continue;
             }
 
@@ -2097,22 +2162,9 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         }
     }
 
-    // walk arguments with this call's name token as the location context, so an illegal implicit
-    // cast inserted around an argument is reported at the call site
-    const TokenReference *prev = _context_token;
-    const FunctionDeclNode *prev_callee = _context_callee;
-
-    _context_token = &node.token_function_name;
-
-    // the callee travels with the token, so visitTypeCast can tell an operator's argument from an
-    // ordinary one - see _context_callee. null is legitimate: an unresolved call is a normal
-    // intermediate state, and there is nothing to name in the operator's words if nothing was chosen
-    _context_callee = node.decl;
-
-    RecursiveVisitor::visitFunctionCallExpr(node);
-
     _context_token = prev;
     _context_callee = prev_callee;
+    _context_call = prev_call;
     _context_operands_refused = prev_operands_refused;
 }
 
@@ -2224,6 +2276,10 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
                             "no overload of operator '{}' accepts a '{}' here - declare one for it, or "
                             "convert the operand first.",
                             _context_callee->operator_spelling(), from.get_type_desciption()));
+                }
+
+                if (_context_call != nullptr) {
+                    _context_call->settlement = CallSettlement::t_failed;
                 }
             }
             else {
@@ -2366,6 +2422,11 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
             expression_produces_no_value(*node.lhs)
             || expression_produces_no_value(*node.rhs);
 
+        if (lhs_facts.is_null && rhs_facts.is_null) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.op_node->token_literal), unbound_null_sentence());
+        }
+
         // **what is wrong with the operands**, asked of AST::binary_operand_refusal rather than
         // decided here. the same two rules have to be reachable from an operator *call*, which is what
         // a use site becomes as soon as anybody in the program declares an infix form of the symbol -
@@ -2392,6 +2453,18 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
 
             if (count.is_folded()) {
                 if (auto refusal = shift_count_refusal(lhs, count.bits)) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(node.op_node->token_literal), *refusal);
+                }
+            }
+        }
+
+        if (node.op_node->op != nullptr
+            && (node.op_node->op->type == Token::Type::t_op_div
+                || node.op_node->op->type == Token::Type::t_op_mod)) {
+            const ConstFoldResult divisor = const_fold(node.rhs);
+            if (divisor.is_folded()) {
+                if (auto refusal = division_by_zero_refusal(divisor.bits)) {
                     _collector.collect_issue<Issue::GenericError>(
                         code_ref_for(node.op_node->token_literal), *refusal);
                 }
@@ -2439,6 +2512,11 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
 void TypeChecker::visitUnaryExpr(UnaryExprNode &node)
 {
     if (node.expr != nullptr) {
+        if (is_written_null(node.expr)) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_operator), unbound_null_sentence());
+        }
+
         const Operator *op = _collector.operators.get_operator(node.token_operator);
         const OperandFacts operand = adjusted_operand(node.expr);
 
@@ -2675,7 +2753,10 @@ void TypeChecker::visit_assign(AssignNode &node)
 
         // check_destination_fits waves a null value through, so the rule for one is asked here
         if (is_written_null(node.value_expr)) {
-            if (const char *reason = null_rejection_reason(target_type)) {
+            if (is_undetermined_type(target_type)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_assign), unbound_null_sentence());
+            } else if (const char *reason = null_rejection_reason(target_type)) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_assign),
                     fmt::format("cannot assign null to '{}' - {}", target_type.get_type_desciption(), reason));
@@ -2803,7 +2884,10 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
     }
 
     if (node.has_type() && is_written_null(node.init_expr)) {
-        if (const char *reason = null_rejection_reason(node.type())) {
+        if (is_undetermined_type(node.type())) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_varname), unbound_null_sentence());
+        } else if (const char *reason = null_rejection_reason(node.type())) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.token_varname),
                 fmt::format("'{}' cannot be null - {}", node.type().get_type_desciption(), reason));

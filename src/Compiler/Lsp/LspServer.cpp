@@ -1,5 +1,6 @@
 #include "Compiler/Lsp/LspServer.h"
 
+#include "AST/ASTDiagnostic.h"
 #include "AST/ASTFile.h"
 #include "Compiler/Lsp/LspCompletion.h"
 #include "Compiler/Lsp/LspHints.h"
@@ -14,6 +15,7 @@
 #include "eco.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -464,8 +466,20 @@ void Compiler::Lsp::Server::Impl::flush_session_output()
     const std::optional<FrontEndFailure> &failure = session.parse_failure();
     if (failure.has_value()) {
         if (failure->path.has_value()) {
+            json range = range_json({});
+            if (failure->diagnostic.has_value() && failure->diagnostic->primary.start.line != 0) {
+                const AST::Span &span = failure->diagnostic->primary;
+                const uint32_t line = span.start.line > 0 ? span.start.line - 1 : 0;
+                const uint32_t column = span.start.column > 0 ? span.start.column - 1 : 0;
+                const uint32_t end_column = span.end.column > 0 ? span.end.column - 1 : column + 1;
+                range = {
+                    { "start", { { "line", line }, { "character", column } } },
+                    { "end", { { "line", line }, { "character", end_column } } }
+                };
+            }
+
             json item = {
-                { "range", range_json({}) },
+                { "range", std::move(range) },
                 { "severity", 1 },
                 { "source", "echoc" },
                 { "message", failure->title.empty()

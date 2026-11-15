@@ -1,0 +1,25 @@
+// a payload default used to overwrite a written argument: `.unique('k')` seated
+// `''` because the parameter was also a body local whose init ran after the
+// incoming value. omitted arguments still take the default
+
+enum Key { case unique(string $key = ''); case plain; }
+enum N { case n(int32 $v = 5); }
+
+function show(Key $k) : string
+{
+    return match ($k) {
+        .unique($key) => "'{$key}'",
+        .plain => "plain",
+    };
+}
+
+echo show(.unique('k'));
+echo show(.unique());
+
+function show_n(N $x) : int32
+{
+    return match ($x) { .n($v) => $v };
+}
+
+echo show_n(N::n(9));
+echo show_n(N::n());

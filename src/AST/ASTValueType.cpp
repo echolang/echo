@@ -656,6 +656,32 @@ AST::ValueType AST::TypeRegistry::get_or_create_optional(const AST::ValueType &p
     return ValueType::make_complex(type);
 }
 
+namespace
+{
+    bool instantiation_layout_is_stale(const AST::ComplexType *ct, const AST::ComplexType *tmpl)
+    {
+        return ct->property_count() < tmpl->property_count()
+            || ct->conformances().size() < tmpl->conformances().size();
+    }
+}
+
+void AST::TypeRegistry::refresh_stale_instantiations()
+{
+    std::vector<ComplexType *> interned;
+
+    for (auto &[key, ct] : _instantiations) {
+        if (ct == nullptr || !ct->is_instantiated() || ct->template_ref == nullptr) {
+            continue;
+        }
+
+        interned.push_back(ct);
+    }
+
+    for (ComplexType *ct : interned) {
+        derive_instantiation(ct, ct->template_ref, ct->instantiation_args);
+    }
+}
+
 AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tmpl, const std::vector<ValueType> &args)
 {
     assert(tmpl->is_generic() && tmpl->type_parameters.size() == args.size());
@@ -684,10 +710,7 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
             inst->is_unique = tmpl->is_unique;
             inst->is_atomic = tmpl->is_atomic;
 
-            const bool stale = inst->property_count() < tmpl->property_count()
-                || inst->conformances().size() < tmpl->conformances().size();
-
-            if (stale) {
+            if (instantiation_layout_is_stale(inst, tmpl)) {
                 derive_instantiation(inst, tmpl, normalized);
             }
         }

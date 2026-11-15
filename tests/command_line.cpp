@@ -1199,3 +1199,15 @@ TEST_CASE("help answers on stdout and a refusal on stderr", "[cli]")
         = EchoTests::run_capturing(echoc + stderr_only);
     REQUIRE(bare_stderr.output.find("No command given.") != std::string::npos);
 }
+
+TEST_CASE("a missing source file is a json diagnostic", "[cli]")
+{
+    const std::string echoc = EchoTests::quoted(EchoTests::echoc_binary());
+    const EchoTests::ProcessResult missing = EchoTests::run_capturing(
+        echoc + " run --diagnostics=json no-such-file.eco");
+
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE(missing.output.find("\"type\":\"diagnostic\"") != std::string::npos);
+    REQUIRE(missing.output.find("No Such File") != std::string::npos);
+    REQUIRE(missing.output.find("no-such-file.eco") != std::string::npos);
+}

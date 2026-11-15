@@ -3,94 +3,94 @@
 #[group: "signal"]
 test nothing_is_caught_at_start
 {
-    std::env::reset();
-    assert(!std::env::caught());
-    assert(std::env::last() == null);
-    assert(std::env::take() == null);
+    std::env::signal::reset();
+    assert(!std::env::signal::caught());
+    assert(std::env::signal::last() == null);
+    assert(std::env::signal::take() == null);
 }
 
 #[group: "signal"]
 test a_trapped_raise_is_recorded
 {
-    std::env::reset();
-    guard std::env::trap();
-    guard std::env::raise(std::env::signal::terminate);
+    std::env::signal::reset();
+    guard std::env::signal::trap();
+    guard std::env::signal::raise(std::env::signal::terminate);
 
-    assert(std::env::caught());
-    assert(std::env::caught(std::env::signal::terminate));
-    assert(!std::env::caught(std::env::signal::interrupt));
+    assert(std::env::signal::caught());
+    assert(std::env::signal::caught(std::env::signal::terminate));
+    assert(!std::env::signal::caught(std::env::signal::interrupt));
 
-    std::env::signal $last = guard std::env::last();
+    std::env::signal $last = guard std::env::signal::last();
     assert($last == std::env::signal::terminate);
 
-    std::env::signal $taken = guard std::env::take();
+    std::env::signal $taken = guard std::env::signal::take();
     assert($taken == std::env::signal::terminate);
-    assert(!std::env::caught());
+    assert(!std::env::signal::caught());
 }
 
 #[group: "signal"]
 test take_goes_in_kind_order
 {
-    std::env::reset();
-    guard std::env::trap();
-    guard std::env::raise(std::env::signal::terminate);
-    guard std::env::raise(std::env::signal::interrupt);
+    std::env::signal::reset();
+    guard std::env::signal::trap();
+    guard std::env::signal::raise(std::env::signal::terminate);
+    guard std::env::signal::raise(std::env::signal::interrupt);
 
-    std::env::signal $first = guard std::env::take();
-    std::env::signal $second = guard std::env::take();
+    std::env::signal $first = guard std::env::signal::take();
+    std::env::signal $second = guard std::env::signal::take();
     assert($first == std::env::signal::interrupt);
     assert($second == std::env::signal::terminate);
-    assert(std::env::take() == null);
+    assert(std::env::signal::take() == null);
 }
 
 #[group: "signal"]
 test taking_does_not_forget_the_last_one
 {
-    std::env::reset();
-    guard std::env::trap();
-    guard std::env::raise(std::env::signal::interrupt);
+    std::env::signal::reset();
+    guard std::env::signal::trap();
+    guard std::env::signal::raise(std::env::signal::interrupt);
 
-    std::env::signal $taken = guard std::env::take();
+    std::env::signal $taken = guard std::env::signal::take();
     assert($taken == std::env::signal::interrupt);
 
-    std::env::signal $last = guard std::env::last();
+    std::env::signal $last = guard std::env::signal::last();
     assert($last == std::env::signal::interrupt);
 }
 
 #[group: "signal"]
 test reset_forgets_pending_and_last
 {
-    guard std::env::trap();
-    guard std::env::raise(std::env::signal::interrupt);
-    std::env::reset();
+    guard std::env::signal::trap();
+    guard std::env::signal::raise(std::env::signal::interrupt);
+    std::env::signal::reset();
 
-    assert(!std::env::caught());
-    assert(std::env::last() == null);
+    assert(!std::env::signal::caught());
+    assert(std::env::signal::last() == null);
 }
 
 #[group: "signal"]
 test a_second_arrival_of_one_kind_is_one_pending
 {
-    std::env::reset();
-    guard std::env::trap();
-    guard std::env::raise(std::env::signal::interrupt);
-    guard std::env::raise(std::env::signal::interrupt);
+    std::env::signal::reset();
+    guard std::env::signal::trap();
+    guard std::env::signal::raise(std::env::signal::interrupt);
+    guard std::env::signal::raise(std::env::signal::interrupt);
 
-    std::env::signal $taken = guard std::env::take();
+    std::env::signal $taken = guard std::env::signal::take();
     assert($taken == std::env::signal::interrupt);
-    assert(std::env::take() == null);
+    assert(std::env::signal::take() == null);
 }
 
 #[group: "signal"]
 test wait_takes_a_pending_signal
 {
-    std::env::reset();
-    guard std::env::trap();
-    guard std::env::raise(std::env::signal::interrupt);
+    std::env::signal::reset();
+    guard std::env::signal::trap();
+    guard std::env::signal::raise(std::env::signal::interrupt);
 
-    std::env::signal $k = std::env::wait(std::time::duration::millis(5));
+    std::env::signal $k = std::env::signal::wait(poll: std::time::duration::millis(5));
     assert($k == std::env::signal::interrupt);
-    assert(!std::env::caught());
+    assert(!std::env::signal::caught());
 }
 
 #[if: threads]
@@ -119,8 +119,8 @@ class Go
 #[group: "signal"]
 test wait_blocks_until_a_raise
 {
-    std::env::reset();
-    guard std::env::trap();
+    std::env::signal::reset();
+    guard std::env::signal::trap();
 
     Go $go = Go();
     std::thread::handle $h = guard std::thread::spawn(function() : void {
@@ -129,11 +129,11 @@ test wait_blocks_until_a_raise
         }
 
         std::time::sleep(std::time::duration::millis(20));
-        guard std::env::raise(std::env::signal::terminate);
+        guard std::env::signal::raise(std::env::signal::terminate);
     });
 
     $go->set();
-    std::env::signal $k = std::env::wait(std::time::duration::millis(5));
+    std::env::signal $k = std::env::signal::wait(poll: std::time::duration::millis(5));
     assert($k == std::env::signal::terminate);
     $h->join();
 }
@@ -156,16 +156,16 @@ test kinds_have_their_shell_names
 #[group: "signal"]
 test windows_has_no_hangup
 {
-    std::env::reset();
+    std::env::signal::reset();
     array<std::env::signal> $hup = [std::env::signal::hangup];
-    status<std::env::signal_error> $s = std::env::trap($hup);
+    status<std::env::signal_error> $s = std::env::signal::trap($hup);
     assert($s->failed());
     assert($s->failure()->message() == 'SIGHUP does not exist on this platform');
-    assert(!std::env::caught());
+    assert(!std::env::signal::caught());
 
-    status<std::env::signal_error> $r = std::env::raise(std::env::signal::user1);
+    status<std::env::signal_error> $r = std::env::signal::raise(std::env::signal::user1);
     assert($r->failed());
-    assert(!std::env::caught());
+    assert(!std::env::signal::caught());
 }
 
 #[tests: expects death]
@@ -173,9 +173,9 @@ test windows_has_no_hangup
 test a_failed_trap_leaves_dispositions_alone
 {
     array<std::env::signal> $all = std::env::signal::all();
-    status<std::env::signal_error> $s = std::env::trap($all);
+    status<std::env::signal_error> $s = std::env::signal::trap($all);
     assert($s->failed());
-    guard std::env::raise(std::env::signal::interrupt);
+    guard std::env::signal::raise(std::env::signal::interrupt);
 }
 
 #[else]
@@ -183,21 +183,21 @@ test a_failed_trap_leaves_dispositions_alone
 #[group: "signal"]
 test hangup_and_the_user_signals_are_trapped
 {
-    std::env::reset();
+    std::env::signal::reset();
     array<std::env::signal> $three = [
         std::env::signal::hangup,
         std::env::signal::user1,
         std::env::signal::user2,
     ];
-    guard std::env::trap($three);
-    guard std::env::raise(std::env::signal::user2);
-    guard std::env::raise(std::env::signal::hangup);
+    guard std::env::signal::trap($three);
+    guard std::env::signal::raise(std::env::signal::user2);
+    guard std::env::signal::raise(std::env::signal::hangup);
 
-    std::env::signal $first = guard std::env::take();
-    std::env::signal $second = guard std::env::take();
+    std::env::signal $first = guard std::env::signal::take();
+    std::env::signal $second = guard std::env::signal::take();
     assert($first == std::env::signal::hangup);
     assert($second == std::env::signal::user2);
-    assert(!std::env::caught(std::env::signal::user1));
+    assert(!std::env::signal::caught(std::env::signal::user1));
 }
 
 #[end]
