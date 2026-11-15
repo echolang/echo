@@ -1,0 +1,4 @@
+// wasi has no signals to trap or raise, so the declarations are not there to name: a program that
+// needs one says so at compile time, before anything tries to install a handler
+
+std::env::signal $k = std::env::signal::interrupt;

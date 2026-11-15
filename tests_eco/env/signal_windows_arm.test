@@ -1,0 +1,15 @@
+flags: --target-os windows
+
+--- OUT --->
+--- IR --->
+CHECK: define dso_local void @_std_env_restore_to_defaultZZMLPi(
+CHECK: call ptr @signal(
+CHECK: ptr null
+CHECK: define dso_local void @_std_env_on_signalZZMLPi(
+CHECK: call void @_std_env_reinstall
+CHECK: define dso_local void @_std_env_reinstallZZMLPi(
+CHECK: icmp eq i32
+CHECK: call ptr @signal(
+CHECK: define dso_local void @_std_env_MN3std3env9installedE_destructor
+CHECK: @_M6atomic_store
+CHECK: call void @_std_env_restore_to_default

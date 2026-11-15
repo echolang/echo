@@ -1,0 +1,29 @@
+// a trapped signal is recorded rather than acted on, and read back from ordinary code. interrupt and
+// terminate are the two every platform has, so this case runs on all three hosts
+use std::env;
+
+echo env::caught();
+
+guard env::trap() else ($e) {
+    die($e->message());
+}
+
+guard env::raise(.terminate) else ($e) {
+    die($e->message());
+}
+guard env::raise(.interrupt) else ($e) {
+    die($e->message());
+}
+
+echo env::caught();
+echo env::caught(.terminate);
+
+env::signal $last = guard env::last();
+echo $last->name();
+
+while (env::caught()) {
+    env::signal $k = guard env::take();
+    echo $k->name();
+}
+
+echo env::caught();

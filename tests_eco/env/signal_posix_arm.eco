@@ -1,0 +1,2 @@
+// the Linux arm of std::env::trap, lowered on whatever machine runs the suite. `signal` keeps the
+// handler installed there, so the handler does not call it

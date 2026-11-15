@@ -99,3 +99,18 @@ internal extern {
     function _NSGetExecutablePath as c_exe_path(ptr<uint8> $buf, ptr<uint32> $size) : int32;
 }
 #[end]
+
+// `signal`, not `sigaction`: one call on every platform, and no struct whose layout differs per
+// libc - the reason the compiler's own SIGPIPE prologue makes the same call. Darwin, glibc and musl
+// all give it the persistent, restarting disposition, so a trapped signal does not turn a blocking
+// read into an `EINTR` somewhere else in the program. The UCRT resets the disposition to the default
+// before it calls a handler, which is why the handler puts itself back on Windows.
+//
+// The handler is `extern function<void(int32)>?` so `null` is `SIG_DFL`. The return is the previous
+// handler, read as a pointer only to compare it with `SIG_ERR`, which is all ones.
+#[if: os != wasi]
+internal extern {
+    function signal as c_signal(int32 $number, extern function<void(int32)>? $handler) : ptr<uint8>;
+    function raise as c_raise(int32 $number) : int32;
+}
+#[end]

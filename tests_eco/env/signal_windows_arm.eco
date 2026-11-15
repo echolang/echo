@@ -1,0 +1,2 @@
+// the Windows arm of std::env::trap, lowered on whatever machine runs the suite. the UCRT puts a
+// disposition back to the default before it calls the handler, so the handler installs itself again

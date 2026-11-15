@@ -1,0 +1,12 @@
+flags: --target-os linux
+
+--- OUT --->
+--- IR --->
+CHECK: define dso_local void @_std_env_restore_to_defaultZZMLPi(
+CHECK: call ptr @signal(
+CHECK: ptr null
+CHECK: define dso_local void @_std_env_on_signalZZMLPi(
+CHECK-NOT: call ptr @signal(
+CHECK: ret void
+CHECK: define dso_local void @_std_env_MN3std3env9installedE_destructor
+CHECK: call void @_std_env_restore_to_default

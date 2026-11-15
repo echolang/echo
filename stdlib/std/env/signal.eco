@@ -1,0 +1,434 @@
+/**
+ * Trapping a process signal, and reading it later from ordinary code.
+ *
+ * The handler records and does nothing else: it sets the signal's bit in a word and remembers it as
+ * the last one. Any thread asks afterwards - a server polls `caught()` from its loop, or blocks in
+ * `wait()` - and stops cleanly in its own time. Nothing in the language can hold an arbitrary body
+ * to what a signal handler may do (no allocation, no lock, no drop), so there is no callback to
+ * register: the one body that runs inside a signal is `on_signal` below, and it touches atomics and
+ * calls `signal` again on Windows, nothing more.
+ *
+ * Its storage is three statics. A static initializes on first use, so `trap()` seats all three
+ * before it installs the handler, and the handler never runs an initializer. The set of installed
+ * kinds is a struct whose teardown puts each one back to the default, so a handler is never left
+ * pointing at code that is about to go away - a JIT run's, or an unloaded library's.
+ *
+ * WASI has no signals. This file is absent there, so a program that names `trap` fails to compile
+ * instead of failing when it tries to install a handler.
+ */
+
+#[if: os != wasi]
+
+namespace std::env;
+
+/**
+ * A process signal this namespace can trap.
+ *
+ * The cases are the ones a program stops or reloads on, not the platform's whole table: a crash
+ * signal is the crash reporter's, and SIGKILL and SIGSTOP cannot be caught at all. The backing value
+ * is the case's position, which is also its bit in the pending set, so `take()` answers in this
+ * order. Windows has `interrupt` and `terminate` and nothing else.
+ */
+public enum signal : int32
+{
+    case interrupt = 0;
+    case terminate = 1;
+    case hangup = 2;
+    case user1 = 3;
+    case user2 = 4;
+
+    /**
+     * The conventional upper case name, as a shell prints it.
+     */
+    const function name() : string
+    {
+        return match ($this) {
+            signal::interrupt => 'SIGINT',
+            signal::terminate => 'SIGTERM',
+            signal::hangup => 'SIGHUP',
+            signal::user1 => 'SIGUSR1',
+            signal::user2 => 'SIGUSR2',
+        };
+    }
+
+    /**
+     * Every case, in backing order.
+     */
+    static function all() : array<signal>
+    {
+        array<signal> $out = [
+            signal::interrupt,
+            signal::terminate,
+            signal::hangup,
+            signal::user1,
+            signal::user2,
+        ];
+        return $out;
+    }
+
+    /**
+     * The case whose backing value is `$code`, or null.
+     */
+    // skip the synthesized LUT: a five-case table does not need one in every program's IR
+    static function from(int32 $code) : signal?
+    {
+        if ($code == 0) {
+            return signal::interrupt;
+        }
+        if ($code == 1) {
+            return signal::terminate;
+        }
+        if ($code == 2) {
+            return signal::hangup;
+        }
+        if ($code == 3) {
+            return signal::user1;
+        }
+        if ($code == 4) {
+            return signal::user2;
+        }
+
+        return null;
+    }
+}
+
+/**
+ * Why a signal could not be trapped or raised.
+ */
+public enum signal_error
+{
+    // the platform has no such signal. Windows has only `interrupt` and `terminate`
+    case unsupported(signal $signal);
+
+    // `signal()` refused the handler
+    case install(signal $signal);
+
+    // `raise()` failed
+    case raise(signal $signal);
+
+    const function message() : string
+    {
+        return match ($this) {
+            signal_error::unsupported($signal) => str::concat($signal->name(), ' does not exist on this platform'),
+            signal_error::install($signal) => str::concat('could not trap ', $signal->name()),
+            signal_error::raise($signal) => str::concat('could not raise ', $signal->name()),
+        };
+    }
+}
+
+/**
+ * Installs the recording handler for every signal in `$which`. The default action - for all five,
+ * ending the process - no longer happens for them. A kind this platform does not have, or an
+ * install that `signal()` refuses, fails and leaves every disposition as it was.
+ */
+public function trap(const array<signal>& $which) : status<signal_error>
+{
+    seat();
+
+    foreach ($which as $k) {
+        if (number_of($k) == null) {
+            return .error(.unsupported($k));
+        }
+    }
+
+    int32 $was = trapped::$handlers->mask->load();
+    int32 $added = 0;
+
+    foreach ($which as $k) {
+        int32 $number = guard number_of($k) else {
+            restore_to_default($added);
+            return .error(.unsupported($k));
+        };
+
+        if (is_sig_err(c_signal($number, &on_signal))) {
+            restore_to_default($added);
+            return .error(.install($k));
+        }
+
+        $added = $added | (bit_of($k) & ~$was);
+    }
+
+    set_bits(trapped::$handlers->mask, $added);
+
+    return .ok;
+}
+
+/**
+ * `interrupt` and `terminate`, the pair a server stops on.
+ */
+public function trap() : status<signal_error>
+{
+    array<signal> $pair = [signal::interrupt, signal::terminate];
+    return trap($pair);
+}
+
+/**
+ * Whether any trapped signal arrived and was not taken yet.
+ */
+public function caught() : bool
+{
+    return trapped::$pending->load() != 0;
+}
+
+/**
+ * Whether `$k` arrived and was not taken yet.
+ */
+public function caught(signal $k) : bool
+{
+    return (trapped::$pending->load() & bit_of($k)) != 0;
+}
+
+/**
+ * The most recent signal that arrived, or null when none did since the last `reset()`. Taking a
+ * signal does not forget it here.
+ */
+public function last() : signal?
+{
+    return signal::from(trapped::$last->load());
+}
+
+/**
+ * Takes one pending signal, in `signal`'s order, and clears it. Null when nothing is pending. Two
+ * threads taking at once never both get the same arrival.
+ */
+public function take() : signal?
+{
+    int32 $was = trapped::$pending->load();
+
+    while ($was != 0) {
+        int32 $code = bits::trailing_zeros($was as uint32) as int32;
+        if (trapped::$pending->compare_exchange($was, $was & ~(1 << $code))) {
+            return signal::from($code);
+        }
+
+        $was = trapped::$pending->load();
+    }
+
+    return null;
+}
+
+/**
+ * Blocks until a trapped signal arrives, looking every `$poll`, and takes it.
+ *
+ * A non-positive `$poll` makes `sleep` return immediately, so the loop spins. Pass a few
+ * milliseconds: 50 to 250 is plenty for a shutdown.
+ */
+public function wait(std::time::duration $poll) : signal
+{
+    while (true) {
+        signal? $hit = take();
+        if ($hit != null) {
+            signal $k = guard $hit;
+            return $k;
+        }
+
+        std::time::sleep($poll);
+    }
+}
+
+/**
+ * Forgets every pending signal and the last one. The handlers stay installed.
+ */
+public function reset() : void
+{
+    seat();
+    trapped::$pending->store(0);
+    trapped::$last->store(-1);
+}
+
+/**
+ * Sends `$k` to this thread, and returns once its handler has run. With a trap installed that is a
+ * recorded arrival, which is how a test exercises a clean stop. Without one it is the default
+ * action, which for all five ends the process.
+ */
+public function raise(signal $k) : status<signal_error>
+{
+    int32 $number = guard number_of($k) else {
+        return .error(.unsupported($k));
+    };
+
+    seat();
+
+    if (c_raise($number) != 0) {
+        return .error(.raise($k));
+    }
+
+    return .ok;
+}
+
+private struct trapped
+{
+    // one bit per `signal`, set by the handler, cleared by `take()` and `reset()`
+    static atomic<int32> $pending = atomic<int32>(0);
+
+    // the backing value of the most recent arrival, -1 for none
+    static atomic<int32> $last = atomic<int32>(-1);
+
+    // the kinds `trap` installed the handler for
+    static installed $handlers = installed();
+}
+
+/**
+ * The kinds the handler is installed for. Its teardown, which runs from `main`'s epilogue and from a
+ * library's unload, puts each back to the default disposition.
+ */
+private struct installed
+{
+    atomic<int32> $mask;
+    atomic<int32> $restoring;
+
+    constructor()
+    {
+        $this->mask = atomic<int32>(0);
+        $this->restoring = atomic<int32>(0);
+    }
+
+    destructor()
+    {
+        $this->restoring->store(1);
+        restore_to_default($this->mask->load());
+    }
+}
+
+// touching each static runs its lazy initializer. the handler must never be the first reader:
+// first-use init is not async-signal-safe
+private function seat() : void
+{
+    trapped::$pending->load();
+    trapped::$last->load();
+    trapped::$handlers->mask->load();
+    trapped::$handlers->restoring->load();
+}
+
+private function bit_of(signal $k) : int32
+{
+    return 1 << $k->value();
+}
+
+private function set_bits(atomic<int32>& $word, int32 $bits) : void
+{
+    int32 $was = $word->load();
+    while (!$word->compare_exchange($was, $was | $bits)) {
+        $was = $word->load();
+    }
+}
+
+private function restore_to_default(int32 $bits) : void
+{
+    int32 $i = 0;
+
+    while ($i < 5) {
+        signal $k = guard signal::from($i) else {
+            $i = $i + 1;
+            continue;
+        };
+
+        if (($bits & bit_of($k)) != 0) {
+            int32 $number = guard number_of($k) else {
+                $i = $i + 1;
+                continue;
+            };
+            c_signal($number, null);
+        }
+
+        $i = $i + 1;
+    }
+}
+
+private function is_sig_err(ptr<uint8> $previous) : bool
+{
+    return mem::bit_cast<usize, ptr<uint8>>($previous) == std::math::MAX_USIZE;
+}
+
+/**
+ * The platform's number for `$k`, or null where the platform has no such signal.
+ *
+ * SIGINT and SIGTERM are 2 and 15 everywhere, the UCRT included. SIGHUP is 1 on every POSIX system.
+ * SIGUSR1 and SIGUSR2 are 30 and 31 on Darwin and 10 and 12 on Linux. Windows has neither, nor a hangup.
+ */
+#[inline]
+private function number_of(signal $k) : int32?
+{
+#[if: os == windows]
+    return match ($k) {
+        signal::interrupt => 2,
+        signal::terminate => 15,
+        signal::hangup => null,
+        signal::user1 => null,
+        signal::user2 => null,
+    };
+#[elif: family == darwin]
+    return match ($k) {
+        signal::interrupt => 2,
+        signal::terminate => 15,
+        signal::hangup => 1,
+        signal::user1 => 30,
+        signal::user2 => 31,
+    };
+#[else]
+    return match ($k) {
+        signal::interrupt => 2,
+        signal::terminate => 15,
+        signal::hangup => 1,
+        signal::user1 => 10,
+        signal::user2 => 12,
+    };
+#[end]
+}
+
+#[inline]
+private function number_is(signal $k, int32 $number) : bool
+{
+    int32 $n = guard number_of($k) else {
+        return false;
+    };
+
+    return $n == $number;
+}
+
+/**
+ * The handler, and the one body here that runs inside a signal. Atomics only: no allocation, no
+ * string, nothing that can fail an `assert`.
+ */
+private function on_signal(int32 $number) : void
+{
+    if (number_is(signal::interrupt, $number)) {
+        record(signal::interrupt);
+    }
+    else if (number_is(signal::terminate, $number)) {
+        record(signal::terminate);
+    }
+    else if (number_is(signal::hangup, $number)) {
+        record(signal::hangup);
+    }
+    else if (number_is(signal::user1, $number)) {
+        record(signal::user1);
+    }
+    else if (number_is(signal::user2, $number)) {
+        record(signal::user2);
+    }
+
+#[if: os == windows]
+    reinstall($number);
+#[end]
+}
+
+#[if: os == windows]
+private function reinstall(int32 $number) : void
+{
+    // the UCRT reset the disposition to the default before this call. skip when the
+    // destructor is putting SIG_DFL back, or a delivery overlapping teardown would
+    // plant the adapter on gone code
+    if (trapped::$handlers->restoring->load() == 0) {
+        c_signal($number, &on_signal);
+    }
+}
+#[end]
+
+private function record(signal $k) : void
+{
+    set_bits(trapped::$pending, bit_of($k));
+    trapped::$last->store($k->value());
+}
+
+#[end]
