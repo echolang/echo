@@ -557,9 +557,27 @@ namespace AST
 
                     if (unify_type(tmpl->args[i]->type(), argument_type, attempt)) {
                         for (const auto &binding : attempt.bindings) {
-                            if (!result.bindings.covers(binding.first)) {
-                                result.bindings.bind(binding.first, binding.second);
+                            if (result.bindings.covers(binding.first)) {
+                                continue;
                             }
+
+                            // an instance method's T is the receiver's. a deferred literal
+                            // must not name the instance while that receiver is still the
+                            // template. constructors, statics and enum cases bind from the
+                            // argument: `Box(7)`, `.make(5)`, `.leaf(3)`
+                            bool inherited = false;
+                            for (size_t p = 0; p < tmpl->inherited_type_param_count; p++) {
+                                if (tmpl->type_parameters[p] == binding.first) {
+                                    inherited = true;
+                                    break;
+                                }
+                            }
+
+                            if (inherited && tmpl->has_receiver() && !tmpl->is_constructor()) {
+                                continue;
+                            }
+
+                            result.bindings.bind(binding.first, binding.second);
                         }
                     }
 

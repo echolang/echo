@@ -1,0 +1,39 @@
+// a fluent method returns `$this` as `Box<T>`. the next call's literal must not
+// name T while that result is still the template: T is the receiver's, and 1
+// dest-types as int64. binding the other way instantiates `Box<int32>::isNot`
+// and then cannot convert `Box<int64>&` to it
+
+class Box<T>
+{
+    public const T $value;
+
+    public constructor(T $value)
+    {
+        $this->value = $value;
+    }
+
+    public const function is(T $want) : Box<T>
+    {
+        return $this;
+    }
+
+    public const function isNot(T $other) : Box<T>
+    {
+        return $this;
+    }
+}
+
+function expect(int64 $value) : Box<int64>
+{
+    return Box<int64>($value);
+}
+
+function expect(uint64 $value) : Box<uint64>
+{
+    return Box<uint64>($value);
+}
+
+echo expect(1)->is(2)->isNot(1)->value;
+
+uint8 $byte = 3;
+echo expect($byte)->is(3)->isNot(0)->value;

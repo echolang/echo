@@ -12,3 +12,4 @@ CHECK-DARWIN: call void @__eco_stdio_write_failed(i32 1)
 CHECK-LINUX: call void @__eco_stdio_write_failed(i32 1)
 CHECK-NOT-WINDOWS: @signal(
 CHECK-NOT-WINDOWS: @__eco_stdio_write_failed
+CHECK: ret i32
