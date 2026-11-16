@@ -209,3 +209,41 @@ TEST_CASE("-p tools answers for one module", "[public_tools]")
     REQUIRE(nothing.exit_code == 1);
     REQUIRE(nothing.output.find("needs a '-m' or a module.eco") != std::string::npos);
 }
+
+TEST_CASE("a vendored tool still builds when a dependency's tests require it", "[public_tools][packages]")
+{
+    // epm run of a tool is `echoc build -m vendor/<name> --target …`. package dir is the
+    // consumer's vendor/, so a dependency's unopened test `#[requires: "echolang/kit"]`
+    // resolves to the root itself. that path is conditional for a consumer and must not
+    // drop the program
+    ScopedProject project("vendored_tool_required_by_dep_tests");
+
+    write_file(project.root() / "vendor/echolang/kit/module.eco",
+        "#[module: \"kit\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: exe { name: \"kit\", entry: \"cli/main.eco\", public: true }] {\n"
+        "    #[sources: \"cli/*.eco\"]\n"
+        "    #[requires: \"echolang/libjson\" { version: \"^1\", source: git \"https://example.com/libjson\" }]\n"
+        "}\n");
+    write_file(project.root() / "vendor/echolang/kit/src/api.eco",
+        "namespace kit;\n"
+        "public function answer() : int32 { return 42; }\n");
+    write_file(project.root() / "vendor/echolang/kit/cli/main.eco", "echo 'KIT RAN';\n");
+
+    write_file(project.root() / "vendor/echolang/libjson/module.eco",
+        "#[module: \"libjson\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[requires: \"echolang/kit\" { version: \"^1\", source: git \"https://example.com/kit\" }]\n"
+        "}\n");
+    write_file(project.root() / "vendor/echolang/libjson/src/json.eco",
+        "namespace json;\n"
+        "public function ok() : int32 { return 1; }\n");
+
+    const ProcessResult built = project.echoc("build --target kit", project.root() / "vendor/echolang/kit");
+    INFO(built.output);
+    REQUIRE(built.exit_code == 0);
+
+    const ProcessResult ran = EchoTests::run_binary(project.root() / "vendor/echolang/kit/ecobuild/kit");
+    REQUIRE(ran.output.find("KIT RAN") != std::string::npos);
+}

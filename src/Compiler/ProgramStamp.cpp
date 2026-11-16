@@ -353,7 +353,8 @@ bool Compiler::plan_program_stamp(
 
     ProgramStampPlan plan;
     plan.path = request.layout.program_stamp(*entry, request.program_name, request.output);
-    plan.manifests = program_manifests(request.all_manifests, request.active_targets);
+    plan.manifests = program_manifests(
+        request.all_manifests, request.active_targets, request.roots);
     plan.options = request.options;
     plan.active_targets = request.active_targets;
     plan.test_modules = request.test_modules;

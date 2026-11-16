@@ -55,6 +55,7 @@ namespace Compiler
     struct ProgramStampRequest
     {
         const std::vector<Parser::ModuleManifest> &all_manifests;
+        const std::vector<std::filesystem::path> &roots;
         const std::string &entry_module;
         const Parser::ActiveTargets &active_targets;
         CompilerOptions options;

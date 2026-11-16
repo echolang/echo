@@ -554,11 +554,14 @@ Parser::ActiveTargets Compiler::workspace_analysis_targets(
 }
 
 // modules this program is made of, dependency-first. a scoped `#[depends:]` is compiled only when
-// that scope is open. seed is "every module no target's scope declares", then close over what
-// opened scopes name
+// that scope is open. seed is roots plus every module no target's scope declares, then close over
+// what opened scopes name. a root is never conditional: a dependency's unopened test
+// `#[requires:]` can resolve to the same path as the program when that program is the package
+// sitting at vendor/<name>
 std::vector<const Parser::ModuleManifest *> Compiler::program_manifests(
     const std::vector<Parser::ModuleManifest> &manifests,
-    const Parser::ActiveTargets &active
+    const Parser::ActiveTargets &active,
+    const std::vector<std::filesystem::path> &roots
 )
 {
     std::set<std::filesystem::path> reached;
@@ -587,7 +590,8 @@ std::vector<const Parser::ModuleManifest *> Compiler::program_manifests(
     conditional.swap(reached);
 
     for (const Parser::ModuleManifest &manifest : manifests) {
-        if (conditional.find(manifest.path) == conditional.end()) {
+        if (manifest_is_a_root(manifest, roots)
+            || conditional.find(manifest.path) == conditional.end()) {
             reached.insert(manifest.path);
         }
     }

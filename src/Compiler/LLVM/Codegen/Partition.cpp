@@ -101,6 +101,12 @@ void walk_constant(
 
     consider_value(constant, needed, work);
 
+    // a global is walked once, from the worklist: recursing into its initializer here never
+    // ends when globals point at each other
+    if (llvm::isa<llvm::GlobalValue>(constant)) {
+        return;
+    }
+
     for (llvm::Value *operand : constant->operand_values()) {
         if (auto *inner = llvm::dyn_cast<llvm::Constant>(operand)) {
             walk_constant(inner, needed, work);
@@ -134,7 +140,7 @@ void walk_metadata(
     }
 }
 
-std::unordered_set<const llvm::GlobalValue *> reachable_from(
+std::unordered_set<const llvm::GlobalValue *> reachable_from_impl(
     const std::vector<llvm::GlobalValue *> &roots
 )
 {
@@ -493,6 +499,13 @@ void pack_groups(std::vector<Group> &groups, size_t max_groups)
 }
 
 };
+
+std::unordered_set<const llvm::GlobalValue *> Compiler::LLVM::reachable_from(
+    const std::vector<llvm::GlobalValue *> &roots
+)
+{
+    return reachable_from_impl(roots);
+}
 
 std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
     CmpUnit &unit,

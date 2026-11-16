@@ -335,7 +335,7 @@ Compiler::Lsp::Session::RebuildProduct Compiler::Lsp::Session::produce_snapshot(
     // the driver's answer over every scope the workspace opens, so a module only a hook's tool needs is
     // absent here exactly as it is from every program the project builds
     const std::vector<const Parser::ModuleManifest *> compiled =
-        Compiler::program_manifests(inputs.manifests, inputs.active_targets);
+        Compiler::program_manifests(inputs.manifests, inputs.active_targets, inputs.roots);
     const std::vector<std::filesystem::path> loose = loose_sources_from(inputs);
 
     ParseRequest request{

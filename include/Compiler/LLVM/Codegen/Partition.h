@@ -5,11 +5,17 @@
 
 #include <filesystem>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace AST
 {
     class File;
+};
+
+namespace llvm
+{
+    class GlobalValue;
 };
 
 namespace Compiler::LLVM
@@ -45,6 +51,10 @@ namespace Compiler::LLVM
         // looks them up; empty after the module is dropped
         std::vector<std::string> root_names;
     };
+
+    // globals reachable from `roots`, including a GlobalVariable's initializer walked once.
+    // partition_unit's worklist; tests pin that cyclic globals terminate
+    std::unordered_set<const llvm::GlobalValue *> reachable_from(const std::vector<llvm::GlobalValue *> &roots);
 
     // split one unit into per-file groups. empty when the unit has nothing to split
     // (one partition, or none). each partition's `hex` is a structural hash of the

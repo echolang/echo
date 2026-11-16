@@ -1509,6 +1509,7 @@ static Compiler::ProgramStampRequest program_stamp_request(
 {
     return Compiler::ProgramStampRequest{
         invocation.manifests,
+        invocation.roots,
         program.entry_module,
         program.active_targets,
         program_options(driver, invocation, program),
@@ -1544,7 +1545,8 @@ static bool run_front_end(
 {
     out.invocation = &invocation;
     out.program = &program;
-    out.compiled = Compiler::program_manifests(invocation.manifests, program.active_targets);
+    out.compiled = Compiler::program_manifests(
+        invocation.manifests, program.active_targets, invocation.roots);
 
     // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
     // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic

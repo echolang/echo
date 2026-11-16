@@ -140,10 +140,13 @@ namespace Compiler
     );
 
     // modules this program compiles, in resolve order. a scope-only dependency is absent otherwise.
-    // driver and language server both ask; the server opens every root scope
+    // driver and language server both ask; the server opens every root scope.
+    // a root is never conditional: a dependency's unopened test scope can resolve to the same
+    // path (epm run of a tool sitting at vendor/<name>), and that path must not drop the program
     std::vector<const Parser::ModuleManifest *> program_manifests(
         const std::vector<Parser::ModuleManifest> &manifests,
-        const Parser::ActiveTargets &active
+        const Parser::ActiveTargets &active,
+        const std::vector<std::filesystem::path> &roots
     );
 };
 
