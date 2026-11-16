@@ -16,6 +16,7 @@ namespace AST
 {
     class FunctionDeclNode;
     class Namespace;
+    class VarDeclNode;
     class VarRefNode;
 
     class ExprNode : public Node
@@ -154,6 +155,12 @@ namespace AST
         // the function this call was written in. a `#[caller]` callee plants a varref to that
         // function's `$__caller` when it also tracks the caller, otherwise `std::src::here()`
         FunctionDeclNode *enclosing_function = nullptr;
+
+        // the parameters whose defaults this call was cloned out of, outermost first. a call that
+        // would clone one of them again is a default that needs itself (`f(int32 $n = f())`,
+        // `struct A { A $a = A(); }`), which never stops expanding: apply_argument_binding refuses it.
+        // CloneContext::shallow copy-constructs, so a clone of a clone starts from its source's list
+        std::vector<const VarDeclNode *> expanding_defaults;
 
         // maintained by AST::CallResolver, which is the one thing that coerces the arguments, and by
         // AST::OwnershipPass for the calls it synthesizes with their callee already named - which it

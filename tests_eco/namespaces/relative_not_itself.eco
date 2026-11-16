@@ -1,0 +1,48 @@
+// inside `app::lib`, `lib::` is the root `lib`: the namespace a file is in is never its own
+// prefix. app::lib::Params holds a lib::Params, which is not itself
+namespace lib;
+
+public struct Options
+{
+    public int32 $n = 1;
+
+    public static function parse(int32 $n) : Options
+    {
+        Options $o = Options();
+        $o->n = $n;
+        return $o;
+    }
+}
+
+public struct Params
+{
+    public int32 $count = 3;
+}
+
+namespace app::lib;
+
+public struct Params
+{
+    public lib::Params $inner = lib::Params();
+}
+
+public function open() : int32
+{
+    lib::Options $o = lib::Options::parse(7);
+    return $o->n;
+}
+
+namespace app::lib::deep;
+
+public function count() : int32
+{
+    lib::Params $p = lib::Params();
+    return $p->count;
+}
+
+namespace main;
+
+echo app::lib::open();
+app::lib::Params $p = app::lib::Params();
+echo $p->inner->count;
+echo app::lib::deep::count();

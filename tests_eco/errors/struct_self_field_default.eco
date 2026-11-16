@@ -1,0 +1,8 @@
+// a field default that constructs its own struct needs that default again for every copy it
+// fills in: refused at the default, beside the layout cycle, not a stack overflow in the compiler
+struct A
+{
+    public A $a = A();
+}
+
+A $x = A();

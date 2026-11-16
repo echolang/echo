@@ -287,8 +287,22 @@ Namespace *imported_namespace_start(
     return imp->target_namespace;
 }
 
+// whether `ns` is `inner` or one of the namespaces `inner` sits in
+static bool encloses(const Namespace *ns, const Namespace *inner)
+{
+    for (const Namespace *at = inner; at != nullptr; at = at->parent()) {
+        if (at == ns) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // a child of `from` walking outward through user namespaces, root last so a relative
-// `cols::A` from `namespace demo` names `demo::cols` and a full `std::math` still finds root `std`
+// `cols::A` from `namespace demo` names `demo::cols` and a full `std::math` still finds root `std`.
+// a namespace `from` is inside is never the answer: its own names need no prefix, so inside
+// `app::pgsql` a written `pgsql::Options` is the root `pgsql`, not `app::pgsql` again
 static Namespace *relative_child(
     NamespaceManager &namespaces,
     const Namespace *from,
@@ -296,9 +310,11 @@ static Namespace *relative_child(
 )
 {
     const Namespace *scope = from == nullptr ? nullptr : from->declaring_namespace();
+    const Namespace *inside = scope;
 
     while (scope != nullptr && !scope->is_root()) {
-        if (const Namespace *child = namespaces.get(*scope, name)) {
+        const Namespace *child = namespaces.get(*scope, name);
+        if (child != nullptr && !encloses(child, inside)) {
             return const_cast<Namespace *>(child);
         }
 

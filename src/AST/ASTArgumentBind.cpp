@@ -8,10 +8,12 @@
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollectionLiteral.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTFile.h"
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMapLiteral.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/ASTVariadic.h"
@@ -337,14 +339,71 @@ AST::ArgumentBinding AST::bind_arguments(
     return result;
 }
 
-void AST::apply_argument_binding(
+namespace
+{
+    // the calls a cloned default holds, each told which defaults it now sits inside
+    class ExpandingDefaults : public AST::RecursiveVisitor
+    {
+    public:
+        const std::vector<const AST::VarDeclNode *> &chain;
+
+        explicit ExpandingDefaults(const std::vector<const AST::VarDeclNode *> &chain) : chain(chain) {}
+
+        void visitFunctionCallExpr(AST::FunctionCallExprNode &node) override
+        {
+            node.expanding_defaults = chain;
+            AST::RecursiveVisitor::visitFunctionCallExpr(node);
+        }
+    };
+
+    bool is_expanding(const AST::FunctionCallExprNode &call, const AST::VarDeclNode *param)
+    {
+        for (const AST::VarDeclNode *outer : call.expanding_defaults) {
+            if (outer == param) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+bool AST::apply_argument_binding(
     AST::FunctionCallExprNode &call,
     const AST::ArgumentBinding &binding,
+    const AST::CodeRef &at,
     AST::NodeCollection &nodes,
     AST::Collector &collector
 )
 {
     assert(binding.kind == ArgumentBindKind::t_ok && "applying a refused binding");
+
+    // before anything is planted, so a refused call is left as it was written
+    for (size_t i = 0; i < binding.filled.size(); i++) {
+        const BoundArgument &slot = binding.filled[i];
+        if (!slot.from_default || slot.from_caller || i >= call.decl->args.size()) {
+            continue;
+        }
+
+        const VarDeclNode *param = call.decl->args[i];
+        if (!is_expanding(call, param)) {
+            continue;
+        }
+
+        // the call is a clone of the default, so its token is in the declaring file, which may be
+        // another module's than the call this round reached it from
+        const File *written = call.token_function_name.file();
+        collector.collect_issue<Issue::DefaultNeedsItself>(
+            CodeRef {
+                written != nullptr && written->module != nullptr ? written->module : at.module,
+                call.token_function_name.make_slice() },
+            fmt::format(
+                "'{}' is called here without '${}', and the default of '${}' calls back into it - "
+                "filling it in would never stop. Pass '${}' here, or give '${}' a default that does not.",
+                call.token_function_name.value(), param->name(), param->name(),
+                param->name(), param->name()));
+        return false;
+    }
 
     std::vector<ExprNode *> filled;
     filled.reserve(binding.filled.size());
@@ -395,11 +454,20 @@ void AST::apply_argument_binding(
         AST::CloneContext cc(nodes, subst, collector.type_registry);
         ExprNode *cloned = AST::clone_sharing_closures(slot.value, cc);
         cloned->from_parameter_default = true;
+
+        std::vector<const VarDeclNode *> chain = call.expanding_defaults;
+        if (i < call.decl->args.size()) {
+            chain.push_back(call.decl->args[i]);
+        }
+        ExpandingDefaults marking(chain);
+        cloned->accept(marking);
+
         filled.push_back(cloned);
     }
 
     call.arguments = std::move(filled);
     call.argument_names.clear();
+    return true;
 }
 
 void AST::retarget_here_defaults(

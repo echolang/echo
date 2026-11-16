@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] DefaultNeedsItself  default_needs_itself_mutual.eco:5:20
+
+  'B' is called here without '$a', and the default of '$a' calls back into it - filling it in would never stop. Pass '$a' here, or give '$a' a default that does not.
+
+  4 | {
+  5 |     public B? $b = B();
+    :                    ^
+  6 | }
+
+1 error, nothing was compiled.

@@ -1,0 +1,27 @@
+// a default may call its own function when it passes the parameter, and a field default may
+// construct a type whose fields have defaults of their own: neither comes back to itself
+function f(int32 $n = f(1)) : int32
+{
+    return $n + 1;
+}
+
+struct Inner
+{
+    public int32 $v = 4;
+}
+
+struct Outer
+{
+    public Inner $i = Inner();
+}
+
+struct Deep
+{
+    public Outer $o = Outer();
+    public Outer $p = Outer(Inner(5));
+}
+
+echo f();
+Deep $d = Deep();
+echo $d->o->i->v;
+echo $d->p->i->v;

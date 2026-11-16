@@ -352,6 +352,11 @@ ISSUE_MESSAGE_FNC(MissingArgument)
     return _message;
 }
 
+ISSUE_MESSAGE_FNC(DefaultNeedsItself)
+{
+    return _message;
+}
+
 ISSUE_MESSAGE_FNC(NamedArgumentNotCallable)
 {
     return _message;

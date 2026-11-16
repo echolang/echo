@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] DefaultNeedsItself  struct_self_field_default.eco:5:19
+
+  'A' is called here without '$a', and the default of '$a' calls back into it - filling it in would never stop. Pass '$a' here, or give '$a' a default that does not.
+
+  4 | {
+  5 |     public A $a = A();
+    :                   ^
+  6 | }
+
+[error] struct_self_field_default.eco:5:14
+
+  'A' contains itself through 'A' - a struct field is stored inline, so a cycle has no size. Use a class, or 'ptr<A>'.
+
+  4 | {
+  5 |     public A $a = A();
+    :              ^^
+  6 | }
+
+2 errors, nothing was compiled.

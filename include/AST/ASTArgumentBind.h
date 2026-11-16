@@ -94,9 +94,13 @@ namespace AST
     // the instance, not the template. a `#[caller]` hole is a varref to the enclosing
     // `$__caller` when that function tracks the caller, otherwise `std::src::here()`. a
     // defaulted `here()` is replanted at this call; an explicit `here()` argument is left
-    void apply_argument_binding(
+    //
+    // false, reported and the call untouched, when a default would be cloned into a call that
+    // was itself cloned out of that same default (FunctionCallExprNode::expanding_defaults)
+    bool apply_argument_binding(
         FunctionCallExprNode &call,
         const ArgumentBinding &binding,
+        const CodeRef &at,
         NodeCollection &nodes,
         Collector &collector);
 

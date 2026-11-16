@@ -1,0 +1,13 @@
+// two field defaults that construct each other: each needs the other's, which needs its own.
+// a class has a layout either way, so only the defaults are refused
+class A
+{
+    public B? $b = B();
+}
+
+class B
+{
+    public A? $a = A();
+}
+
+A $x = A();

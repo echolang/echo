@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] DefaultNeedsItself  default_needs_itself.eco:3:23
+
+  'f' is called here without '$n', and the default of '$n' calls back into it - filling it in would never stop. Pass '$n' here, or give '$n' a default that does not.
+
+  2 | // itself in, called or not
+  3 | function f(int32 $n = f()) : int32
+    :                       ^
+  4 | {
+
+1 error, nothing was compiled.

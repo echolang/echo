@@ -1,0 +1,8 @@
+// a parameter default that calls its own function without that parameter never stops filling
+// itself in, called or not
+function f(int32 $n = f()) : int32
+{
+    return $n;
+}
+
+echo f(1);

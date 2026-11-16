@@ -262,6 +262,8 @@ namespace AST
         MAKE_ISSUE_DEF1(DuplicateArgumentName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(MissingArgumentLabel, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(MissingArgument, IssueSeverity::Error, const std::string, _message);
+        // a parameter's default that calls back into the same default, so filling it in never ends
+        MAKE_ISSUE_DEF1(DefaultNeedsItself, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(NamedArgumentNotCallable, IssueSeverity::Error, const std::string, _message);
 
         // a private property is omitted from the implicit constructor, so it must already have a
