@@ -38,6 +38,14 @@ namespace Compiler
     // a miss, or an empty function, reads the path from disk. the driver passes nothing
     typedef std::function<std::optional<std::string>(const std::filesystem::path &)> SourceOverride;
 
+    // one root's own build by module name: what AST::RootProgram is before there are modules to
+    // point at
+    struct RootProgramPlan
+    {
+        std::string root;
+        std::vector<std::string> modules;
+    };
+
     // the inputs parse_front_end_bundle needs, so an eighth positional cannot drift from the
     // seventh. overlay empty means disk
     struct ParseRequest
@@ -48,6 +56,10 @@ namespace Compiler
         const std::vector<std::filesystem::path> &loose_sources;
         bool with_stdlib = true;
         SourceOverride overlay;
+
+        // each root's own program for a test run over several, by module name - see root_program_plans.
+        // non-empty also asks for a `main` module with no sources, the unit the runner's entry lives in
+        std::vector<RootProgramPlan> root_programs;
     };
 
     // the analysis pipeline between parsing and codegen. ConstantExpander, Monomorphizer,
@@ -75,6 +87,19 @@ namespace Compiler
         const std::vector<std::string> &named_roots,
         bool allow_project_discovery,
         const std::filesystem::path &discovery_dir
+    );
+
+    // **where an invocation rooted at this manifest finds its packages.** `--package-dir` when given,
+    // then the root's own `vendor/` - Parser::resolve_package_dir, unchanged - and, when the root has
+    // none, the `vendor/` of the workspace that lists it as a member.
+    //
+    // a workspace is installed once, at its root, for every member; a member built from its own
+    // directory, or by a hook's tool run there, is otherwise a module with no packages at all. its own
+    // `vendor/` still wins, so a member that is installed for alone builds as it always has
+    std::filesystem::path package_dir_for(
+        const std::filesystem::path &root_manifest,
+        const std::filesystem::path &package_dir_override,
+        const TargetFacts &facts
     );
 
     // package dir and program dir onto `scratch`, from the first user root, once per invocation
@@ -115,6 +140,12 @@ namespace Compiler
     bool manifest_claims_main_module(const std::vector<const Parser::ModuleManifest *> &manifests);
     bool manifest_claims_main_module(const std::vector<Parser::ModuleManifest> &manifests);
 
+    // the loaded manifest a root path names, null when it is not among them
+    const Parser::ModuleManifest *manifest_at_root(
+        const std::vector<Parser::ModuleManifest> &manifests,
+        const std::filesystem::path &root
+    );
+
     // is this manifest one of the roots the invocation named, as opposed to one pulled in
     // behind it. `resolve_front_end_manifests` already settled each root to the path a
     // manifest records as its own, so this is membership, not another `manifest_at`
@@ -144,6 +175,19 @@ namespace Compiler
     // a root is never conditional: a dependency's unopened test scope can resolve to the same
     // path (epm run of a tool sitting at vendor/<name>), and that path must not drop the program
     std::vector<const Parser::ModuleManifest *> program_manifests(
+        const std::vector<Parser::ModuleManifest> &manifests,
+        const Parser::ActiveTargets &active,
+        const std::vector<std::filesystem::path> &roots
+    );
+
+    // **what each root's own build would compile, in the order it would parse it**, for a run that
+    // builds several roots as one program. `manifests` is the whole graph of that run and `active`
+    // its open scopes; a root's own build opens only its own.
+    //
+    // Parser::order_loaded_graph of each root (compiler-supplied first), then compiled_of with
+    // that root's own scopes. the order is part of what a build means, and here another root may
+    // have pulled two unrelated modules the other way round
+    std::vector<RootProgramPlan> root_program_plans(
         const std::vector<Parser::ModuleManifest> &manifests,
         const Parser::ActiveTargets &active,
         const std::vector<std::filesystem::path> &roots

@@ -16,6 +16,7 @@ namespace AST
 namespace llvm
 {
     class GlobalValue;
+    class Module;
 };
 
 namespace Compiler::LLVM
@@ -38,6 +39,17 @@ namespace Compiler::LLVM
         std::string exec_model;
     };
 
+    // what a partition holds of a global it reaches
+    enum class Definition
+    {
+        // a declaration: some other partition, or another object, defines it
+        t_declared,
+        // this partition's object defines it
+        t_defined,
+        // a body for this partition's inliner and no object code. the definition is its home partition's
+        t_inline_copy,
+    };
+
     struct UnitPartition
     {
         // the source file's basename, or `__shared` for foreign `linkonce_odr` and
@@ -46,9 +58,11 @@ namespace Compiler::LLVM
         std::string label;
         std::string hex;
         bool shared = false;
+        // partition_unit's `clone_inline`, kept so materialize_partition defines what `hex` hashed
+        bool clone_inline = true;
         std::vector<AST::File *> files;
-        // names of the group's roots in the still-live unit module. `materialize_partition`
-        // looks them up; empty after the module is dropped
+        // names of the group's roots in the module partition_unit was handed.
+        // `materialize_partition` looks them up there
         std::vector<std::string> root_names;
     };
 
@@ -56,28 +70,40 @@ namespace Compiler::LLVM
     // partition_unit's worklist; tests pin that cyclic globals terminate
     std::unordered_set<const llvm::GlobalValue *> reachable_from(const std::vector<llvm::GlobalValue *> &roots);
 
-    // split one unit into per-file groups. empty when the unit has nothing to split
+    // split one unit into per-file groups. **`module` is the unit's IR and need not be the one the
+    // unit holds**: a library is optimized in a worker's own LLVMContext, and it is that copy which is
+    // split. `unit` answers by symbol name where a function was written, which reads nothing a worker
+    // may not read beside another. empty when the unit has nothing to split
     // (one partition, or none). each partition's `hex` is a structural hash of the
     // original IR that group will emit, plus `env` - not of a `CloneModule` bitcode
     // dump, whose metadata numbering moved across identical rebuilds
     //
     // a this-module function lands in that file's partition. `linkonce_odr` that
     // `file_of` places in another module - generic instantiations,
-    // synthesized deinits - land in `__shared`, and a small `#[inline]` helper is
-    // cloned into each partition that calls it. a call into a
-    // large ODR body is an external from the file object and a definition in
-    // `__shared`, so ISel of a huge deinit runs once
+    // synthesized deinits - land in `__shared`. **every body has that one home**, so
+    // ISel of it runs once however many files call it
+    //
+    // `clone_inline` is whether a pass that inlines still runs over the pieces. when one does, a
+    // small `#[inline]` helper is also carried by each partition that calls it, as a body the
+    // inliner may read and the object never holds. when none does - the unit was optimized whole
+    // before the split, or nothing is optimized at all - there is nobody to read it
     //
     // `max_groups` > 0 packs the file/`__shared` groups into that many bins after the split.
     // a cap on ISel machines, not a load-balance: packing files around `__shared` does not
     // shrink the shared object if that is what actually takes the time
     std::vector<UnitPartition> partition_unit(
-        CmpUnit &unit, const CodegenContext &ctx, const PartitionEnv &env, size_t max_groups = 0);
+        CmpUnit &unit,
+        llvm::Module &module,
+        const CodegenContext &ctx,
+        const PartitionEnv &env,
+        size_t max_groups = 0,
+        bool clone_inline = true);
 
     // extract only the globals this partition defines or references and serialize
-    // them. called on a cache miss, while `unit.llvm_module` still lives
+    // them. called on a cache miss, with the module partition_unit split
     std::string materialize_partition(
         CmpUnit &unit,
+        llvm::Module &module,
         const UnitPartition &part,
         const CodegenContext &ctx);
 

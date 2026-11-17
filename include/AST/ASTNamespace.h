@@ -42,6 +42,12 @@ namespace AST
             return _is_lexical;
         }
 
+        // a module's private test namespace - see NamespaceManager::retrieve_hidden. an outward walk
+        // searches it as the frame just inside the root
+        bool is_hidden() const {
+            return _is_hidden;
+        }
+
         // the unique name - the one a symbol is built from. `display_name()` is what a human reads;
         // the two differ only for a lexical namespace, so every reader has to say which it means
         std::string name() const {
@@ -101,12 +107,16 @@ namespace AST
         std::string _name;
         std::string _display_name;
         bool _is_lexical = false;
+        bool _is_hidden = false;
 
         std::unordered_map<std::string, std::unique_ptr<Namespace>> _children;
 
         // keyed by the block's opening brace, not by a name - which is what makes these unreachable
         // from any namespace path a user can write
         std::unordered_map<DeclarationSite, std::unique_ptr<Namespace>, DeclarationSiteHash> _lexical_children;
+
+        // keyed by a name no source can spell - see NamespaceManager::retrieve_hidden
+        std::unordered_map<std::string, std::unique_ptr<Namespace>> _hidden_children;
 
         std::unordered_map<std::string, std::unique_ptr<Symbol>> _symbols;
     };
@@ -127,6 +137,10 @@ namespace AST
         // it would silently create a writable namespace beside it instead
         Namespace &retrieve(Namespace &parent, const std::string &name);
 
+        // the path form of the same, starting at `parent`. empty `parts` is `parent` itself, which is
+        // what a bare `namespace;` asks for
+        Namespace &retrieve(Namespace &parent, const std::vector<std::string> &parts);
+
         // the lexical namespace of the block whose opening brace is `site`, created on first ask.
         // create-or-reuse rather than create, because the declaration pass and the body pass both walk
         // the same braces and have to land on one object - the declaration site is what makes that
@@ -143,6 +157,15 @@ namespace AST
             const std::string &display_name,
             const std::string &discriminator
         );
+
+        // **a namespace the user did not write and cannot name, which is nonetheless not a block's.**
+        // create-or-reuse by `name`, which is what a symbol is built from and must therefore be unique
+        // among the parent's children of every kind; it displays as nothing, so a diagnostic names what
+        // is declared in it exactly as if it sat in the parent.
+        //
+        // not lexical, deliberately: a lexical namespace *is* "inside a body", and a `namespace a;`
+        // statement or an operator declaration is refused there. this one holds file-scope declarations
+        Namespace &retrieve_hidden(Namespace &parent, const std::string &name);
 
         // returns the namespace for the given name, or nullptr if it doesn't exist
         const Namespace *get(const std::string &name) const;
@@ -171,7 +194,14 @@ namespace AST
         // it. types had only the exact lookup above, so a `namespace app;` file could not name a
         // root type at all, and a nested type's body - which parses inside a namespace named after
         // its owner - could name no declared type whatsoever
-        Symbol *find_symbol_in_scope(const std::string &symbol_name, const Namespace &from) const;
+        //
+        // `private_root` is the asking file's private test namespace (AST::private_namespace_of), or
+        // null. it is the frame just inside the root, as is a hidden namespace the walk passes
+        Symbol *find_symbol_in_scope(
+            const std::string &symbol_name,
+            const Namespace &from,
+            const Namespace *private_root = nullptr
+        ) const;
 
         Namespace &root() { return _root; }
 

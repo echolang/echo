@@ -61,13 +61,13 @@ static void refuse_invisible(
 )
 {
     const DeclarationOrigin from { file.module, &file };
-    if (visible_from(visibility, origin, from)) {
+    if (nameable_from(visibility, origin, from)) {
         return;
     }
 
     collector.collect_issue<Issue::InaccessibleDeclaration>(
         binding_ref(file, binding),
-        visibility_refusal(visibility, origin, from, what),
+        naming_refusal(visibility, origin, from, what),
         origin,
         declaration_token);
 }

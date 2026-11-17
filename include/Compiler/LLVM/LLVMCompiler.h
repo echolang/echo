@@ -65,10 +65,10 @@ public:
     // links a runner; without this a leftover env var would run a test inside a `run` prologue
     void set_native_test_runner(bool enabled);
 
-    // the tests this compile will run, as mangled symbols. must be set before compile_bundle
-    // so a native runner's `main` can dispatch on them and so DCE cannot drop a test nothing
-    // in `main` appeared to reach
-    void set_test_symbols(std::vector<std::string> symbols);
+    // the tests this compile will run, as mangled symbol and declaring module. must be set
+    // before compile_bundle so a native runner's `main` can dispatch on them and so DCE cannot
+    // drop a test nothing in `main` appeared to reach
+    void set_runner_tests(std::vector<Compiler::LLVM::CodegenContext::RunnerTest> tests);
 
     // `cached_modules` names the modules whose compiled object is being reused, so no code is generated for
     // them at all - see TypeLowering::create_cmp_units for why that is the only place it has to be said

@@ -55,6 +55,7 @@ bool Compiler::resolve_driver_options(
 
     out.no_stdlib = cli.flag(Opt::t_no_stdlib);
     out.no_hooks = cli.flag(Opt::t_no_hooks);
+    out.workspace = cli.flag(Opt::t_workspace);
     out.emit_stdlib_header = cli.flag(Opt::t_emit_stdlib_header);
     out.silent = cli.flag(Opt::t_silent);
     out.verbose = cli.flag(Opt::t_verbose);

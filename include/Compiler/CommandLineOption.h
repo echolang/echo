@@ -65,6 +65,7 @@ namespace Compiler
         t_module,
         t_target,
         t_filter,
+        t_workspace,
         t_build_dir,
         t_package_dir,
         t_link,

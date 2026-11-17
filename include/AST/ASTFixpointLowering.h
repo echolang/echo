@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTDetach.h"
 #include "AST/ASTRecursiveVisitor.h"
 
 #include "Token.h"
@@ -24,6 +25,7 @@ namespace AST
     //   - finalize() is one more round, not an `of_type` sweep (detached nodes stay in the arena)
     //   - hoist indices are per file, so a golden's `$__guard0` does not move
     //   - `_changed` is what the fixpoint reads: mutate and forget it, and the round stalls
+    //   - a subtree that leaves the tree goes through forget()
     //
     // OperatorRewriter stays outside: its pending state is a different shape
     class FixpointLowering : protected RecursiveVisitor
@@ -58,6 +60,9 @@ namespace AST
         // save `_current_function`, descend, restore. the skip policy is the caller's
         void walk_function(FunctionDeclNode &node);
 
+        // `root` left the tree: batched, flushed by run_round. release what you keep from it first
+        void forget(Node &root);
+
         Bundle &_bundle;
         Collector &_collector;
 
@@ -76,6 +81,9 @@ namespace AST
 
     private:
         size_t _hoist_count = 0;
+
+        // what left the tree this round. flushed by run_round, so finalize() is covered too
+        DetachBatch _detached;
     };
 };
 

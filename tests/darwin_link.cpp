@@ -146,4 +146,55 @@ TEST_CASE("echoc run records the Darwin SDK version", "[darwin_link]")
     require_recorded_sdk(project.root() / "ecobuild" / "scratch" / "eco_run");
 }
 
+// **what a Darwin executable exports is what dyld binds at launch.** Darwin exports every global by
+// default, and a body shared between units is a weak one: each call to it is then bound by name before
+// `main`, in every process, which a test run starts one of per test. nothing loads symbols out of a
+// program but a plugin copying the hash seed, so that is the whole list - as it always was on ELF
+TEST_CASE("a Darwin executable exports the hash seed and nothing else", "[darwin_link]")
+{
+    ScopedProject project("exports");
+
+    write_file(project.root() / "module.eco", R"(
+#[module: "app"]
+#[sources: "*.eco"]
+)");
+
+    // a map hashes, so the seed exists; `array<int32>` is a generic instance, a body no one unit owns
+    write_file(project.root() / "app.eco", R"(
+map<string, int32> $ages = ['a' => 1];
+array<int32> $list = [1, 2, 3];
+echo $ages->count() + $list->count();
+)");
+
+    for (const std::string &link : { std::string(), std::string(" --link lib:z") }) {
+        const ProcessResult result = project.echoc("build -o app" + link);
+        INFO(result.output);
+        REQUIRE(result.exit_code == 0);
+
+        const ProcessResult ran = EchoTests::run_binary(project.root() / "app");
+        REQUIRE(ran.exit_code == 0);
+        REQUIRE(ran.output.find("4") != std::string::npos);
+
+        const ProcessResult exported = run_capturing("nm -gU " + quoted(project.root() / "app"));
+        INFO(exported.output);
+        REQUIRE(exported.exit_code == 0);
+
+        std::istringstream lines(exported.output);
+        std::string address, kind, symbol;
+        bool seed = false;
+
+        while (lines >> address >> kind >> symbol) {
+            if (symbol == "___eco_hash_seed") {
+                seed = true;
+                continue;
+            }
+
+            // the linker's own, in every executable
+            REQUIRE(symbol == "__mh_execute_header");
+        }
+
+        REQUIRE(seed);
+    }
+}
+
 #endif

@@ -2,7 +2,6 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
-#include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
@@ -101,7 +100,7 @@ ExprNode *InterpolationLowering::refuse(StringInterpolationExprNode &node, std::
     // nothing here is kept - the hole expressions go with the node - so the whole subtree is what left
     // the tree, and the arena has to stop answering for it or TypeLowering keeps finding calls inside
     // a literal nobody will emit
-    forget_subtree(_bundle, node);
+    forget(node);
     node.holes.clear();
 
     _changed = true;
@@ -201,7 +200,7 @@ ExprNode *InterpolationLowering::lower(StringInterpolationExprNode &node)
 
     // the holes moved into the calls above, so only the node itself left the tree
     node.holes.clear();
-    forget_subtree(_bundle, node);
+    forget(node);
 
     _changed = true;
     return acc;

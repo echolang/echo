@@ -93,6 +93,9 @@ namespace Compiler
             int _depth = 0;
 
             void settle_scope();
+
+            // the cursor file's private test namespace, the extra root frame its lookups search
+            const AST::Namespace *private_root() const;
             const AST::Namespace *namespace_at_cursor();
             AST::Node *node_at(size_t offset) const;
             AST::TypeDeclNode *type_decl_named_at(size_t offset, const std::string &name) const;

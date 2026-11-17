@@ -21,7 +21,10 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <optional>
+#include <set>
 #include <utility>
 
 namespace
@@ -201,6 +204,21 @@ namespace
         }
     }
 
+    // a plan's names as the parsed modules they are by now; one not parsed yet is left out
+    AST::RootProgram bind_root_program(const Compiler::RootProgramPlan &plan, AST::ModuleCollection &modules)
+    {
+        AST::RootProgram program;
+        program.root = modules.find_module_ptr(plan.root);
+
+        for (const std::string &name : plan.modules) {
+            if (const AST::Module *module = modules.find_module_ptr(name)) {
+                program.modules.push_back(module);
+            }
+        }
+
+        return program;
+    }
+
     std::optional<Compiler::FrontEndFailure> parse_manifest_modules(
         const std::vector<const Parser::ModuleManifest *> &manifests,
         const std::vector<std::filesystem::path> &roots,
@@ -208,7 +226,8 @@ namespace
         const Compiler::SourceOverride &overlay,
         AST::Bundle &bundle,
         Parser::ModuleParser &parser,
-        bool with_stdlib
+        bool with_stdlib,
+        const std::vector<Compiler::RootProgramPlan> &root_programs
     )
     {
         for (const Parser::ModuleManifest *entry : manifests) {
@@ -241,8 +260,23 @@ namespace
                 }
             }
 
+            // before the parse, whose type-name sites already ask. every module of a root's own
+            // program is parsed by now but the root, which reaches itself - see AST::Module::own_program
+            for (const Compiler::RootProgramPlan &plan : root_programs) {
+                if (plan.root != manifest.name) {
+                    continue;
+                }
+
+                const AST::RootProgram program = bind_root_program(plan, bundle.modules);
+                module.own_program.insert(program.modules.begin(), program.modules.end());
+            }
+
             for (const auto &source : contribution.sources) {
                 if (auto file = input_file_for(source, overlay)) {
+                    file->tests_only = std::find(
+                        contribution.tests_only_sources.begin(),
+                        contribution.tests_only_sources.end(),
+                        source) != contribution.tests_only_sources.end();
                     input.files.push_back(std::move(*file));
                 }
                 else {
@@ -260,16 +294,6 @@ namespace
 
             if (auto failure = parse_one_input(parser, input)) {
                 return failure;
-            }
-
-            for (AST::File &file : module.files()) {
-                const auto found = std::find(
-                    contribution.test_scoped_sources.begin(),
-                    contribution.test_scoped_sources.end(),
-                    file.get_path());
-                if (found != contribution.test_scoped_sources.end()) {
-                    file.test_scoped = true;
-                }
             }
 
             step.finish(true);
@@ -371,6 +395,62 @@ std::vector<std::filesystem::path> Compiler::resolve_user_roots(
     return out;
 }
 
+std::filesystem::path Compiler::package_dir_for(
+    const std::filesystem::path &root_manifest,
+    const std::filesystem::path &package_dir_override,
+    const Compiler::TargetFacts &facts
+)
+{
+    const std::filesystem::path own = Parser::resolve_package_dir(
+        root_manifest.parent_path(), package_dir_override);
+
+    std::error_code ec;
+
+    if (!package_dir_override.empty() || own.empty() || std::filesystem::is_directory(own, ec)) {
+        return own;
+    }
+
+    // how far up a workspace root may sit. `modules/<a>/<b>` is three, and a manifest that lists a
+    // member deeper than this can still be named with `--package-dir`
+    constexpr int k_max_workspace_depth = 8;
+
+    const std::filesystem::path member = Compiler::canonical_or_absolute(root_manifest);
+    std::filesystem::path here = member.parent_path();
+
+    for (int depth = 0; depth < k_max_workspace_depth; depth++) {
+        const std::filesystem::path parent = here.parent_path();
+
+        if (parent.empty() || parent == here) {
+            break;
+        }
+
+        here = parent;
+
+        const std::filesystem::path candidate = here / "module.eco";
+
+        if (!std::filesystem::is_regular_file(candidate, ec)) {
+            continue;
+        }
+
+        // a scratch of its own: a manifest further up that does not read is somebody else's, and its
+        // refusals are not this build's to print
+        Parser::ManifestScratch probe(facts);
+        Parser::ModuleManifest above;
+
+        if (!Parser::read_module_manifest(candidate, probe, above, Parser::ManifestRead::t_written)) {
+            continue;
+        }
+
+        const std::vector<std::filesystem::path> members = Parser::workspace_members(above).manifests;
+
+        if (std::find(members.begin(), members.end(), member) != members.end()) {
+            return Parser::resolve_package_dir(here, {});
+        }
+    }
+
+    return own;
+}
+
 void Compiler::settle_package_dir(
     const std::vector<std::filesystem::path> &user_roots,
     const std::filesystem::path &package_dir_override,
@@ -379,8 +459,8 @@ void Compiler::settle_package_dir(
 {
     if (!user_roots.empty()) {
         scratch.entry_directory = Compiler::canonical_or_absolute(user_roots.front().parent_path());
-        scratch.package_dir = Parser::resolve_package_dir(
-            user_roots.front().parent_path(), package_dir_override);
+        scratch.package_dir = package_dir_for(
+            user_roots.front(), package_dir_override, scratch.parser.target_facts);
     }
     else if (!package_dir_override.empty()) {
         scratch.package_dir = Parser::resolve_package_dir({}, package_dir_override);
@@ -446,7 +526,8 @@ std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
             request.overlay,
             bundle,
             parser,
-            request.with_stdlib)) {
+            request.with_stdlib,
+            request.root_programs)) {
         return failure;
     }
 
@@ -454,7 +535,12 @@ std::optional<Compiler::FrontEndFailure> Compiler::parse_front_end_bundle(
         collect_shared_top_level_code(*manifest, bundle);
     }
 
-    if (request.loose_sources.empty()) {
+    for (const RootProgramPlan &plan : request.root_programs) {
+        bundle.root_programs.push_back(bind_root_program(plan, bundle.modules));
+    }
+
+    // a several-roots test run has no sources and still needs a `main` unit for its runner
+    if (request.loose_sources.empty() && request.root_programs.empty()) {
         return std::nullopt;
     }
 
@@ -523,6 +609,18 @@ bool Compiler::manifest_claims_main_module(const std::vector<Parser::ModuleManif
         });
 }
 
+const Parser::ModuleManifest *Compiler::manifest_at_root(
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::filesystem::path &root
+)
+{
+    const auto found = std::find_if(
+        manifests.begin(), manifests.end(),
+        [&root](const Parser::ModuleManifest &manifest) { return manifest.path == root; });
+
+    return found == manifests.end() ? nullptr : &*found;
+}
+
 bool Compiler::manifest_is_a_root(
     const Parser::ModuleManifest &manifest,
     const std::vector<std::filesystem::path> &roots
@@ -558,61 +656,140 @@ Parser::ActiveTargets Compiler::workspace_analysis_targets(
 // what opened scopes name. a root is never conditional: a dependency's unopened test
 // `#[requires:]` can resolve to the same path as the program when that program is the package
 // sitting at vendor/<name>
+namespace
+{
+    std::vector<const Parser::ModuleManifest *> compiled_of(
+        const std::vector<const Parser::ModuleManifest *> &manifests,
+        const Parser::ActiveTargets &active,
+        const std::vector<std::filesystem::path> &roots
+    )
+    {
+        std::set<std::filesystem::path> reached;
+
+        for (const Parser::ModuleManifest *manifest : manifests) {
+            for (const Parser::ModuleTarget &target : manifest->targets) {
+                reached.insert(target.depends.begin(), target.depends.end());
+            }
+
+            // a hook's dependencies are its tool's. seeded as conditional, never activated: loaded, not compiled
+            for (const Parser::ModuleHook &hook : manifest->hooks) {
+                reached.insert(hook.depends.begin(), hook.depends.end());
+            }
+        }
+
+        std::vector<const Parser::ModuleManifest *> out;
+
+        // `reached` holds the conditional ones until here, where it becomes its complement plus whatever the
+        // walk adds - which is the set this function is actually computing.
+        //
+        // no fast path for "nothing is conditional", deliberately: an empty `conditional` makes the
+        // complement the whole list and the walk can only add what is already in it, so the general path
+        // already answers that case with the same set in the same order - and a second path a reader has to
+        // prove equivalent is the one that eventually stops being
+        std::set<std::filesystem::path> conditional;
+        conditional.swap(reached);
+
+        for (const Parser::ModuleManifest *manifest : manifests) {
+            if (Compiler::manifest_is_a_root(*manifest, roots)
+                || conditional.find(manifest->path) == conditional.end()) {
+                reached.insert(manifest->path);
+            }
+        }
+
+        std::vector<std::filesystem::path> depends;
+
+        for (auto manifest = manifests.rbegin();
+                manifest != manifests.rend(); ++manifest) {
+            if (reached.find((*manifest)->path) == reached.end()) {
+                continue;
+            }
+
+            depends.clear();
+            Parser::append_active_depends(**manifest, active, depends);
+            reached.insert(depends.begin(), depends.end());
+        }
+
+        for (const Parser::ModuleManifest *manifest : manifests) {
+            if (reached.find(manifest->path) != reached.end()) {
+                out.push_back(manifest);
+            }
+        }
+
+        return out;
+    }
+};
+
 std::vector<const Parser::ModuleManifest *> Compiler::program_manifests(
     const std::vector<Parser::ModuleManifest> &manifests,
     const Parser::ActiveTargets &active,
     const std::vector<std::filesystem::path> &roots
 )
 {
-    std::set<std::filesystem::path> reached;
+    std::vector<const Parser::ModuleManifest *> all;
+    all.reserve(manifests.size());
 
     for (const Parser::ModuleManifest &manifest : manifests) {
-        for (const Parser::ModuleTarget &target : manifest.targets) {
-            reached.insert(target.depends.begin(), target.depends.end());
-        }
-
-        // a hook's dependencies are its tool's. seeded as conditional, never activated: loaded, not compiled
-        for (const Parser::ModuleHook &hook : manifest.hooks) {
-            reached.insert(hook.depends.begin(), hook.depends.end());
-        }
+        all.push_back(&manifest);
     }
 
-    std::vector<const Parser::ModuleManifest *> out;
+    return compiled_of(all, active, roots);
+}
 
-    // `reached` holds the conditional ones until here, where it becomes its complement plus whatever the
-    // walk adds - which is the set this function is actually computing.
-    //
-    // no fast path for "nothing is conditional", deliberately: an empty `conditional` makes the
-    // complement the whole list and the walk can only add what is already in it, so the general path
-    // already answers that case with the same set in the same order - and a second path a reader has to
-    // prove equivalent is the one that eventually stops being
-    std::set<std::filesystem::path> conditional;
-    conditional.swap(reached);
+std::vector<Compiler::RootProgramPlan> Compiler::root_program_plans(
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const Parser::ActiveTargets &active,
+    const std::vector<std::filesystem::path> &roots
+)
+{
+    std::map<std::filesystem::path, const Parser::ModuleManifest *> by_path;
 
     for (const Parser::ModuleManifest &manifest : manifests) {
-        if (manifest_is_a_root(manifest, roots)
-            || conditional.find(manifest.path) == conditional.end()) {
-            reached.insert(manifest.path);
-        }
+        by_path.emplace(manifest.path, &manifest);
     }
 
-    std::vector<std::filesystem::path> depends;
+    std::vector<RootProgramPlan> out;
 
-    for (auto manifest = manifests.rbegin();
-            manifest != manifests.rend(); ++manifest) {
-        if (reached.find(manifest->path) == reached.end()) {
+    for (const std::filesystem::path &root_path : roots) {
+        const auto found = by_path.find(root_path);
+
+        if (found == by_path.end()) {
             continue;
         }
 
-        depends.clear();
-        Parser::append_active_depends(*manifest, active, depends);
-        reached.insert(depends.begin(), depends.end());
-    }
+        const Parser::ModuleManifest &root = *found->second;
 
-    for (const Parser::ModuleManifest &manifest : manifests) {
-        if (reached.find(manifest.path) != reached.end()) {
-            out.push_back(&manifest);
+        // compiler-supplied first, then this root: the same roots resolve_module_graph would have
+        // been handed for that root's own invocation
+        std::vector<std::filesystem::path> own_roots;
+
+        for (const Parser::ModuleManifest &manifest : manifests) {
+            if (Compiler::is_compiler_supplied_module(manifest)) {
+                own_roots.push_back(manifest.path);
+            }
         }
+
+        own_roots.push_back(root.path);
+
+        std::vector<const Parser::ModuleManifest *> graph;
+        Parser::order_loaded_graph(by_path, own_roots, graph);
+
+        // only the root's own scopes are open in its own build. the others are roots here and
+        // libraries there
+        Parser::ActiveTargets own;
+        const auto opened = active.find(root.name);
+
+        if (opened != active.end()) {
+            own.emplace(root.name, opened->second);
+        }
+
+        RootProgramPlan plan;
+        plan.root = root.name;
+
+        for (const Parser::ModuleManifest *manifest : compiled_of(graph, own, { root.path })) {
+            plan.modules.push_back(manifest->name);
+        }
+
+        out.push_back(std::move(plan));
     }
 
     return out;

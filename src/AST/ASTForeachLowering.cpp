@@ -2,7 +2,6 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
-#include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
@@ -139,7 +138,7 @@ void ForeachLowering::discard(ScopeNode &scope, size_t index, ForeachNode &loop)
     // decided the loop cannot be lowered at all - so the whole loop is what left the tree. without this its
     // `iterate()` receiver and everything in its body stayed visible to TypeLowering's arena sweep,
     // which is what turned one refused loop into a second diagnostic underneath the real one
-    forget_subtree(_bundle, loop);
+    forget(loop);
 
     scope.children[index] = make_ref(empty);
 

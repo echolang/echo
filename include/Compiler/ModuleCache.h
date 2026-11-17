@@ -38,8 +38,8 @@ namespace Compiler
     // what a module's compiled object is a function of. Two builds that agree on this may share an artifact;
     // two that do not, must not.
     //
-    // **the inputs are kept, not just the digest.** A cache miss is otherwise unexplainable - "something
-    // changed" is not an answer a person can act on - and `--explain-cache` reads them back to name the file
+    // **every part is kept, not just the digest.** A cache miss is otherwise unexplainable - "something
+    // changed" is not an answer a person can act on - and `--explain cache` reads them back to name the part
     struct ModuleCacheKey
     {
         std::string hex;
@@ -47,6 +47,20 @@ namespace Compiler
         // with it, so two facts (debug/release, `--define`, tests) keep separate lists
         std::string embed_identity;
         std::vector<std::pair<std::filesystem::path, uint64_t>> inputs;
+        // the compiler, target and build mode - the same for every module of one build
+        uint64_t environment = 0;
+        // what the parser was told about this module, as `name=value` entries: TargetFacts',
+        // then coverage and each opened target. folded in this order; `--explain cache` diffs them
+        std::vector<std::string> configuration;
+
+        // those entries joined with `;` and a trailing one: the on-disk `config` line
+        static std::string configuration_record(const std::vector<std::string> &entries);
+        // each declared dependency's key, by module name
+        std::vector<std::pair<std::string, std::string>> depends;
+        // every module keyed before this one, in order, with its key
+        std::vector<std::pair<std::string, std::string>> preceding;
+        // every file publishing a conversion this module can see, by file name. empty for the stdlib
+        std::vector<std::pair<std::string, uint64_t>> conversions;
     };
 
     // a key per module, by name. `manifests` in dependency order. a dependency contributes its key,
@@ -101,9 +115,10 @@ namespace Compiler
         const std::filesystem::path &path,
         const std::vector<std::filesystem::path> &files);
 
-    // the first input whose hash differs from the recorded one, as a sentence, or "" when the record is
-    // missing or agrees. Best-effort: this is a diagnostic, and being unable to explain a miss is not itself
-    // an error
+    // the first part of the key that differs from the recorded one, as a sentence, or "" when the record is
+    // missing: the environment, the module's own files, its configuration, its dependencies, the modules
+    // parsed before it, the conversions it can see. Best-effort: this is a diagnostic, and being unable to
+    // explain a miss is not itself an error
     std::string explain_miss(const std::filesystem::path &inputs_path, const ModuleCacheKey &key);
 };
 

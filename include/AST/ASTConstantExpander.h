@@ -23,12 +23,14 @@ namespace AST
     class Namespace;
     class NamespaceManager;
 
-    // a constant's name: exact-namespace when qualified, outward when bare. null if the name is not one
+    // a constant's name: exact-namespace when qualified, outward when bare. null if the name is not one.
+    // `private_root` is the asking file's private test namespace - see NamespaceManager::find_symbol_in_scope
     ConstDeclNode *find_constant(
         NamespaceManager &namespaces,
         const std::string &name,
         const Namespace *from,
-        bool qualified
+        bool qualified,
+        const Namespace *private_root = nullptr
     );
 
     // each use of a constant becomes a clone of its initializer. before the fixpoint: OwnershipPass

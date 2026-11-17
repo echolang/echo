@@ -86,7 +86,8 @@ AST::Symbol *Parser::find_unqualified_type(Parser::Payload &payload, const std::
         return payload.collector.namespaces.find_symbol(imp->target_name, *imp->target_namespace);
     }
 
-    return payload.collector.namespaces.find_symbol_in_scope(name, from);
+    return payload.collector.namespaces.find_symbol_in_scope(
+        name, from, AST::file_of(payload.context).private_namespace);
 }
 
 bool Parser::starts_callable_type(Parser::Cursor &cursor, size_t offset)
@@ -937,7 +938,8 @@ static AST::ValueType parse_array_suffix(Parser::Payload &payload, AST::ValueTyp
                     payload.collector.namespaces,
                     cursor.current().value(),
                     payload.context.current_namespace,
-                    /*qualified=*/false) != nullptr;
+                    /*qualified=*/false,
+                    AST::file_of(payload.context).private_namespace) != nullptr;
 
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(cursor.current()),

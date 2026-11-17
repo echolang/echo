@@ -149,6 +149,40 @@ std::vector<std::filesystem::path> Parser::expand_source_pattern(const std::file
     return recursive ? glob::rglob(spelled) : glob::glob(spelled);
 }
 
+Parser::WorkspaceMembers Parser::workspace_members(const Parser::ModuleManifest &manifest)
+{
+    Parser::WorkspaceMembers out;
+    std::error_code ec;
+
+    for (const std::string &pattern : manifest.workspace_as_written) {
+        // sorted, so the member order is the tree's and not the directory listing's
+        std::set<std::filesystem::path> matched;
+
+        // the pattern names directories and a member is a directory with a manifest in it, so the
+        // manifest is what is matched: one expansion, and `*` means what it means in `#[sources:]`
+        for (const std::filesystem::path &match : Parser::expand_source_pattern(
+                manifest.directory / pattern / "module.eco")) {
+            if (std::filesystem::is_regular_file(match, ec)) {
+                matched.insert(Compiler::canonical_or_absolute(match));
+            }
+        }
+
+        if (matched.empty()) {
+            out.unmatched.push_back(pattern);
+            continue;
+        }
+
+        for (const std::filesystem::path &member : matched) {
+            if (member != manifest.path
+                && std::find(out.manifests.begin(), out.manifests.end(), member) == out.manifests.end()) {
+                out.manifests.push_back(member);
+            }
+        }
+    }
+
+    return out;
+}
+
 namespace
 {
 
@@ -420,6 +454,13 @@ bool read_manifest_attributes(
             for (const AST::AttributeValue *pattern : AST::AttributeReader::each(written)) {
                 if (std::optional<std::string> value = reader.string(*pattern)) {
                     into.push_back(value.value());
+                }
+            }
+        }
+        else if (name == "workspace") {
+            for (const AST::AttributeValue *pattern : AST::AttributeReader::each(written)) {
+                if (std::optional<std::string> value = reader.string(*pattern)) {
+                    out.workspace_as_written.push_back(value.value());
                 }
             }
         }
@@ -1224,7 +1265,7 @@ Parser::ModuleContribution Parser::module_contribution_for(
 
             out.sources.push_back(source);
             if (target.kind == Parser::TargetKind::t_test) {
-                out.test_scoped_sources.push_back(source);
+                out.tests_only_sources.push_back(source);
             }
         }
 
@@ -1421,6 +1462,78 @@ bool Parser::complete_manifest_sources(Parser::ModuleManifest &manifest, Parser:
     return expand_settled_manifest(manifest, into, scratch);
 }
 
+bool Parser::order_loaded_graph(
+    const std::map<std::filesystem::path, const Parser::ModuleManifest *> &loaded,
+    const std::vector<std::filesystem::path> &roots,
+    std::vector<const Parser::ModuleManifest *> &out,
+    std::string *out_cycle,
+    std::filesystem::path *out_at
+)
+{
+    out.clear();
+
+    std::set<std::filesystem::path> emitted;
+    std::vector<std::filesystem::path> in_progress;
+    const std::set<std::filesystem::path> root_set(roots.begin(), roots.end());
+
+    std::function<bool(const std::filesystem::path &)> visit =
+        [&](const std::filesystem::path &path) {
+            if (emitted.count(path) > 0) {
+                return true;
+            }
+
+            const auto found = loaded.find(path);
+            if (found == loaded.end()) {
+                return true;
+            }
+
+            if (std::find(in_progress.begin(), in_progress.end(), path) != in_progress.end()) {
+                if (out_cycle == nullptr) {
+                    return true;
+                }
+
+                std::string chain;
+                for (const std::filesystem::path &step : in_progress) {
+                    chain += loaded.at(step)->name;
+                    chain += " -> ";
+                }
+                chain += found->second->name;
+                *out_cycle = std::move(chain);
+
+                if (out_at != nullptr) {
+                    *out_at = path;
+                }
+
+                return false;
+            }
+
+            in_progress.push_back(path);
+
+            const bool is_root = root_set.count(path) > 0;
+
+            for (const std::filesystem::path &dependency : Parser::graph_dependencies(
+                    *found->second, is_root)) {
+                if (!visit(dependency)) {
+                    return false;
+                }
+            }
+
+            in_progress.pop_back();
+            emitted.insert(path);
+            out.push_back(found->second);
+            return true;
+        };
+
+    for (const std::filesystem::path &root : roots) {
+        if (!visit(root)) {
+            out.clear();
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool Parser::resolve_module_graph(
     const std::vector<std::filesystem::path> &roots,
     Parser::ManifestScratch &scratch,
@@ -1500,53 +1613,6 @@ bool Parser::resolve_module_graph(
         }
     }
 
-    // depth-first, emitting a module after everything it depends on. `in_progress` is what turns a cycle
-    // into a named path instead of an infinite descent
-    std::set<std::filesystem::path> emitted;
-    std::vector<std::filesystem::path> in_progress;
-
-    std::function<bool(const std::filesystem::path &)> visit =
-        [&](const std::filesystem::path &path) {
-            if (emitted.count(path) > 0) {
-                return true;
-            }
-
-            if (std::find(in_progress.begin(), in_progress.end(), path) != in_progress.end()) {
-                std::string chain;
-                for (const std::filesystem::path &step : in_progress) {
-                    chain += loaded.at(step).name;
-                    chain += " -> ";
-                }
-                chain += loaded.at(path).name;
-
-                scratch.report<AST::Issue::ModuleDependencyCycle>(
-                    path,
-                    1,
-                    fmt::format(
-                        "the module dependencies form a cycle: {}. A module is parsed completely before the "
-                        "next one starts, so it can only name symbols from modules parsed before it - which "
-                        "makes a cycle unsatisfiable rather than merely unsupported.", chain));
-                return false;
-            }
-
-            in_progress.push_back(path);
-
-            const bool is_root = root_set.count(path) > 0;
-
-            for (const std::filesystem::path &dependency : Parser::graph_dependencies(
-                    loaded.at(path), is_root)) {
-                if (!visit(dependency)) {
-                    return false;
-                }
-            }
-
-            in_progress.pop_back();
-            emitted.insert(path);
-            out.push_back(loaded.at(path));
-
-            return true;
-        };
-
     // **the roots in the order they were given, first.**
     //
     // walking `loaded`, a path-keyed map, on the theory that a canonical-path order is more
@@ -1563,11 +1629,29 @@ bool Parser::resolve_module_graph(
     // walking the roots is also the whole walk: everything in `loaded` got there as a root or as some
     // manifest's `depends`, so the recursion above reaches all of it. A sweep over `loaded` afterwards would
     // be inert *and* would be a second, filesystem-ordered emit path for a reader to rule out
-    for (const std::filesystem::path &root : root_order) {
-        if (!visit(root)) {
-            out.clear();
-            return false;
-        }
+    std::map<std::filesystem::path, const ModuleManifest *> ptrs;
+
+    for (const auto &[path, manifest] : loaded) {
+        ptrs.emplace(path, &manifest);
+    }
+
+    std::vector<const ModuleManifest *> ordered;
+    std::string cycle;
+    std::filesystem::path at;
+
+    if (!Parser::order_loaded_graph(ptrs, root_order, ordered, &cycle, &at)) {
+        scratch.report<AST::Issue::ModuleDependencyCycle>(
+            at,
+            1,
+            fmt::format(
+                "the module dependencies form a cycle: {}. A module is parsed completely before the "
+                "next one starts, so it can only name symbols from modules parsed before it - which "
+                "makes a cycle unsatisfiable rather than merely unsupported.", cycle));
+        return false;
+    }
+
+    for (const ModuleManifest *manifest : ordered) {
+        out.push_back(*manifest);
     }
 
     return true;

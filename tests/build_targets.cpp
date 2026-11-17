@@ -154,6 +154,23 @@ TEST_CASE("a build with no target named builds every one the manifest declares",
     REQUIRE(EchoTests::file_exists(project.root() / "ecobuild/serve"));
 }
 
+// **a dump of the declarations is an answer, not a build.** tools ask for it - a generator in a
+// `before_build` hook once per build - and none of them wants the program it describes compiled,
+// optimized and linked a second time on the way out
+TEST_CASE("printing the declarations builds nothing", "[targets]")
+{
+    ScopedProject project("decls_only");
+    write_two_target_project(project);
+
+    const ProcessResult dumped = project.echoc("build -p decls");
+    INFO(dumped.output);
+
+    REQUIRE(dumped.exit_code == 0);
+    REQUIRE(dumped.output.find("\"modules\"") != std::string::npos);
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/clock"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/serve"));
+}
+
 TEST_CASE("each target runs its own entry file and nothing of the other's", "[targets]")
 {
     ScopedProject project("entries_do_not_mix");

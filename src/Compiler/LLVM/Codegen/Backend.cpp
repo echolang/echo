@@ -522,6 +522,10 @@ std::optional<std::vector<std::string>> host_linker_command(
     command.push_back(platform->minos);
     command.push_back(platform->sdk);
 
+    // see Compiler::darwin_executable_export. this path never links a library
+    command.push_back("-exported_symbol");
+    command.push_back(Compiler::darwin_executable_export());
+
     command.insert(command.end(), link_words.begin(), link_words.end());
 
     return command;

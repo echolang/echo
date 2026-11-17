@@ -15,6 +15,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Type.h>
 
 #include <fmt/core.h>
@@ -287,7 +288,13 @@ llvm::Constant *row_constant(
     return llvm::ConstantStruct::get(struct_ty, fields);
 }
 
-llvm::Constant *slice_constant(Compiler::LLVM::CodegenContext &ctx, const AST::AttrPlan &plan)
+// `rows` index into the plan's. `suffix` tells one view's backing array from another's
+llvm::Constant *slice_constant(
+    Compiler::LLVM::CodegenContext &ctx,
+    const AST::AttrPlan &plan,
+    const std::vector<size_t> &view,
+    const std::string &suffix
+)
 {
     llvm::Type *row_ty = ctx.types->get_llvm_type(plan.schema.row_type, *ctx.current_cmp_unit);
     llvm::Type *slice_ty = ctx.types->get_llvm_type(plan.table_type, *ctx.current_cmp_unit);
@@ -304,16 +311,16 @@ llvm::Constant *slice_constant(Compiler::LLVM::CodegenContext &ctx, const AST::A
 
     llvm::Type *len_ty = slice_struct->getElementType(len_index);
 
-    if (plan.rows.empty()) {
+    if (view.empty()) {
         fields[len_index] = llvm::ConstantInt::get(len_ty, 0);
         return llvm::ConstantStruct::get(slice_struct, fields);
     }
 
     std::vector<llvm::Constant *> rows;
-    rows.reserve(plan.rows.size());
+    rows.reserve(view.size());
     unsigned serial = 0;
-    for (const AST::AttrRow &row : plan.rows) {
-        rows.push_back(row_constant(ctx, plan, row, serial));
+    for (size_t index : view) {
+        rows.push_back(row_constant(ctx, plan, plan.rows[index], serial));
     }
 
     llvm::ArrayType *array_ty = llvm::ArrayType::get(row_ty, rows.size());
@@ -325,7 +332,7 @@ llvm::Constant *slice_constant(Compiler::LLVM::CodegenContext &ctx, const AST::A
         true,
         llvm::GlobalValue::PrivateLinkage,
         array,
-        AST::attr_table_symbol(plan) + ".table");
+        AST::attr_table_symbol(plan) + ".table" + suffix);
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
 
     llvm::Constant *zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx.llvm_context), 0);
@@ -335,46 +342,51 @@ llvm::Constant *slice_constant(Compiler::LLVM::CodegenContext &ctx, const AST::A
     return llvm::ConstantStruct::get(slice_struct, fields);
 }
 
-llvm::GlobalVariable *slice_global(
-    Compiler::LLVM::CodegenContext &ctx,
-    const AST::AttrPlan &plan,
-    bool define
-)
+// **a declaration never says `constant`.** the definition is one in every build but a test runner
+// over several roots, where it is a variable its `main` fills in for the root being tested - and a
+// library's object is the same file in both, so what it assumes of the symbol has to hold in both
+llvm::GlobalVariable *slice_declaration(Compiler::LLVM::CodegenContext &ctx, const AST::AttrPlan &plan)
 {
     const std::string name = AST::attr_table_symbol(plan);
-    llvm::Type *slice_ty = ctx.types->get_llvm_type(plan.table_type, *ctx.current_cmp_unit);
     llvm::Module *module = ctx.current_module();
 
-    llvm::GlobalVariable *gv = module->getGlobalVariable(name, true);
-    if (gv == nullptr) {
-        gv = new llvm::GlobalVariable(
-            *module,
-            slice_ty,
-            true,
-            llvm::GlobalValue::ExternalLinkage,
-            define ? slice_constant(ctx, plan) : nullptr,
-            name);
-        return gv;
+    if (llvm::GlobalVariable *found = module->getGlobalVariable(name, true)) {
+        return found;
     }
 
-    if (define && gv->isDeclaration()) {
-        gv->setInitializer(slice_constant(ctx, plan));
-        gv->setConstant(true);
-        gv->setLinkage(llvm::GlobalValue::ExternalLinkage);
-    }
-
-    return gv;
+    return new llvm::GlobalVariable(
+        *module,
+        ctx.types->get_llvm_type(plan.table_type, *ctx.current_cmp_unit),
+        false,
+        llvm::GlobalValue::ExternalLinkage,
+        nullptr,
+        name);
 }
 
-}
-
-void Compiler::LLVM::emit_attr_tables(CodegenContext &ctx)
+void define_table(Compiler::LLVM::CodegenContext &ctx, const AST::AttrPlan &plan)
 {
-    if (ctx.attr_plans == nullptr) {
+    llvm::GlobalVariable *table = slice_declaration(ctx, plan);
+    if (!table->isDeclaration()) {
         return;
     }
 
+    // several root programs: empty until `main` selects one. see emit_attr_view_selection
+    if (!plan.views.empty()) {
+        table->setInitializer(llvm::Constant::getNullValue(table->getValueType()));
+        return;
+    }
+
+    table->setInitializer(slice_constant(ctx, plan, AST::attr_all_rows(plan), ""));
+    table->setConstant(true);
+}
+
+std::vector<const AST::AttrPlan *> ready_plans(const Compiler::LLVM::CodegenContext &ctx)
+{
     std::vector<const AST::AttrPlan *> plans;
+    if (ctx.attr_plans == nullptr) {
+        return plans;
+    }
+
     for (const auto &entry : ctx.attr_plans->entries) {
         if (entry.second.status == AST::AttrPlanStatus::t_ready) {
             plans.push_back(&entry.second);
@@ -383,9 +395,61 @@ void Compiler::LLVM::emit_attr_tables(CodegenContext &ctx)
     std::sort(plans.begin(), plans.end(), [](const AST::AttrPlan *a, const AST::AttrPlan *b) {
         return AST::attr_table_symbol(*a) < AST::attr_table_symbol(*b);
     });
-    for (const AST::AttrPlan *plan : plans) {
-        slice_global(ctx, *plan, true);
+    return plans;
+}
+
+}
+
+void Compiler::LLVM::emit_attr_tables(CodegenContext &ctx)
+{
+    for (const AST::AttrPlan *plan : ready_plans(ctx)) {
+        define_table(ctx, *plan);
     }
+}
+
+void Compiler::LLVM::emit_attr_view_selection(CodegenContext &ctx, const std::string &root)
+{
+    if (ctx.attr_plans == nullptr) {
+        return;
+    }
+
+    const std::vector<std::string> &roots = ctx.attr_plans->view_roots;
+    const auto found = std::find(roots.begin(), roots.end(), root);
+    if (found == roots.end()) {
+        return;
+    }
+
+    const size_t view = static_cast<size_t>(found - roots.begin());
+    const std::string name = "__eco_attr_view_" + std::to_string(view);
+    llvm::Module *module = ctx.current_module();
+    llvm::Function *select = module->getFunction(name);
+
+    // one function per root rather than the stores at each test: a root has hundreds of tests and
+    // every one of them selects the same tables
+    if (select == nullptr) {
+        select = llvm::Function::Create(
+            llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx.llvm_context), false),
+            llvm::GlobalValue::InternalLinkage,
+            name,
+            module);
+
+        llvm::IRBuilder<> builder(llvm::BasicBlock::Create(*ctx.llvm_context, "entry", select));
+
+        for (const AST::AttrPlan *plan : ready_plans(ctx)) {
+            if (view >= plan->views.size()) {
+                continue;
+            }
+
+            define_table(ctx, *plan);
+            builder.CreateStore(
+                slice_constant(ctx, *plan, plan->views[view], ".v" + std::to_string(view)),
+                slice_declaration(ctx, *plan));
+        }
+
+        builder.CreateRetVoid();
+    }
+
+    ctx.builder->CreateCall(select);
 }
 
 void Compiler::LLVM::gen_attr_of_builtin(CodegenContext &ctx, AST::FunctionCallExprNode &node)
@@ -399,7 +463,7 @@ void Compiler::LLVM::gen_attr_of_builtin(CodegenContext &ctx, AST::FunctionCallE
             ctx.function_context()));
     }
 
-    llvm::GlobalVariable *gv = slice_global(ctx, *plan, false);
+    llvm::GlobalVariable *gv = slice_declaration(ctx, *plan);
     llvm::Type *slice_ty = ctx.types->get_llvm_type(plan->table_type, *ctx.current_cmp_unit);
     ctx.push_scalar(ctx.builder->CreateLoad(slice_ty, gv, "attr.table"));
 }

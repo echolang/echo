@@ -300,3 +300,609 @@ TEST_CASE("a report names the abort site", "[test_targets][report]")
     REQUIRE(jsonl.find("\"file\":\"gives_up.eco\"") != std::string::npos);
     REQUIRE(jsonl.find("\"line\":3") != std::string::npos);
 }
+
+namespace
+{
+
+// four modules, three of them tested together. `kit` owns a route table collected with `attr::of`
+// and every other module registers into it:
+//
+//   one   -> kit            tests keep a `Rig`, a `KEY` and a "/shared" route at file scope
+//   two   -> zed, kit       tests keep the same three names
+//   three -> one            no test helpers
+void write_route_modules(const ScopedProject &project)
+{
+    const auto manifest = [&project](
+        const std::string &name, const std::string &depends, bool test_sources) {
+        write_file(project.root() / name / "module.eco",
+            "#[module: \"" + name + "\"]\n"
+            "#[sources: \"src/*.eco\"]\n"
+            + depends
+            + (test_sources ? "#[target: test] {\n    #[sources: \"tests/*.eco\"]\n}\n" : ""));
+    };
+
+    const auto route = [](const std::string &name) {
+        return "namespace " + name + ";\n"
+            "\n"
+            "#[http::get: \"/" + name + "\"]\n"
+            "public function route() : int32\n"
+            "{\n"
+            "    return 1;\n"
+            "}\n";
+    };
+
+    manifest("kit", "", false);
+    write_file(project.root() / "kit/src/kit.eco",
+        route("kit") +
+        "\n"
+        "public struct Route\n"
+        "{\n"
+        "    public string $path;\n"
+        "    public function<int32()> $call;\n"
+        "}\n"
+        "\n"
+        "public function paths() : string\n"
+        "{\n"
+        "    string $all = '';\n"
+        "    foreach (attr::of<Route>(\"http::get\", \"path\") as const &$row) {\n"
+        "        string $path = $row->path;\n"
+        "        $all = \"{$all}{$path} \";\n"
+        "    }\n"
+        "    return $all;\n"
+        "}\n");
+
+    manifest("zed", "", false);
+    write_file(project.root() / "zed/src/zed.eco", route("zed"));
+
+    const auto helpers = [](const std::string &key) {
+        return "internal const KEY = '" + key + "';\n"
+            "\n"
+            "struct Rig\n"
+            "{\n"
+            "    public string $key = KEY;\n"
+            "}\n"
+            "\n"
+            "#[http::get: \"/shared\"]\n"
+            "function shared_route() : int32\n"
+            "{\n"
+            "    return 1;\n"
+            "}\n";
+    };
+
+    // a helper at file scope, then a namespace: the test below is no longer under the namespace
+    // its own file's helper went into
+    const auto suite = [](const std::string &name, const std::string &key, const std::string &paths) {
+        return "function rig_key() : string\n"
+            "{\n"
+            "    Rig $rig = Rig();\n"
+            "    return $rig->key;\n"
+            "}\n"
+            "\n"
+            "namespace " + name + "::checks;\n"
+            "\n"
+            "test sees_its_own_program\n"
+            "{\n"
+            "    assert(rig_key() == '" + key + "');\n"
+            "    assert(kit::paths() == '" + paths + "');\n"
+            "}\n";
+    };
+
+    manifest("one", "#[depends: \"../kit\"]\n", true);
+    write_file(project.root() / "one/src/one.eco", route("one"));
+    write_file(project.root() / "one/tests/helpers.eco", helpers("of one"));
+    write_file(project.root() / "one/tests/suite.eco", suite("one", "of one", "/kit /one /shared "));
+
+    // `zed` before `kit`, which is not the order the run as a whole meets them in
+    manifest("two", "#[depends: \"../zed\"]\n#[depends: \"../kit\"]\n", true);
+    write_file(project.root() / "two/src/two.eco", route("two"));
+    write_file(project.root() / "two/tests/helpers.eco", helpers("of two"));
+    write_file(project.root() / "two/tests/suite.eco", suite("two", "of two", "/zed /kit /two /shared "));
+
+    manifest("three", "#[depends: \"../one\"]\n#[depends: \"../kit\"]\n", false);
+    write_file(project.root() / "three/src/three.eco",
+        route("three") +
+        "\n"
+        "test sees_its_own_program\n"
+        "{\n"
+        "    assert(kit::paths() == '/kit /one /three ');\n"
+        "}\n");
+}
+
+};
+
+// **one program, and still each root's own.** three things a root's own `echoc test` gives it for free
+// and one shared build has to give back: the names its test files keep at file scope are its own, a
+// table collected from "the program" holds its program and not its neighbours', and in the order its
+// own build would have met the modules
+TEST_CASE("each root of a test run over several keeps its own program", "[test_targets]")
+{
+    ScopedProject project("several_programs");
+    write_route_modules(project);
+
+    const std::string cache = (project.root() / "cache").string();
+    const auto root = [&project](const std::string &name) {
+        return (project.root() / name).string();
+    };
+
+    // what each asserts is what it sees alone, so the same suites have to pass both ways
+    for (const std::string &name : { "one", "two", "three" }) {
+        const ProcessResult alone = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", root(name), "--build-dir", cache });
+
+        INFO(alone.output);
+        REQUIRE(alone.exit_code == 0);
+        REQUIRE(alone.output.find("1 test passed") != std::string::npos);
+    }
+
+    const ProcessResult together = EchoTests::run_process({
+        EchoTests::echoc_binary(), "test", "-m", root("one"), "-m", root("two"), "-m", root("three"),
+        "--build-dir", cache });
+
+    INFO(together.output);
+    REQUIRE(together.exit_code == 0);
+    REQUIRE(together.output.find("3 tests passed") != std::string::npos);
+
+    // `zed` is in the bundle because `two` asked for it, and public: nothing but its own manifest
+    // says `three` may not name it - which is the one thing a build of `three` alone goes by
+    SECTION("a root naming a module it does not depend on is refused")
+    {
+        write_file(project.root() / "three/src/reach.eco",
+            "namespace three;\n"
+            "\n"
+            "public function reaches_over() : int32\n"
+            "{\n"
+            "    return zed::route();\n"
+            "}\n");
+
+        const ProcessResult refused = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", root("one"), "-m", root("two"), "-m", root("three"),
+            "--build-dir", cache });
+
+        INFO(refused.output);
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find(
+            "is declared in the module 'zed', which the module 'three' does not depend on")
+            != std::string::npos);
+
+        // and the same source is as wrong alone, where there is no `zed` at all
+        const ProcessResult alone = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", root("three"), "--build-dir", cache });
+
+        INFO(alone.output);
+        REQUIRE(alone.exit_code != 0);
+    }
+
+    // each root's `str::from(const Rig&)` takes its own private `Rig`, so the two are two overloads
+    SECTION("two roots each extend str for their own file-scope type")
+    {
+        for (const std::string &name : { "one", "two" }) {
+            write_file(project.root() / name / "tests/str.eco",
+                "namespace str;\n"
+                "\n"
+                "function from(const Rig& $r) : string\n"
+                "{\n"
+                "    return $r->key;\n"
+                "}\n");
+            write_file(project.root() / name / "tests/text.eco",
+                "test a_rig_renders_as_its_key\n"
+                "{\n"
+                "    Rig $r = Rig();\n"
+                "    assert(\"{$r}\" == KEY);\n"
+                "}\n");
+        }
+
+        const ProcessResult extended = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", root("one"), "-m", root("two"), "-m", root("three"),
+            "--build-dir", cache });
+
+        INFO(extended.output);
+        REQUIRE(extended.exit_code == 0);
+        REQUIRE(extended.output.find("5 tests passed") != std::string::npos);
+    }
+
+    // `three` depends on `one`, and still has none of `one`'s tests when it builds alone
+    SECTION("what one root's test files declare is not another root's")
+    {
+        write_file(project.root() / "one/tests/probe.eco",
+            "namespace one::probe;\n"
+            "\n"
+            "public function answer() : int32\n"
+            "{\n"
+            "    return 42;\n"
+            "}\n");
+        write_file(project.root() / "three/src/probe.eco",
+            "test reaches_into_the_tests_of_one\n"
+            "{\n"
+            "    assert(one::probe::answer() == 42);\n"
+            "}\n");
+
+        const ProcessResult refused = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", root("one"), "-m", root("two"), "-m", root("three"),
+            "--build-dir", cache });
+
+        INFO(refused.output);
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find(
+            "is declared in a test file of the module 'one', and only that module's own tests can name it")
+            != std::string::npos);
+    }
+
+    SECTION("a name one root's own program registers twice is still refused")
+    {
+        write_file(project.root() / "two/tests/again.eco",
+            "#[http::get: \"/two\"]\n"
+            "function two_again() : int32\n"
+            "{\n"
+            "    return 1;\n"
+            "}\n");
+
+        const ProcessResult refused = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", root("one"), "-m", root("two"), "-m", root("three"),
+            "--build-dir", cache });
+
+        INFO(refused.output);
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find("'/two' is used twice as the 'path' of 'http::get'") != std::string::npos);
+        REQUIRE(refused.output.find("'/shared' is used twice") == std::string::npos);
+    }
+}
+
+// **a workspace is the `-m` list written down once.** the manifest names its members and
+// `--workspace` is the run that names them all, so the list a person types, the one CI types and the
+// one a package manager installs for cannot be three lists
+TEST_CASE("a workspace run tests the module and every member it lists", "[test_targets][workspace]")
+{
+    ScopedProject project("workspace");
+    write_route_modules(project);
+
+    // `one`, `two` and `three` beside a root that is a member by being where the list is
+    write_file(project.root() / "module.eco",
+        "#[module: \"root\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[workspace: [\"t*\", \"one\"]]\n");
+
+    write_file(project.root() / "src/root.eco",
+        "namespace root;\n"
+        "\n"
+        "test is_a_member_too\n"
+        "{\n"
+        "    assert(true);\n"
+        "}\n");
+
+    const ProcessResult ran = project.echoc("test --workspace");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("4 tests passed") != std::string::npos);
+    REQUIRE(ran.output.find("root/root.eco::is_a_member_too") != std::string::npos);
+
+    SECTION("the manifest dump names the members a pattern resolved to")
+    {
+        const ProcessResult dumped = project.echoc("build -p manifest");
+        INFO(dumped.output);
+
+        REQUIRE(dumped.exit_code == 0);
+        REQUIRE(dumped.output.find("\"workspace\": [\"t*\", \"one\"]") != std::string::npos);
+        REQUIRE(dumped.output.find("\"members\": [\"three\", \"two\", \"one\"]") != std::string::npos);
+    }
+
+    SECTION("a pattern that matches no module is refused")
+    {
+        write_file(project.root() / "module.eco",
+            "#[module: \"root\"]\n"
+            "#[sources: \"src/*.eco\"]\n"
+            "#[workspace: [\"one\", \"gone/*\"]]\n");
+
+        const ProcessResult refused = project.echoc("test --workspace");
+        INFO(refused.output);
+
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find("No Such Member") != std::string::npos);
+        REQUIRE(refused.output.find("'gone/*'") != std::string::npos);
+    }
+
+    SECTION("a module that lists no members has no workspace to run")
+    {
+        const ProcessResult refused = project.echoc(
+            "test --workspace -m " + EchoTests::quoted(project.root() / "one"));
+        INFO(refused.output);
+
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find("No Workspace") != std::string::npos);
+    }
+
+    SECTION("without the flag the members are not this run's")
+    {
+        const ProcessResult alone = project.echoc("test");
+        INFO(alone.output);
+
+        REQUIRE(alone.exit_code == 0);
+        REQUIRE(alone.output.find("1 test passed") != std::string::npos);
+    }
+}
+
+// **a workspace is installed once, at its root.** a member has no `vendor/` of its own then, and is
+// still built from its own directory - by a person, and by any hook tool that asks echoc about the
+// module it was run for
+TEST_CASE("a workspace member finds its packages at the workspace root", "[test_targets][workspace]")
+{
+    ScopedProject project("workspace_packages");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"root\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[workspace: [\"parts/*\"]]\n");
+    write_file(project.root() / "src/root.eco", "namespace root;\n");
+
+    write_file(project.root() / "vendor/libhello/module.eco",
+        "#[module: \"libhello\"]\n"
+        "#[version: \"1.0.0\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "vendor/libhello/src/hello.eco",
+        "namespace libhello;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    const auto part = [&project](const std::string &name) {
+        write_file(project.root() / "parts" / name / "module.eco",
+            "#[module: \"" + name + "\"]\n"
+            "#[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
+            "#[sources: \"src/*.eco\"]\n");
+        write_file(project.root() / "parts" / name / "src/suite.eco",
+            "namespace " + name + ";\n"
+            "\n"
+            "test asks_the_package\n"
+            "{\n"
+            "    assert(libhello::answer() == 42);\n"
+            "}\n");
+    };
+
+    part("inside");
+
+    const ProcessResult member = EchoTests::run_process({
+        EchoTests::echoc_binary(), "test", "-m", (project.root() / "parts/inside").string() });
+    INFO(member.output);
+    REQUIRE(member.exit_code == 0);
+    REQUIRE(member.output.find("1 test passed") != std::string::npos);
+
+    const ProcessResult all = project.echoc("test --workspace");
+    INFO(all.output);
+    REQUIRE(all.exit_code == 0);
+    REQUIRE(all.output.find("1 test passed") != std::string::npos);
+
+    SECTION("a module the workspace does not list is not its member")
+    {
+        write_file(project.root() / "other/outside/module.eco",
+            "#[module: \"outside\"]\n"
+            "#[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
+            "#[sources: \"src/*.eco\"]\n");
+        write_file(project.root() / "other/outside/src/lib.eco", "namespace outside;\n");
+
+        const ProcessResult refused = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", (project.root() / "other/outside").string() });
+        INFO(refused.output);
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find("is not in 'vendor/'") != std::string::npos);
+    }
+}
+
+// **a test run pointed at several modules is one build and one runner.** none of them is "the program", so
+// the question several roots cannot answer for `build` is not asked: each contributes its tests
+TEST_CASE("a test run over several modules runs the tests of each", "[test_targets]")
+{
+    ScopedProject project("several_modules");
+
+    // the same file name, the same test name, at the same line and column: only the module tells the two
+    // apart, in the runner's symbol as much as in what is printed
+    for (const std::string &name : { "one", "two" }) {
+        write_file(project.root() / name / "module.eco",
+            "#[module: \"" + name + "\"]\n"
+            "#[sources: \"src/*.eco\"]\n");
+
+        write_file(project.root() / name / "src/suite.eco",
+            "namespace " + name + ";\n"
+            "\n"
+            "test adds_up\n"
+            "{\n"
+            "    assert(1 + 1 == 2);\n"
+            "}\n");
+    }
+
+    const std::string one = (project.root() / "one").string();
+    const std::string two = (project.root() / "two").string();
+    const std::string cache = (project.root() / "cache").string();
+
+    const ProcessResult both = EchoTests::run_process({
+        EchoTests::echoc_binary(), "test", "-m", one, "-m", two, "--build-dir", cache });
+
+    INFO(both.output);
+    REQUIRE(both.exit_code == 0);
+    REQUIRE(both.output.find("one/suite.eco::adds_up") != std::string::npos);
+    REQUIRE(both.output.find("two/suite.eco::adds_up") != std::string::npos);
+    REQUIRE(both.output.find("2 tests passed") != std::string::npos);
+
+    SECTION("a module filter selects one of them")
+    {
+        const ProcessResult narrowed = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", one, "-m", two, "--build-dir", cache,
+            "--filter", "module:two" });
+
+        INFO(narrowed.output);
+        REQUIRE(narrowed.exit_code == 0);
+        REQUIRE(narrowed.output.find("two/suite.eco::adds_up") != std::string::npos);
+        REQUIRE(narrowed.output.find("one/suite.eco::adds_up") == std::string::npos);
+    }
+
+    SECTION("a second run builds none of them again")
+    {
+        const ProcessResult again = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", one, "-m", two, "--build-dir", cache,
+            "--explain", "cache" });
+
+        INFO(again.output);
+        REQUIRE(again.exit_code == 0);
+        REQUIRE(EchoTests::line_starting_with(again.output, "one").find("hit") != std::string::npos);
+        REQUIRE(EchoTests::line_starting_with(again.output, "two").find("hit") != std::string::npos);
+    }
+
+    SECTION("a target is one module's, so it is refused")
+    {
+        const ProcessResult refused = EchoTests::run_process({
+            EchoTests::echoc_binary(), "test", "-m", one, "-m", two, "--build-dir", cache,
+            "--target", "quick" });
+
+        INFO(refused.output);
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find("No Such Target") != std::string::npos);
+        REQUIRE(refused.output.find("several") != std::string::npos);
+    }
+
+    SECTION("every other command still wants one program")
+    {
+        const ProcessResult refused = EchoTests::run_process({
+            EchoTests::echoc_binary(), "build", "-m", one, "-m", two, "--build-dir", cache });
+
+        INFO(refused.output);
+        REQUIRE(refused.exit_code != 0);
+        REQUIRE(refused.output.find("Several manifests were given") != std::string::npos);
+    }
+}
+
+// **a namespace a test file writes is the program's.** only what a test scope adds at *file scope* is the
+// module's tests' own; `namespace str;`, the module's own namespace and a generator's namespace reopen the
+// one every other file sees, and a lookup from inside any of them still finds the file-scope helpers
+TEST_CASE("a test file reopens the program's namespaces and keeps its file-scope helpers", "[test_targets]")
+{
+    ScopedProject project("reopens_namespaces");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"shelf\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[sources: \"tests/*.eco\"]\n"
+        "    #[sources: \"gen/*.eco\"]\n"
+        "}\n");
+
+    write_file(project.root() / "src/shelf.eco",
+        "namespace shelf;\n"
+        "\n"
+        "internal function weight() : int32\n"
+        "{\n"
+        "    return 7;\n"
+        "}\n"
+        "\n"
+        "public function weigh(int32 $n) : int32\n"
+        "{\n"
+        "    return $n;\n"
+        "}\n"
+        "\n"
+        "public function total<T>(const array<T>& $items) : int32\n"
+        "{\n"
+        "    int32 $sum = 0;\n"
+        "    foreach ($items as const &$item) {\n"
+        "        $sum = $sum + weigh($item);\n"
+        "    }\n"
+        "    return $sum;\n"
+        "}\n");
+
+    write_file(project.root() / "src/root.eco",
+        "public function describe(int32 $n) : string\n"
+        "{\n"
+        "    return 'number';\n"
+        "}\n");
+
+    // file scope: the module's tests' own
+    write_file(project.root() / "tests/helpers.eco",
+        "struct Rig\n"
+        "{\n"
+        "    public int32 $n;\n"
+        "}\n"
+        "\n"
+        "internal const RIG_NAME = 'rig';\n"
+        "\n"
+        "function make_rig(int32 $n) : Rig\n"
+        "{\n"
+        "    return Rig($n);\n"
+        "}\n"
+        "\n"
+        "// hides the root's `describe(int32)` from the tests, as any inner namespace would\n"
+        "function describe(const Rig& $r) : string\n"
+        "{\n"
+        "    return RIG_NAME;\n"
+        "}\n");
+
+    write_file(project.root() / "tests/str.eco",
+        "namespace str;\n"
+        "\n"
+        "function from(const Rig& $r) : string\n"
+        "{\n"
+        "    return RIG_NAME;\n"
+        "}\n");
+
+    write_file(project.root() / "tests/weigh.eco",
+        "namespace shelf;\n"
+        "\n"
+        "function weigh(const Rig& $r) : int32\n"
+        "{\n"
+        "    return $r->n;\n"
+        "}\n");
+
+    write_file(project.root() / "gen/reg.eco",
+        "namespace gen::reg;\n"
+        "\n"
+        "function size() : int32\n"
+        "{\n"
+        "    return 2;\n"
+        "}\n");
+
+    write_file(project.root() / "tests/suite.eco",
+        "namespace shelf::checks;\n"
+        "\n"
+        "use gen::reg;\n"
+        "\n"
+        "test sees_the_program_and_its_helpers\n"
+        "{\n"
+        "    Rig $r = make_rig(3);\n"
+        "    assert(\"{$r}\" == 'rig');\n"
+        "    assert(shelf::weight() == 7);\n"
+        "    assert(shelf::total([make_rig(1), make_rig(2)]) == 3);\n"
+        "    assert(reg::size() == 2);\n"
+        "    assert(describe($r) == 'rig');\n"
+        "}\n");
+
+    const ProcessResult ran = project.echoc("test");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("1 test passed") != std::string::npos);
+
+    // a bare `namespace;` is back to file scope, which for a test file is still its own - and its own
+    // `Spare` hides the root's, constructors included
+    SECTION("a bare namespace returns to the file's own scope")
+    {
+        write_file(project.root() / "tests/back.eco",
+            "namespace shelf;\n"
+            "\n"
+            "namespace;\n"
+            "\n"
+            "struct Spare\n"
+            "{\n"
+            "    public int32 $n = 1;\n"
+            "}\n"
+            "\n"
+            "test the_spare_is_the_tests_own\n"
+            "{\n"
+            "    Spare $s = Spare();\n"
+            "    assert($s->n == 1);\n"
+            "}\n");
+        write_file(project.root() / "src/spare.eco",
+            "struct Spare\n"
+            "{\n"
+            "    public int32 $n = 2;\n"
+            "}\n");
+
+        const ProcessResult shadowed = project.echoc("test");
+        INFO(shadowed.output);
+        REQUIRE(shadowed.exit_code == 0);
+        REQUIRE(shadowed.output.find("2 tests passed") != std::string::npos);
+    }
+}

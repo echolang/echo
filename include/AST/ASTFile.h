@@ -82,10 +82,15 @@ namespace AST
         // the plain text content of the file
         std::optional<std::string> content;
 
-        // this file was contributed only by a `#[target: test]` scope. coverage skips it so a
+        // this file exists only because a `#[target: test]` listed it. coverage skips it so a
         // helper in tests/ does not count as product code. a file also listed at module scope
-        // stays false
-        bool test_scoped = false;
+        // stays false. stamped at File creation, which is what file_namespace_for reads
+        bool tests_only = false;
+
+        // where this file's file-scope declarations go when tests_only, null otherwise - the module's
+        // private test namespace. `namespace a::b;` still means the program's `a::b`, and a lookup from
+        // anywhere in the file searches this beside the root. **mutable** for `imports`' reason
+        mutable Namespace *private_namespace = nullptr;
 
 
         // out of line: `enum_maps` holds unique_ptr to EnumMap, complete only in ASTFile.cpp
@@ -127,5 +132,12 @@ namespace AST
         const File *file;
         const TokenSlice token_slice;
     };
+
+    // the private test namespace of the file `at` was written in, or null - the extra root frame an
+    // unqualified lookup from there searches. null for a minted token, which names no file
+    inline const Namespace *private_namespace_of(const TokenReference &at) {
+        const File *file = at.is_valid() ? at.file() : nullptr;
+        return file != nullptr ? file->private_namespace : nullptr;
+    }
 };
 #endif

@@ -62,6 +62,36 @@ namespace AST
     // is `t_module`: this module, and no further, the same rung a top-level declaration already has
     Visibility member_visibility(const std::optional<Visibility> &written);
 
+    // **is the module of `origin` part of the program `from`'s module is built into on its own?**
+    // false only in a test run over several roots, for a root naming a module outside what it
+    // depends on - see AST::Module::own_program - or naming what another module's test files declare.
+    // no modifier reaches across that, `public` included.
+    //
+    // **asked only where source names a declaration**: a type name, a constant, a `use`, a call
+    // written in an ordinary body. `from` is that source's own module there. a generic instance's
+    // body, a closure inside one and anything the compiler minted are written in one module and
+    // compiled for another, so they are not asked - nor is an operator or an `#[implicit]`
+    // conversion, which name nothing. a root's own `echoc test` stays the proof that it builds alone
+    bool reachable_from(const DeclarationOrigin &origin, const DeclarationOrigin &from);
+
+    // that rule, worded, or empty - the split visible_from / visibility_refusal takes
+    std::string reach_refusal(
+        const DeclarationOrigin &origin,
+        const DeclarationOrigin &from,
+        const std::string &what
+    );
+
+    // both questions at once, for a site where source names a declaration and one origin answers
+    // both: reachable_from, then visible_from. naming_refusal words whichever said no
+    bool nameable_from(Visibility visibility, const DeclarationOrigin &origin, const DeclarationOrigin &from);
+
+    std::string naming_refusal(
+        Visibility visibility,
+        const DeclarationOrigin &origin,
+        const DeclarationOrigin &from,
+        const std::string &what
+    );
+
     // **may a site written in `from` name a declaration of this visibility declared in `origin`?**
     //
     // `t_owner` is not answered here. That axis asks about *types* and not about files, so it is

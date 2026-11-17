@@ -387,23 +387,36 @@ unsigned TargetFacts::pointer_size() const
     return architecture == k_wasi_arch ? 4u : 8u;
 }
 
-std::string TargetFacts::cache_signature() const
+std::vector<std::string> TargetFacts::cache_entries() const
 {
-    std::string result = "os=" + operating_system
-        + ";arch=" + architecture
-        + ";family=" + family() + ";";
-
-    // stated either way rather than only when set: a module compiled with its tests holds function bodies a
-    // module compiled without them does not, so the two cannot be allowed to share an object
-    result += std::string("tests=") + (tests ? "1" : "0") + ";";
-    // derived from os, and still spelled out: changing which os has threads must miss
-    // the old object without a manual cache version bump, the same reason family is here
-    result += std::string("threads=") + (threads() ? "1" : "0") + ";";
-    result += std::string("dynlib=") + (dynlib() ? "1" : "0") + ";";
+    std::vector<std::string> entries = {
+        "os=" + operating_system,
+        "arch=" + architecture,
+        "family=" + family(),
+        // stated either way rather than only when set: a module compiled with its tests holds
+        // function bodies a module compiled without them does not
+        std::string("tests=") + (tests ? "1" : "0"),
+        // derived from os, and still spelled out: changing which os has threads must miss
+        // the old object without a manual cache version bump, the same reason family is here
+        std::string("threads=") + (threads() ? "1" : "0"),
+        std::string("dynlib=") + (dynlib() ? "1" : "0"),
+    };
 
     // the set is ordered, so this is stable across two invocations that typed the flags differently
     for (const std::string &define : defines) {
-        result += "define=" + define + ";";
+        entries.push_back("define=" + define);
+    }
+
+    return entries;
+}
+
+std::string TargetFacts::cache_signature() const
+{
+    std::string result;
+
+    for (const std::string &entry : cache_entries()) {
+        result += entry;
+        result += ';';
     }
 
     return result;

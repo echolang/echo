@@ -43,6 +43,9 @@ bool FixpointLowering::run_round()
         });
     }
 
+    // once for the round, not once per discard: nothing between a forget() and here reads of_type
+    _detached.flush(_bundle);
+
     return _changed;
 }
 
@@ -54,6 +57,11 @@ void FixpointLowering::finalize()
     _finalizing = true;
     run_round();
     _finalizing = false;
+}
+
+void FixpointLowering::forget(Node &root)
+{
+    _detached.collect(root);
 }
 
 void FixpointLowering::walk_function(FunctionDeclNode &node)

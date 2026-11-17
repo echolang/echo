@@ -100,6 +100,11 @@ namespace Compiler
 
         // skip the root's `#[hook:]`s. stated, never implied
         bool no_hooks = false;
+
+        // `test --workspace`: the roots are the one module named or discovered plus the members its
+        // `#[workspace:]` lists. settled into `modules` before anything reads them, so it is `-m`s
+        // to everything downstream
+        bool workspace = false;
         bool emit_stdlib_header = false;
         bool silent = false;
 

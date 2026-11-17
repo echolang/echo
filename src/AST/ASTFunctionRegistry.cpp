@@ -281,7 +281,8 @@ AST::FunctionDeclNode *AST::FunctionRegistry::first_matching_signature(
 
 const std::vector<AST::FunctionDeclNode *> &AST::FunctionRegistry::overloads(
     const std::string &name,
-    const AST::Namespace &ns
+    const AST::Namespace &ns,
+    const AST::Namespace *private_root
 ) const
 {
     // the answer for a name nothing declares. one object rather than a fresh empty vector per ask, and
@@ -293,6 +294,18 @@ const std::vector<AST::FunctionDeclNode *> &AST::FunctionRegistry::overloads(
     // entirely - an outer namespace does not extend an inner one's overload set, it is hidden by
     // it, exactly as a local variable hides an outer one of the same name
     for (const Namespace *current = &ns; current != nullptr; current = current->parent()) {
+        // a test file's private names are the frame just inside the root, wherever the walk began
+        if (current->is_hidden()) {
+            private_root = private_root != nullptr ? private_root : current;
+            continue;
+        }
+
+        if (current->is_root() && private_root != nullptr) {
+            if (const auto &own = declared_overloads(name, *private_root); !own.empty()) {
+                return own;
+            }
+        }
+
         const auto in_namespace = _by_name.find(current);
         if (in_namespace == _by_name.end()) {
             continue;

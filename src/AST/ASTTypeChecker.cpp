@@ -47,6 +47,7 @@
 #include "AST/ASTAttrCollect.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTCopy.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTDestruction.h"
@@ -78,6 +79,13 @@ namespace AST
 // produced a value that faults when called.
 //
 // Answers with the reason rather than a bool, so each site can frame it for the destination it is
+// a teardown, a copy or another function in the compiler's own `$` namespace: only a call the compiler
+// minted reaches one, so no source named it, and its origin is its type's home rather than a declaration
+static bool only_the_compiler_calls(const FunctionDeclNode &decl)
+{
+    return is_copy_function(&decl) || decl.func_name().starts_with('$');
+}
+
 static const char *unbound_null_sentence()
 {
     return "'null' needs a destination that can be absent - a typed variable, a parameter, or a comparison";
@@ -224,6 +232,34 @@ DeclarationOrigin TypeChecker::current_origin() const
     // and at file scope there is no declaration to ask - where the walk is exactly right, a file root being
     // reachable only from the file it is
     return DeclarationOrigin { _current_module, _current_file };
+}
+
+DeclarationOrigin TypeChecker::written_origin() const
+{
+    const FunctionDeclNode *fn = _current_function;
+
+    if (fn == nullptr) {
+        return DeclarationOrigin { _current_module, _current_file };
+    }
+
+    // a closure names what its enclosing ordinary function may name
+    while (fn->is_closure && fn->enclosing_function != nullptr) {
+        fn = fn->enclosing_function;
+    }
+
+    if (fn->is_instantiated() || fn->is_implicitly_generated) {
+        return DeclarationOrigin {};
+    }
+
+    if (const ComplexType *owner = enclosing_type_of(*fn)) {
+        if (owner->is_instantiated()) {
+            return DeclarationOrigin {};
+        }
+    }
+
+    return fn->declared_in.is_known()
+        ? fn->declared_in
+        : DeclarationOrigin { _current_module, _current_file };
 }
 
 const ComplexType *TypeChecker::enclosing_type() const
@@ -435,7 +471,7 @@ void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
 {
     FunctionDeclNode *decl = node.decl;
 
-    if (decl == nullptr) {
+    if (decl == nullptr || only_the_compiler_calls(*decl)) {
         return;
     }
 
@@ -449,18 +485,15 @@ void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
     if (decl->is_constructor()) {
         if (const ComplexType *built = enclosing_type_of(*decl)) {
             const ComplexType *declared = built->template_or_self();
-            const DeclarationOrigin from = current_origin();
+            const DeclarationOrigin from = written_origin();
 
-            // asked before the sentence is worded - the AST::visible_from / AST::visibility_refusal split
-            // exists so that the common answer costs no name and no format, and every constructor call in
-            // the program reaches this
-            if (!visible_from(declared->visibility, declared->declared_in, from)) {
+            if (!nameable_from(declared->visibility, declared->declared_in, from)) {
                 // a constructor's `name_token` *is* its struct's name token - one of the two things
                 // FunctionDeclNode keeps a separate `declaration_token` for - so the label lands on the
                 // type declaration, which is where the modifier was written
                 _collector.collect_issue<Issue::InaccessibleDeclaration>(
                     code_ref_for(node.token_function_name),
-                    visibility_refusal(
+                    naming_refusal(
                         declared->visibility, declared->declared_in, from, built->namespaced_name()),
                     declared->declared_in,
                     decl->name_token);
@@ -485,44 +518,34 @@ void TypeChecker::check_deprecated_use(const FunctionDeclNode &decl, const Token
 
 void TypeChecker::check_named_function_visibility(const FunctionDeclNode &decl, const TokenReference &at)
 {
-    if (decl.visibility == Visibility::t_public) {
+    const DeclarationOrigin from = written_origin();
+
+    if (!nameable_from(decl.visibility, decl.declared_in, from)) {
+        _collector.collect_issue<Issue::InaccessibleDeclaration>(
+            code_ref_for(at),
+            naming_refusal(decl.visibility, decl.declared_in, from, decl.signature_description()),
+            decl.declared_in,
+            std::optional<TokenReference>(decl.declaration_site_token()));
+        return;
+    }
+
+    if (decl.visibility != Visibility::t_owner) {
         return;
     }
 
     // the *owner* axis: a `private` method or constructor. asked through AST::enclosing_type_of on both
     // sides rather than off `owner_type`, which is null on a constructor - the one shape that has to reach
     // its own type's privates and the reason that function exists at all
-    if (decl.visibility == Visibility::t_owner) {
-        const ComplexType *owner = enclosing_type_of(decl);
+    const ComplexType *owner = enclosing_type_of(decl);
 
-        if (can_reach_private_member(enclosing_type(), owner)) {
-            return;
-        }
-
-        _collector.collect_issue<Issue::PrivateMethod>(
-            code_ref_for(at),
-            decl.signature_description(),
-            owner != nullptr ? owner->namespaced_name() : std::string("<unknown type>"));
-
+    if (can_reach_private_member(enclosing_type(), owner)) {
         return;
     }
 
-    // and the file and module axes, which are about where the two declarations were written and not about
-    // types at all - so the rule is AST::visible_from and the wording comes off it
-    const DeclarationOrigin from = current_origin();
-
-    // the answer first and the sentence only if it is no - see the split's comment in ASTVisibility.h.
-    // `signature_description()` walks the namespace chain and renders every parameter type, and this runs
-    // at every call to every declaration that did not say `public`
-    if (visible_from(decl.visibility, decl.declared_in, from)) {
-        return;
-    }
-
-    _collector.collect_issue<Issue::InaccessibleDeclaration>(
+    _collector.collect_issue<Issue::PrivateMethod>(
         code_ref_for(at),
-        visibility_refusal(decl.visibility, decl.declared_in, from, decl.signature_description()),
-        decl.declared_in,
-        std::optional<TokenReference>(decl.declaration_site_token()));
+        decl.signature_description(),
+        owner != nullptr ? owner->namespaced_name() : std::string("<unknown type>"));
 }
 
 void TypeChecker::check_variadic_argument(FunctionCallExprNode &node)

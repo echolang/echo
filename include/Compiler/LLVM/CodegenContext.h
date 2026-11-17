@@ -641,9 +641,17 @@ namespace Compiler::LLVM
         // a leftover env var must not run a test inside a `run` prologue
         bool emit_native_test_runner = false;
 
-        // mangled names `echoc test` will call. empty on a `run`/`build`. a native runner's
-        // `main` looks them up, and DCE cannot drop a test nothing in `main` appeared to reach
-        std::vector<std::string> test_symbols;
+        // what `echoc test` will call: the mangled name, and the module that declared it - a runner
+        // over several roots makes that root's program the current one first. empty on a
+        // `run`/`build`. a native runner's `main` looks them up, and DCE cannot drop a test nothing
+        // in `main` appeared to reach
+        struct RunnerTest
+        {
+            std::string symbol;
+            std::string module;
+        };
+
+        std::vector<RunnerTest> runner_tests;
 
         // the main compilation unit, or nullptr if the bundle has no main module yet
         CmpUnit *main_cmp_unit();

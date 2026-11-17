@@ -1624,7 +1624,8 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
             payload.collector.namespaces,
             ref.token_name.value(),
             ns,
-            qualified) != nullptr
+            qualified,
+            AST::file_of(payload.context).private_namespace) != nullptr
         && candidates.empty())
     {
         payload.collector.collect_issue<AST::Issue::GenericError>(

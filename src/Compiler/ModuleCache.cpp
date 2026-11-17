@@ -226,6 +226,7 @@ bool Compiler::compute_module_keys(
     // objects stay out: they do not call into user conversions, and folding the program in
     // would make the stdlib's cache a per-project store
     uint64_t conversion_set = k_fnv_offset_basis;
+    std::vector<std::pair<std::string, uint64_t>> conversion_files;
 
     for (const Parser::ModuleManifest *entry : manifests) {
         if (is_compiler_supplied_module(*entry)) {
@@ -250,19 +251,22 @@ bool Compiler::compute_module_keys(
             const uint64_t digest = fnv1a64(bytes.value(), k_fnv_offset_basis);
             conversion_set = fnv1a64(source.filename().string(), conversion_set);
             conversion_set = fnv1a64(&digest, sizeof(digest), conversion_set);
+            conversion_files.emplace_back(source.filename().string(), digest);
         }
     }
 
-    // by canonical manifest path, because that is what `depends` holds
-    std::map<std::filesystem::path, uint64_t> digest_by_path;
+    // name and digest by canonical manifest path, because that is what `depends` holds
+    std::map<std::filesystem::path, std::pair<std::string, uint64_t>> keyed_by_path;
 
     // the digest of every module already keyed, in order - see the fold below
     uint64_t preceding = k_fnv_offset_basis;
+    std::vector<std::pair<std::string, std::string>> keyed_before;
 
     for (const Parser::ModuleManifest *entry : manifests) {
         const Parser::ModuleManifest &manifest = *entry;
 
         ModuleCacheKey key;
+        key.environment = environment;
         uint64_t hash = environment;
 
         hash = fnv1a64(manifest.name, hash);
@@ -278,13 +282,14 @@ bool Compiler::compute_module_keys(
         // `echoc test` and `echoc build` differ in the application's object and in no library's
         // composed by TargetFacts::for_module, which is what the parser asks for the same module - the two
         // answers being the same one is what makes this key describe the tokens that were actually parsed
-        hash = fnv1a64(
-            TargetFacts::for_module(facts, manifest.name, modules_with_tests).cache_signature(), hash);
+        key.configuration = TargetFacts::for_module(facts, manifest.name, modules_with_tests).cache_entries();
+        hash = fnv1a64(ModuleCacheKey::configuration_record(key.configuration), hash);
 
         if (options.coverage_instruments_module(is_compiler_supplied_module(manifest))) {
             hash = fnv1a64(std::string("coverage"), hash);
             hash = fnv1a64(
                 options.coverage_stdlib() ? std::string("cstdlib") : std::string("nocstdlib"), hash);
+            key.configuration.push_back(options.coverage_stdlib() ? "coverage=stdlib" : "coverage=1");
         }
 
         // the manifest's own bytes: its source list, its dependencies and its comments are all part of what
@@ -312,6 +317,7 @@ bool Compiler::compute_module_keys(
         // every existing project's, shared across every target of a build
         for (const std::string &target : contribution.active_targets) {
             hash = fnv1a64(target, hash);
+            key.configuration.push_back("target=" + target);
         }
 
         // `sources` is already sorted by the manifest reader, and a scope's files follow the module's own
@@ -368,15 +374,17 @@ bool Compiler::compute_module_keys(
         // and every dependency's key. The topological order guarantees they are already computed - if one is
         // missing the graph was not ordered, which is a resolver bug rather than a user error
         for (const std::filesystem::path &dependency : contribution.depends) {
-            auto found = digest_by_path.find(dependency);
-            if (found == digest_by_path.end()) {
+            auto found = keyed_by_path.find(dependency);
+            if (found == keyed_by_path.end()) {
                 out_error = fmt::format(
                     "internal: the manifest '{}' was keyed before its dependency '{}'.",
                     manifest.path.string(), dependency.string());
                 return false;
             }
 
-            hash = fnv1a64(&found->second, sizeof(found->second), hash);
+            const auto &[name, digest] = found->second;
+            hash = fnv1a64(&digest, sizeof(digest), hash);
+            key.depends.emplace_back(name, to_hex(digest));
         }
 
         // **and every module parsed before this one, declared dependency or not.**
@@ -391,15 +399,18 @@ bool Compiler::compute_module_keys(
         // library ahead of this one invalidates it - but the alternative is a stale object that links
         // silently, and the conservative direction is the only safe one to be wrong in
         hash = fnv1a64(&preceding, sizeof(preceding), hash);
+        key.preceding = keyed_before;
 
         if (!is_compiler_supplied_module(manifest)) {
             hash = fnv1a64(&conversion_set, sizeof(conversion_set), hash);
+            key.conversions = conversion_files;
         }
 
         key.hex = to_hex(hash);
 
-        digest_by_path.emplace(manifest.path, hash);
+        keyed_by_path.emplace(manifest.path, std::make_pair(manifest.name, hash));
         preceding = fnv1a64(&hash, sizeof(hash), preceding);
+        keyed_before.emplace_back(manifest.name, key.hex);
         out_keys.emplace(manifest.name, std::move(key));
     }
 
@@ -483,64 +494,3 @@ bool Compiler::write_embed_inputs_record(
     return write_artifact_file(path, record);
 }
 
-bool Compiler::write_inputs_record(const std::filesystem::path &path, const ModuleCacheKey &key)
-{
-    // the directory is the caller's - it prepared one before it decided to emit here at all, and creating
-    // one on the way past would be a second place that answers where an artifact goes
-    std::string record = key.hex + "\n";
-
-    for (const auto &[input, digest] : key.inputs) {
-        record += to_hex(digest) + " " + input.string() + "\n";
-    }
-
-    return write_artifact_file(path, record);
-}
-
-std::string Compiler::explain_miss(const std::filesystem::path &inputs_path, const ModuleCacheKey &key)
-{
-    std::ifstream in(inputs_path, std::ios::binary);
-    if (!in) {
-        return "";
-    }
-
-    std::string recorded_hex;
-    if (!std::getline(in, recorded_hex)) {
-        return "";
-    }
-
-    std::map<std::string, std::string> recorded;
-    std::string line;
-    while (std::getline(in, line)) {
-        const size_t space = line.find(' ');
-        if (space == std::string::npos) {
-            continue;
-        }
-        recorded.emplace(line.substr(space + 1), line.substr(0, space));
-    }
-
-    for (const auto &[input, digest] : key.inputs) {
-        auto found = recorded.find(input.string());
-
-        if (found == recorded.end()) {
-            return fmt::format("'{}' is new", input.filename().string());
-        }
-
-        if (found->second != to_hex(digest)) {
-            return fmt::format("'{}' changed", input.filename().string());
-        }
-    }
-
-    // every input this build has agrees with the record, so the difference is either an input the record has
-    // and this build does not - a deleted file - or something outside the file list entirely
-    for (const auto &[recorded_path, digest] : recorded) {
-        const bool still_present = std::any_of(key.inputs.begin(), key.inputs.end(), [&recorded_path](const std::pair<std::filesystem::path, uint64_t> &input) {
-            return input.first.string() == recorded_path;
-        });
-
-        if (!still_present) {
-            return fmt::format("'{}' is gone", std::filesystem::path(recorded_path).filename().string());
-        }
-    }
-
-    return "the compiler, target or build mode changed";
-}

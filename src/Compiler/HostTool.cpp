@@ -247,6 +247,11 @@ bool Compiler::append_codegen_target_args(
     return true;
 }
 
+const char *Compiler::darwin_executable_export()
+{
+    return "___eco_hash_seed*";
+}
+
 bool Compiler::append_codegen_link_args(
     std::vector<std::string> &argv,
     const CodegenTarget &target,
@@ -317,6 +322,10 @@ bool Compiler::append_codegen_link_args(
     // symbols local unless named; Darwin exports globals by default
     if (!target.is_library() && target.os() == TargetOs::t_linux) {
         argv.push_back("-Wl,--export-dynamic-symbol=__eco_hash_seed");
+    }
+
+    if (!target.is_library() && target.is_darwin()) {
+        argv.push_back(std::string("-Wl,-exported_symbol,") + darwin_executable_export());
     }
 
     if (target.is_wasm() && export_memory) {

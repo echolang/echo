@@ -156,13 +156,13 @@ void Parser::refuse_invisible_type(
     // asked before the sentence is worded, which is what the AST::visible_from / AST::visibility_refusal
     // split is for: this runs at every type name in the program, and every one of them would otherwise
     // pay for a name copy and a format to test the answer for emptiness
-    if (AST::visible_from(layout.visibility, layout.declared_in, from)) {
+    if (AST::nameable_from(layout.visibility, layout.declared_in, from)) {
         return;
     }
 
     payload.collector.collect_issue<AST::Issue::InaccessibleDeclaration>(
         payload.context.code_ref(at),
-        AST::visibility_refusal(layout.visibility, layout.declared_in, from, decl.type_name()),
+        AST::naming_refusal(layout.visibility, layout.declared_in, from, decl.type_name()),
         layout.declared_in,
         decl.name_token);
 }
@@ -175,13 +175,13 @@ void Parser::refuse_invisible_type(
 {
     const AST::DeclarationOrigin from = AST::origin_at(payload.context);
 
-    if (AST::visible_from(alias.visibility, alias.declared_in, from)) {
+    if (AST::nameable_from(alias.visibility, alias.declared_in, from)) {
         return;
     }
 
     payload.collector.collect_issue<AST::Issue::InaccessibleDeclaration>(
         payload.context.code_ref(at),
-        AST::visibility_refusal(alias.visibility, alias.declared_in, from, alias.name()),
+        AST::naming_refusal(alias.visibility, alias.declared_in, from, alias.name()),
         alias.declared_in,
         alias.token_name);
 }

@@ -94,14 +94,14 @@ void LLVMCompiler::set_native_test_runner(bool enabled)
     _ctx.emit_native_test_runner = enabled;
 }
 
-void LLVMCompiler::set_test_symbols(std::vector<std::string> symbols)
+void LLVMCompiler::set_runner_tests(std::vector<Compiler::LLVM::CodegenContext::RunnerTest> tests)
 {
-    _ctx.test_symbols = std::move(symbols);
+    _ctx.runner_tests = std::move(tests);
 }
 
 void LLVMCompiler::emit_test_dispatch()
 {
-    if (!_ctx.test_mode || !_ctx.emit_native_test_runner || _ctx.test_symbols.empty()) {
+    if (!_ctx.test_mode || !_ctx.emit_native_test_runner || _ctx.runner_tests.empty()) {
         return;
     }
 
@@ -136,7 +136,8 @@ void LLVMCompiler::emit_test_dispatch()
 
     llvm::FunctionType *test_ty = llvm::FunctionType::get(void_ty, false);
 
-    for (const std::string &symbol : _ctx.test_symbols) {
+    for (const Compiler::LLVM::CodegenContext::RunnerTest &test : _ctx.runner_tests) {
+        const std::string &symbol = test.symbol;
         llvm::BasicBlock *run = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.run", main_fn);
         llvm::BasicBlock *cont = llvm::BasicBlock::Create(*_ctx.llvm_context, "test.next", main_fn);
 
@@ -153,6 +154,7 @@ void LLVMCompiler::emit_test_dispatch()
             fn = llvm::Function::Create(test_ty, llvm::Function::ExternalLinkage, symbol, module);
         }
 
+        Compiler::LLVM::emit_attr_view_selection(_ctx, test.module);
         _ctx.builder->CreateCall(fn);
         _ctx.builder->CreateBr(after);
         _ctx.builder->SetInsertPoint(cont);

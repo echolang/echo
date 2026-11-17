@@ -401,6 +401,54 @@ TEST_CASE("several roots with a hook are refused", "[hooks]")
     REQUIRE(refused.output.find("name one '-m'") != std::string::npos);
 }
 
+TEST_CASE("a test run over several roots runs the hooks of each", "[hooks]")
+{
+    // every root of a test run is built, so each one's hook runs - from its own directory, as a run
+    // pointed at that root alone would have it
+    ScopedProject project("several_test_roots");
+
+    write_generator(project.root() / "restgen");
+
+    for (const std::string &name : { "first", "second" }) {
+        const std::filesystem::path dir = project.root() / name;
+
+        write_file(dir / "module.eco",
+            "#[module: \"" + name + "\"]\n"
+            "#[sources: \"src/*.eco\"]\n"
+            "#[hook: before_build { run: \"gen\", args: [\"api/spec.txt\", \"gen/api.eco\"] }] {\n"
+            "    #[depends: \"../restgen\"]\n"
+            "}\n");
+
+        write_file(dir / "api/spec.txt", name == "first" ? "7" : "9");
+        write_file(dir / "src/lib.eco",
+            "namespace " + name + ";\n"
+            "\n"
+            "test is_there\n"
+            "{\n"
+            "    assert(true);\n"
+            "}\n");
+
+        std::error_code ec;
+        std::filesystem::create_directories(dir / "gen", ec);
+    }
+
+    const ProcessResult ran = project.echoc(
+        "test -m " + EchoTests::quoted(project.root() / "first")
+        + " -m " + EchoTests::quoted(project.root() / "second"));
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("2 tests passed") != std::string::npos);
+
+    const auto generated = [&project](const std::string &name) {
+        std::ifstream in(project.root() / name / "gen/api.eco");
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+
+    REQUIRE(generated("first").find("return 7;") != std::string::npos);
+    REQUIRE(generated("second").find("return 9;") != std::string::npos);
+}
+
 TEST_CASE("select_public_tool names what there was to choose from", "[hooks][public_tools]")
 {
     Compiler::PublicToolSet set;

@@ -146,12 +146,14 @@ namespace Compiler
         // reading of the same question, off the LLVM triple
         unsigned pointer_size() const;
 
-        // `os=darwin;arch=arm64;family=darwin;define=A;define=B;` - everything a condition can see, in
-        // one string, for the module cache to fold. family is determined by os and is still here:
-        // recategorising android out of linux-family must miss the old object without a manual cache
-        // version bump. Here rather than in ModuleCache because *what the facts are* is this type's
-        // question: a fact added without a line here would silently share a cache key with a build
-        // that did not have it, which is the one cache failure with no diagnostic
+        // `os=darwin`, `arch=arm64`, `family=darwin`, `define=A` - everything a condition can see, as
+        // the entries the module cache folds and `--explain cache` diffs. family is determined by os
+        // and is still here: recategorising android out of linux-family must miss the old object
+        // without a manual cache version bump. Here rather than in ModuleCache because *what the
+        // facts are* is this type's question
+        std::vector<std::string> cache_entries() const;
+
+        // those entries joined with `;` and a trailing one, for tests that pin the spelling
         std::string cache_signature() const;
     };
 };

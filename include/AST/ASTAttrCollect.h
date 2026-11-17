@@ -94,6 +94,13 @@ namespace AST
         AttrSchema schema;
         ValueType table_type = ValueType::make_unknown();
         std::vector<AttrRow> rows;
+
+        // **the table each root of a several-roots test run sees**, as indexes into `rows`, one entry
+        // per AST::Bundle::root_programs in that order. a root's own build collects from its own
+        // program, in its own parse order, and this is that answer kept beside the bundle-wide one.
+        // empty in every other build, where `rows` is the table
+        std::vector<std::vector<size_t>> views;
+
         std::string refusal;
         std::optional<TokenReference> at;
     };
@@ -129,6 +136,10 @@ namespace AST
 
         std::unordered_map<std::string, AttrPlan> entries;
         std::deque<AttrPlan> call_refusals;
+
+        // the root module each AttrPlan::views entry answers for, by name. codegen selects a view by
+        // the module of the test it is about to call, and has no bundle to ask
+        std::vector<std::string> view_roots;
     };
 
     std::vector<AttrMatch> declarations_with_attribute(const Bundle &bundle, std::string_view name);
@@ -150,7 +161,12 @@ namespace AST
 
     std::string attr_table_symbol(const AttrPlan &plan);
 
-    // rows, every tag refusal, duplicate keys, two schemas for one name, two key fields
+    // every index into `rows`: the view of a build that has no AttrPlan::views
+    std::vector<size_t> attr_all_rows(const AttrPlan &plan);
+
+    // rows, every tag refusal, duplicate keys, two schemas for one name, two key fields. duplicate
+    // keys are asked of each root's view when the bundle holds several root programs: two roots may
+    // each register a name the other never sees
     void check_attr_collects(Collector &collector, const Bundle &bundle);
 };
 

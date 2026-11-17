@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -316,6 +317,87 @@ void fill_plan_rows(AST::AttrPlan &plan, const AST::Bundle &bundle, AST::Collect
     }
 }
 
+const AST::File *row_file(const AST::AttrMatch &hit)
+{
+    const TokenReference *token = row_site(hit);
+    return token != nullptr && token->is_valid() ? token->file() : nullptr;
+}
+
+// the rows of `plan` this root's own build would have collected, in the order it would have
+// collected them: its own module order first, and `rows` is already in file and line order within
+// one module
+std::vector<size_t> view_of(const AST::AttrPlan &plan, const AST::RootProgram &program)
+{
+    std::vector<std::pair<size_t, size_t>> ranked;
+
+    for (size_t i = 0; i < plan.rows.size(); i++) {
+        const AST::File *file = row_file(plan.rows[i].match);
+        if (file == nullptr || !program.holds(*file)) {
+            continue;
+        }
+
+        ranked.emplace_back(program.position_of(file->module).value(), i);
+    }
+
+    std::stable_sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) {
+        return a.first < b.first;
+    });
+
+    std::vector<size_t> out;
+    out.reserve(ranked.size());
+    for (const auto &entry : ranked) {
+        out.push_back(entry.second);
+    }
+    return out;
+}
+
+// `reported` is what keeps a repeat inside a module every root depends on to one diagnostic rather
+// than one per root
+bool keys_are_unique(
+    const AST::AttrPlan &plan,
+    const std::vector<size_t> &rows,
+    std::unordered_set<const AST::AttrRow *> &reported,
+    AST::Collector &collector
+)
+{
+    std::unordered_map<std::string, const AST::AttrRow *> seen;
+    bool unique = true;
+
+    for (size_t index : rows) {
+        const AST::AttrRow &row = plan.rows[index];
+
+        auto [seen_it, is_new] = seen.emplace(row.key, &row);
+        if (is_new) {
+            continue;
+        }
+
+        unique = false;
+        if (!reported.insert(&row).second) {
+            continue;
+        }
+
+        const TokenReference *token = row_site(row.match);
+        if (token == nullptr && plan.at.has_value()) {
+            token = &plan.at.value();
+        }
+        if (token == nullptr) {
+            continue;
+        }
+
+        report_at(
+            collector,
+            token->file() != nullptr ? token->file()->module : nullptr,
+            *token,
+            fmt::format(
+                "'{}' is used twice as the '{}' of '{}'",
+                row.key,
+                plan.key_field,
+                plan.attribute_name));
+    }
+
+    return unique;
+}
+
 }
 
 std::vector<AST::AttrMatch> AST::declarations_with_attribute(
@@ -461,6 +543,11 @@ const AST::AttrPlan *AST::attr_plan_lookup(
 
 void AST::check_attr_collects(AST::Collector &collector, const AST::Bundle &bundle)
 {
+    collector.attr_plans.view_roots.clear();
+    for (const AST::RootProgram &program : bundle.root_programs) {
+        collector.attr_plans.view_roots.push_back(program.root != nullptr ? program.root->name : std::string());
+    }
+
     std::vector<AST::AttrPlan *> ready;
     ready.reserve(collector.attr_plans.entries.size());
     for (auto &entry : collector.attr_plans.entries) {
@@ -495,6 +582,10 @@ void AST::check_attr_collects(AST::Collector &collector, const AST::Bundle &bund
         fill_plan_rows(plan, bundle, collector);
         if (plan.status != AST::AttrPlanStatus::t_ready) {
             continue;
+        }
+
+        for (const AST::RootProgram &program : bundle.root_programs) {
+            plan.views.push_back(view_of(plan, program));
         }
 
         std::string chosen;
@@ -563,38 +654,34 @@ void AST::check_attr_collects(AST::Collector &collector, const AST::Bundle &bund
             continue;
         }
 
-        std::unordered_map<std::string, const AST::AttrRow *> seen;
-        bool unique = true;
         for (AST::AttrRow &row : plan.rows) {
             row.key = AST::attr_payload_field_text(*row.match.attribute, *key_property);
+        }
 
-            auto [seen_it, is_new] = seen.emplace(row.key, &row);
-            if (is_new) {
-                continue;
-            }
+        bool unique = true;
+        std::unordered_set<const AST::AttrRow *> reported;
 
-            unique = false;
-            const TokenReference *token = row_site(row.match);
-            if (token == nullptr && plan.at.has_value()) {
-                token = &plan.at.value();
-            }
-            if (token == nullptr) {
-                continue;
-            }
+        if (bundle.root_programs.empty()) {
+            unique = keys_are_unique(plan, AST::attr_all_rows(plan), reported, collector);
+        }
 
-            report_at(
-                collector,
-                token->file() != nullptr ? token->file()->module : nullptr,
-                *token,
-                fmt::format(
-                    "'{}' is used twice as the '{}' of '{}'",
-                    row.key,
-                    plan.key_field,
-                    plan.attribute_name));
+        // **each root's table on its own, and never the union.** two roots that both register
+        // 'admin' are two programs that each register it once
+        for (const std::vector<size_t> &view : plan.views) {
+            if (!keys_are_unique(plan, view, reported, collector)) {
+                unique = false;
+            }
         }
 
         if (!unique) {
             plan.status = AST::AttrPlanStatus::t_refused;
         }
     }
+}
+
+std::vector<size_t> AST::attr_all_rows(const AST::AttrPlan &plan)
+{
+    std::vector<size_t> every(plan.rows.size());
+    std::iota(every.begin(), every.end(), size_t{0});
+    return every;
 }

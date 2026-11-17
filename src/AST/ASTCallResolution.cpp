@@ -12,6 +12,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTConstructor.h"
+#include "AST/ASTFile.h"
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTLiteralTyping.h"
@@ -392,7 +393,8 @@ namespace AST
 
         // a free call: the namespace it was written in, searched outward by the registry
         if (call.lookup_namespace != nullptr) {
-            return _collector.functions.overloads(call.lookup_name(), *call.lookup_namespace);
+            return _collector.functions.overloads(
+                call.lookup_name(), *call.lookup_namespace, private_namespace_of(call.token_function_name));
         }
 
         // a member call. the receiver is argument 0, already addressed by the parser as

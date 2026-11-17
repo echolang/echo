@@ -208,6 +208,40 @@ test reachable_requires_collects_a_path_dep
     scratch::gone($app);
 }
 
+test reachable_requires_collects_every_workspace_member
+{
+    string $app = scratch::dir('reach-workspace');
+    scratch::file($app, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($app, 'modules/one/src/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'modules/one/module.eco',
+        "#[module: \"one\"]\n#[version: \"0.1.0\"]\n#[requires: \"leaf\" { version: \"^1.0\", source: git \"https://x\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'modules/two/src/dummy.eco', "echo 1;\n");
+    scratch::file($app, 'modules/two/tests/dummy.eco', "echo 1;\n");
+    scratch::file(
+        $app,
+        'modules/two/module.eco',
+        "#[module: \"two\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[requires: \"twig\" { version: \"^2.0\", source: git \"https://y\" }]\n}\n"
+    );
+    string $mod = scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[workspace: [\"modules/*\"]]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    assert($m->members->count() == 2);
+    assert($m->members[0] == 'modules/one');
+
+    // a member is a root of the run, so its test scope is installed for as its own install would
+    array<manifest::Requirement> $need = guard manifest::reachable_requires($m);
+    assert($need->count() == 2);
+    assert($need[0]->name == 'leaf');
+    assert($need[1]->name == 'twig');
+    scratch::gone($app);
+}
+
 test reachable_requires_is_empty_without_requires
 {
     string $lib = scratch::dir('reach-empty-lib');

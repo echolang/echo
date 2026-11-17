@@ -92,7 +92,15 @@ namespace AST
         // monomorphizer round. It is the registry's own vector, so a caller that registers a declaration
         // while holding it has invalidated it; the one caller that keeps the set past that point,
         // CallResolver::candidates_for, still hands back a copy by its own return type
-        const std::vector<FunctionDeclNode *> &overloads(const std::string &name, const Namespace &ns) const;
+        //
+        // `private_root` is the asking file's private test namespace (AST::private_namespace_of), or
+        // null. it is the frame just inside the root, as is a hidden namespace the walk passes, so a
+        // test helper hides a root function of its name exactly as any inner namespace would
+        const std::vector<FunctionDeclNode *> &overloads(
+            const std::string &name,
+            const Namespace &ns,
+            const Namespace *private_root = nullptr
+        ) const;
 
         // this namespace only, no outward walk. what a `use` asks when deciding whether a path
         // names a function here, rather than one further out that a qualified call would still find

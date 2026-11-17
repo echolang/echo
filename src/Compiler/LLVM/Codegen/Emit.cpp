@@ -15,7 +15,10 @@
 
 #include "AST/ASTModule.h"
 
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Target/TargetMachine.h>
 
 #include <unordered_set>
 
@@ -58,6 +61,90 @@ static IsolatedEmitRequest make_isolated_request(
     request.already_optimized = already_optimized;
     request.timings = timings;
     return request;
+}
+
+// one object a split unit is made of
+struct PartitionPiece
+{
+    std::filesystem::path object_path;
+    // empty when the object is already there
+    std::string bitcode;
+};
+
+// the pieces of `parts`, one per distinct hash, each materialized unless its object is a hit
+static std::vector<PartitionPiece> partition_pieces(
+    CmpUnit &unit,
+    llvm::Module &module,
+    const std::vector<UnitPartition> &parts,
+    const std::filesystem::path &dest,
+    const CodegenContext &ctx
+)
+{
+    std::vector<PartitionPiece> pieces;
+    std::unordered_set<std::string> seen;
+
+    for (const UnitPartition &part : parts) {
+        if (!seen.insert(part.hex).second) {
+            continue;
+        }
+
+        PartitionPiece piece;
+        piece.object_path = dest.parent_path() / ("p." + part.hex + ".o");
+
+        if (!Compiler::cached_object_is_hit(piece.object_path)) {
+            piece.bitcode = materialize_partition(unit, module, part, ctx);
+        }
+
+        pieces.push_back(std::move(piece));
+    }
+
+    return pieces;
+}
+
+// a library unit, optimized whole and then split, in a worker's own LLVMContext: splitting first
+// loses inlining across its files, and ISel is the half that fans out
+struct LibrarySplitRequest
+{
+    CmpUnit *unit = nullptr;
+    // the whole unit, to its own object
+    IsolatedEmitRequest whole;
+    // index into emit_unit_objects' outputs
+    size_t output = 0;
+};
+
+struct LibrarySplitResult
+{
+    IsolatedEmitResult prepared;
+    std::vector<PartitionPiece> pieces;
+};
+
+// reads `request.unit` and `ctx` and writes neither: Partition's function_homes asks the unit's
+// function table by name and the AST where a declaration was written
+static LibrarySplitResult split_library_unit(
+    const LibrarySplitRequest &request,
+    const CodegenContext &ctx,
+    const PartitionEnv &env
+)
+{
+    LibrarySplitResult result;
+    llvm::LLVMContext context;
+    IsolatedModule loaded;
+
+    if (!load_isolated_module(request.whole, context, loaded, result.prepared)) {
+        return result;
+    }
+
+    // nothing optimizes a piece after this, so no piece carries a copy for an inliner
+    const std::vector<UnitPartition> parts =
+        partition_unit(*request.unit, *loaded.module, ctx, env, k_library_partitions, false);
+
+    if (parts.size() < 2) {
+        result.pieces.push_back({ request.whole.object_path, bitcode_of(*loaded.module) });
+        return result;
+    }
+
+    result.pieces = partition_pieces(*request.unit, *loaded.module, parts, request.whole.object_path, ctx);
+    return result;
 }
 
 static bool run_isolated_emits(std::vector<IsolatedEmitRequest> &requests, unsigned jobs)
@@ -131,6 +218,20 @@ bool emit_unit_objects(
     std::vector<Output> outputs;
     std::vector<IsolatedEmitRequest> isolated;
 
+    std::vector<LibrarySplitRequest> libraries;
+
+    // a split unit's pieces join its output, and the ones not already there are queued for ISel
+    auto queue_pieces = [&](Output &output, std::vector<PartitionPiece> &pieces, bool already_optimized) {
+        for (PartitionPiece &piece : pieces) {
+            output.pieces.push_back(piece.object_path);
+
+            if (!piece.bitcode.empty()) {
+                isolated.push_back(make_isolated_request(
+                    std::move(piece.bitcode), piece.object_path, ctx, sub, already_optimized, timings));
+            }
+        }
+    };
+
     for (auto &cmp_unit : ctx.cmp_units) {
         if (!cmp_unit->llvm_module) {
             continue;
@@ -145,39 +246,33 @@ bool emit_unit_objects(
             && !cmp_unit->merged
             && !ctx.options.debug_info;
 
-        // a library is optimized whole, then only ISel fans out: split earlier and you lose inlining
-        const bool split_optimized = can_split && cmp_unit->ast_module->name != ctx.entry_module_name;
+        // a library is optimized whole, then only ISel fans out: split earlier and you lose inlining.
+        // both happen in split_library_unit, beside every other library's
+        if (can_split && cmp_unit->ast_module->name != ctx.entry_module_name) {
+            LibrarySplitRequest request;
+            request.unit = cmp_unit.get();
+            request.whole = make_isolated_request(
+                bitcode_of(*cmp_unit->llvm_module), output.dest, ctx, sub, false, timings);
+            request.output = outputs.size();
+
+            cmp_unit->llvm_module.reset();
+            cmp_unit->optimized = true;
+
+            libraries.push_back(std::move(request));
+            outputs.push_back(std::move(output));
+            continue;
+        }
 
         std::vector<UnitPartition> parts;
         if (can_split) {
-            if (split_optimized) {
-                Compiler::ScopedPhase optimize("optimize");
-                backend.prepare_unit_for_emission(*cmp_unit);
-            }
-
-            parts = partition_unit(*cmp_unit, ctx, env, split_optimized ? k_library_partitions : 0);
+            // the entry unit's pieces are optimized after the split, unless nothing is. see partition_unit
+            parts = partition_unit(*cmp_unit, *cmp_unit->llvm_module, ctx, env, 0, !env.no_optimize);
         }
 
         if (parts.size() >= 2) {
-            std::unordered_set<std::string> seen;
-
-            for (UnitPartition &part : parts) {
-                if (!seen.insert(part.hex).second) {
-                    continue;
-                }
-
-                const std::filesystem::path piece =
-                    output.dest.parent_path() / ("p." + part.hex + ".o");
-                output.pieces.push_back(piece);
-
-                if (Compiler::cached_object_is_hit(piece)) {
-                    continue;
-                }
-
-                isolated.push_back(make_isolated_request(
-                    materialize_partition(*cmp_unit, part, ctx),
-                    piece, ctx, sub, split_optimized, timings));
-            }
+            std::vector<PartitionPiece> pieces =
+                partition_pieces(*cmp_unit, *cmp_unit->llvm_module, parts, output.dest, ctx);
+            queue_pieces(output, pieces, false);
 
             cmp_unit->llvm_module.reset();
             cmp_unit->optimized = true;
@@ -188,6 +283,30 @@ bool emit_unit_objects(
         }
 
         outputs.push_back(std::move(output));
+    }
+
+    if (!libraries.empty()) {
+        Compiler::PhaseTimings &clock = Compiler::PhaseTimings::instance();
+        std::vector<LibrarySplitResult> splits(libraries.size());
+
+        Compiler::run_jobs(jobs, libraries.size(), [&](size_t i) {
+            splits[i] = split_library_unit(libraries[i], ctx, env);
+            // the unit's IR is in its pieces now
+            libraries[i].whole.bitcode = std::string();
+        });
+
+        for (size_t i = 0; i < splits.size(); i++) {
+            if (!splits[i].prepared.ok) {
+                Compiler::ProgressReporter::instance().suspend();
+                llvm::errs() << splits[i].prepared.error << "\n";
+                return false;
+            }
+
+            clock.record("optimize", splits[i].prepared.optimize_ms);
+            clock.record_slowest("optimize", splits[i].prepared.slowest_optimize);
+
+            queue_pieces(outputs[libraries[i].output], splits[i].pieces, true);
+        }
     }
 
     std::vector<Output *> live;

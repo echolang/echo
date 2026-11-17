@@ -95,6 +95,10 @@ public struct Manifest
     // a hook's `#[depends:]`, as written. walked from the root only
     array<string> $hook_depends;
 
+    // the directories `#[workspace:]` resolved to, relative to this manifest. echoc expands the
+    // patterns, so a `*` means here what it means to `echoc test --workspace`
+    array<string> $members;
+
     constructor(string $name, string $version, string $path)
     {
         $this->name = $name;
@@ -107,6 +111,7 @@ public struct Manifest
         $this->public_targets = array<string>();
         $this->hook_requires = array<Requirement>();
         $this->hook_depends = array<string>();
+        $this->members = array<string>();
     }
 
     const function offers(const string& $target) : bool
@@ -407,8 +412,39 @@ function load_directs(
 /**
  * Root requires, plus every `#[requires:]` on a reachable `#[depends:]` module.
  * Path modules stay out of vendor/; only their git requires are solve roots.
+ *
+ * A `#[workspace:]` member is a root of the same run: `echoc test --workspace`
+ * builds every member against this manifest's one vendor/, so what each of
+ * them would install alone is installed here.
  */
 public function reachable_requires(const Manifest& $root) : result<array<Requirement>, string>
+{
+    array<Requirement> $out = guard root_requires($root) else ($e) {
+        return .error($e);
+    }
+
+    usize $i = 0;
+
+    while ($i < $root->members->count()) {
+        string $path = sys::join(sys::join(sys::dirname($root->path), $root->members[$i]), 'module.eco');
+        Manifest $member = guard load($path) else ($e) {
+            return .error($e);
+        }
+
+        array<Requirement> $theirs = guard root_requires($member) else ($e) {
+            return .error($e);
+        }
+
+        append_copy($theirs, $out);
+        $i = $i + 1;
+    }
+
+    return .ok($out);
+}
+
+// one manifest as the root of its own build. a member is walked with a `seen` of its own:
+// a module another member met as a library is a root here, test requires and all
+function root_requires(const Manifest& $root) : result<array<Requirement>, string>
 {
     array<Requirement> $out = all_requires($root);
     array<string> $seen = array<string>();
@@ -559,6 +595,19 @@ public function load(const string& $path) : result<Manifest, string>
         }
 
         $ti = $ti + 1;
+    }
+
+    array<json::Value> $members = $root['members']->asArray() ?? array<json::Value>();
+    usize $mi = 0;
+
+    while ($mi < $members->count()) {
+        string $member = $members[$mi]->asStr() ?? '';
+
+        if (!$member->empty()) {
+            $m->members[] = $member;
+        }
+
+        $mi = $mi + 1;
     }
 
     array<json::Value> $hooks = $root['hooks']->asArray() ?? array<json::Value>();

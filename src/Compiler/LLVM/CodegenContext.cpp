@@ -135,8 +135,12 @@ namespace Compiler::LLVM
     llvm::Constant *static_bytes_pointer(CodegenContext &ctx, const std::string &bytes)
     {
         // StringRef keeps interior NULs; the trailing NUL is what `->c_str()` reads
-        return llvm::cast<llvm::Constant>(
-            ctx.builder->CreateGlobalStringPtr(llvm::StringRef(bytes.data(), bytes.size()), "str"));
+        //
+        // **into the current unit by name, not wherever the builder stands.** a constant emitted
+        // between bodies - an attribute table, into the entry unit - has no insert block of its own,
+        // and the builder's is the last body of whichever unit was walked before it
+        return ctx.builder->CreateGlobalStringPtr(
+            llvm::StringRef(bytes.data(), bytes.size()), "str", 0, ctx.current_module());
     }
 
     llvm::Constant *string_view_from_bytes(

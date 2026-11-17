@@ -86,6 +86,11 @@ namespace AST
         // was never written in - while the clone's own stamp is its template's, which is the answer wanted
         DeclarationOrigin current_origin() const;
 
+        // **the module whose source wrote the site being checked**, or an unknown origin when the site
+        // is not plainly written code. a closure walks to its enclosing ordinary function; an instance
+        // or a minted body has no answer. the one origin nameable_from is asked with here
+        DeclarationOrigin written_origin() const;
+
         // and the *owner* axis's half of the same question: the type whose body is being walked, null at
         // file scope. through AST::enclosing_type_of rather than `owner_type`, a constructor carrying a
         // null owner - see AST::can_reach_private_member, which is what this is asked for

@@ -11,6 +11,7 @@
 #include "Parser/SymbolParser.h"
 
 #include "AST/ASTConstructor.h"
+#include "AST/ASTContext.h"
 #include "AST/ASTImport.h"
 
 #include <iostream>
@@ -29,6 +30,23 @@ Compiler::TargetFacts Parser::ModuleParser::facts_for(const AST::Module &module)
     return Compiler::TargetFacts::for_module(target_facts, module.name, test_modules);
 }
 
+// the root, or the module's private test namespace for a file AST::File::tests_only names
+static AST::Namespace &file_namespace_for(
+    const AST::TokenizedFile &tfile,
+    const AST::Module &module,
+    AST::Collector &collector
+)
+{
+    AST::Namespace &root = collector.namespaces.root();
+
+    if (tfile.file == nullptr || !tfile.file->tests_only) {
+        return root;
+    }
+
+    // a leading digit is what no identifier has, so no `namespace` a user writes mangles to this
+    return collector.namespaces.retrieve_hidden(root, "0tests_" + AST::sanitize_symbol_fragment(module.name));
+}
+
 Parser::Payload Parser::ModuleParser::make_parser_payload(
     const AST::TokenizedFile &tfile,
     AST::Module &module,
@@ -38,10 +56,16 @@ Parser::Payload Parser::ModuleParser::make_parser_payload(
 {
     auto cursor = Cursor(module.tokens, tfile.token_slice.start_index, tfile.token_slice.end_index);
 
+    AST::Namespace &file_namespace = file_namespace_for(tfile, module, collector);
+
+    if (tfile.file != nullptr && !file_namespace.is_root()) {
+        tfile.file->private_namespace = &file_namespace;
+    }
+
     AST::Context context = {
         .module = module,
         .file = tfile,
-        .current_namespace = &collector.namespaces.root(),
+        .current_namespace = &file_namespace,
     };
 
     return Payload {
@@ -56,40 +80,18 @@ Parser::Payload Parser::ModuleParser::make_parser_payload(
     };
 }
 
-void Parser::ModuleParser::parse_file_from_disk(std::filesystem::path path, AST::Module &module, AST::Collector &collector) const
+void Parser::ModuleParser::read_input_file(const InputFile &input, AST::Module &module) const
 {
-    // create a file entry in the module
-    auto &file = module.add_file(path);
-    file.read_from_disk();
+    auto &file = module.add_file(input.path);
+    file.tests_only = input.tests_only;
 
-    // ensure the content is set
+    if (input.content.has_value()) {
+        file.set_content(input.content.value());
+    } else {
+        file.read_from_disk();
+    }
+
     assert(file.content.has_value());
-
-    // // parse the file
-    // auto &tfile = make_tokenized_file(module, file);
-    // auto payload = make_parser_payload(tfile, module, collector);
-
-    // // begin parsing the file root
-    // file.root = &Parser::parse_scope(payload);
-}
-
-void Parser::ModuleParser::parse_file_from_mem(std::filesystem::path path, const std::string &content, AST::Module &module, AST::Collector &collector) const
-{
-    // create a file entry in the module
-    auto &file = module.add_file(path);
-
-    // set the content of the file
-    file.set_content(content);
-
-    // ensure the content is set
-    assert(file.content.has_value());
-
-    // // parse the file
-    // auto &tfile = make_tokenized_file(module, file);
-    // auto payload = make_parser_payload(tfile, module, collector);
-
-    // // begin parsing the file root
-    // file.root = &Parser::parse_scope(payload);
 }
 
 AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module, AST::File &file) const
@@ -223,11 +225,7 @@ void Parser::ModuleParser::parse_input(const InputPayload &payload) const
         Compiler::ScopedPhase read_phase("read sources");
 
         for (const auto &input_file : payload.files) {
-            if (input_file.content.has_value()) {
-                parse_file_from_mem(input_file.path, input_file.content.value(), payload.module, payload.collector);
-            } else {
-                parse_file_from_disk(input_file.path, payload.module, payload.collector);
-            }
+            read_input_file(input_file, payload.module);
         }
     }
 

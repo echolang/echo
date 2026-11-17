@@ -79,12 +79,14 @@ namespace
     //   link                                    -> Compiler::parse_link_requirement
     //   cc                                      -> Compiler::parse_cc_requirement
     //   build_dir                               -> Compiler::BuildLayout
+    //   workspace                               -> Parser::workspace_members
     //
     // link, cc and target carry a tag inside their value rather than being one attribute per kind, so what
     // a build may need linked - or produce - can grow without this list growing with it, which is also why
     // neither name says what it is for beyond the tool it reaches
     constexpr std::string_view k_manifest_attributes[] = {
-        "module", "version", "depends", "sources", "target", "link", "cc", "build_dir", "requires", "hook" };
+        "module", "version", "depends", "sources", "target", "link", "cc", "build_dir", "requires", "hook",
+        "workspace" };
 
     // and what each of them may do with a `{ ... }` scope. **A column of the table above rather than name
     // comparisons at the point of use**: a ninth manifest attribute has to state this or it does not
@@ -94,6 +96,7 @@ namespace
         { "module",    AST::AttributeScoping::t_module_only },
         { "version",   AST::AttributeScoping::t_module_only },
         { "build_dir", AST::AttributeScoping::t_module_only },
+        { "workspace", AST::AttributeScoping::t_module_only },
         { "target",    AST::AttributeScoping::t_opens_a_scope },
         { "hook",      AST::AttributeScoping::t_opens_a_scope },
         { "depends",   AST::AttributeScoping::t_scopable },

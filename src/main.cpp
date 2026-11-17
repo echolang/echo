@@ -251,6 +251,10 @@ struct Invocation
     // where several `exe` targets mean several builds
     std::vector<Parser::ModuleTarget> test_targets;
 
+    // a test run pointed at more than one root and no sources. the roots are all libraries to a `main`
+    // module that holds nothing but the runner's entry point
+    bool several_test_roots = false;
+
     std::vector<Program> programs;
 };
 
@@ -289,7 +293,10 @@ static int build_bundle(
         program.active_targets,
         source_files,
         !driver.no_stdlib,
-        {}
+        {},
+        invocation.several_test_roots
+            ? Compiler::root_program_plans(invocation.manifests, program.active_targets, invocation.roots)
+            : std::vector<Compiler::RootProgramPlan>{}
     };
 
     if (const std::optional<Compiler::FrontEndFailure> failure =
@@ -400,6 +407,15 @@ static void print_decls(
     }
 
     std::cout << Compiler::decls_as_json(bundle, decls_user_modules(invocation), driver.decls_all);
+}
+
+// **a dump of the checked program is the whole of what was asked.** `-p decls` exists for tools, which
+// read the JSON and have no use for a binary - and a generator run from a hook asks this once per
+// build, so going on to generate, optimize and link the program it described is a second full build
+// nobody looks at. true once the front end has answered, and each command then stops where it stands
+static bool answered_by_the_front_end(const Compiler::DriverOptions &driver)
+{
+    return driver.prints(Compiler::PrintKind::t_decls);
 }
 
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
@@ -1062,7 +1078,36 @@ static bool resolve_programs(
     // "which of these is the program", and guessing would pick one silently
     const Parser::ModuleManifest *entry = nullptr;
 
-    if (out.sources.empty()) {
+    // **a test run has no "which of these is the program" to answer.** every root it was pointed at
+    // contributes its tests to one runner, so several of them are a request and not an ambiguity
+    out.several_test_roots = driver.subcommand == Compiler::Subcommand::t_test
+        && out.sources.empty() && out.roots.size() > 1;
+
+    // the first root, in the order they were named: it lends the runner its build directory
+    const Parser::ModuleManifest *first_root = nullptr;
+
+    if (out.several_test_roots) {
+        for (const std::filesystem::path &root : out.roots) {
+            first_root = Compiler::manifest_at_root(out.manifests, root);
+
+            if (first_root != nullptr) {
+                break;
+            }
+        }
+
+        if (first_root == nullptr) {
+            std::cerr << "Internal: none of the root manifests is among the resolved modules." << std::endl;
+            return false;
+        }
+
+        if (Compiler::manifest_claims_main_module(out.manifests)) {
+            std::cerr << "A manifest declares the '" << ECO_MAIN_MODULE_NAME
+                      << "' module, which a test run over several manifests needs for its runner."
+                      << std::endl;
+            return false;
+        }
+    }
+    else if (out.sources.empty()) {
         if (out.roots.size() != 1) {
             if (out.roots.empty()) {
                 std::cerr << "No source files provided, and no 'module.eco' in the working directory."
@@ -1107,7 +1152,12 @@ static bool resolve_programs(
     // **the layout before the programs**, because a target's binary is a path this owns. It is a function
     // of the entry manifest and `--build-dir`, both of which are settled by here, and resolving it once is
     // what stops two answers disagreeing about a directory one of them has written into
-    out.layout = Compiler::BuildLayout::resolve(driver.build_dir, entry, out.roots, fallback_scratch_dir());
+    out.layout = Compiler::BuildLayout::resolve(
+        driver.build_dir,
+        out.several_test_roots ? first_root : entry,
+        out.roots,
+        fallback_scratch_dir(),
+        out.several_test_roots);
 
     // **the one refusal a build directory can earn, and it is asked before anything is built.** An
     // unwritable store is never fatal - it is an optimization - but a directory that is somebody else's
@@ -1133,6 +1183,13 @@ static bool resolve_programs(
         // run the narrow one's tests and call that everything
         if (entry != nullptr && !driver.targets.empty()
             && !select_targets(driver, diagnostics, *entry, out.test_targets)) {
+            return false;
+        }
+
+        if (out.several_test_roots && !driver.targets.empty()) {
+            diagnostics.render_untyped("No Such Target",
+                "'--target' names a test target one manifest declares, and this run's tests are those of "
+                "several. Narrow them with '--filter', which selects by module too.");
             return false;
         }
 
@@ -2206,6 +2263,11 @@ int main_run(
         return 1;
     }
 
+    if (answered_by_the_front_end(driver)) {
+        front.layout().discard_temporary_scratch();
+        return 0;
+    }
+
     const std::string &entry_module = front.entry_module();
 
     LLVMCompiler compiler(front.options);
@@ -2417,6 +2479,11 @@ int main_test(
         return 1;
     }
 
+    if (answered_by_the_front_end(driver)) {
+        front.layout().discard_temporary_scratch();
+        return 0;
+    }
+
     Compiler::TestSelection selection;
     if (!resolve_test_selection(driver, diagnostics, invocation, selection)) {
         return 1;
@@ -2432,7 +2499,9 @@ int main_test(
     if (selected.empty()) {
         if (declared.empty()) {
             Compiler::ProgressReporter::instance().close(
-                fmt::format("'{}' declares no tests", front.entry_module()),
+                invocation.several_test_roots
+                    ? std::string("none of these modules declares a test")
+                    : fmt::format("'{}' declares no tests", front.entry_module()),
                 Compiler::progress_elapsed_ms(started));
 
             std::cout << Compiler::PhaseTimings::instance().report();
@@ -2450,12 +2519,12 @@ int main_test(
 
     LLVMCompiler compiler(front.options);
 
-    std::vector<std::string> roots;
+    std::vector<Compiler::LLVM::CodegenContext::RunnerTest> runner_tests;
     for (const Compiler::TestCase &test : selected) {
-        roots.push_back(test.symbol);
+        runner_tests.push_back({ test.symbol, test.module });
     }
 
-    compiler.set_test_symbols(roots);
+    compiler.set_runner_tests(std::move(runner_tests));
 
     (void)environment;
 
@@ -2552,6 +2621,11 @@ static int build_one_program(
     FrontEnd front;
     if (!run_front_end(driver, diagnostics, invocation, program, bundle, front, module_keys)) {
         return 1;
+    }
+
+    if (answered_by_the_front_end(driver)) {
+        front.layout().discard_temporary_scratch();
+        return 0;
     }
 
     const Compiler::CompilerOptions options = front.options;
@@ -2991,6 +3065,76 @@ static int main_print_manifest(
     return 0;
 }
 
+// `--workspace` becomes the `-m`s it stands for: the module named or discovered, then every member
+// its manifest lists. **here and nowhere later**, so the graph, the hooks and the build layout are
+// asked about several roots the one way they already know
+static bool settle_workspace_roots(
+    Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics
+)
+{
+    Compiler::TargetFacts facts;
+
+    if (!resolve_target_facts(driver, diagnostics, facts)) {
+        return false;
+    }
+
+    const std::vector<std::filesystem::path> roots =
+        Compiler::resolve_user_roots(driver.modules, true, Compiler::discovery_directory());
+
+    if (roots.size() != 1) {
+        diagnostics.render_untyped(
+            "No Workspace",
+            roots.empty()
+                ? "'--workspace' needs a '-m' or a module.eco in the working directory."
+                : "'--workspace' starts from the one module that declares it - name one '-m'.");
+        return false;
+    }
+
+    Parser::ManifestScratch scratch(facts);
+    Parser::ModuleManifest root;
+
+    if (!Parser::read_module_manifest(roots.front(), scratch, root, Parser::ManifestRead::t_written)) {
+        if (scratch.bundle.collector.issues.empty()) {
+            diagnostics.render_untyped(
+                "No Such Manifest",
+                fmt::format("{}: no such manifest - expected a manifest file or a directory holding "
+                    "a 'module.eco'.", roots.front().string()));
+        }
+
+        scratch.bundle.collector.print_issues(diagnostics);
+        return false;
+    }
+
+    if (root.workspace_as_written.empty()) {
+        diagnostics.render_untyped(
+            "No Workspace",
+            fmt::format(
+                "'{}' declares no workspace - list its members with '#[workspace: [\"<directory>\", ...]]' "
+                "in {}.", root.name, root.path.string()));
+        return false;
+    }
+
+    const Parser::WorkspaceMembers members = Parser::workspace_members(root);
+
+    if (!members.unmatched.empty()) {
+        diagnostics.render_untyped(
+            "No Such Member",
+            fmt::format(
+                "the workspace pattern '{}' of '{}' matches no directory holding a 'module.eco'.",
+                members.unmatched.front(), root.name));
+        return false;
+    }
+
+    driver.modules = { roots.front().string() };
+
+    for (const std::filesystem::path &member : members.manifests) {
+        driver.modules.push_back(member.string());
+    }
+
+    return true;
+}
+
 static int main_lsp(const Compiler::DriverOptions &driver)
 {
     // stdout is the LSP stream; nothing else may write it. unitbuf so each frame
@@ -3127,6 +3271,10 @@ int main(int argc, char *argv[], char *envp[])
 
     if (driver.prints(Compiler::PrintKind::t_manifest)) {
         return main_print_manifest(driver, diagnostics);
+    }
+
+    if (driver.workspace && !settle_workspace_roots(driver, diagnostics)) {
+        return 1;
     }
 
     if (driver.prints(Compiler::PrintKind::t_tools)) {

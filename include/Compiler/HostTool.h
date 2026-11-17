@@ -173,6 +173,15 @@ namespace Compiler
         std::string &out_error
     );
 
+    // **the one symbol a Darwin executable exports**, as the pattern `ld -exported_symbol` takes.
+    // a plugin copies the host's hash seed out of the main image and nothing else crosses that
+    // boundary - which ELF already says by exporting nothing unless named. Darwin exports every
+    // global instead, and a `linkonce_odr` body is a *weak* export: dyld then binds each call to one
+    // by name at launch, tens of thousands of lookups before `main`, in every process a test run
+    // starts. a pattern rather than the name because naming a symbol the program never minted is an
+    // undefined-symbol error, and a program that hashes nothing has no seed
+    const char *darwin_executable_export();
+
     // compile args plus the link-only half of the row. `-mexec-model=reactor` and
     // `-shared` are columns of `target`. `--export-memory` is the program fact
     // `CompilerOptions::export_memory`, not a row column, because CBuild reuses

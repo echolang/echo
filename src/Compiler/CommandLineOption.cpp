@@ -301,6 +301,26 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, check_filter
         },
         {
+            Opt::t_workspace, "workspace", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_inputs,
+            accepts::test, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "test every module of the workspace in one build",
+            "Run the tests of this module and of every module its manifest lists as a member:\n"
+            "  #[workspace: [\"modules/*\", \"examples/blog\"]]\n"
+            "  echoc test --workspace\n"
+            "It is the same run as naming each of them with '-m': one build, one runner, and every "
+            "module compiled once however many members depend on it. Each member still sees only its own "
+            "program - the names its test files declare at file scope stay its own, and a table collected "
+            "with 'attr::of' holds what that member's own build would have collected.\n"
+            "Packages come from one directory, the workspace root's 'vendor/', so that is where every "
+            "member's requirements have to be installed. Narrow the run to one member with "
+            "'--filter module:<name>'.\n"
+            "A pattern that matches no module is refused, since a member that silently went missing is a "
+            "suite that silently stopped running.",
+            {}, nullptr
+        },
+        {
             Opt::t_build_dir, "build-dir", nullptr, '\0',
             OptionArity::t_value, OptionCategory::t_inputs,
             // compiling | clean: the server builds nothing and writes no artifact

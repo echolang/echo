@@ -225,6 +225,12 @@ namespace Parser
         std::vector<std::string> sources_as_written;
         std::vector<std::string> depends_as_written;
 
+        // `#[workspace:]`, as written: directory patterns, each naming modules that are developed and
+        // tested together with this one. **not edges.** nothing here is a dependency, and a build that
+        // was not asked for the workspace never looks - Parser::workspace_members is the one reader, so
+        // a vendored package that declares one costs its consumer nothing
+        std::vector<std::string> workspace_as_written;
+
         // `#[requires:]`, as written. resolved into `depends` at read time against the package dir
         std::vector<ModuleRequirement> requirements;
 
@@ -284,9 +290,9 @@ namespace Parser
         // not activate, folds nothing new and so still shares one object across every target
         std::vector<std::string> active_targets;
 
-        // sources a `#[target: test]` scope added that the unscoped module list did not already
-        // hold. coverage skips them; File::test_scoped is the per-file stamp
-        std::vector<std::filesystem::path> test_scoped_sources;
+        // sources a `#[target: test]` added that the unscoped module list did not already hold.
+        // coverage skips them; File::tests_only is the per-file stamp
+        std::vector<std::filesystem::path> tests_only_sources;
     };
 
     // which of each module's targets a program opens the scopes of, by module name.
@@ -459,6 +465,23 @@ namespace Parser
         const std::filesystem::path &entry_directory,
         const std::filesystem::path &override_dir);
 
+    // **the modules a `#[workspace:]` names.** each pattern is a directory under the manifest's own, in
+    // the grammar `#[sources:]` patterns have, and matches every such directory holding a `module.eco`:
+    //
+    //     #[workspace: ["modules/*", "modules/*/*", "examples/blog"]]
+    //
+    // `manifests` is canonical, in pattern order and path order within one, each once, and never the
+    // declaring manifest itself - it is the workspace's first member by being where it is declared.
+    // `unmatched` is every pattern that named no module: whoever asked for the workspace refuses it,
+    // and whoever only describes the manifest does not
+    struct WorkspaceMembers
+    {
+        std::vector<std::filesystem::path> manifests;
+        std::vector<std::string> unmatched;
+    };
+
+    WorkspaceMembers workspace_members(const ModuleManifest &manifest);
+
     // the written form, as JSON. no absolute paths - goldens and lockfiles have to be
     // machine-independent. several manifests become a JSON array
     std::string manifest_as_json(const ModuleManifest &manifest);
@@ -479,6 +502,19 @@ namespace Parser
         ManifestScratch &scratch,
         std::optional<std::filesystem::path> &out_missing
     );
+
+    // **the parse order of an already-loaded graph**, starting from `roots`. depth-first, a module
+    // after everything it depends on. resolve_module_graph and each RootProgramPlan both ask this,
+    // so a one-root subgraph is that root's own build rather than a second walk
+    //
+    // false with the cycle chain in `out_cycle` and the repeating path in `out_at` when those are
+    // given. root_program_plans passes null: the combined graph already refused
+    bool order_loaded_graph(
+        const std::map<std::filesystem::path, const ModuleManifest *> &loaded,
+        const std::vector<std::filesystem::path> &roots,
+        std::vector<const ModuleManifest *> &out,
+        std::string *out_cycle = nullptr,
+        std::filesystem::path *out_at = nullptr);
 
     // every manifest reachable from `roots`, in the order the modules must be parsed: a dependency before
     // whatever depends on it.

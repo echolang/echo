@@ -98,10 +98,16 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::string &name)
 
 AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &parts)
 {
-    // start from the root
-    auto current = &_root;
+    return retrieve(_root, parts);
+}
 
-    // iterate over the parts and find the namespace
+AST::Namespace &AST::NamespaceManager::retrieve(
+    AST::Namespace &parent,
+    const std::vector<std::string> &parts
+)
+{
+    auto current = &parent;
+
     for (const auto &part : parts) {
         current = &retrieve(*current, part);
     }
@@ -118,6 +124,20 @@ AST::Namespace &AST::NamespaceManager::retrieve(AST::Namespace &parent, const st
     if (created) {
         entry->second = std::make_unique<Namespace>(name);
         entry->second->_parent = &parent;
+    }
+
+    return *entry->second;
+}
+
+AST::Namespace &AST::NamespaceManager::retrieve_hidden(AST::Namespace &parent, const std::string &name)
+{
+    const auto [entry, created] = parent._hidden_children.try_emplace(name, nullptr);
+
+    if (created) {
+        entry->second = std::make_unique<Namespace>(name);
+        entry->second->_display_name = "";
+        entry->second->_parent = &parent;
+        entry->second->_is_hidden = true;
     }
 
     return *entry->second;
@@ -272,7 +292,8 @@ AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &symbol_name, 
 
 AST::Symbol *AST::NamespaceManager::find_symbol_in_scope(
     const std::string &symbol_name,
-    const AST::Namespace &from
+    const AST::Namespace &from,
+    const AST::Namespace *private_root
 ) const
 {
     // innermost first, exactly as FunctionRegistry::overloads walks - the nearest namespace that
@@ -280,6 +301,18 @@ AST::Symbol *AST::NamespaceManager::find_symbol_in_scope(
     // a lexical namespace is a frame of this walk like any other, which is the whole of what makes a
     // block-local type shadow a file-scope one: no rule of its own, just the namespace it is asked from
     for (const Namespace *current = &from; current != nullptr; current = current->parent()) {
+        // a test file's private names are the frame just inside the root, wherever the walk began
+        if (current->is_hidden()) {
+            private_root = private_root != nullptr ? private_root : current;
+            continue;
+        }
+
+        if (current->is_root() && private_root != nullptr) {
+            if (AST::Symbol *found = find_symbol(symbol_name, *private_root)) {
+                return found;
+            }
+        }
+
         if (AST::Symbol *found = find_symbol(symbol_name, *current)) {
             return found;
         }

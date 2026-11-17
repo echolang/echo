@@ -33,7 +33,8 @@ ConstDeclNode *find_constant(
     NamespaceManager &namespaces,
     const std::string &name,
     const Namespace *from,
-    bool qualified
+    bool qualified,
+    const Namespace *private_root
 )
 {
     if (from == nullptr) {
@@ -42,7 +43,7 @@ ConstDeclNode *find_constant(
 
     Symbol *symbol = qualified
         ? namespaces.find_symbol(name, *from)
-        : namespaces.find_symbol_in_scope(name, *from);
+        : namespaces.find_symbol_in_scope(name, *from, private_root);
 
     if (symbol == nullptr) {
         return nullptr;
@@ -245,8 +246,8 @@ ConstDeclNode *ConstantExpander::resolve(ConstRefExprNode &ref)
     // a same-module constant may not have existed when the reference was parsed, so the stamp
     // is missing. by now pass 2 has finished and finalize_file_imports has classified the
     // binding - ask again rather than trusting only the parse-time rewrite
+    File *file = ref.token_name.file() != nullptr ? ref.token_name.file() : _current_file;
     if (!qualified) {
-        File *file = ref.token_name.file() != nullptr ? ref.token_name.file() : _current_file;
         if (file != nullptr
             && apply_item_import(*file, _collector, ref.token_name.value(), lookup, imported_name)) {
             qualified = true;
@@ -256,7 +257,7 @@ ConstDeclNode *ConstantExpander::resolve(ConstRefExprNode &ref)
     const std::string &name = imported_name.empty() ? ref.token_name.value() : imported_name;
 
     ConstDeclNode *decl = find_constant(
-        _collector.namespaces, name, lookup, qualified);
+        _collector.namespaces, name, lookup, qualified, file != nullptr ? file->private_namespace : nullptr);
 
     if (decl == nullptr) {
         _collector.collect_issue<Issue::UnknownConstant>(
@@ -278,13 +279,13 @@ bool ConstantExpander::refuse_if_not_visible(const ConstDeclNode &decl, const Co
 {
     const DeclarationOrigin from { _current_module, _current_file };
 
-    if (visible_from(decl.visibility, decl.declared_in, from)) {
+    if (nameable_from(decl.visibility, decl.declared_in, from)) {
         return false;
     }
 
     _collector.collect_issue<Issue::InaccessibleDeclaration>(
         code_ref_for(ref.token_name),
-        visibility_refusal(decl.visibility, decl.declared_in, from, ref.token_name.value()),
+        naming_refusal(decl.visibility, decl.declared_in, from, ref.token_name.value()),
         decl.declared_in,
         std::optional<TokenReference>(decl.token_name));
 

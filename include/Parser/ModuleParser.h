@@ -25,6 +25,7 @@ namespace Parser
         {
             std::filesystem::path path;
             std::optional<std::string> content;
+            bool tests_only = false;
 
             InputFile(std::filesystem::path path) :
                 path(path), content(std::nullopt)
@@ -110,18 +111,8 @@ namespace Parser
     private:
         std::unique_ptr<Lexer> _lexer;
 
-        void parse_file_from_disk(
-            std::filesystem::path path,
-            AST::Module &module,
-            AST::Collector &collector
-        ) const;
-
-        void parse_file_from_mem(
-            std::filesystem::path path,
-            const std::string &content,
-            AST::Module &module,
-            AST::Collector &collector
-        ) const;
+        // seats `input` onto the module: path, content, and the flags InputFile carries
+        void read_input_file(const InputFile &input, AST::Module &module) const;
     };
 };
 

@@ -526,7 +526,8 @@ std::vector<AST::FunctionDeclNode *> AST::function_ref_candidates(
         return {};
     }
 
-    return collector.functions.overloads(node.lookup_name(), *node.lookup_namespace);
+    return collector.functions.overloads(
+        node.lookup_name(), *node.lookup_namespace, private_namespace_of(node.token_name));
 }
 
 AST::FunctionRefExprNode *AST::function_ref_of(AST::ExprNode *expr)

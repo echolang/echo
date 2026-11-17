@@ -6,12 +6,14 @@
 #include "Compiler/CompilerOptions.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace llvm
 {
+    class LLVMContext;
     class Module;
     class TargetMachine;
 };
@@ -47,6 +49,21 @@ namespace Compiler::LLVM
     };
 
     IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request);
+
+    struct IsolatedModule
+    {
+        std::unique_ptr<llvm::Module> module;
+        std::unique_ptr<llvm::TargetMachine> machine;
+    };
+
+    // the head of every worker: parse `request.bitcode` into `context`, build the machine it names,
+    // run the per-unit pipeline unless it already ran. false with `result.error` set
+    bool load_isolated_module(
+        const IsolatedEmitRequest &request,
+        llvm::LLVMContext &context,
+        IsolatedModule &out,
+        IsolatedEmitResult &result
+    );
 
     bool emit_module_object(
         llvm::Module &module,

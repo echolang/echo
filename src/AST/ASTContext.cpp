@@ -8,7 +8,7 @@
 // everything outside `[A-Za-z0-9_]` becomes an underscore. A file stem may hold a dash, a dot or worse,
 // and these end up inside an emitted symbol name - LLVM would quote them, but a symbol a developer has to
 // read in a linker error or a profile is worth keeping plain
-static std::string sanitize_symbol_fragment(const std::string &raw)
+std::string AST::sanitize_symbol_fragment(const std::string &raw)
 {
     std::string out;
     out.reserve(raw.size());
@@ -30,6 +30,11 @@ std::string AST::Context::site_discriminator(const TokenReference &at) const
         file.file != nullptr ? sanitize_symbol_fragment(file.file->get_path().stem().string()) : "";
 
     return fmt::format("{}L{}C{}", file_tag, at.line(), at.char_offset());
+}
+
+std::string AST::Context::module_site_discriminator(const TokenReference &at) const
+{
+    return fmt::format("{}_{}", sanitize_symbol_fragment(module.name), site_discriminator(at));
 }
 
 AST::LexicalScope::LexicalScope(

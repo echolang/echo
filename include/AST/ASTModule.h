@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -60,6 +61,17 @@ namespace AST
         // symbol: nothing resolves to one, so there is no set to join and no lookup to serve - only a list
         // to walk. The driver is the only reader
         std::vector<TestDeclaration> tests;
+
+        // **the modules this module's own build compiles**, for a root of a test run over several.
+        // such a run parses every root into one bundle, where a root could name a module it never
+        // declared - one that is simply not there when it is built alone. AST::reachable_from is the
+        // reader. **empty means every module**, which is each build but that one, and in that one
+        // each module that is not a root: a dependency is somebody else's to build alone
+        std::unordered_set<const Module *> own_program;
+
+        bool reaches(const Module &other) const {
+            return own_program.empty() || &other == this || own_program.count(&other) > 0;
+        }
 
         // the unspellable `unwrap_abort` a `guard` without `else` calls. null until
         // AST::ensure_unwrap_abort first asks, then one decl for the module

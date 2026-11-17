@@ -284,7 +284,8 @@ Compiler::BuildLayout Compiler::BuildLayout::resolve(
     const std::filesystem::path &flag_directory,
     const Parser::ModuleManifest *entry,
     const std::vector<std::filesystem::path> &roots,
-    const std::filesystem::path &fallback_scratch
+    const std::filesystem::path &fallback_scratch,
+    bool several_roots
 )
 {
     BuildLayout layout;
@@ -307,7 +308,7 @@ Compiler::BuildLayout Compiler::BuildLayout::resolve(
     // build then finds a directory it asked for, holding something, carrying no marker, and refuses itself
     layout._entry_dir = layout.module_dir(*entry);
     layout._entry_trust = layout.trust_of(*entry);
-    layout._scratch = layout._entry_dir / "scratch";
+    layout._scratch = layout._entry_dir / (several_roots ? "workspace" : "scratch");
 
     return layout;
 }

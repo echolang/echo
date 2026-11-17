@@ -17,6 +17,11 @@
 namespace
 {
 
+Compiler::LLVM::Definition define_all(const llvm::GlobalValue *)
+{
+    return Compiler::LLVM::Definition::t_defined;
+}
+
 std::string hash_of(llvm::LLVMContext &context, const std::string &ir)
 {
     llvm::SMDiagnostic error;
@@ -28,8 +33,7 @@ std::string hash_of(llvm::LLVMContext &context, const std::string &ir)
         needed.insert(&function);
     }
 
-    return Compiler::LLVM::partition_hex(
-        *module, needed, [](const llvm::GlobalValue *) { return true; }, Compiler::LLVM::PartitionEnv{});
+    return Compiler::LLVM::partition_hex(*module, needed, define_all, Compiler::LLVM::PartitionEnv{});
 }
 
 std::unique_ptr<llvm::Module> parse_ir(llvm::LLVMContext &context, const std::string &ir)
@@ -51,8 +55,7 @@ std::string hash_reachable(llvm::Module &module)
     REQUIRE(needed.count(function) == 1);
     REQUIRE(needed.count(module.getNamedValue("a")) == 1);
 
-    return Compiler::LLVM::partition_hex(
-        module, needed, [](const llvm::GlobalValue *) { return true; }, Compiler::LLVM::PartitionEnv{});
+    return Compiler::LLVM::partition_hex(module, needed, define_all, Compiler::LLVM::PartitionEnv{});
 }
 
 std::string stores(const std::string &last)
@@ -136,4 +139,41 @@ TEST_CASE("a partition hash survives globals that point at each other", "[cache]
     REQUIRE_FALSE(ab.empty());
     REQUIRE(ab == hash_reachable(*ab_module));
     REQUIRE(ab != aa);
+}
+
+TEST_CASE("a partition hash tells an inline copy from a definition", "[cache][partition]")
+{
+    // a partition that only carries a body for its inliner emits no code for it, so it is not
+    // the object of one that defines the same body
+    llvm::LLVMContext context;
+
+    auto module = parse_ir(context, R"(
+        define linkonce_odr i32 @small() {
+        entry:
+          ret i32 7
+        }
+
+        define i32 @f() {
+        entry:
+          %v = call i32 @small()
+          ret i32 %v
+        }
+    )");
+
+    const std::unordered_set<const llvm::GlobalValue *> needed =
+        Compiler::LLVM::reachable_from({ module->getFunction("f") });
+    const llvm::GlobalValue *small = module->getFunction("small");
+
+    const std::string defined = Compiler::LLVM::partition_hex(
+        *module, needed, define_all, Compiler::LLVM::PartitionEnv{});
+    const std::string copied = Compiler::LLVM::partition_hex(
+        *module, needed,
+        [small](const llvm::GlobalValue *global) {
+            return global == small
+                ? Compiler::LLVM::Definition::t_inline_copy
+                : Compiler::LLVM::Definition::t_defined;
+        },
+        Compiler::LLVM::PartitionEnv{});
+
+    REQUIRE(defined != copied);
 }

@@ -4,7 +4,6 @@
 #include "AST/ASTCast.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTRegion.h"
-#include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTRecursiveVisitor.h"
@@ -71,12 +70,12 @@ namespace AST
 
         if (lookup.plan.kind == CastKind::t_declared) {
             // copied before the node leaves the tree: source_token_of falls back through the
-            // operand, and forget_subtree is about to take the TypeCastNode out of the arena
+            // operand, and forget() is about to take the TypeCastNode out of the arena
             const TokenReference at = location_of_expression(&node);
             const ValueType destination = node.cast_to;
             ExprNode *operand = node.expr;
             node.expr = nullptr;
-            forget_subtree(_bundle, node);
+            forget(node);
 
             _changed = true;
             return emit_declared_conversion(
@@ -88,7 +87,7 @@ namespace AST
         if (lookup.plan.kind == CastKind::t_identity) {
             ExprNode *operand = node.expr;
             node.expr = nullptr;
-            forget_subtree(_bundle, node);
+            forget(node);
             _changed = true;
             return operand;
         }

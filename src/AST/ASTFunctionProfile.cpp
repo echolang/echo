@@ -39,7 +39,7 @@ bool AST::coverage_instruments(const FunctionDeclNode *decl, bool include_stdlib
         return false;
     }
 
-    if (decl->declared_in.file != nullptr && decl->declared_in.file->test_scoped) {
+    if (decl->declared_in.file != nullptr && decl->declared_in.file->tests_only) {
         return false;
     }
 

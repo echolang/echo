@@ -99,12 +99,15 @@ bool emit_module_object(
     return true;
 }
 
-IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
+bool load_isolated_module(
+    const IsolatedEmitRequest &request,
+    llvm::LLVMContext &context,
+    IsolatedModule &out,
+    IsolatedEmitResult &result
+)
 {
-    IsolatedEmitResult result;
     const auto started = std::chrono::steady_clock::now();
 
-    llvm::LLVMContext context;
     // a copy, not a view: parseBitcodeFile's bitstream reader can look past the
     // payload, and getMemBuffer does not pad
     std::unique_ptr<llvm::MemoryBuffer> buffer =
@@ -115,39 +118,48 @@ IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
     if (!parsed) {
         result.ok = false;
         result.error = llvm::toString(parsed.takeError());
-        return result;
+        return false;
     }
 
-    std::string error;
-    std::unique_ptr<llvm::TargetMachine> machine = make_target_machine(
+    out.module = std::move(parsed.get());
+    out.machine = make_target_machine(
         request.triple,
         request.cpu,
         request.features,
         codegen_opt_level(request.codegen_opt),
         request.pic,
-        error
+        result.error
     );
 
-    if (!machine) {
+    if (!out.machine) {
         result.ok = false;
-        result.error = error;
-        return result;
+        return false;
     }
-
-    llvm::Module &module = *parsed.get();
 
     if (!request.already_optimized) {
         FunctionTimeTrace trace(request.timings ? &result.slowest_optimize : nullptr);
-        prepare_module(module, machine.get(), request.codegen_opt != Compiler::CodegenOpt::t_none);
+        prepare_module(*out.module, out.machine.get(), request.codegen_opt != Compiler::CodegenOpt::t_none);
     }
 
     result.optimize_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
+    return true;
+}
+
+IsolatedEmitResult emit_isolated_unit(const IsolatedEmitRequest &request)
+{
+    IsolatedEmitResult result;
+    llvm::LLVMContext context;
+    IsolatedModule loaded;
+
+    if (!load_isolated_module(request, context, loaded, result)) {
+        return result;
+    }
 
     const auto isel_started = std::chrono::steady_clock::now();
 
     if (!emit_module_object(
-            module, *machine, request.object_path, request.targeting_windows,
+            *loaded.module, *loaded.machine, request.object_path, request.targeting_windows,
             request.timings ? &result.slowest_isel : nullptr, result.error)) {
         result.ok = false;
         return result;

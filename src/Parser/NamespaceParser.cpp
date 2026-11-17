@@ -136,7 +136,13 @@ AST::NamespaceDeclNode *Parser::parse_namespacedecl(Parser::Payload &payload)
         }
     }
 
-    auto &ns = payload.collector.namespaces.retrieve(ns_parts);
+    // the program's namespace, also from a tests_only file: a test reopens `str` or its own module's
+    // namespace exactly as any file does. its file-scope helpers stay reachable - see private_namespace_of.
+    // a bare `namespace;` is back to file scope, which for such a file is its private namespace
+    AST::Namespace *file_scope = AST::file_of(payload.context).private_namespace;
+    auto &ns = ns_parts.empty() && file_scope != nullptr
+        ? *file_scope
+        : payload.collector.namespaces.retrieve(ns_parts);
     auto &ns_decl = payload.context.emplace_node<AST::NamespaceDeclNode>(ns_tokens, &ns);
 
     // set the current namespace in the context

@@ -148,11 +148,16 @@ namespace Compiler
         //
         // `roots` are the manifests this invocation was pointed at. **every other non-toolchain module is a
         // dependency**: default dir is t_confined, and a `#[build_dir:]` that leaves its tree is ignored
+        //
+        // `several_roots` is a test run over more than one root. `entry` is then the first of them, which
+        // lends its directory: the runner belongs to no single module, and a scratch of its own name keeps
+        // it from replacing the one that module's own test run links
         static BuildLayout resolve(
             const std::filesystem::path &flag_directory,
             const Parser::ModuleManifest *entry,
             const std::vector<std::filesystem::path> &roots,
-            const std::filesystem::path &fallback_scratch
+            const std::filesystem::path &fallback_scratch,
+            bool several_roots = false
         );
 
         // where this module's own artifacts live - its object, its inputs record, its C build

@@ -22,6 +22,9 @@ namespace AST
     class TypeDeclNode;
     class VarDeclNode;
 
+    // everything outside `[A-Za-z0-9_]` becomes an underscore, so the result is safe inside a symbol
+    std::string sanitize_symbol_fragment(const std::string &raw);
+
     struct Context
     {
         Module &module;
@@ -257,6 +260,11 @@ namespace AST
          * declarations mangling to one name.
          */
         std::string site_discriminator(const TokenReference &at) const;
+
+        // the same, behind the module's name. for a declaration two *modules* may make at one site of
+        // one same-named file and still both link into one program: a test, when a run compiles the
+        // tests of several modules. a file's stem repeats across modules as freely as a line does
+        std::string module_site_discriminator(const TokenReference &at) const;
     };
 
     // scopes a type-parameter frame to a parser function, so every early return unwinds it.

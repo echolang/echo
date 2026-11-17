@@ -31,6 +31,13 @@ namespace
 
         return origin.module->name;
     }
+
+    // declared in a file only a test scope of its module lists, asked from another module: built on its
+    // own, the asking module has none of that module's tests
+    bool in_tests_of_another_module(const AST::DeclarationOrigin &origin, const AST::DeclarationOrigin &from)
+    {
+        return origin.file != nullptr && origin.file->tests_only && origin.module != from.module;
+    }
 };
 
 std::optional<AST::Visibility> AST::visibility_of_token(Token::Type type)
@@ -77,6 +84,25 @@ AST::Visibility AST::member_visibility(const std::optional<AST::Visibility> &wri
     return AST::Visibility::t_public;
 }
 
+bool AST::reachable_from(const AST::DeclarationOrigin &origin, const AST::DeclarationOrigin &from)
+{
+    // an unknown origin on either side reaches everywhere, for the reason visible_from gives
+    if (!origin.is_known() || !from.is_known()) {
+        return true;
+    }
+
+    return !in_tests_of_another_module(origin, from) && from.module->reaches(*origin.module);
+}
+
+bool AST::nameable_from(
+    AST::Visibility visibility,
+    const AST::DeclarationOrigin &origin,
+    const AST::DeclarationOrigin &from
+)
+{
+    return AST::reachable_from(origin, from) && AST::visible_from(visibility, origin, from);
+}
+
 bool AST::visible_from(
     AST::Visibility visibility,
     const AST::DeclarationOrigin &origin,
@@ -103,6 +129,47 @@ bool AST::visible_from(
     }
 
     return true;
+}
+
+std::string AST::reach_refusal(
+    const AST::DeclarationOrigin &origin,
+    const AST::DeclarationOrigin &from,
+    const std::string &what
+)
+{
+    if (AST::reachable_from(origin, from)) {
+        return "";
+    }
+
+    const std::string declared = describe_origin_module(origin);
+    const std::string asking = describe_origin_module(from);
+
+    if (in_tests_of_another_module(origin, from)) {
+        return fmt::format(
+            "'{}' is declared in a test file of the module '{}', and only that module's own tests can "
+            "name it. Built on its own, '{}' has none of the tests of '{}'.",
+            what, declared, asking, declared);
+    }
+
+    return fmt::format(
+        "'{}' is declared in the module '{}', which the module '{}' does not depend on. This run "
+        "builds them as one program; built on its own, '{}' has no '{}' to name. Add it to the "
+        "'#[depends:]' or '#[requires:]' of '{}'.",
+        what, declared, asking, asking, declared, asking);
+}
+
+std::string AST::naming_refusal(
+    AST::Visibility visibility,
+    const AST::DeclarationOrigin &origin,
+    const AST::DeclarationOrigin &from,
+    const std::string &what
+)
+{
+    // first, because it is true whatever the declaration says of itself: a `private` in a module that
+    // is not there is not there
+    const std::string unreachable = AST::reach_refusal(origin, from, what);
+
+    return unreachable.empty() ? AST::visibility_refusal(visibility, origin, from, what) : unreachable;
 }
 
 std::string AST::visibility_refusal(

@@ -352,7 +352,7 @@ AST::TypeDeclNode *Compiler::Lsp::CompletionLookup::resolve_type_path(
             }
         }
 
-        return type_of_symbol(namespaces.find_symbol_in_scope(last, *_namespace));
+        return type_of_symbol(namespaces.find_symbol_in_scope(last, *_namespace, private_root()));
     }
 
     const std::vector<std::string> prefix(path.begin(), path.end() - 1);
@@ -399,6 +399,11 @@ AST::TypeDeclNode *Compiler::Lsp::CompletionLookup::resolve_type_text(std::strin
     return resolve_type_path(path);
 }
 
+const AST::Namespace *Compiler::Lsp::CompletionLookup::private_root() const
+{
+    return _origin.file != nullptr ? _origin.file->private_namespace : nullptr;
+}
+
 const AST::FunctionDeclNode *Compiler::Lsp::CompletionLookup::first_overload(
     const std::string &name,
     const AST::Namespace &ns
@@ -408,7 +413,7 @@ const AST::FunctionDeclNode *Compiler::Lsp::CompletionLookup::first_overload(
         return nullptr;
     }
 
-    for (AST::FunctionDeclNode *fn : _bundle->collector.functions.overloads(name, ns)) {
+    for (AST::FunctionDeclNode *fn : _bundle->collector.functions.overloads(name, ns, private_root())) {
         if (fn != nullptr && !fn->is_member()) {
             return fn;
         }

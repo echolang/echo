@@ -50,7 +50,8 @@ namespace
             bundle.collector.namespaces,
             ref.lookup_name(),
             ref.lookup_namespace,
-            ref.is_qualified);
+            ref.is_qualified,
+            AST::private_namespace_of(ref.token_name));
     }
 };
 

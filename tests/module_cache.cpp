@@ -96,6 +96,24 @@ void write_library(const fs::path &directory, const std::string &module_name)
         "}\n");
 }
 
+// a project that vendors `libhello` and calls into it
+void write_vendored(const fs::path &root, const std::string &app_source = "echo libhello::answer();\n")
+{
+    write_file(root / "module.eco",
+        "#[module: \"pkgapp\"]\n"
+        "#[version: \"0.1.0\"]\n"
+        "#[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(root / "src" / "app.eco", app_source);
+    write_file(root / "vendor" / "libhello" / "module.eco",
+        "#[module: \"libhello\"]\n"
+        "#[version: \"1.0.0\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(root / "vendor" / "libhello" / "src" / "hello.eco",
+        "namespace libhello;\n"
+        "public function answer() : int32 { return 42; }\n");
+}
+
 void write_inline_library(const fs::path &directory, const std::string &module_name)
 {
     write_file(directory / "module.eco",
@@ -903,22 +921,6 @@ TEST_CASE("a vendor path change alone does not change a module's key", "[cache][
 {
     // paths are folded as basenames, so copying a vendored tree to another directory must not
     // perturb the hex. swapping the *content* of vendor/libhello would, and that is the point
-    auto write_vendored = [](const fs::path &root) {
-        write_file(root / "module.eco",
-            "#[module: \"pkgapp\"]\n"
-            "#[version: \"0.1.0\"]\n"
-            "#[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
-            "#[sources: \"src/*.eco\"]\n");
-        write_file(root / "src" / "app.eco", "echo libhello::answer();\n");
-        write_file(root / "vendor" / "libhello" / "module.eco",
-            "#[module: \"libhello\"]\n"
-            "#[version: \"1.0.0\"]\n"
-            "#[sources: \"src/*.eco\"]\n");
-        write_file(root / "vendor" / "libhello" / "src" / "hello.eco",
-            "namespace libhello;\n"
-            "public function answer() : int32 { return 42; }\n");
-    };
-
     auto hex_of = [](const std::string &output, const std::string &module) {
         const std::string line = line_starting_with(output, module);
         std::istringstream fields(line);
@@ -949,6 +951,93 @@ TEST_CASE("a vendor path change alone does not change a module's key", "[cache][
 
     REQUIRE(hex_of(b.output, "libhello") == hello_a);
     REQUIRE(hex_of(b.output, "pkgapp") == app_a);
+}
+
+TEST_CASE("a vendored copy elsewhere shares a store, and its miss names what moved", "[cache][packages]")
+{
+    // two projects vendoring the same package, built into one store. The key folds file names and never
+    // directories, so the second copy is a hit; and when it is not, the reason must be the one that moved
+    // the key, never "'module.eco' is new" for a manifest that only lives somewhere else
+    ScopedProject first("vendor_store_first");
+    write_vendored(first.root());
+
+    const std::string args = "build -o app --explain cache --build-dir " + quoted(first.build_dir());
+
+    const ProcessResult a = first.echoc(args);
+    REQUIRE(a.exit_code == 0);
+    INFO(a.output);
+
+    SECTION("an identical copy at another path is a hit")
+    {
+        ScopedProject second("vendor_store_second");
+        write_vendored(second.root());
+
+        const ProcessResult b = second.echoc(args);
+        REQUIRE(b.exit_code == 0);
+        INFO(b.output);
+
+        REQUIRE(line_starting_with(b.output, "libhello").find("hit") != std::string::npos);
+    }
+
+    SECTION("a copy whose consumer publishes a conversion misses, and says so")
+    {
+        // the word alone is enough for the conversion scan, which is what keeps this test about the key
+        // rather than about extensions
+        ScopedProject second("vendor_store_conversion");
+        write_vendored(second.root(), "// no extension here\necho libhello::answer();\n");
+
+        const ProcessResult b = second.echoc(args);
+        REQUIRE(b.exit_code == 0);
+        INFO(b.output);
+
+        const std::string line = line_starting_with(b.output, "libhello");
+        REQUIRE(line.find("miss") != std::string::npos);
+        REQUIRE(line.find("'app.eco'") != std::string::npos);
+        REQUIRE(line.find("conversion") != std::string::npos);
+        REQUIRE(line.find("is new") == std::string::npos);
+    }
+}
+
+TEST_CASE("a miss names a module parsed before it", "[cache]")
+{
+    // otherlib is no dependency of cachelib, only parsed ahead of it - which is still in cachelib's key,
+    // because a module can name anything declared before it. The miss has to say that rather than blame
+    // the compiler
+    ScopedProject project("preceding_module");
+
+    write_library(project.root() / "other", "otherlib");
+    write_library(project.root() / "lib", "cachelib");
+    write_file(project.root() / "app" / "module.eco",
+        "#[module: \"app\"]\n"
+        "#[depends: \"../other\"]\n"
+        "#[depends: \"../lib\"]\n"
+        "#[sources: \"*.eco\"]\n");
+    write_file(project.root() / "app" / "app.eco", "echo cachelib::twice(otherlib::twice(1));\n");
+
+    const std::string args = "run --explain cache --build-dir " + quoted(project.build_dir());
+    const fs::path app_dir = project.root() / "app";
+
+    const ProcessResult first = project.echoc(args, app_dir);
+    REQUIRE(first.exit_code == 0);
+    INFO(first.output);
+
+    write_file(project.root() / "other" / "src" / "lib.eco",
+        "namespace otherlib;\n"
+        "\n"
+        "public function twice(int32 $n) : int32\n"
+        "{\n"
+        "    return $n + $n;\n"
+        "}\n");
+
+    const ProcessResult after = project.echoc(args, app_dir);
+    REQUIRE(after.exit_code == 0);
+    INFO(after.output);
+
+    REQUIRE(line_starting_with(after.output, "otherlib").find("'lib.eco' changed") != std::string::npos);
+
+    const std::string line = line_starting_with(after.output, "cachelib");
+    REQUIRE(line.find("miss") != std::string::npos);
+    REQUIRE(line.find("'otherlib', parsed before it, changed") != std::string::npos);
 }
 
 TEST_CASE("resolve_package_dir does not pick an ancestor vendor/", "[cache][packages]")
@@ -1588,6 +1677,12 @@ TEST_CASE("a sibling conversion is in every user module's key", "[cache]")
 
         REQUIRE(cache_key(line_starting_with(after.output, "errlib")) != cache_key(err_before));
         REQUIRE(cache_key(line_starting_with(after.output, "stdlib")) == cache_key(stdlib_before));
+
+        // none of errlib's own files changed, so the reason has to be the sibling's, by name - not a
+        // compiler change, which is what a record of files alone would call it
+        const std::string line = line_starting_with(after.output, "errlib");
+        REQUIRE(line.find("'conv.eco'") != std::string::npos);
+        REQUIRE(line.find("conversion") != std::string::npos);
     }
 
     SECTION("editing a non-conversion file in the sibling does not move errlib")

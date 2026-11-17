@@ -272,6 +272,11 @@ void keep_odr_from_dce(llvm::Module &module)
             return;
         }
 
+        // an inline copy is there to be dropped
+        if (global.hasAvailableExternallyLinkage()) {
+            return;
+        }
+
         if (is_llvm_global_name(global.getName())) {
             return;
         }
@@ -313,16 +318,16 @@ void keep_module_flags_only(llvm::Module &module)
 
 std::unordered_map<const llvm::Function *, AST::File *> function_homes(
     Compiler::LLVM::CmpUnit &unit,
+    llvm::Module &module,
     const Compiler::LLVM::CodegenContext &ctx
 )
 {
     std::unordered_map<const llvm::Function *, AST::File *> home_of;
 
-    if (unit.llvm_module == nullptr || unit.ast_module == nullptr) {
+    if (unit.ast_module == nullptr) {
         return home_of;
     }
 
-    llvm::Module &module = *unit.llvm_module;
     const Compiler::LLVM::FunctionTable &table = unit.function_table;
 
     AST::File *entry_home = nullptr;
@@ -371,20 +376,23 @@ std::unordered_map<const llvm::Function *, AST::File *> function_homes(
     return home_of;
 }
 
-bool should_define(
+using Compiler::LLVM::Definition;
+
+Definition definition_of(
     const llvm::GlobalValue *global,
     const std::unordered_set<const llvm::GlobalValue *> &needed,
     const std::unordered_map<const llvm::Function *, AST::File *> &home_of,
     const std::vector<AST::File *> &group_files,
-    bool group_shared
+    bool group_shared,
+    bool clone_inline
 )
 {
     if (needed.find(global) == needed.end()) {
-        return false;
+        return Definition::t_declared;
     }
 
     if (global->hasLocalLinkage()) {
-        return true;
+        return Definition::t_defined;
     }
 
     auto *function = llvm::dyn_cast<llvm::Function>(global);
@@ -402,22 +410,19 @@ bool should_define(
         : std::find(group_files.begin(), group_files.end(), home) != group_files.end();
 
     if (home_is_here) {
-        return true;
-    }
-
-    if (function != nullptr && is_odr_linkage(*function) && is_inline_worthy(*function)) {
-        return true;
+        return Definition::t_defined;
     }
 
     if (function == nullptr && is_odr_linkage(*global)) {
-        return true;
+        return Definition::t_defined;
     }
 
-    if (group_shared && (is_odr_linkage(*global) || function == nullptr)) {
-        return true;
+    // after the arms that define: a body whose home is this partition is never also a copy
+    if (clone_inline && function != nullptr && is_odr_linkage(*function) && is_inline_worthy(*function)) {
+        return Definition::t_inline_copy;
     }
 
-    return false;
+    return Definition::t_declared;
 }
 
 std::vector<llvm::GlobalValue *> roots_from_names(
@@ -509,18 +514,19 @@ std::unordered_set<const llvm::GlobalValue *> Compiler::LLVM::reachable_from(
 
 std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
     CmpUnit &unit,
+    llvm::Module &module,
     const CodegenContext &ctx,
     const PartitionEnv &env,
-    size_t max_groups
+    size_t max_groups,
+    bool clone_inline
 )
 {
-    if (unit.llvm_module == nullptr || unit.ast_module == nullptr) {
+    if (unit.ast_module == nullptr) {
         return {};
     }
 
-    llvm::Module &module = *unit.llvm_module;
     const std::unordered_map<const llvm::Function *, AST::File *> home_of =
-        function_homes(unit, ctx);
+        function_homes(unit, module, ctx);
 
     std::unordered_map<AST::File *, std::vector<llvm::GlobalValue *>> roots_of;
     std::vector<llvm::GlobalValue *> shared_roots;
@@ -595,15 +601,16 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
 
     for (Group &group : groups) {
         const std::unordered_set<const llvm::GlobalValue *> needed = reachable_from(group.roots);
-        auto define = [&](const llvm::GlobalValue *global) -> bool {
-            return should_define(global, needed, home_of, group.files, group.shared);
+        auto kind = [&](const llvm::GlobalValue *global) {
+            return definition_of(global, needed, home_of, group.files, group.shared, clone_inline);
         };
 
         UnitPartition partition;
         partition.label = group.label;
         partition.shared = group.shared;
+        partition.clone_inline = clone_inline;
         partition.files = group.files;
-        partition.hex = partition_hex(module, needed, define, env);
+        partition.hex = partition_hex(module, needed, kind, env);
 
         for (llvm::GlobalValue *root : group.roots) {
             if (root->hasName()) {
@@ -619,22 +626,40 @@ std::vector<Compiler::LLVM::UnitPartition> Compiler::LLVM::partition_unit(
 
 std::string Compiler::LLVM::materialize_partition(
     CmpUnit &unit,
+    llvm::Module &module,
     const UnitPartition &part,
     const CodegenContext &ctx
 )
 {
-    llvm::Module &module = *unit.llvm_module;
     const std::unordered_map<const llvm::Function *, AST::File *> home_of =
-        function_homes(unit, ctx);
+        function_homes(unit, module, ctx);
 
     const std::vector<llvm::GlobalValue *> roots = roots_from_names(module, part.root_names);
     const std::unordered_set<const llvm::GlobalValue *> needed = reachable_from(roots);
 
+    auto kind = [&](const llvm::GlobalValue *global) {
+        return definition_of(global, needed, home_of, part.files, part.shared, part.clone_inline);
+    };
+
     llvm::ValueToValueMapTy vmap;
     std::unique_ptr<llvm::Module> clone = llvm::CloneModule(
         module, vmap, [&](const llvm::GlobalValue *global) {
-            return should_define(global, needed, home_of, part.files, part.shared);
+            return kind(global) != Definition::t_declared;
         });
+
+    // an inline copy is a body the inliner may read and the object never holds
+    if (part.clone_inline) {
+        for (llvm::Function &function : module) {
+            if (kind(&function) != Definition::t_inline_copy) {
+                continue;
+            }
+
+            if (auto *copy = llvm::dyn_cast_or_null<llvm::Function>(vmap.lookup(&function))) {
+                copy->setComdat(nullptr);
+                copy->setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
+            }
+        }
+    }
 
     keep_odr_from_dce(*clone);
     keep_module_flags_only(*clone);

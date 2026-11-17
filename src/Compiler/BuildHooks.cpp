@@ -40,51 +40,27 @@ std::vector<std::pair<std::string, std::string>> hook_environment(
 
 };
 
-bool Compiler::run_before_build_hooks(
-    const DriverOptions &driver,
+// one root's hooks, in declaration order, from that root's own directory. `package_dir` is the
+// invocation's, which several roots share. `built` is every tool build this invocation has already
+// run, as the command that ran it: two roots hooking the same tool build it once between them, and
+// the command is the whole of what a build is a function of
+static bool run_root_hooks(
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
-    const TargetFacts &facts,
-    const std::vector<Parser::ModuleManifest> &manifests,
-    const std::vector<std::filesystem::path> &user_roots
+    const Compiler::TargetFacts &facts,
+    const Parser::ModuleManifest *loaded,
+    const std::filesystem::path &package_dir,
+    std::set<std::vector<std::string>> &built
 )
 {
-    if (driver.no_hooks || !driver.sources.empty()) {
-        return true;
-    }
-
-    const auto manifest_at_root = [&manifests](const std::filesystem::path &root) -> const Parser::ModuleManifest * {
-        const auto found = std::find_if(
-            manifests.begin(), manifests.end(),
-            [&root](const Parser::ModuleManifest &manifest) { return manifest.path == root; });
-
-        return found == manifests.end() ? nullptr : &*found;
-    };
-
-    if (user_roots.size() != 1) {
-        for (const std::filesystem::path &root : user_roots) {
-            const Parser::ModuleManifest *manifest = manifest_at_root(root);
-
-            if (manifest == nullptr || manifest->hooks.empty()) {
-                continue;
-            }
-
-            diagnostics.render_untyped(
-                "Several Roots",
-                "a '#[hook:]' runs for one module - name one '-m', or drop the extra roots.");
-            return false;
-        }
-
-        return true;
-    }
-
-    const Parser::ModuleManifest *loaded = manifest_at_root(user_roots.front());
+    using namespace Compiler;
 
     if (loaded == nullptr || loaded->hooks.empty()) {
         return true;
     }
 
     ToolConsumer consumer(facts);
-    settle_package_dir({ loaded->path }, driver.package_dir, consumer.root_scratch);
+    settle_package_dir({ loaded->path }, package_dir, consumer.root_scratch);
     consumer.host_scratch.package_dir = consumer.root_scratch.package_dir;
     consumer.host_scratch.entry_directory = consumer.root_scratch.entry_directory;
     consumer.root = *loaded;
@@ -105,9 +81,6 @@ bool Compiler::run_before_build_hooks(
     const BuildLayout layout = BuildLayout::resolve(driver.build_dir, &root, { root.path }, {});
     const bool json = diagnostics.is_machine_readable();
 
-    // two hooks sharing a tool build it once, before the child would have to load itself to notice
-    std::set<const PublicTool *> built;
-
     for (const Parser::ModuleHook &hook : root.hooks) {
         // deferred from the read: refused now that something needs them
         if (!Parser::refuse_unresolved_requirements(
@@ -125,7 +98,8 @@ bool Compiler::run_before_build_hooks(
             return refused();
         }
 
-        if (built.insert(tool).second) {
+        // two hooks sharing a tool build it once, before the child would have to load itself to notice
+        if (built.insert(tool->build_argv).second) {
             ProgressStep step(ProgressReporter::instance(), ProgressPhase::t_tool, tool->refs.front());
 
             const CapturedProcess build = run_captured(tool->build_argv);
@@ -198,6 +172,59 @@ bool Compiler::run_before_build_hooks(
                 output
             );
             return refused();
+        }
+    }
+
+    return true;
+}
+
+bool Compiler::run_before_build_hooks(
+    const DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const TargetFacts &facts,
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<std::filesystem::path> &user_roots
+)
+{
+    if (driver.no_hooks || !driver.sources.empty()) {
+        return true;
+    }
+
+    // **a test run over several roots builds every one of them, so every one's hooks run.** each from
+    // its own directory and into its own state, exactly as a run pointed at that root alone would. any
+    // other command with several roots has one program among them at most, and running a hook for a
+    // module that is only a library to it is what "only the root runs its hooks" refuses
+    if (user_roots.size() != 1 && driver.subcommand != Subcommand::t_test) {
+        for (const std::filesystem::path &root : user_roots) {
+            const Parser::ModuleManifest *manifest = manifest_at_root(manifests, root);
+
+            if (manifest == nullptr || manifest->hooks.empty()) {
+                continue;
+            }
+
+            diagnostics.render_untyped(
+                "Several Roots",
+                "a '#[hook:]' runs for one module - name one '-m', or drop the extra roots.");
+            return false;
+        }
+
+        return true;
+    }
+
+    // **one package directory for the run, the first root's** - the rule the build itself follows,
+    // so a hook's tool is the package the program is compiled against and not a second copy in
+    // another root's `vendor/`
+    std::filesystem::path package_dir = driver.package_dir;
+
+    if (package_dir.empty() && user_roots.size() > 1) {
+        package_dir = package_dir_for(user_roots.front(), {}, facts);
+    }
+
+    std::set<std::vector<std::string>> built;
+
+    for (const std::filesystem::path &root : user_roots) {
+        if (!run_root_hooks(driver, diagnostics, facts, manifest_at_root(manifests, root), package_dir, built)) {
+            return false;
         }
     }
 

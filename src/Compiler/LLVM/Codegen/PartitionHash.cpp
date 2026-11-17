@@ -303,10 +303,11 @@ struct StableHash
         }
     }
 
-    void fold_function(const llvm::Function &function, bool define)
+    void fold_function(const llvm::Function &function, Compiler::LLVM::Definition definition)
     {
+        // the enum's value is what the key folds: reordering it moves every partition's hash
         fold_str(function.getName());
-        fold_u64(define ? 1 : 0);
+        fold_u64(static_cast<uint64_t>(definition));
         fold_type(function.getFunctionType());
         fold_u64(static_cast<uint64_t>(function.getCallingConv()));
         fold_attrs(function.getAttributes().getFnAttrs());
@@ -316,7 +317,7 @@ struct StableHash
             fold_attrs(function.getAttributes().getParamAttrs(i));
         }
 
-        if (!define || function.isDeclaration()) {
+        if (definition == Compiler::LLVM::Definition::t_declared || function.isDeclaration()) {
             return;
         }
 
@@ -455,7 +456,7 @@ struct StableHash
 std::string Compiler::LLVM::partition_hex(
     llvm::Module &module,
     const std::unordered_set<const llvm::GlobalValue *> &needed,
-    const std::function<bool(const llvm::GlobalValue *)> &define,
+    const std::function<Definition(const llvm::GlobalValue *)> &definition_of,
     const Compiler::LLVM::PartitionEnv &env
 )
 {
@@ -494,19 +495,19 @@ std::string Compiler::LLVM::partition_hex(
     hash.fold_u64(functions.size());
 
     for (const llvm::Function *function : functions) {
-        hash.fold_function(*function, define(function));
+        hash.fold_function(*function, definition_of(function));
     }
 
     hash.fold_u64(globals.size());
 
     for (const llvm::GlobalVariable *global : globals) {
-        hash.fold_global(*global, define(global));
+        hash.fold_global(*global, definition_of(global) != Definition::t_declared);
     }
 
     hash.fold_u64(aliases.size());
 
     for (const llvm::GlobalAlias *alias : aliases) {
-        hash.fold_alias(*alias, define(alias));
+        hash.fold_alias(*alias, definition_of(alias) != Definition::t_declared);
     }
 
     hash.digest = Compiler::fnv1a64(env.triple, hash.digest);

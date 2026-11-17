@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -267,6 +269,81 @@ TEST_CASE("a large this-module copy constructor links across entry partitions", 
     const ProcessResult native = EchoTests::run_binary(project.root() / "out");
     REQUIRE(native.exit_code == 0);
     REQUIRE(native.output.find("scale") != std::string::npos);
+}
+
+TEST_CASE("a body every file calls is in one partition object", "[cache][partition]")
+{
+    // a generic instance and the string runtime each file reaches used to be defined in every
+    // file's object - optimized and lowered once per file, and folded to one by the linker
+    for (const std::string &mode : { "module", "none" }) {
+        ScopedProject project("entry_partition_one_home_" + mode);
+
+        write_file(project.root() / "module.eco",
+            "#[module: \"app\"]\n"
+            "#[sources: \"src/*.eco\"]\n");
+
+        write_file(project.root() / "src" / "twice.eco",
+            "function twice<T>(T $value) : T\n"
+            "{\n"
+            "    return $value + $value;\n"
+            "}\n");
+
+        for (const std::string &name : { "left", "right", "middle" }) {
+            write_file(project.root() / "src" / (name + ".eco"),
+                "function " + name + "(int32 $n) : string\n"
+                "{\n"
+                "    int32 $doubled = twice<int32>($n);\n"
+                "    return \"" + name + " {$doubled}\";\n"
+                "}\n");
+        }
+
+        write_file(project.root() / "src" / "main.eco",
+            "string $l = left(1);\n"
+            "string $r = right(2);\n"
+            "string $m = middle(3);\n"
+            "echo \"{$l} {$r} {$m}\";\n");
+
+        const fs::path cache = project.root() / "cache";
+        const ProcessResult built = project.echoc(
+            "build -o out --optimize " + mode + " --build-dir " + quoted(cache));
+        INFO(built.output);
+        REQUIRE(built.exit_code == 0);
+
+        const ProcessResult ran = EchoTests::run_binary(project.root() / "out");
+        REQUIRE(ran.exit_code == 0);
+        REQUIRE(ran.output.find("left 2 right 4 middle 6") != std::string::npos);
+
+        const std::vector<std::string> pieces = partition_object_names(cache / "app" / "scratch");
+        REQUIRE(pieces.size() >= 4);
+
+        std::map<std::string, int> definitions;
+
+        for (const std::string &piece : pieces) {
+            const ProcessResult nm = EchoTests::run_process(
+                { "llvm-nm", "--defined-only", (cache / "app" / "scratch" / piece).string() });
+
+            if (nm.exit_code != 0) {
+                SKIP("no tool to list an object's symbols");
+            }
+
+            std::istringstream lines(nm.output);
+            std::string address, kind, symbol;
+
+            // a function another object can name: `T`, or `W` where a weak one says so
+            while (lines >> address >> kind >> symbol) {
+                if (kind == "T" || kind == "W") {
+                    definitions[symbol]++;
+                }
+            }
+        }
+
+        REQUIRE_FALSE(definitions.empty());
+
+        for (const auto &[symbol, count] : definitions) {
+            INFO(mode << ": " << symbol);
+            REQUIRE(count == 1);
+        }
+    }
 }
 
 TEST_CASE("printing IR of a partitioned entry still emits", "[cache][partition]")

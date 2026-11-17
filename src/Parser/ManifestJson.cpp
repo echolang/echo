@@ -1,4 +1,6 @@
 #include "Parser/ManifestParser.h"
+
+#include "Compiler/SettledPath.h"
 #include "AST/ASTAttributeValue.h"
 
 #include <fmt/core.h>
@@ -182,6 +184,24 @@ std::string Parser::manifest_as_json(const Parser::ModuleManifest &manifest)
     json_requirements(out, manifest.requirements);
     out << ",\n  \"sources\": ";
     json_string_array(out, manifest.sources_as_written);
+
+    // only a manifest that declares one says anything, so every other dump is what it was. `members`
+    // is the patterns resolved, relative like every path here: epm installs for all of them and must
+    // not grow a second reading of what a pattern matches
+    if (!manifest.workspace_as_written.empty()) {
+        std::vector<std::string> members;
+        const std::filesystem::path directory = Compiler::canonical_or_absolute(manifest.directory);
+
+        for (const std::filesystem::path &member : Parser::workspace_members(manifest).manifests) {
+            members.push_back(member.parent_path().lexically_relative(directory).generic_string());
+        }
+
+        out << ",\n  \"workspace\": ";
+        json_string_array(out, manifest.workspace_as_written);
+        out << ",\n  \"members\": ";
+        json_string_array(out, members);
+    }
+
     out << ",\n  \"targets\": [";
 
     for (size_t i = 0; i < manifest.targets.size(); i++) {

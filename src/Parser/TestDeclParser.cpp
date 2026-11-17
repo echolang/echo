@@ -43,7 +43,7 @@ namespace
             *payload.context.current_namespace,
             AST::make_declaration_site(test_token),
             k_tests_namespace,
-            payload.context.site_discriminator(test_token));
+            payload.context.module_site_discriminator(test_token));
     }
 
     // `#[group: "..."]` off the declaration's drained attributes, or empty when none was written.
